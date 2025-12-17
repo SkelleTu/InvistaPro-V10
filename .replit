@@ -59,6 +59,8 @@ SENDGRID_API_KEY = "SG.XQEIByeUTGSlAdwtzhSpgA.LUeEL38vp6bV_s7TjDfwAniDt2ksnAm0FY
 HUGGINGFACE_API_KEY = "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"
 DERIV_APP_ID = "101716"
 DERIV_API_KEY_DEMO = "v7j2uDsYHLfEjlj"
+SUPABASE_URL = "https://iporgioruideqodqzxjo.supabase.co"
+SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlwb3JnaW9ydWlkZXFvZHF6eGpvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYwMDkxNjgsImV4cCI6MjA4MTU4NTE2OH0.oydev7DW7peO7m5fzuWZ9PaYS_3buwYaW50UekIJbSU"
 
 [userenv.development]
 
