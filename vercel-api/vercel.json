@@ -1,0 +1,12 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "crons": [
+    {
+      "path": "/api/cron-ping-replit",
+      "schedule": "*/4 * * * *"
+    }
+  ],
+  "env": {
+    "REPLIT_URL": "@replit_url"
+  }
+}

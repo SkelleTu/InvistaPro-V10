@@ -1,0 +1,23 @@
+[
+  {
+    "type": "novo-usuario",
+    "email": "teste.recuperacao@gmail.com",
+    "timestamp": "2025-09-02T14:20:20.899Z",
+    "success": true,
+    "errorMessage": "Simulado - WhatsApp não conectado"
+  },
+  {
+    "type": "novo-usuario",
+    "email": "vfdiogoseg@gmail.com",
+    "timestamp": "2025-10-08T19:29:28.307Z",
+    "success": true,
+    "errorMessage": "Simulado - WhatsApp não conectado"
+  },
+  {
+    "type": "novo-usuario",
+    "email": "carlos.eduardo.saturnino98@gmail.com",
+    "timestamp": "2025-10-12T12:58:23.316Z",
+    "success": true,
+    "errorMessage": "Simulado - WhatsApp não conectado"
+  }
+]

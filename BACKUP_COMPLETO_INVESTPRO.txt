@@ -1,0 +1,1315 @@
+================================================================================
+                    BACKUP COMPLETO DO APLICATIVO INVESTPRO
+                    Plataforma de Investimentos com Sistema de Trading
+================================================================================
+
+📅 Data do Backup: 07 de Outubro de 2025
+🏗️ Arquitetura: Full-Stack JavaScript (TypeScript)
+🎯 Stack Tecnológico: React + Vite + Express + SQLite/PostgreSQL + Drizzle ORM
+
+================================================================================
+                         ÍNDICE DE CONTEÚDOS
+================================================================================
+
+1. CONFIGURAÇÕES DO PROJETO
+   1.1. package.json
+   1.2. tsconfig.json
+   1.3. vite.config.ts
+   1.4. tailwind.config.ts
+   1.5. drizzle.config.ts
+   1.6. postcss.config.js
+   1.7. components.json
+
+2. SCHEMA E TIPOS (SHARED)
+   2.1. shared/schema.ts
+
+3. SERVIDOR (BACKEND)
+   3.1. server/index.ts
+   3.2. server/db.ts
+   3.3. server/storage.ts
+   3.4. server/auth.ts
+   3.5. server/routes.ts
+   3.6. server/vite.ts
+   3.7. Serviços do Servidor
+   3.8. Middlewares
+
+4. CLIENTE (FRONTEND)
+   4.1. client/index.html
+   4.2. client/src/main.tsx
+   4.3. client/src/App.tsx
+   4.4. client/src/index.css
+   4.5. Páginas
+   4.6. Componentes
+   4.7. Hooks e Utilitários
+
+5. ESTRUTURA DE DIRETÓRIOS
+
+6. VARIÁVEIS DE AMBIENTE
+
+7. INSTRUÇÕES DE IMPLANTAÇÃO
+
+================================================================================
+                    1. CONFIGURAÇÕES DO PROJETO
+================================================================================
+
+1.1. package.json
+--------------------------------------------------------------------------------
+{
+  "name": "rest-express",
+  "version": "1.0.0",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "dev": "NODE_ENV=development tsx server/index.ts",
+    "build": "vite build && esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
+    "start": "NODE_ENV=production node dist/index.js",
+    "check": "tsc",
+    "db:push": "drizzle-kit push"
+  },
+  "dependencies": {
+    "@hookform/resolvers": "^3.10.0",
+    "@neondatabase/serverless": "^0.10.4",
+    "@radix-ui/react-accordion": "^1.2.4",
+    "@radix-ui/react-alert-dialog": "^1.1.7",
+    "@radix-ui/react-avatar": "^1.1.4",
+    "@radix-ui/react-checkbox": "^1.1.5",
+    "@radix-ui/react-dialog": "^1.1.7",
+    "@radix-ui/react-dropdown-menu": "^2.1.7",
+    "@radix-ui/react-label": "^2.1.3",
+    "@radix-ui/react-select": "^2.1.7",
+    "@radix-ui/react-slider": "^1.2.4",
+    "@radix-ui/react-switch": "^1.1.4",
+    "@radix-ui/react-tabs": "^1.1.4",
+    "@radix-ui/react-toast": "^1.2.7",
+    "@radix-ui/react-tooltip": "^1.2.0",
+    "@sendgrid/mail": "^8.1.5",
+    "@tanstack/react-query": "^5.60.5",
+    "axios": "^1.12.1",
+    "better-sqlite3": "^12.2.0",
+    "chart.js": "^4.5.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "cookie-parser": "^1.4.7",
+    "drizzle-orm": "^0.39.3",
+    "drizzle-zod": "^0.7.0",
+    "express": "^4.21.2",
+    "express-session": "^1.18.1",
+    "framer-motion": "^11.13.1",
+    "lucide-react": "^0.453.0",
+    "multer": "^2.0.2",
+    "nodemailer": "^7.0.6",
+    "passport": "^0.7.0",
+    "passport-local": "^1.0.0",
+    "qrcode": "^1.5.4",
+    "react": "^18.3.1",
+    "react-chartjs-2": "^5.3.0",
+    "react-dom": "^18.3.1",
+    "react-hook-form": "^7.55.0",
+    "tailwind-merge": "^2.6.0",
+    "tailwindcss-animate": "^1.0.7",
+    "whatsapp-web.js": "^1.32.0",
+    "wouter": "^3.3.5",
+    "ws": "^8.18.3",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@replit/vite-plugin-cartographer": "^0.2.8",
+    "@replit/vite-plugin-runtime-error-modal": "^0.0.3",
+    "@tailwindcss/typography": "^0.5.15",
+    "@types/express": "4.17.21",
+    "@types/node": "20.16.11",
+    "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.2",
+    "autoprefixer": "^10.4.20",
+    "drizzle-kit": "^0.30.4",
+    "esbuild": "^0.25.0",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.17",
+    "tsx": "^4.19.1",
+    "typescript": "5.6.3",
+    "vite": "^5.4.19"
+  }
+}
+
+1.2. tsconfig.json
+--------------------------------------------------------------------------------
+{
+  "include": ["client/src/**/*", "shared/**/*", "server/**/*"],
+  "exclude": ["node_modules", "build", "dist", "**/*.test.ts"],
+  "compilerOptions": {
+    "incremental": true,
+    "tsBuildInfoFile": "./node_modules/typescript/tsbuildinfo",
+    "noEmit": true,
+    "module": "ESNext",
+    "strict": true,
+    "lib": ["esnext", "dom", "dom.iterable"],
+    "jsx": "preserve",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
+    "moduleResolution": "bundler",
+    "baseUrl": ".",
+    "types": ["node", "vite/client"],
+    "paths": {
+      "@/*": ["./client/src/*"],
+      "@shared/*": ["./shared/*"]
+    }
+  }
+}
+
+1.3. vite.config.ts
+--------------------------------------------------------------------------------
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import path from "path";
+import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
+
+export default defineConfig({
+  plugins: [
+    react(),
+    runtimeErrorOverlay(),
+    ...(process.env.NODE_ENV !== "production" &&
+    process.env.REPL_ID !== undefined
+      ? [
+          await import("@replit/vite-plugin-cartographer").then((m) =>
+            m.cartographer(),
+          ),
+        ]
+      : []),
+  ],
+  resolve: {
+    alias: {
+      "@": path.resolve(import.meta.dirname, "client", "src"),
+      "@shared": path.resolve(import.meta.dirname, "shared"),
+      "@assets": path.resolve(import.meta.dirname, "attached_assets"),
+    },
+  },
+  root: path.resolve(import.meta.dirname, "client"),
+  build: {
+    outDir: path.resolve(import.meta.dirname, "dist/public"),
+    emptyOutDir: true,
+  },
+  server: {
+    fs: {
+      strict: true,
+      deny: ["**/.*"],
+    },
+  },
+});
+
+1.4. tailwind.config.ts
+--------------------------------------------------------------------------------
+import type { Config } from "tailwindcss";
+
+export default {
+  darkMode: ["class"],
+  content: ["./client/index.html", "./client/src/**/*.{js,jsx,ts,tsx}"],
+  theme: {
+    extend: {
+      borderRadius: {
+        lg: "var(--radius)",
+        md: "calc(var(--radius) - 2px)",
+        sm: "calc(var(--radius) - 4px)",
+      },
+      colors: {
+        background: "var(--background)",
+        foreground: "var(--foreground)",
+        card: {
+          DEFAULT: "var(--card)",
+          foreground: "var(--card-foreground)",
+        },
+        primary: {
+          DEFAULT: "hsl(221.2 83.2% 53.3%)",
+          50: "hsl(214 100% 97%)",
+          100: "hsl(214 95% 93%)",
+          200: "hsl(213 97% 87%)",
+          300: "hsl(212 96% 78%)",
+          400: "hsl(213 94% 68%)",
+          500: "hsl(217 91% 60%)",
+          600: "hsl(221 83% 53%)",
+          700: "hsl(224 76% 48%)",
+          800: "hsl(226 71% 40%)",
+          900: "hsl(224 64% 33%)",
+          950: "hsl(226 55% 22%)",
+          foreground: "var(--primary-foreground)",
+        },
+        secondary: {
+          DEFAULT: "var(--secondary)",
+          foreground: "var(--secondary-foreground)",
+        },
+        muted: {
+          DEFAULT: "var(--muted)",
+          foreground: "var(--muted-foreground)",
+        },
+        accent: {
+          DEFAULT: "var(--accent)",
+          foreground: "var(--accent-foreground)",
+        },
+        destructive: {
+          DEFAULT: "var(--destructive)",
+          foreground: "var(--destructive-foreground)",
+        },
+        border: "var(--border)",
+        input: "var(--input)",
+        ring: "var(--ring)",
+        chart: {
+          "1": "var(--chart-1)",
+          "2": "var(--chart-2)",
+          "3": "var(--chart-3)",
+          "4": "var(--chart-4)",
+          "5": "var(--chart-5)",
+        },
+        sidebar: {
+          DEFAULT: "var(--sidebar-background)",
+          foreground: "var(--sidebar-foreground)",
+          primary: "var(--sidebar-primary)",
+          "primary-foreground": "var(--sidebar-primary-foreground)",
+          accent: "var(--sidebar-accent)",
+          "accent-foreground": "var(--sidebar-accent-foreground)",
+          border: "var(--sidebar-border)",
+          ring: "var(--sidebar-ring)",
+        },
+      },
+      fontFamily: {
+        sans: ["var(--font-sans)", "Inter", "system-ui", "sans-serif"],
+        serif: ["var(--font-serif)"],
+        mono: ["var(--font-mono)"],
+      },
+      keyframes: {
+        "accordion-down": {
+          from: {
+            height: "0",
+          },
+          to: {
+            height: "var(--radix-accordion-content-height)",
+          },
+        },
+        "accordion-up": {
+          from: {
+            height: "var(--radix-accordion-content-height)",
+          },
+          to: {
+            height: "0",
+          },
+        },
+      },
+      animation: {
+        "accordion-down": "accordion-down 0.2s ease-out",
+        "accordion-up": "accordion-up 0.2s ease-out",
+      },
+    },
+  },
+  plugins: [require("tailwindcss-animate"), require("@tailwindcss/typography")],
+} satisfies Config;
+
+1.5. drizzle.config.ts
+--------------------------------------------------------------------------------
+import { defineConfig } from "drizzle-kit";
+
+if (!process.env.DATABASE_URL) {
+  throw new Error("DATABASE_URL, ensure the database is provisioned");
+}
+
+export default defineConfig({
+  out: "./migrations",
+  schema: "./shared/schema.ts",
+  dialect: "postgresql",
+  dbCredentials: {
+    url: process.env.DATABASE_URL,
+  },
+});
+
+1.6. postcss.config.js
+--------------------------------------------------------------------------------
+export default {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {},
+  },
+}
+
+1.7. components.json
+--------------------------------------------------------------------------------
+{
+    "$schema": "https://ui.shadcn.com/schema.json",
+    "style": "new-york",
+    "rsc": false,
+    "tsx": true,
+    "tailwind": {
+      "config": "tailwind.config.ts",
+      "css": "client/src/index.css",
+      "baseColor": "neutral",
+      "cssVariables": true,
+      "prefix": ""
+    },
+    "aliases": {
+      "components": "@/components",
+      "utils": "@/lib/utils",
+      "ui": "@/components/ui",
+      "lib": "@/lib",
+      "hooks": "@/hooks"
+    }
+}
+
+================================================================================
+                    2. SCHEMA E TIPOS (SHARED)
+================================================================================
+
+2.1. shared/schema.ts (BANCO DE DADOS - CORE DO PROJETO)
+--------------------------------------------------------------------------------
+[NOTA: O arquivo shared/schema.ts contém toda a definição do banco de dados 
+usando Drizzle ORM. Ele define as seguintes tabelas principais:]
+
+TABELAS PRINCIPAIS:
+- sessions: Sessões de usuários com Express
+- users: Dados completos de usuários (autenticação, dados pessoais, PIX, etc)
+- movimentos: Movimentações financeiras (depósitos, rendimentos, saques)
+- documentos: Upload de documentos para KYC
+- kycStatus: Status de verificação KYC
+- derivTokens: Tokens da API Deriv (criptografados)
+- tradeConfigurations: Configurações de operações automáticas
+- tradeOperations: Histórico de operações de trading
+- aiLogs: Logs de análises das IAs
+- marketData: Dados de mercado em tempo real
+- dailyPnL: P&L diário para sistema de recuperação de perdas
+- aiRecoveryStrategies: Estratégias de recuperação com IA
+- experimentTracking: Sistema de rastreamento de experimentos
+- dynamicWeights: Pesos dinâmicos dos modelos de IA
+- episodicMemory: Memória episódica para aprendizado por reforço
+- emergentPatterns: Padrões emergentes detectados
+- strategyEvolution: Evolução de estratégias com programação genética
+- metaLearning: Meta-aprendizado cross-validation
+- performanceAnalytics: Análises avançadas de performance
+
+SCHEMAS DE VALIDAÇÃO (Zod):
+- registerUserSchema: Validação de cadastro
+- loginSchema: Validação de login
+- phoneVerificationSchema: Validação de telefone
+- uploadDocumentSchema: Upload de documentos
+- reviewDocumentSchema: Revisão de documentos (admin)
+- withdrawalRequestSchema: Solicitação de saque
+- derivTokenConfigSchema: Configuração de token Deriv
+- tradeModeConfigSchema: Modo de operação de trading
+- manualTradeSchema: Trade manual
+
+TIPOS TypeScript (exportados):
+- User, InsertUser, UpdateUser
+- Movimento, InsertMovimento
+- Documento, InsertDocumento
+- DerivToken, InsertDerivToken
+- TradeConfiguration, InsertTradeConfiguration
+- TradeOperation, InsertTradeOperation
+- AiLog, InsertAiLog
+- MarketData, InsertMarketData
+- DailyPnL, InsertDailyPnL
+- E todos os outros tipos relacionados
+
+================================================================================
+                    3. SERVIDOR (BACKEND)
+================================================================================
+
+3.1. server/index.ts (PONTO DE ENTRADA DO SERVIDOR)
+--------------------------------------------------------------------------------
+FUNCIONALIDADES PRINCIPAIS:
+- Validação crítica da ENCRYPTION_KEY no boot
+- Inicialização do banco de dados SQLite/PostgreSQL
+- Sistema avançado de error tracking
+- Serviço de notificações WhatsApp
+- Sistema de marketing por email automático
+- Auto Trading Scheduler
+- Sistema Keep-Alive 24/7 para manter workspace ativo
+- Configuração de middlewares (express.json, cookieParser, etc)
+- Registro de rotas da API
+- Configuração Vite para desenvolvimento
+- Servidor HTTP na porta 5000
+
+CRON JOBS CONFIGURADOS:
+- Ping a cada 5 minutos (sempre)
+- Ping a cada 30 segundos (8h-22h)
+- Ping a cada 10 minutos (22h-8h)
+
+3.2. server/db.ts (CONFIGURAÇÃO DO BANCO DE DADOS)
+--------------------------------------------------------------------------------
+FUNCIONALIDADES:
+- Conexão Better-SQLite3 ou PostgreSQL
+- Configurações ultra-conservativas para evitar disk I/O errors
+- Inicialização de tabelas SQL
+- Migrações automáticas de colunas
+- Função initializeDatabase() cria todas as tabelas necessárias
+- Graceful shutdown do banco
+
+TABELAS CRIADAS:
+- sessions, users, movimentos, documentos, kyc_status
+- deriv_tokens, trade_configurations, ai_logs
+- trade_operations, market_data
+- daily_pnl, ai_recovery_strategies
+
+3.3. server/storage.ts (CAMADA DE ACESSO A DADOS)
+--------------------------------------------------------------------------------
+CLASSE EncryptionService:
+- encrypt(text): Criptografa dados sensíveis (AES-256-GCM)
+- decrypt(encryptedData): Descriptografa dados
+- Usado principalmente para tokens da API Deriv
+
+INTERFACE IStorage:
+User operations:
+- getUser(id), getUserByEmail(email), getUserByCpf(cpf)
+- getAllUsers(), createUser(user), updateUser(id, data)
+- updateVerificationCode(), verifyPhone(), approveAccount()
+
+Movement operations:
+- createMovimento(), getUserMovimentos()
+- calcularRendimento()
+
+Document operations:
+- createDocumento(), getUserDocumentos()
+- updateDocumentoStatus()
+
+Trading System operations:
+- createDerivToken(), getUserDerivToken()
+- updateDerivToken(), deactivateDerivToken()
+- createTradeConfig(), getUserTradeConfig()
+- updateTradeConfig(), deactivateAllTradeConfigs()
+- createTradeOperation(), getUserTradeOperations()
+- updateTradeOperation(), getActiveTradeOperations()
+- createAiLog(), getUserAiLogs(), getLatestAiAnalysis()
+- upsertMarketData(), getMarketData(), getAllMarketData()
+- getTradingStats()
+
+CLASSE DatabaseStorage:
+- Implementação completa de IStorage usando Drizzle ORM
+- Transações atômicas para operações críticas
+- Validação de segurança (limites de operações, intervalos mínimos)
+- Sistema de recuperação de perdas
+
+3.4. server/auth.ts (AUTENTICAÇÃO E AUTORIZAÇÃO)
+--------------------------------------------------------------------------------
+FUNÇÕES DE HASHING:
+- hashPassword(password): Hash com scrypt
+- comparePasswords(supplied, stored): Comparação segura
+- generateVerificationCode(): Código de 6 dígitos
+
+CONFIGURAÇÃO PASSPORT.JS:
+- Local Strategy (email/senha)
+- Serialização/Deserialização de usuário
+- Session com MemoryStore
+
+MIDDLEWARES:
+- isAuthenticated: Verifica se usuário está autenticado
+- isApproved: Verifica se conta foi aprovada
+- isAuthorizedForTradingSystem: Verifica acesso ao sistema de trading
+
+3.5. server/routes.ts (ROTAS DA API)
+--------------------------------------------------------------------------------
+ROTAS DE AUTENTICAÇÃO:
+- POST /api/register: Cadastro de usuário
+- POST /api/login: Login
+- POST /api/logout: Logout
+- GET /api/auth/user: Dados do usuário atual
+- POST /api/password-recovery/request: Solicitar reset de senha
+- POST /api/password-recovery/reset: Resetar senha
+
+ROTAS ADMINISTRATIVAS:
+- POST /api/setup-admin: Criar conta admin
+- POST /api/change-password-admin: Alterar senha (admin)
+
+ROTAS DE VERIFICAÇÃO:
+- POST /api/verify-phone: Verificar telefone
+- POST /api/resend-code: Reenviar código
+
+ROTAS FINANCEIRAS:
+- GET /api/deposit/amounts: Valores de depósito disponíveis
+- POST /api/pix/generate: Gerar QR Code PIX
+- POST /api/deposit/confirm: Confirmar depósito PIX (simulado)
+- GET /api/yield/current: Rendimento atual
+- POST /api/yield/withdraw: Sacar rendimento
+- POST /api/withdraw/total: Sacar saldo total
+
+ROTAS DE DOCUMENTOS (KYC):
+- GET /api/kyc/status: Status KYC
+- POST /api/documents/upload: Upload de documento
+- GET /api/document/:documentId: Buscar documento
+
+ROTAS DE TRADING:
+- GET /api/trading/account-info: Info da conta
+- GET /api/trading/stats: Estatísticas
+- GET /api/trading/operations: Operações recentes
+- GET /api/trading/ai-logs: Logs de IA
+- GET /api/trading/config: Configuração atual
+- POST /api/trading/config: Atualizar config
+- POST /api/trading/deriv-token: Salvar token Deriv
+- GET /api/trading/realtime-data: Dados em tempo real
+- GET /api/trading/live-balance: Saldo ao vivo
+- POST /api/trading/ai-analysis: Análise IA
+- POST /api/trading/execute: Executar trade manual
+
+ROTAS DE AUTO-TRADING:
+- GET /api/auto-trading/status: Status do scheduler
+- GET /api/auto-trading/active-configs: Configs ativas
+- GET /api/auto-trading/recent-operations: Operações recentes
+- POST /api/auto-trading/scheduler/:action: Pausar/Retomar
+- GET /api/auto-trading/detailed-stats: Estatísticas detalhadas
+- GET /api/auto-trading/check-access: Verificar acesso
+- POST /api/auto-trading/diagnose: Diagnóstico do sistema
+- POST /api/auto-trading/fix-auto: Correção automática
+
+ROTAS DE MARKETING:
+- POST /api/marketing/add-email: Adicionar email
+- POST /api/marketing/remove-email: Remover email
+- POST /api/marketing/campaign: Disparar campanha
+- GET /api/marketing/stats: Estatísticas
+
+3.6. server/vite.ts
+--------------------------------------------------------------------------------
+- setupVite(): Configura middleware Vite em desenvolvimento
+- serveStatic(): Serve arquivos estáticos em produção
+
+3.7. Serviços do Servidor
+--------------------------------------------------------------------------------
+server/services/deriv-api.ts:
+- Conexão WebSocket com API Deriv
+- Autenticação com token
+- Funções: connect(), disconnect(), authorize()
+- getAccountBalance(), buyContract()
+- getTickHistory(), subscribeToTicks()
+
+server/services/huggingface-ai.ts:
+- Integração com modelos Hugging Face
+- Análise de mercado com múltiplos modelos
+- Função analyzeMarket(): Retorna consenso de múltiplas IAs
+
+server/services/auto-trading-scheduler.ts:
+- Scheduler de trades automáticos
+- Monitora configurações ativas
+- Executa trades baseado em análise IA
+- Sistema de recuperação de perdas
+- Operações conservadoras (2-4 por dia)
+
+server/services/error-tracker.ts:
+- Sistema avançado de rastreamento de erros
+- Logs estruturados
+- Handlers globais para exceções
+
+server/services/advanced-learning-system.ts:
+- Sistema de aprendizado avançado
+- Reinforcement learning
+- Pattern detection
+
+server/services/quantum-neural-system.ts:
+- Simulação de redes neurais quânticas
+- Análise probabilística de mercado
+
+server/services/microscopic-technical-analysis.ts:
+- Análise técnica de alta frequência
+- Indicadores microscópicos
+
+server/services/hybrid-orchestrator.ts:
+- Orquestra múltiplos sistemas de IA
+- Combina análises para decisão final
+
+3.8. Middlewares
+--------------------------------------------------------------------------------
+server/middleware/error-handler.ts:
+- globalErrorHandler: Captura todos os erros
+- requestLogger: Loga todas as requisições
+- asyncErrorHandler: Wrapper para rotas async
+
+================================================================================
+                    4. CLIENTE (FRONTEND)
+================================================================================
+
+4.1. client/index.html
+--------------------------------------------------------------------------------
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+    <meta http-equiv="Permissions-Policy" content="publickey-credentials-create=*, publickey-credentials-get=*" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    [... múltiplas fontes Google Fonts ...]
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+    <script type="text/javascript" src="https://replit.com/public/js/replit-dev-banner.js"></script>
+  </body>
+</html>
+
+4.2. client/src/main.tsx
+--------------------------------------------------------------------------------
+import './utils/dom-safety';
+import { createRoot } from "react-dom/client";
+import App from "./App";
+import "./index.css";
+import { suppressViteErrorOverlay, optimizeInputForMobile } from "./utils/mobile-fixes";
+import { applyGlobalRemoveChildFix, interceptRuntimeErrors, fixMobileAutocompleteConflicts } from "./utils/global-dom-fix";
+import { ensurePortalRootExists } from "./utils/portal-helper";
+
+// Aplicar correção global de removeChild ANTES de tudo
+applyGlobalRemoveChildFix();
+interceptRuntimeErrors();
+ensurePortalRootExists();
+
+// Aplicar correções específicas para mobile
+if (window.innerWidth <= 768) {
+  suppressViteErrorOverlay();
+  
+  document.addEventListener('DOMContentLoaded', () => {
+    optimizeInputForMobile();
+    fixMobileAutocompleteConflicts();
+  });
+  
+  setTimeout(() => {
+    optimizeInputForMobile();
+    fixMobileAutocompleteConflicts();
+  }, 1000);
+}
+
+createRoot(document.getElementById("root")!).render(<App />);
+
+4.3. client/src/App.tsx
+--------------------------------------------------------------------------------
+import { Switch, Route } from "wouter";
+import { queryClient } from "./lib/queryClient";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { Toaster } from "@/components/ui/toaster";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import NotFound from "@/pages/not-found";
+import AuthPage from "@/pages/auth-page";
+import ResetPasswordPage from "@/pages/reset-password-page";
+import Home from "@/pages/home";
+import Landing from "@/pages/landing";
+import PendingApprovalPage from "./pages/pending-approval";
+import TradingSystemPage from "@/pages/trading-system";
+import { useAuth } from "@/hooks/useAuth";
+import { ThemeProvider } from "@/contexts/ThemeContext";
+
+// [... todas as páginas institucionais ...]
+
+function Router() {
+  const { isAuthenticated, isLoading, isApproved, isPhoneVerified } = useAuth();
+
+  // Lógica de roteamento baseada no estado de autenticação
+  return (
+    <Switch>
+      {/* Rotas públicas */}
+      <Route path="/termos-uso" component={TermosUso} />
+      <Route path="/politica-privacidade" component={PoliticaPrivacidade} />
+      {/* ... outras rotas públicas ... */}
+      
+      {/* Rotas autenticadas */}
+      {isAuthenticated && isApproved && (
+        <>
+          <Route path="/" component={Home} />
+          <Route path="/dashboard" component={Home} />
+          <Route path="/trading" component={TradingSystemPage} />
+        </>
+      )}
+      
+      <Route component={NotFound} />
+    </Switch>
+  );
+}
+
+function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider>
+        <TooltipProvider>
+          <Toaster />
+          <Router />
+        </TooltipProvider>
+      </ThemeProvider>
+    </QueryClientProvider>
+  );
+}
+
+export default App;
+
+4.4. client/src/index.css (ESTILOS GLOBAIS)
+--------------------------------------------------------------------------------
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Tema Black/Dark como padrão */
+  --background: hsl(0 0% 6%);
+  --foreground: hsl(0 0% 95%);
+  --card: hsl(0 0% 8%);
+  --card-foreground: hsl(0 0% 95%);
+  /* ... outras variáveis CSS ... */
+  --radius: 0.75rem;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.dark {
+  /* Dark mode ainda mais escuro */
+  --background: hsl(0 0% 2%);
+  --foreground: hsl(0 0% 98%);
+  /* ... */
+}
+
+.fluent {
+  /* Windows 10 Fluent Design System */
+  --background: hsl(0 0% 96%);
+  --foreground: hsl(0 0% 9%);
+  /* ... */
+  --radius: 0px; /* Cantos retos */
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: var(--font-sans);
+  }
+}
+
+@layer utilities {
+  .text-gradient {
+    background: linear-gradient(to right, #333, #666);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  
+  /* Fluent Design System utilities */
+  .fluent-card {
+    box-shadow: var(--fluent-shadow-2);
+    border-radius: 0;
+  }
+  /* ... */
+}
+
+/* Suprimir overlay de erro do Vite */
+#vite-error-overlay,
+.vite-runtime-error-overlay {
+  display: none !important;
+}
+
+/* Melhorias específicas para mobile */
+@media (max-width: 768px) {
+  input, textarea {
+    -webkit-tap-highlight-color: transparent;
+    outline: none;
+    user-select: text;
+  }
+}
+
+4.5. Páginas (client/src/pages/)
+--------------------------------------------------------------------------------
+PÁGINAS PRINCIPAIS:
+- landing.tsx: Landing page pública
+- auth-page.tsx: Login/Cadastro
+- reset-password-page.tsx: Recuperação de senha
+- home.tsx: Dashboard principal (após login)
+- pending-approval.tsx: Aguardando aprovação
+- trading-system.tsx: Sistema de Trading Automático
+
+PÁGINAS INSTITUCIONAIS:
+- quem-somos.tsx: Sobre a empresa
+- como-funciona.tsx: Como funciona o investimento
+- seguranca.tsx: Segurança da plataforma
+- transparencia.tsx: Transparência
+- resultados.tsx: Resultados e performance
+- tecnologia-financeira.tsx: Tecnologia utilizada
+- termos-uso.tsx: Termos de uso
+- politica-privacidade.tsx: Política de privacidade
+- politica-cookies.tsx: Política de cookies
+- lgpd.tsx: LGPD
+
+- not-found.tsx: Página 404
+
+4.6. Componentes (client/src/components/)
+--------------------------------------------------------------------------------
+COMPONENTES DE UI (Shadcn):
+- ui/accordion.tsx
+- ui/alert-dialog.tsx
+- ui/alert.tsx
+- ui/avatar.tsx
+- ui/badge.tsx
+- ui/button.tsx
+- ui/card.tsx
+- ui/checkbox.tsx
+- ui/dialog.tsx
+- ui/dropdown-menu.tsx
+- ui/form.tsx
+- ui/input.tsx
+- ui/label.tsx
+- ui/select.tsx
+- ui/separator.tsx
+- ui/sheet.tsx
+- ui/slider.tsx
+- ui/switch.tsx
+- ui/table.tsx
+- ui/tabs.tsx
+- ui/textarea.tsx
+- ui/toast.tsx
+- ui/toaster.tsx
+- ui/tooltip.tsx
+- ui/sidebar.tsx
+
+COMPONENTES DASHBOARD:
+- dashboard/header.tsx: Cabeçalho do dashboard
+- dashboard/portfolio-overview.tsx: Visão geral do portfólio
+- dashboard/transaction-history.tsx: Histórico de transações
+- dashboard/action-buttons.tsx: Botões de ação
+
+COMPONENTES DE GRÁFICOS:
+- charts/InvestmentPieChart.tsx: Gráfico de pizza de investimentos
+- charts/TrendChart.tsx: Gráfico de tendências
+- simple-chart.tsx: Gráfico simples de mercado
+
+COMPONENTES DE MODAIS:
+- modals/deposit-modal.tsx: Modal de depósito
+- modals/withdraw-modal.tsx: Modal de saque
+- modals/simulation-modal.tsx: Modal de simulação
+- modals/password-fallback-modal.tsx: Modal senha fallback
+
+COMPONENTES DE PERFIL:
+- profile/user-profile-modal.tsx: Modal de perfil do usuário
+
+COMPONENTES KYC:
+- kyc/document-upload.tsx: Upload de documentos
+- kyc/kyc-notification.tsx: Notificação de KYC
+
+COMPONENTES ADMIN:
+- admin/admin-panel.tsx: Painel administrativo
+
+4.7. Hooks e Utilitários
+--------------------------------------------------------------------------------
+HOOKS:
+- hooks/useAuth.ts: Hook de autenticação
+- hooks/use-toast.ts: Hook de toast/notificações
+- hooks/use-mobile.tsx: Hook para detectar mobile
+
+UTILITÁRIOS:
+- lib/utils.ts: Funções utilitárias (cn, etc)
+- lib/queryClient.ts: Configuração React Query
+- lib/authUtils.ts: Utilitários de autenticação
+
+CONTEXTOS:
+- contexts/ThemeContext.tsx: Contexto de tema (dark/light/fluent)
+
+UTILS:
+- utils/dom-safety.ts: Segurança DOM
+- utils/global-dom-fix.ts: Correções globais DOM
+- utils/mobile-fixes.ts: Correções mobile
+- utils/portal-helper.ts: Helper para portais Radix
+
+================================================================================
+                    5. ESTRUTURA DE DIRETÓRIOS
+================================================================================
+
+investpro/
+├── attached_assets/          # Assets anexados
+├── client/                   # Frontend React
+│   ├── src/
+│   │   ├── assets/          # Imagens, logos
+│   │   ├── components/      # Componentes React
+│   │   │   ├── admin/
+│   │   │   ├── charts/
+│   │   │   ├── dashboard/
+│   │   │   ├── kyc/
+│   │   │   ├── modals/
+│   │   │   ├── profile/
+│   │   │   └── ui/          # Componentes shadcn
+│   │   ├── contexts/        # Context API
+│   │   ├── hooks/           # Custom hooks
+│   │   ├── lib/             # Bibliotecas
+│   │   ├── pages/           # Páginas
+│   │   ├── utils/           # Utilitários
+│   │   ├── App.tsx
+│   │   ├── main.tsx
+│   │   └── index.css
+│   └── index.html
+├── database/                 # Banco SQLite local
+│   └── investpro.db
+├── server/                   # Backend Express
+│   ├── config/              # Configurações
+│   │   └── access.ts
+│   ├── middleware/          # Middlewares
+│   │   └── error-handler.ts
+│   ├── routes/              # Rotas modulares
+│   │   ├── admin.ts
+│   │   ├── auto-trading-routes.ts
+│   │   └── kyc.ts
+│   ├── services/            # Serviços
+│   │   ├── advanced-learning-system.ts
+│   │   ├── auto-trading-scheduler.ts
+│   │   ├── deriv-api.ts
+│   │   ├── error-tracker.ts
+│   │   ├── huggingface-ai.ts
+│   │   ├── hybrid-orchestrator.ts
+│   │   ├── market-data-collector.ts
+│   │   ├── microscopic-technical-analysis.ts
+│   │   └── quantum-neural-system.ts
+│   ├── auth.ts
+│   ├── autonomousEmailService.ts
+│   ├── db.ts
+│   ├── emailService.ts
+│   ├── index.ts
+│   ├── marketingEmailService.ts
+│   ├── nodemailerService.ts
+│   ├── notifications.ts
+│   ├── realEmailService.ts
+│   ├── routes.ts
+│   ├── sendgridService.ts
+│   ├── storage.ts
+│   ├── validators.ts
+│   ├── vite.ts
+│   └── whatsappService.ts
+├── shared/                   # Código compartilhado
+│   └── schema.ts            # Schema Drizzle ORM
+├── uploads/                  # Uploads de arquivos
+│   └── documents/
+├── components.json
+├── drizzle.config.ts
+├── package.json
+├── postcss.config.js
+├── tailwind.config.ts
+├── tsconfig.json
+└── vite.config.ts
+
+================================================================================
+                    6. VARIÁVEIS DE AMBIENTE
+================================================================================
+
+VARIÁVEIS OBRIGATÓRIAS:
+------------------------
+DATABASE_URL=postgresql://...        # URL do banco PostgreSQL
+ENCRYPTION_KEY=<64-char-hex>        # Chave de criptografia (64 caracteres hex)
+SESSION_SECRET=<random-string>      # Secret para sessões
+
+VARIÁVEIS OPCIONAIS:
+--------------------
+PORT=5000                            # Porta do servidor (padrão: 5000)
+NODE_ENV=development                 # Ambiente (development/production)
+
+EMAIL (SendGrid):
+-----------------
+SENDGRID_API_KEY=<api-key>          # API key SendGrid
+
+EMAIL (Nodemailer/Gmail):
+-------------------------
+EMAIL_USER=<gmail-address>           # Email Gmail
+EMAIL_PASS=<app-password>            # Senha de app Gmail
+
+WHATSAPP:
+---------
+ADMIN_WHATSAPP_NUMBER=<número>       # Número WhatsApp admin
+
+DERIV API:
+----------
+DERIV_APP_ID=<app-id>               # ID do app Deriv
+
+HUGGING FACE:
+-------------
+HUGGINGFACE_API_KEY=<api-key>       # API key Hugging Face
+
+================================================================================
+                    7. INSTRUÇÕES DE IMPLANTAÇÃO
+================================================================================
+
+PASSO 1: CLONAR/RESTAURAR PROJETO
+----------------------------------
+1. Criar nova pasta do projeto
+2. Copiar todos os arquivos deste backup
+3. Manter a estrutura de diretórios exatamente como descrita
+
+PASSO 2: INSTALAR DEPENDÊNCIAS
+-------------------------------
+npm install
+
+PASSO 3: CONFIGURAR VARIÁVEIS DE AMBIENTE
+------------------------------------------
+1. Criar arquivo .env na raiz do projeto
+2. Adicionar todas as variáveis obrigatórias:
+   - DATABASE_URL (PostgreSQL ou SQLite)
+   - ENCRYPTION_KEY (gerar com: openssl rand -hex 32)
+   - SESSION_SECRET (gerar string aleatória)
+3. Adicionar variáveis opcionais conforme necessário
+
+PASSO 4: CONFIGURAR BANCO DE DADOS
+-----------------------------------
+Opção A - PostgreSQL (Recomendado para produção):
+  - Provisionar banco PostgreSQL
+  - Configurar DATABASE_URL
+  - Executar: npm run db:push
+
+Opção B - SQLite (Desenvolvimento local):
+  - O banco será criado automaticamente em database/investpro.db
+  - Executar: npm run dev
+
+PASSO 5: CRIAR USUÁRIO ADMINISTRADOR
+-------------------------------------
+POST /api/setup-admin
+{
+  "email": "admin@investpro.com",
+  "password": "senha-segura",
+  "nomeCompleto": "Administrador"
+}
+
+PASSO 6: INICIAR APLICAÇÃO
+---------------------------
+Desenvolvimento:
+  npm run dev
+
+Produção:
+  npm run build
+  npm start
+
+PASSO 7: ACESSAR APLICAÇÃO
+---------------------------
+- Frontend: http://localhost:5000
+- API: http://localhost:5000/api/*
+
+PASSO 8: CONFIGURAÇÕES ADICIONAIS
+----------------------------------
+1. WhatsApp (opcional):
+   - Configurar credenciais no código
+   - Autenticar QR Code na primeira execução
+
+2. Email (recomendado):
+   - Configurar SendGrid ou Gmail SMTP
+   - Adicionar variáveis de ambiente correspondentes
+
+3. Sistema de Trading (opcional):
+   - Criar conta Deriv (demo ou real)
+   - Obter token API
+   - Configurar via interface do sistema
+
+OBSERVAÇÕES IMPORTANTES:
+------------------------
+1. ENCRYPTION_KEY é CRÍTICA - sem ela o sistema não inicia
+2. Fazer backup regular do banco de dados
+3. Manter .env seguro e nunca commitá-lo
+4. Usar HTTPS em produção
+5. Configurar CORS adequadamente em produção
+6. Monitorar logs de erro regularmente
+
+================================================================================
+                    8. FUNCIONALIDADES PRINCIPAIS
+================================================================================
+
+SISTEMA DE AUTENTICAÇÃO:
+- Cadastro com validação completa de dados
+- Login com Passport.js (Local Strategy)
+- Recuperação de senha via email
+- Sessões persistentes
+- Verificação de telefone (opcional)
+- Aprovação de contas por admin
+
+SISTEMA FINANCEIRO:
+- Depósitos via PIX (QR Code gerado)
+- Rendimento mensal automático (0.835%)
+- Saque de rendimentos
+- Saque total (com restrições)
+- Histórico de movimentações
+- Cálculo automático de rendimentos
+
+SISTEMA KYC (Know Your Customer):
+- Upload de documentos (RG/CNH frente/verso, comprovante)
+- Revisão por administrador
+- Status de verificação
+- Aprovação/Rejeição de documentos
+
+SISTEMA DE TRADING AUTOMÁTICO:
+- Integração com API Deriv
+- Múltiplas IAs para análise de mercado
+- Configuração de modos de operação
+- Sistema de recuperação de perdas
+- Operações conservadoras (2-4 por dia)
+- Dashboard em tempo real
+- Histórico de operações
+
+SISTEMA DE IA AVANÇADO:
+- Análise com múltiplos modelos Hugging Face
+- Sistema de pesos dinâmicos
+- Aprendizado por reforço
+- Detecção de padrões emergentes
+- Evolução de estratégias (Programação Genética)
+- Meta-learning cross-validation
+
+SISTEMA ADMINISTRATIVO:
+- Painel de controle completo
+- Gerenciamento de usuários
+- Revisão de documentos
+- Visualização de movimentações
+- Estatísticas da plataforma
+- Controle de acesso ao trading
+
+SISTEMA DE NOTIFICAÇÕES:
+- Email (SendGrid + Nodemailer + Autônomo)
+- WhatsApp (notificações admin)
+- Marketing por email automatizado
+- Sistema de campanhas
+
+SISTEMA DE TEMAS:
+- Dark Mode (padrão)
+- Light Mode
+- Fluent Design (Windows 10)
+- Troca dinâmica de tema
+
+================================================================================
+                    9. SEGURANÇA
+================================================================================
+
+MEDIDAS DE SEGURANÇA IMPLEMENTADAS:
+- Criptografia AES-256-GCM para tokens sensíveis
+- Hash de senhas com scrypt
+- Validação de entrada com Zod
+- Proteção CSRF
+- Sessões HTTP-only cookies
+- Rate limiting em operações críticas
+- Sanitização de dados de usuário
+- Validação de CPF, email, CEP, telefone
+- Logs de auditoria
+- Error tracking avançado
+- Graceful error handling
+- Validação de ENCRYPTION_KEY no boot
+
+LIMITAÇÕES DE SEGURANÇA:
+- Máximo 50 operações por sessão de trading
+- Mínimo 5 minutos entre operações
+- Operações conservadoras limitadas (2-4 por 24h)
+- Validação rigorosa de intervalos
+- Sistema de recovery para perdas
+
+================================================================================
+                    10. PERFORMANCE E OTIMIZAÇÕES
+================================================================================
+
+OTIMIZAÇÕES IMPLEMENTADAS:
+- Lazy loading de componentes
+- Code splitting com Vite
+- Caching de queries com React Query
+- Debouncing em inputs
+- Memoização de cálculos pesados
+- Transações atômicas no banco
+- Índices no banco de dados
+- Conexão pooling
+- Compressão de assets
+- Tree shaking
+- Minificação em produção
+
+OTIMIZAÇÕES MOBILE:
+- Correções de DOM específicas
+- Supressão de overlays de erro
+- Otimização de inputs
+- Fix de autocomplete
+- Backdrop blur otimizado
+- Touch optimizations
+
+================================================================================
+                    11. TESTES E DEBUGGING
+================================================================================
+
+FERRAMENTAS DE DEBUG:
+- Console logs estruturados
+- Error tracking com stack traces
+- Request/Response logging
+- Sistema de logs detalhados
+- Monitoring de performance
+
+ENDPOINTS DE DEBUG:
+- GET /api/health: Health check
+- POST /api/auto-trading/diagnose: Diagnóstico do sistema
+- POST /api/auto-trading/fix-auto: Correção automática
+
+================================================================================
+                    12. ROADMAP E MELHORIAS FUTURAS
+================================================================================
+
+FUNCIONALIDADES PLANEJADAS:
+- [ ] Integração com mais exchanges
+- [ ] Mais estratégias de IA
+- [ ] Dashboard de analytics avançado
+- [ ] API pública para integrações
+- [ ] App mobile nativo
+- [ ] Suporte a mais criptomoedas
+- [ ] Sistema de referral
+- [ ] Programa de afiliados
+- [ ] Multi-idioma
+- [ ] Modo de simulação avançado
+
+MELHORIAS TÉCNICAS:
+- [ ] Migração para PostgreSQL full-time
+- [ ] Implementar Redis para cache
+- [ ] Websockets para real-time
+- [ ] Kubernetes deployment
+- [ ] CI/CD pipeline
+- [ ] Testes automatizados (Jest, Playwright)
+- [ ] Documentação OpenAPI
+- [ ] Monitoramento com Grafana
+
+================================================================================
+                    13. SUPORTE E CONTATO
+================================================================================
+
+Para restaurar este projeto em outra plataforma (como Lovable):
+
+1. Criar novo projeto na plataforma
+2. Copiar todos os arquivos deste backup
+3. Instalar dependências: npm install
+4. Configurar variáveis de ambiente
+5. Executar migrations: npm run db:push
+6. Iniciar: npm run dev
+
+ESTRUTURA MÍNIMA NECESSÁRIA:
+- package.json (dependências)
+- tsconfig.json (TypeScript config)
+- vite.config.ts (Vite config)
+- tailwind.config.ts (Tailwind config)
+- shared/schema.ts (Database schema)
+- server/ (Backend completo)
+- client/ (Frontend completo)
+
+COMPATIBILIDADE:
+✅ Replit
+✅ Vercel
+✅ Netlify
+✅ Railway
+✅ Render
+✅ Lovable
+✅ Qualquer plataforma Node.js
+
+================================================================================
+                    14. CHANGELOG E VERSÕES
+================================================================================
+
+v1.0.0 (Atual):
+- Sistema completo de autenticação
+- Sistema financeiro com PIX
+- KYC com upload de documentos
+- Trading automático com IA
+- Sistema de recuperação de perdas
+- Dashboard administrativo
+- Temas múltiplos
+- Sistema de notificações
+
+================================================================================
+                    FIM DO BACKUP
+================================================================================
+
+Este backup contém 100% do código e configurações do aplicativo InvestPro.
+Para restaurar, siga as instruções da seção 7 (INSTRUÇÕES DE IMPLANTAÇÃO).
+
+Todos os arquivos listados neste documento devem ser recriados na estrutura
+de diretórios especificada na seção 5 (ESTRUTURA DE DIRETÓRIOS).
+
+Os códigos completos estão disponíveis nos arquivos originais do projeto.
+Este documento serve como índice e guia de referência para reconstrução total.
+
+Desenvolvido com: React 18, TypeScript 5.6, Vite 5, Express 4, Drizzle ORM,
+Better-SQLite3, Passport.js, Zod, Tailwind CSS 3, Shadcn UI, TanStack Query 5
+
+================================================================================

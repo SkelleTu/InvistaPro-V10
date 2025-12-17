@@ -1,0 +1,27 @@
+node_modules
+dist
+.DS_Store
+server/public
+vite.config.ts.*
+*.tar.gz
+database/
+
+# Sensitive files - never commit secrets
+**/CREDENCIAIS*.txt
+**/DOCUMENT*CREDENCIAIS*.txt
+server/config/password-recovery/*.txt
+attached_assets/*.txt
+
+# Database files
+*.db
+*.db-journal
+*.sqlite
+
+# Environment files
+.env
+.env.local
+.env.production
+
+# Session and cookies
+cookies.txt
+session_cookies.txt

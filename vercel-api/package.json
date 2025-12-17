@@ -1,0 +1,16 @@
+{
+  "name": "investpro-vercel-ping",
+  "version": "1.0.0",
+  "description": "Sistema de ping mútuo Vercel-Replit para manter 24/7",
+  "private": true,
+  "scripts": {
+    "dev": "vercel dev",
+    "deploy": "vercel --prod"
+  },
+  "dependencies": {
+    "@vercel/node": "^3.0.0"
+  },
+  "devDependencies": {
+    "vercel": "^32.0.0"
+  }
+}
