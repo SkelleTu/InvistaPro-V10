@@ -83,11 +83,62 @@ Ao inicializar, sistema chama `getDigitDiffSupportedSymbols()` que:
 
 ---
 
+## 📦 100% DATA SYNC ARCHITECTURE - 18 DEC 2025
+
+### Problema Identificado:
+As 3 camadas de dados estavam **DESCONECTADAS**:
+1. ❌ Deriv API → Backend (campos truncados)
+2. ❌ Backend → Database (whitelist restritiva)
+3. ❌ Database → Frontend (campos faltando)
+
+### Solução Implementada:
+
+#### 1. Schema Expandido (`shared/schema.ts`)
+13 novos campos adicionados à tabela `trade_operations`:
+- `shortcode` - Código do contrato Deriv
+- `buyPrice` - Preço de compra exato
+- `sellPrice` - Preço de venda exato
+- `entryEpoch` - Timestamp entrada (epoch)
+- `exitEpoch` - Timestamp saída (epoch)
+- `contractType` - Tipo do contrato
+- `barrier` - Dígito barrier usado
+- `derivStatus` - Status raw da Deriv
+- `derivProfit` - Lucro exato (sem arredondamento)
+- `payout` - Valor do payout
+- `statusChangedAt` - Quando status mudou
+- `lastSyncAt` - Última sincronização
+- `syncCount` - Número de syncs
+
+#### 2. DerivContractInfo Expandido (`deriv-api.ts`)
+Interface agora captura 100% do payload `proposal_open_contract`:
+- sell_price, entry_tick_time, exit_tick_time
+- contract_type, barrier, payout
+- is_valid_to_sell, is_sold, is_expired, is_settleable
+- date_start, date_expiry, current_spot, current_spot_time
+
+#### 3. Sync Service Atualizado (`deriv-trade-sync.ts`)
+- SEMPRE salva todos os campos em cada sync
+- Logs detalhados de cada campo
+- Sync incondicional para garantir 100% consistência
+
+#### 4. Storage Whitelist Expandida (`storage.ts`)
+Todos os novos campos agora permitidos no `updateTradeOperation()`
+
+### Resultado:
+```
+✅ Deriv API → Backend: 100% campos capturados
+✅ Backend → Database: 100% campos salvos
+✅ Database → Frontend: 100% campos disponíveis
+```
+
+---
+
 ## Overview
 Trading automation system for variable income (Deriv DIGITDIFF contracts - descoberta dinâmica).
 
 ## Current Status
 - ✅ Full system operational with dynamic DIGITDIFF asset discovery
+- ✅ 100% data consistency (Deriv → Backend → Database → Frontend)
 - ✅ Real-time microscopic analysis
 - ✅ Dynamic diversification
 - ✅ Ultra-fast adaptive cool-off (0-30 sec)
