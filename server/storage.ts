@@ -652,8 +652,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateTradeOperation(id: string, updates: Partial<TradeOperation>): Promise<TradeOperation> {
-    // Whitelist allowed fields for security
-    const allowedFields = ['status', 'profit', 'entryPrice', 'exitPrice', 'derivContractId', 'completedAt'];
+    // Whitelist allowed fields for security - 100% Deriv data sync
+    const allowedFields = [
+      'status', 'profit', 'entryPrice', 'exitPrice', 'derivContractId', 'completedAt',
+      'shortcode', 'buyPrice', 'sellPrice', 'entryEpoch', 'exitEpoch',
+      'contractType', 'barrier', 'derivStatus', 'derivProfit', 'payout',
+      'statusChangedAt', 'lastSyncAt', 'syncCount'
+    ];
     const safeUpdates: any = {};
     
     for (const [key, value] of Object.entries(updates)) {
@@ -662,14 +667,14 @@ export class DatabaseStorage implements IStorage {
       }
     }
     
-    // Only set completedAt when transitioning to terminal status
+    // Only set completedAt when transitioning to terminal status (if not already set)
     const currentOperation = await db
       .select()
       .from(tradeOperations)
       .where(eq(tradeOperations.id, id))
       .limit(1);
     
-    if (currentOperation.length > 0) {
+    if (currentOperation.length > 0 && !safeUpdates.completedAt) {
       const current = currentOperation[0];
       const isTransitioningToTerminal = 
         current.status !== 'won' && current.status !== 'lost' && 

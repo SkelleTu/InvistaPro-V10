@@ -48,9 +48,9 @@ export class DerivTradeSync {
         errorTracker.captureError(
           error,
           'ERROR',
-          'DERIV_SYNC',
+          'WEBSOCKET',
           {
-            requestPath: 'AUTO_SYNC',
+            requestPath: 'DERIV_SYNC_AUTO',
             requestMethod: 'performFullSync'
           }
         );
@@ -127,36 +127,49 @@ export class DerivTradeSync {
             continue;
           }
 
-          // Atualizar operação se houver mudanças
-          let hasChanges = false;
-          const updates: any = {};
+          // 100% DERIV DATA SYNC - Capturar todos os campos
+          const updates: any = {
+            shortcode: contractInfo.shortcode,
+            buyPrice: contractInfo.buy_price,
+            contractType: contractInfo.contract_type,
+            barrier: contractInfo.barrier,
+            derivStatus: contractInfo.status,
+            lastSyncAt: new Date().toISOString(),
+            syncCount: (operation.syncCount || 0) + 1,
+          };
 
           if (contractInfo.status === 'closed' || contractInfo.status === 'sold') {
-            // Contrato finalizado
+            // Contrato finalizado - capturar TODOS os dados finais
             if (operation.status !== 'won' && operation.status !== 'lost') {
               const profit = contractInfo.profit || 0;
               updates.status = profit > 0 ? 'won' : profit < 0 ? 'lost' : 'closed';
               updates.profit = profit;
+              updates.derivProfit = profit;
               updates.exitPrice = contractInfo.exit_tick;
-              hasChanges = true;
+              updates.sellPrice = contractInfo.sell_price;
+              updates.entryEpoch = contractInfo.entry_tick_time;
+              updates.exitEpoch = contractInfo.exit_tick_time;
+              updates.payout = contractInfo.payout;
+              updates.statusChangedAt = new Date().toISOString();
+              updates.completedAt = new Date().toISOString();
               result.updated++;
 
-              console.log(`✅ [DERIV SYNC] ${operation.symbol} ${updates.status}: $${profit.toFixed(2)}`);
+              console.log(`✅ [DERIV SYNC] ${operation.symbol} ${updates.status}: Profit=$${profit.toFixed(2)} | Buy=$${contractInfo.buy_price} | Sell=$${contractInfo.sell_price || 0} | Payout=$${contractInfo.payout || 0}`);
             }
           } else if (contractInfo.status === 'open') {
-            // Contrato ainda aberto - atualizar preço
+            // Contrato ainda aberto - atualizar preço e época de entrada
             if (operation.status === 'pending') {
               updates.status = 'active';
-              updates.entryPrice = contractInfo.entry_tick;
-              hasChanges = true;
-              console.log(`📈 [DERIV SYNC] ${operation.symbol} ativado`);
+              updates.statusChangedAt = new Date().toISOString();
             }
+            updates.entryPrice = contractInfo.entry_tick;
+            updates.entryEpoch = contractInfo.entry_tick_time;
+            updates.payout = contractInfo.payout;
+            console.log(`📈 [DERIV SYNC] ${operation.symbol} ativo | Entry=$${contractInfo.entry_tick} | Barrier=${contractInfo.barrier}`);
           }
 
-          // Salvar atualizações
-          if (hasChanges) {
-            await storage.updateTradeOperation(operation.id, updates);
-          }
+          // SEMPRE salvar - garante sync 100%
+          await storage.updateTradeOperation(operation.id, updates);
 
           result.synced++;
         } catch (error: any) {
