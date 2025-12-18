@@ -619,14 +619,15 @@ export class AutoTradingScheduler {
       }
 
       // Verificação de qualidade dos dados
+      // 🔥 AUMENTADO para 5 minutos pois Deriv pode ter latência
       const lastUpdateTime = marketDataInfo.lastUpdate ? new Date(marketDataInfo.lastUpdate).getTime() : 0;
       const dataAge = new Date().getTime() - lastUpdateTime;
-      const isDataStale = dataAge > (marketDataInfo.isSimulated ? 24 * 60 * 60 * 1000 : 60 * 1000); // 24h para simulados, 1min para reais
+      const isDataStale = dataAge > (marketDataInfo.isSimulated ? 24 * 60 * 60 * 1000 : 5 * 60 * 1000); // 24h para simulados, 5min para reais
       
       if (isDataStale) {
         return { 
           success: false, 
-          error: `Dados de mercado desatualizados (${Math.round(dataAge / 1000)}s)` 
+          error: `Dados de mercado MUITO desatualizados (${Math.round(dataAge / 1000)}s > 300s)` 
         };
       }
 
@@ -1073,12 +1074,13 @@ export class AutoTradingScheduler {
           }
           
           // Verificar atualização dos dados
+          // 🔥 AUMENTADO para 5 minutos pois Deriv pode ter latência
           const lastUpdateTime = symbolData.lastUpdate ? new Date(symbolData.lastUpdate).getTime() : 0;
           const dataAge = new Date().getTime() - lastUpdateTime;
-          const isDataStale = dataAge > (symbolData.isSimulated ? 24 * 60 * 60 * 1000 : 60 * 1000);
+          const isDataStale = dataAge > (symbolData.isSimulated ? 24 * 60 * 60 * 1000 : 5 * 60 * 1000);
           
           if (isDataStale) {
-            return null; // Dados desatualizados
+            return null; // Dados MUITO desatualizados
           }
           
           // Preparar tickData
