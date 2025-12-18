@@ -1296,8 +1296,28 @@ export class AutoTradingScheduler {
     
     console.log(`🔧 DEBUG getTradeParamsForMode: mode=${mode}, duration calculada=${duration}, amount=${amount}`);
 
-    // Gerar barrier aleatório para digit differs (0-9)
-    const barrier = Math.floor(Math.random() * 10).toString();
+    // ✅ FIX: Barrier INTELIGENTE baseado em IA + padrão de dígitos
+    // Para DIGITDIFF: prever se o dígito vai MUDAR (direction='up' = mudará, direction='down' = estável)
+    // Mapear consenso e direção para barrier que faz sentido
+    let barrier = '5'; // Default neutro
+    
+    if (direction === 'up' && consensoStrength && consensoStrength > 0.5) {
+      // IA prevê movimento forte para UP = expectativa de mudança de dígito
+      // Usar barrier baseado em confiança (75-99% confiança = barriers altos 7-9)
+      const barrierValue = Math.min(9, Math.max(5, Math.floor((consensoStrength * 10))));
+      barrier = barrierValue.toString();
+      console.log(`📊 [DIGITDIFF] IA prevê UP forte (${(consensoStrength*100).toFixed(0)}%) → Barrier ${barrier} (espera mudança)`);
+    } else if (direction === 'down' && consensoStrength && consensoStrength > 0.5) {
+      // IA prevê movimento para DOWN = expectativa de estabilidade
+      // Usar barrier baixos (0-4) para apostar em menos mudança
+      const barrierValue = Math.max(0, Math.min(4, Math.floor((consensoStrength * 4))));
+      barrier = barrierValue.toString();
+      console.log(`📊 [DIGITDIFF] IA prevê DOWN (${(consensoStrength*100).toFixed(0)}%) → Barrier ${barrier} (espera estabilidade)`);
+    } else {
+      // Consensus baixo ou neutro = usar barrier médio com pequena variação
+      barrier = Math.floor(Math.random() * 3 + 4).toString(); // 4-6 (zona neutra)
+      console.log(`📊 [DIGITDIFF] Consenso baixo/neutro → Barrier ${barrier} (zona neutra)`);
+    }
 
     return { amount, duration, barrier };
   }
