@@ -685,13 +685,14 @@ export class AutoTradingScheduler {
         }
         
         // 🔥 LÓGICA OTIMIZADA: Executar quando consenso >= threshold
-        if (aiConsensus.finalDecision !== 'neutral' && aiConsensus.consensusStrength >= dynamicThreshold) {
+        // 🔥 ACEITAR QUALQUER SINAL (até neutral 45%) - TESTE SEM LIMITES
+        if (aiConsensus.consensusStrength >= dynamicThreshold) {
           if (isExceptionalSignal) {
             console.log(`✅ [${operationId}] 🔥🔥🔥 EXECUTANDO SINAL EXCEPCIONAL: ${aiConsensus.consensusStrength}%`);
           } else if (isStrongSignal) {
             console.log(`✅ [${operationId}] 🔥 EXECUTANDO SINAL FORTE: ${aiConsensus.consensusStrength}%`);
           } else {
-            console.log(`✅ [${operationId}] 🚀 EXECUTANDO: Consenso ${aiConsensus.consensusStrength}% >= Threshold ${dynamicThreshold}%`);
+            console.log(`✅ [${operationId}] 🚀 EXECUTANDO: Consenso ${aiConsensus.consensusStrength}% >= Threshold ${dynamicThreshold}% (${aiConsensus.finalDecision})`);
           }
           // Continuar para executar a operação
         } else if (shouldForceMinimum && operationsToday < limits.min) {
@@ -1108,15 +1109,16 @@ export class AutoTradingScheduler {
       // Aguardar todas as análises
       const results = await Promise.all(analysisPromises);
       
-      // Filtrar resultados válidos e ordenar por consenso (maior para menor)
+      // 🔥 ACEITAR TODOS OS SINAIS - inclusive neutral (45%) é válido para trade
+      // Filtrar apenas resultados nulos/com erro
       const validResults = results
-        .filter(r => r !== null && r.direction !== 'neutral')
+        .filter(r => r !== null)
         .sort((a, b) => b!.consensus - a!.consensus);
       
       if (validResults.length === 0) {
         return { 
           success: false, 
-          error: 'Nenhum símbolo com sinal válido (todos neutros ou com erros)', 
+          error: 'Erro ao analisar símbolos', 
           totalAnalyzed: allSymbolsData.length, 
           top5Symbols: [] 
         };

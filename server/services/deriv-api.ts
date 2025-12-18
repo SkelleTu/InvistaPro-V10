@@ -702,8 +702,9 @@ export class DerivAPIService extends EventEmitter {
   }
 
   private normalizeSymbol(symbol: string): string {
-    // Converter R_75 → R75, R_50 → R50, etc (remover underscore)
-    return symbol.replace('_', '');
+    // DIGITDIFF precisa com underscore: R_50, R_75, R_100
+    // Manter como está para digit differs
+    return symbol; // Nunca remover underscore para DIGITDIFF
   }
 
   private async createCallPutProposal(symbol: string, contractType: 'CALL' | 'PUT', duration: number, amount: number): Promise<{id: string, ask_price: number} | null> {
