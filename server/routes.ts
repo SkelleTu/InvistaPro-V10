@@ -2648,6 +2648,130 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // =========================== ASSET LOSS ANALYSIS - Verificar perdas por repetição ===========================
+
+  app.get('/api/trading/asset-loss-analysis', isAuthenticated, isTradingAuthorized, async (req, res) => {
+    try {
+      if (!req.user?.id) {
+        return res.status(401).json({ message: 'Usuário não autenticado' });
+      }
+      
+      const userId = req.user.id;
+      
+      // Buscar todas as operações fechadas do usuário
+      const allOperations = await dbStorage.getUserTradeOperations(userId);
+      const completedTrades = allOperations.filter((t: any) => t.status !== 'pending' && t.profit !== null);
+      
+      // Agrupar trades por símbolo para análise de repetição
+      const assetStats: {[key: string]: {
+        totalTrades: number;
+        consecutiveOpens: number;
+        totalPnL: number;
+        wins: number;
+        losses: number;
+        avgProfit: number;
+        winRate: number;
+        recentTrades: any[];
+      }} = {};
+      
+      completedTrades.forEach((trade: any, index: number) => {
+        if (!assetStats[trade.symbol]) {
+          assetStats[trade.symbol] = {
+            totalTrades: 0,
+            consecutiveOpens: 0,
+            totalPnL: 0,
+            wins: 0,
+            losses: 0,
+            avgProfit: 0,
+            winRate: 0,
+            recentTrades: []
+          };
+        }
+        
+        const stat = assetStats[trade.symbol];
+        stat.totalTrades++;
+        stat.totalPnL += trade.profit || 0;
+        if (trade.profit > 0) stat.wins++;
+        if (trade.profit < 0) stat.losses++;
+        stat.recentTrades.push({
+          profit: trade.profit,
+          createdAt: trade.createdAt,
+          completedAt: trade.completedAt
+        });
+      });
+      
+      // Calcular estatísticas e detectar padrão de repetição excessiva
+      const analysis: {[key: string]: any} = {};
+      let totalConsecutive = 0;
+      
+      Object.entries(assetStats).forEach(([symbol, stat]) => {
+        stat.avgProfit = stat.totalTrades > 0 ? stat.totalPnL / stat.totalTrades : 0;
+        stat.winRate = stat.totalTrades > 0 ? (stat.wins / stat.totalTrades) * 100 : 0;
+        
+        // Detectar trades consecutivos do MESMO ativo (indicador de repetição excessiva)
+        const recentSortedTrades = stat.recentTrades.slice(-20).reverse(); // Últimos 20
+        let consecutive = 0;
+        
+        recentSortedTrades.forEach((trade: any, idx: number) => {
+          if (idx > 0) {
+            const prevTrade = recentSortedTrades[idx - 1];
+            const timeDiff = new Date(trade.createdAt).getTime() - new Date(prevTrade.createdAt).getTime();
+            if (timeDiff < 5 * 60 * 1000) { // Menos de 5 minutos de diferença
+              consecutive++;
+            }
+          }
+        });
+        
+        stat.consecutiveOpens = consecutive;
+        totalConsecutive += consecutive;
+        
+        analysis[symbol] = {
+          totalTrades: stat.totalTrades,
+          totalPnL: Math.round(stat.totalPnL * 100) / 100,
+          wins: stat.wins,
+          losses: stat.losses,
+          winRate: Math.round(stat.winRate * 100) / 100,
+          avgProfit: Math.round(stat.avgProfit * 100) / 100,
+          consecutiveOpens: stat.consecutiveOpens,
+          riskLevel: stat.consecutiveOpens > 3 ? 'HIGH - Repetição excessiva detectada!' : 
+                     stat.consecutiveOpens > 1 ? 'MEDIUM - Alguma repetição' : 'LOW - Bem diversificado'
+        };
+      });
+      
+      // Encontrar ativo com MAIS perdas por repetição
+      const assetsByLoss = Object.entries(analysis)
+        .sort((a, b) => (a[1].totalPnL || 0) - (b[1].totalPnL || 0));
+      
+      res.json({
+        summary: {
+          totalAssets: Object.keys(analysis).length,
+          totalTrades: completedTrades.length,
+          totalConsecutiveOpens: totalConsecutive,
+          overallPnL: Math.round(completedTrades.reduce((sum: number, t: any) => sum + (t.profit || 0), 0) * 100) / 100,
+          recommendation: totalConsecutive > 5 ? '⚠️ REPETIÇÃO EXCESSIVA DETECTADA - Use diversificação entre ativos!' : 
+                         '✅ Padrão de diversificação saudável'
+        },
+        assetPerformance: analysis,
+        worstPerformer: assetsByLoss[0] ? {
+          symbol: assetsByLoss[0][0],
+          pnl: assetsByLoss[0][1].totalPnL,
+          consecutiveOpens: assetsByLoss[0][1].consecutiveOpens,
+          reason: assetsByLoss[0][1].consecutiveOpens > 3 ? 'Repetição excessiva causando perdas' : 'Taxa de ganho baixa'
+        } : null,
+        bestPerformer: assetsByLoss[assetsByLoss.length - 1] ? {
+          symbol: assetsByLoss[assetsByLoss.length - 1][0],
+          pnl: assetsByLoss[assetsByLoss.length - 1][1].totalPnL,
+          winRate: assetsByLoss[assetsByLoss.length - 1][1].winRate
+        } : null
+      });
+      
+    } catch (error) {
+      console.error('❌ Erro ao analisar perdas por ativo:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ message: 'Erro ao analisar perdas por ativo', error: errorMessage });
+    }
+  });
+
   // =========================== DERIV ACCOUNT INFO ===========================
 
   app.get('/api/trading/account-info', isAuthenticated, isTradingAuthorized, async (req, res) => {

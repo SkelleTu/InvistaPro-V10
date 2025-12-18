@@ -30,6 +30,10 @@ export class AutoTradingScheduler {
   private setupPromise: Promise<void>;
   private isInitialized: boolean = false;
   
+  // 🎯 SISTEMA DE DIVERSIFICAÇÃO - Evita repetição do mesmo ativo
+  private recentAssets: Map<string, string[]> = new Map(); // userId -> [asset1, asset2, ...]
+  private assetCooldownMinutes: number = 2; // Cool-off entre trades do mesmo ativo
+  
   // 🎯 SISTEMA DE OPERAÇÕES CONSERVADORAS DIÁRIAS (persistido no banco)
   // Limites específicos por modo de operação
   private getOperationLimitsForMode(mode: string): { min: number; max: number } {
@@ -509,7 +513,29 @@ export class AutoTradingScheduler {
         };
       }
       
-      const selectedSymbol = bestSymbolResult.symbol;
+      let selectedSymbol = bestSymbolResult.symbol;
+      
+      // 🎯 DIVERSIFICAÇÃO: Verificar se este ativo pode ser aberto agora
+      const canOpenAsset = await this.canOpenTradeForAsset(config.userId, selectedSymbol);
+      if (!canOpenAsset) {
+        // Se não pode, tentar próximo melhor ativo (se disponível)
+        console.log(`⚠️ [${operationId}] Ativo ${selectedSymbol} em cool-off, procurando alternativa...`);
+        
+        // Buscar 2º melhor símbolo
+        if (bestSymbolResult.top5Symbols && bestSymbolResult.top5Symbols.length > 1) {
+          selectedSymbol = bestSymbolResult.top5Symbols[1];
+          const canOpenAlt = await this.canOpenTradeForAsset(config.userId, selectedSymbol);
+          if (!canOpenAlt) {
+            return { success: false, error: 'Todos os ativos candidatos estão em cool-off de diversificação' };
+          }
+          console.log(`✅ [${operationId}] Usando ativo alternativo: ${selectedSymbol}`);
+        } else {
+          return { success: false, error: 'Ativo selecionado em cool-off e sem alternativas' };
+        }
+      }
+      
+      // Registrar uso do ativo para diversificação
+      this.trackAssetUsage(config.userId, selectedSymbol);
       const aiConsensusPreCalculated = bestSymbolResult.aiConsensus;
       
       console.log(`✅ [${operationId}] Melhor símbolo selecionado: ${selectedSymbol} (Consenso: ${aiConsensusPreCalculated.consensusStrength}%)`);
@@ -1493,6 +1519,55 @@ export class AutoTradingScheduler {
       // Em caso de erro, usar multiplicador básico de recuperação
       return await storage.calculateRecoveryMultiplier(userId);
     }
+  }
+
+  // 🎯 DIVERSIFICAÇÃO ENTRE ATIVOS - Evita repetição excessiva
+  async canOpenTradeForAsset(userId: string, symbol: string): Promise<boolean> {
+    if (!this.recentAssets.has(userId)) {
+      this.recentAssets.set(userId, []);
+    }
+    
+    const recentList = this.recentAssets.get(userId) || [];
+    
+    // Se o ativo foi usado recentemente (últimos 2 minutos), bloqueia
+    const assetIndex = recentList.indexOf(symbol);
+    if (assetIndex >= 0) {
+      // Ativo foi usado recentemente - bloqueia
+      console.log(`🚫 [DIVERSIFICAÇÃO] Ativo ${symbol} usado recentemente - bloqueado para evitar repetição`);
+      return false;
+    }
+    
+    return true;
+  }
+
+  trackAssetUsage(userId: string, symbol: string): void {
+    if (!this.recentAssets.has(userId)) {
+      this.recentAssets.set(userId, []);
+    }
+    
+    const recentList = this.recentAssets.get(userId) || [];
+    
+    // Adicionar ativo à lista recente
+    recentList.unshift(symbol);
+    
+    // Manter apenas os últimos N ativos (simular cool-off)
+    // Limpar ativo da lista após cool-off (2 minutos)
+    if (recentList.length > 5) {
+      recentList.pop();
+    }
+    
+    // Resetar cool-off após 2 minutos automaticamente
+    setTimeout(() => {
+      const currentList = this.recentAssets.get(userId) || [];
+      const idx = currentList.indexOf(symbol);
+      if (idx >= 0) {
+        currentList.splice(idx, 1);
+        console.log(`🔄 [DIVERSIFICAÇÃO] Cool-off de ${symbol} finalizado`);
+      }
+    }, this.assetCooldownMinutes * 60 * 1000);
+    
+    this.recentAssets.set(userId, recentList);
+    console.log(`✅ [DIVERSIFICAÇÃO] Ativo ${symbol} rastreado. Lista recente: ${recentList.join(', ')}`);
   }
 
   /**
