@@ -341,6 +341,13 @@ export class AutoTradingScheduler {
   }
 
   private async executeAnaliseNaturalAnalysis(): Promise<void> {
+    // 🔴 VERIFICAÇÃO CRÍTICA #1: Flag de pausa centralizada (banco de dados)
+    const tradingControlStatus = await storage.getTradingControlStatus();
+    if (tradingControlStatus?.isPaused) {
+      console.log(`🛑 [SCHEDULER] Trading pausado globalmente - não executando análise`);
+      return;
+    }
+    
     // SEGURANÇA: Verificar se pode executar operações
     if (!this.canExecuteOperation()) {
       return; // Bloquear execução se controles de segurança ativos
@@ -442,6 +449,13 @@ export class AutoTradingScheduler {
 
 
   private async processAnaliseNaturalConfiguration(config: any, operationId: string): Promise<{success: boolean, error?: string}> {
+    // 🔴 VERIFICAÇÃO CRÍTICA #2: Flag de pausa centralizada (antes de qualquer operação)
+    const tradingControlStatus = await storage.getTradingControlStatus();
+    if (tradingControlStatus?.isPaused) {
+      console.log(`🛑 [${operationId}] Pausa global detectada - não executando trade`);
+      return { success: false, error: 'Trading pausado globalmente' };
+    }
+    
     // SEGURANÇA: Verificar limites antes de processar
     if (!this.canExecuteOperation()) {
       return { success: false, error: 'Bloqueado por controles de segurança' };
