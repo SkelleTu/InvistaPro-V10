@@ -2475,6 +2475,103 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // =========================== TRADING ASSETS - ALL AVAILABLE SYMBOLS ===========================
+
+  app.get('/api/trading/assets', isAuthenticated, isTradingAuthorized, async (req, res) => {
+    try {
+      if (!req.user?.id) {
+        return res.status(401).json({ message: 'Usuário não autenticado' });
+      }
+
+      const stats = marketDataCollector.getDiscoveryStats();
+      const allAssets = marketDataCollector.getAllAssets();
+      const supportedSymbols = marketDataCollector.getSupportedSymbols();
+
+      // Agrupar ativos por categoria
+      const assetsByCategory: { [key: string]: typeof allAssets } = {};
+      
+      allAssets.forEach((asset: any) => {
+        const category = asset.market_display_name || 'Outros';
+        if (!assetsByCategory[category]) {
+          assetsByCategory[category] = [];
+        }
+        assetsByCategory[category].push(asset);
+      });
+
+      res.json({
+        stats: {
+          totalAssetsDiscovered: stats.totalSymbols,
+          digitDiffSupported: stats.digitDiffSupported,
+          lastUpdateSeconds: stats.timeAgoSeconds,
+          percentageWithDigitDiff: stats.totalSymbols > 0 ? Math.round((stats.digitDiffSupported / stats.totalSymbols) * 100) : 0
+        },
+        summary: {
+          categoriesCount: Object.keys(assetsByCategory).length,
+          supportedSymbols: supportedSymbols.length,
+          totalSymbols: allAssets.length
+        },
+        categories: Object.entries(assetsByCategory).map(([category, assets]) => ({
+          name: category,
+          count: assets.length,
+          withDigitDiff: assets.filter(a => supportedSymbols.includes(a.symbol)).length,
+          symbols: assets.slice(0, 10).map((a: any) => ({
+            symbol: a.symbol,
+            displayName: a.display_name,
+            marketDisplayName: a.market_display_name,
+            submartketDisplayName: a.submarket_display_name,
+            supportsDigitDiff: supportedSymbols.includes(a.symbol),
+            exchangeOpen: a.exchange_is_open === 1,
+            tradingSuspended: a.is_trading_suspended === 1
+          })),
+          moreAssets: Math.max(0, assets.length - 10)
+        })),
+        supportedSymbolsList: supportedSymbols.slice(0, 50).map((symbol: string) => ({
+          symbol,
+          info: marketDataCollector.getAssetInfo(symbol)
+        })),
+        moreSymbols: Math.max(0, supportedSymbols.length - 50)
+      });
+
+    } catch (error) {
+      console.error('❌ Erro ao buscar ativos disponíveis:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ message: 'Erro ao buscar ativos', error: errorMessage });
+    }
+  });
+
+  app.get('/api/trading/assets/discover', isAuthenticated, isTradingAuthorized, async (req, res) => {
+    try {
+      if (!req.user?.id) {
+        return res.status(401).json({ message: 'Usuário não autenticado' });
+      }
+
+      console.log('🔍 Iniciando descoberta de ativos a pedido do usuário...');
+      const discovered = await marketDataCollector.discoverAndLoadAllAssets();
+      
+      const stats = marketDataCollector.getDiscoveryStats();
+
+      res.json({
+        success: true,
+        message: `Descoberta completa! ${discovered.length} ativos com DIGITDIFF encontrados.`,
+        discoveredAssets: discovered.length,
+        stats: {
+          totalAssetsDiscovered: stats.totalSymbols,
+          digitDiffSupported: stats.digitDiffSupported,
+          discoveredNow: discovered.length
+        }
+      });
+
+    } catch (error) {
+      console.error('❌ Erro ao descobrir ativos:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ 
+        success: false,
+        message: 'Erro ao descobrir ativos', 
+        error: errorMessage 
+      });
+    }
+  });
+
   // =========================== DERIV REAL-TIME DATA ===========================
 
   app.get('/api/trading/realtime-data', isAuthenticated, isTradingAuthorized, async (req, res) => {

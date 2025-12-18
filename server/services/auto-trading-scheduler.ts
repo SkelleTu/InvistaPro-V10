@@ -1166,56 +1166,25 @@ export class AutoTradingScheduler {
   }
 
   private getSymbolsForMode(mode: string): string[] {
-    // 🔥 TODOS OS ATIVOS SUPORTADOS - EXPANSÃO COMPLETA PARA MÁXIMA DIVERSIFICAÇÃO
-    // Sistema agora opera 120+ ativos simultaneamente em tempo real
-    const allSymbols = [
-      // Volatility Indices - 5 ativos
+    // 🔥 TODOS OS ATIVOS SUPORTADOS - DESCOBERTA DINÂMICA
+    // Sistema agora carrega automaticamente TODOS os ativos da Deriv em tempo real
+    const supportedSymbols = marketDataCollector.getSupportedSymbols();
+    
+    if (supportedSymbols.length > 0) {
+      console.log(`🎯 [getSymbolsForMode] Usando ${supportedSymbols.length} ativos descobertos dinamicamente`);
+      return supportedSymbols;
+    }
+    
+    // Fallback se descoberta dinâmica não tiver funcionado ainda
+    console.warn('⚠️ [getSymbolsForMode] Nenhum símbolo descoberto - usando fallback');
+    const fallbackSymbols = [
       'R_10', 'R_25', 'R_50', 'R_75', 'R_100',
-      
-      // Forex Major Pairs - 10 ativos
       'EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'AUDUSD', 'USDCAD', 'NZDUSD',
-      'EURJPY', 'EURGBP', 'GBPJPY',
-      
-      // Forex Minor Pairs - 16 ativos
-      'EURCAD', 'EURCHF', 'EURAUD', 'EURNZD', 'GBPAUD', 'GBPNZD', 'GBPCAD', 'GBPCHF',
-      'AUDCAD', 'AUDCHF', 'AUDNZD', 'CADCHF', 'CADJPY', 'CHFJPY', 'NZDJPY', 'NZDCAD',
-      'NZDCHF', 'AUDCAD', 'USDSEK', 'USDNOK', 'USDDKK', 'USDHKD', 'USDSGD', 'USDMXN',
-      
-      // Commodities - 6 ativos
-      'XAUUSD', 'XAGUSD', 'XPTUSD', 'XPDUSD', 'BRENUSD', 'WTIUSD',
-      
-      // Cryptocurrencies - 13 ativos
-      'BTCUSD', 'ETHUSD', 'LTCUSD', 'BCHUSD', 'BNBUSD', 'XRPUSD', 'ADAUSD', 'DOTUSD',
-      'LINKUSD', 'UNIUSD', 'SOLUSD', 'MATICUSD', 'AVAXUSD', 'AAAPEUSD',
-      
-      // Stock Indices - 9 ativos
-      'SPX500', 'UK100', 'DE40', 'FR40', 'AUS200', 'JPN225', 'HSI50', 'SHCOMP', 'IND50',
-      
-      // Individual Stocks (Blue Chips) - 50+ ativos
-      // Tech
-      'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'NFLX', 'CSCO', 'INTC',
-      'AMD', 'CRM', 'ADBE', 'PYPL', 'SQ',
-      
-      // Finance
-      'JPM', 'BAC', 'WFC', 'GS', 'MS', 'BLK', 'SCHW',
-      
-      // Pharma/Healthcare
-      'JNJ', 'PFE', 'UNH', 'AZN', 'NVO', 'MRK', 'ABT', 'TMO', 'GILD',
-      
-      // Consumer
-      'WMT', 'KO', 'PEP', 'MCD', 'SBUX', 'NKE', 'LULU', 'TJX', 'HD',
-      
-      // Energy
-      'XOM', 'CVX', 'COP', 'SLB', 'MPC',
-      
-      // Industrial
-      'BA', 'CAT', 'MMM', 'GE', 'HON', 'LMT',
-      
-      // Utilities
-      'DUK', 'SO', 'NEE', 'AEP', 'EXC'
+      'XAUUSD', 'XAGUSD', 'BTCUSD', 'ETHUSD',
+      'SPX500', 'UK100', 'DE40', 'FR40'
     ];
     
-    return allSymbols; // 120+ ativos para diversificação máxima
+    return fallbackSymbols;
   }
 
   // ===== FLEXIBILIDADE DINÂMICA: STAKE + TICKS =====

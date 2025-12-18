@@ -65,6 +65,12 @@ export class DerivAPIService extends EventEmitter {
   private heartbeatInterval: NodeJS.Timeout | null = null;
   private supervisorHeartbeatInterval: NodeJS.Timeout | null = null;
   private operationId: string | null = null;
+  
+  // Sistema de descoberta dinâmica com cache
+  private symbolsCache: DerivActiveSymbol[] = [];
+  private digitDiffCache: string[] = [];
+  private lastCacheUpdate: number = 0;
+  private cacheExpireMs: number = 5 * 60 * 1000; // 5 minutos
 
   constructor() {
     super();
@@ -544,8 +550,28 @@ export class DerivAPIService extends EventEmitter {
     });
   }
 
+  // Validar cache de ativos
+  private isCacheValid(): boolean {
+    return this.lastCacheUpdate > 0 && Date.now() - this.lastCacheUpdate < this.cacheExpireMs;
+  }
+
   // 🔥 NOVO: Descobrir DINAMICAMENTE quais ativos suportam DIGITDIFF (conforme docs oficiais Deriv)
-  async getDigitDiffSupportedSymbols(allSymbols: DerivActiveSymbol[]): Promise<string[]> {
+  async getDigitDiffSupportedSymbols(allSymbols?: DerivActiveSymbol[]): Promise<string[]> {
+    // Se cache está válido, retornar do cache
+    if (this.isCacheValid() && this.digitDiffCache.length > 0) {
+      console.log(`⚡ [DIGITDIFF CACHE] Retornando ${this.digitDiffCache.length} ativos do cache`);
+      return this.digitDiffCache;
+    }
+
+    // Se não passar símbolos e cache expirou, usar cache anterior se houver
+    if (!allSymbols) {
+      if (this.digitDiffCache.length > 0) {
+        console.log(`⚡ [DIGITDIFF CACHE] Retornando ${this.digitDiffCache.length} ativos do cache antigo`);
+        return this.digitDiffCache;
+      }
+      return [];
+    }
+
     console.log(`🔍 [DIGITDIFF DISCOVERY] Iniciando descoberta com ${allSymbols.length} símbolos`);
     
     if (!this.isConnected) {
@@ -580,6 +606,10 @@ export class DerivAPIService extends EventEmitter {
       }
     }
     
+    // Atualizar cache
+    this.digitDiffCache = supportedSymbols;
+    this.lastCacheUpdate = Date.now();
+    
     console.log(`🔥 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
     console.log(`🔥 [DIGITDIFF DESCOBERTA COMPLETA]`);
     console.log(`🔥 Símbolos verificados: ${checked}/${allSymbols.length}`);
@@ -588,6 +618,24 @@ export class DerivAPIService extends EventEmitter {
     console.log(`🔥 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
     
     return supportedSymbols;
+  }
+
+  // Obter símbolos ativos com cache
+  async getActiveSymbolsCached(): Promise<DerivActiveSymbol[]> {
+    // Se cache está válido, retornar do cache
+    if (this.isCacheValid() && this.symbolsCache.length > 0) {
+      console.log(`⚡ [SYMBOLS CACHE] Retornando ${this.symbolsCache.length} símbolos do cache`);
+      return this.symbolsCache;
+    }
+
+    // Buscar novos símbolos
+    const symbols = await this.getActiveSymbols();
+    
+    // Atualizar cache
+    this.symbolsCache = symbols;
+    this.lastCacheUpdate = Date.now();
+    
+    return symbols;
   }
 
   // 🔥 NOVO: Buscar contratos disponíveis para um símbolo (conforme docs Deriv)

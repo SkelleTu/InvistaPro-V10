@@ -191,18 +191,57 @@ export class MarketDataCollector extends EventEmitter {
   }
 
   /**
+   * Descobrir e carregar todos os ativos DIGITDIFF disponíveis
+   */
+  async discoverAndLoadAllAssets(): Promise<string[]> {
+    try {
+      console.log('🔍 [DISCOVERY] Iniciando descoberta de todos os ativos DIGITDIFF disponíveis...');
+      
+      // Conectar à Deriv se não estiver conectado
+      if (!this.derivAPI.isConnected) {
+        await this.derivAPI.connectPublic();
+      }
+      
+      // Obter TODOS os símbolos ativos
+      const allSymbols = await this.derivAPI.getActiveSymbolsCached();
+      console.log(`📊 [DISCOVERY] Encontrados ${allSymbols.length} símbolos ativos na Deriv`);
+      
+      // Descobrir quais suportam DIGITDIFF
+      const digitDiffSymbols = await this.derivAPI.getDigitDiffSupportedSymbols(allSymbols);
+      console.log(`💎 [DISCOVERY] ${digitDiffSymbols.length} ativos com DIGITDIFF suportado`);
+      
+      // Atualizar lista interna
+      this.DIGITDIFF_SUPPORTED_SYMBOLS = digitDiffSymbols;
+      this.allDerivSymbols = new Map(allSymbols.map(s => [s.symbol, s]));
+      this.lastSymbolsUpdate = Date.now();
+      
+      return digitDiffSymbols;
+    } catch (error) {
+      console.error('❌ [DISCOVERY] Erro ao descobrir ativos:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Iniciar coleta contínua de dados (modo "Fluxo Natural de Análises Cooperativas de Inteligência Artificial")
    */
-  async startCollection(symbols: string[]): Promise<void> {
+  async startCollection(symbols?: string[]): Promise<void> {
     if (this.isCollecting) {
       console.log('🔄 [FNACIA] Coleta já está ativa');
       return;
     }
 
     try {
-      // 🔥 EXPANSÃO DINÂMICA: Usar TODOS os símbolos descobertos dinamicamente
-      // Nenhum filtro - usar exatamente os ativos que foram detectados com DIGITDIFF
-      const supportedSymbols = symbols; // ✅ Usar todos os símbolos descobertos dinamicamente
+      let supportedSymbols = symbols;
+      
+      // Se não passar símbolos, descobrir automaticamente
+      if (!supportedSymbols || supportedSymbols.length === 0) {
+        console.log('🔍 [FNACIA] Nenhum símbolo passado - descobrindo dinamicamente...');
+        supportedSymbols = await this.discoverAndLoadAllAssets();
+      } else {
+        // Atualizar lista interna com os símbolos passados
+        this.DIGITDIFF_SUPPORTED_SYMBOLS = supportedSymbols;
+      }
       
       if (supportedSymbols.length === 0) {
         console.log('⚠️ [FNACIA] Nenhum símbolo com DIGITDIFF disponível');
@@ -210,26 +249,66 @@ export class MarketDataCollector extends EventEmitter {
       }
       
       console.log(`🚀 [FNACIA] Iniciando coleta para ${supportedSymbols.length} ativos descobertos dinamicamente...`);
-      console.log(`🚀 [FNACIA] Símbolos: ${supportedSymbols.join(', ')}`);
+      
+      // Mostrar primeiros 10 e contar o resto
+      const firstTen = supportedSymbols.slice(0, 10).join(', ');
+      const remaining = supportedSymbols.length > 10 ? ` ... +${supportedSymbols.length - 10} mais` : '';
+      console.log(`🚀 [FNACIA] Símbolos: ${firstTen}${remaining}`);
       
       // Conectar à Deriv (público, sem autenticação)
       await this.derivAPI.connectPublic();
       
-      // Inscrever-se a TODOS os símbolos suportados descobertos
-      for (const symbol of supportedSymbols) {
-        await this.derivAPI.subscribeToTicks(symbol);
-        // Log para todos os símbolos
-        console.log(`📈 [FNACIA] Inscrito em ${symbol} ✅`);
+      // Inscrever-se em batches para não sobrecarregar
+      const batchSize = 50;
+      for (let i = 0; i < supportedSymbols.length; i += batchSize) {
+        const batch = supportedSymbols.slice(i, i + batchSize);
+        
+        for (const symbol of batch) {
+          await this.derivAPI.subscribeToTicks(symbol);
+        }
+        
+        console.log(`📈 [FNACIA] Inscrito em ${Math.min(i + batchSize, supportedSymbols.length)}/${supportedSymbols.length} ativos`);
       }
 
       this.isCollecting = true;
       console.log(`✅ [FNACIA] Coleta ativa para ${supportedSymbols.length} ativos descobertos dinamicamente`);
-      console.log(`💰 [FNACIA] EXPANSÃO: 5 → ${supportedSymbols.length} ativos para máxima diversificação!`);
+      console.log(`💰 [FNACIA] EXPANSÃO COMPLETA: Sistema carregando TODOS os ativos da Deriv!`);
       
     } catch (error) {
       console.error('❌ [FNACIA] Erro ao iniciar coleta:', error);
       throw error;
     }
+  }
+
+  /**
+   * Obter informações sobre um ativo específico
+   */
+  getAssetInfo(symbol: string): any {
+    return this.allDerivSymbols.get(symbol) || null;
+  }
+
+  /**
+   * Obter todos os ativos descobertos
+   */
+  getAllAssets(): any[] {
+    return Array.from(this.allDerivSymbols.values());
+  }
+
+  /**
+   * Obter estatísticas de descoberta
+   */
+  getDiscoveryStats(): {
+    totalSymbols: number;
+    digitDiffSupported: number;
+    lastUpdate: number;
+    timeAgoSeconds: number;
+  } {
+    return {
+      totalSymbols: this.allDerivSymbols.size,
+      digitDiffSupported: this.DIGITDIFF_SUPPORTED_SYMBOLS.length,
+      lastUpdate: this.lastSymbolsUpdate,
+      timeAgoSeconds: Math.floor((Date.now() - this.lastSymbolsUpdate) / 1000)
+    };
   }
 
   /**
