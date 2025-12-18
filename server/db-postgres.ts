@@ -5,10 +5,7 @@ import * as pgSchema from './schemas/postgres-schema';
 let pgDb: any = null;
 let isPostgresAvailable = false;
 
-// TEMPORÁRIO: Desabilitando PostgreSQL - endpoint Neon está desativado
-console.warn('⚠️ PostgreSQL desabilitado - usando apenas SQLite');
-
-/* 
+// Conectando ao PostgreSQL (Supabase) via Neon
 try {
   if (process.env.DATABASE_URL) {
     const sql = neon(process.env.DATABASE_URL);
@@ -22,6 +19,5 @@ try {
   console.error('❌ Erro ao conectar PostgreSQL:', error);
   console.warn('⚠️ Continuando apenas com SQLite');
 }
-*/
 
 export { pgDb, pgSchema, isPostgresAvailable };
