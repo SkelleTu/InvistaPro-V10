@@ -15,6 +15,7 @@ import { derivAPI } from "./services/deriv-api";
 import { createDatabaseBackup } from "./database-backup";
 import { storage } from "./storage";
 import { derivTradeSync } from "./services/deriv-trade-sync";
+import { runPostgresMigration } from "./migrate-postgres";
 
 const app = express();
 app.use(express.json());
@@ -100,8 +101,22 @@ app.use((req, res, next) => {
   if (!validateEncryption()) {
     await waitForEncryption();
   }
+  
   // Inicializar banco de dados local
   initializeDatabase();
+  
+  // 🗄️ EXECUTAR MIGRAÇÃO POSTGRESQL PARA CRIAR TABELAS NO SUPABASE
+  console.log('🗄️ Verificando sincronização com PostgreSQL (Supabase)...');
+  if (process.env.DATABASE_URL) {
+    const migrationSuccess = await runPostgresMigration();
+    if (migrationSuccess) {
+      console.log('✅ Tabelas PostgreSQL/Supabase criadas ou já existentes');
+    } else {
+      console.warn('⚠️ Não foi possível criar tabelas no PostgreSQL - continuando com SQLite');
+    }
+  } else {
+    console.log('ℹ️ DATABASE_URL não definida - usando apenas SQLite');
+  }
   
   // 🛡️ SISTEMA DE BACKUP AUTOMÁTICO DO BANCO DE DADOS
   console.log('💾 Configurando sistema de backup automático...');

@@ -231,13 +231,14 @@ async function migratePostgres() {
   }
 }
 
-// Executar migração
-migratePostgres()
-  .then(() => {
-    console.log('🎉 Migração concluída com sucesso!');
-    process.exit(0);
-  })
-  .catch((error) => {
-    console.error('💥 Falha na migração:', error);
-    process.exit(1);
-  });
+// Exportar função para ser chamada ao inicializar o servidor
+export async function runPostgresMigration() {
+  try {
+    await migratePostgres();
+    console.log('🎉 Migração PostgreSQL concluída com sucesso!');
+    return true;
+  } catch (error) {
+    console.error('❌ Falha na migração PostgreSQL:', error);
+    return false;
+  }
+}
