@@ -542,7 +542,8 @@ export class AutoTradingScheduler {
         };
       }
       
-      let selectedSymbol = bestSymbolResult.symbol;
+      // 🔧 LIMPAR SÍMBOLO: Remover consenso formatado (ex: "R_50(45.0%)" → "R_50")
+      let selectedSymbol = bestSymbolResult.symbol.split('(')[0].trim();
       
       // 🎯 DIVERSIFICAÇÃO INTELIGENTE: Verificar se ativo pode ser aberto + jogo de cintura
       const diversityCheck = await this.canOpenTradeForAsset(
@@ -557,13 +558,13 @@ export class AutoTradingScheduler {
         
         // Buscar 2º melhor símbolo (se disponível)
         if (bestSymbolResult.top5Symbols && bestSymbolResult.top5Symbols.length > 1) {
-          selectedSymbol = bestSymbolResult.top5Symbols[1];
+          selectedSymbol = bestSymbolResult.top5Symbols[1].split('(')[0].trim();
           const altCheck = await this.canOpenTradeForAsset(config.userId, selectedSymbol);
           
           if (!altCheck.allowed) {
             // Tentar 3º melhor como último recurso
             if (bestSymbolResult.top5Symbols.length > 2) {
-              selectedSymbol = bestSymbolResult.top5Symbols[2];
+              selectedSymbol = bestSymbolResult.top5Symbols[2].split('(')[0].trim();
               const thirdCheck = await this.canOpenTradeForAsset(config.userId, selectedSymbol);
               if (!thirdCheck.allowed) {
                 return { success: false, error: 'Todos os ativos candidatos estão em cool-off' };

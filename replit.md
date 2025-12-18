@@ -83,6 +83,9 @@ Preferred communication style: Simple, everyday language.
 ### Bug Fixes
 - Fixed `getDailyPnL` error in routes.ts (replaced with `createOrUpdateDailyPnL`)
 - Corrected TypeScript type errors in deriv-trade-sync.ts
+- **CRITICAL FIX**: Símbolo Deriv vinha formatado com consenso - ex: `R_50(45.0%)` → agora limpo para `R_50`
+  - Aplicado em 3 pontos: linha 549 (primeiro símbolo) + linha 564 (2º símbolo) + linha 570 (3º símbolo)
+  - Usa `.split('(')[0].trim()` para remover consenso formatado
 
 ## External Dependencies
 
