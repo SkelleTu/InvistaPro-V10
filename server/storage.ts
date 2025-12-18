@@ -12,6 +12,7 @@ import {
   activeTradingSessions,
   activeWebSocketSubscriptions,
   systemHealthHeartbeat,
+  tradingControl,
   type User,
   type InsertUser,
   type UpdateUser,
@@ -39,6 +40,8 @@ import {
   type InsertActiveWebSocketSubscription,
   type SystemHealthHeartbeat,
   type InsertSystemHealthHeartbeat,
+  type TradingControl,
+  type InsertTradingControl,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, isNotNull, sql } from "drizzle-orm";
@@ -201,6 +204,11 @@ export interface IStorage {
   getAllSystemHeartbeats(): Promise<SystemHealthHeartbeat[]>;
   incrementHeartbeatError(componentName: string, error: string): Promise<void>;
   resetHeartbeatErrors(componentName: string): Promise<void>;
+
+  // Trading control (pause/resume - centralizado)
+  getTradingControlStatus(): Promise<TradingControl | undefined>;
+  pauseTrading(pausedBy: string, reason: string): Promise<TradingControl>;
+  resumeTrading(): Promise<TradingControl>;
 
 }
 
@@ -1510,6 +1518,73 @@ export class DatabaseStorage implements IStorage {
         updatedAt: new Date().toISOString(),
       })
       .where(eq(systemHealthHeartbeat.componentName, componentName));
+  }
+
+  // Trading control (centralizado - compartilhado entre todos os remixes)
+  async getTradingControlStatus(): Promise<TradingControl | undefined> {
+    const [control] = await db.select().from(tradingControl).limit(1);
+    return control;
+  }
+
+  async pauseTrading(pausedBy: string, reason: string): Promise<TradingControl> {
+    const existing = await this.getTradingControlStatus();
+    const now = new Date().toISOString();
+
+    if (existing) {
+      const [updated] = await db
+        .update(tradingControl)
+        .set({
+          isPaused: true,
+          pausedBy,
+          pausedAt: now,
+          pauseReason: reason,
+          resumedAt: null,
+          updatedAt: now,
+        })
+        .where(eq(tradingControl.id, existing.id))
+        .returning();
+      return updated;
+    } else {
+      const [created] = await db
+        .insert(tradingControl)
+        .values({
+          isPaused: true,
+          pausedBy,
+          pausedAt: now,
+          pauseReason: reason,
+          updatedAt: now,
+        })
+        .returning();
+      return created;
+    }
+  }
+
+  async resumeTrading(): Promise<TradingControl> {
+    const existing = await this.getTradingControlStatus();
+    const now = new Date().toISOString();
+
+    if (existing) {
+      const [updated] = await db
+        .update(tradingControl)
+        .set({
+          isPaused: false,
+          resumedAt: now,
+          updatedAt: now,
+        })
+        .where(eq(tradingControl.id, existing.id))
+        .returning();
+      return updated;
+    } else {
+      const [created] = await db
+        .insert(tradingControl)
+        .values({
+          isPaused: false,
+          resumedAt: now,
+          updatedAt: now,
+        })
+        .returning();
+      return created;
+    }
   }
 
 }

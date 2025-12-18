@@ -93,6 +93,80 @@ export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
     enabled: isAdmin && isOpen,
   });
 
+  // Buscar status de pausa global do trading
+  const { data: tradingControlStatus, refetch: refetchTradingStatus } = useQuery<any>({
+    queryKey: ["/api/auto-trading/trading-control-status"],
+    enabled: isAdmin && isOpen,
+    refetchInterval: 5000, // Atualizar a cada 5 segundos
+  });
+
+  // Mutation para pausar trading
+  const pauseTradingMutation = useMutation({
+    mutationFn: async (reason: string) => {
+      const response = await fetch('/api/auto-trading/pause-trading', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ reason }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || 'Erro ao pausar trading');
+      }
+
+      return response.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: "Trading pausado com sucesso!",
+        description: "Todos os remixes pararam de operar.",
+      });
+      refetchTradingStatus();
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Erro ao pausar trading",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Mutation para retomar trading
+  const resumeTradingMutation = useMutation({
+    mutationFn: async () => {
+      const response = await fetch('/api/auto-trading/resume-trading', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || 'Erro ao retomar trading');
+      }
+
+      return response.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: "Trading retomado com sucesso!",
+        description: "Todos os remixes voltaram a operar.",
+      });
+      refetchTradingStatus();
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Erro ao retomar trading",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const [pauseReason, setPauseReason] = useState("");
+
   // Mutation para revisar documentos
   const reviewDocMutation = useMutation({
     mutationFn: async ({ documentId, approved, reason }: { documentId: string; approved: boolean; reason?: string }) => {
@@ -200,6 +274,7 @@ export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
             <TabsTrigger value="users" className="text-xs md:text-sm px-2 py-2">Usuários</TabsTrigger>
             <TabsTrigger value="documents" className="text-xs md:text-sm px-2 py-2">Docs</TabsTrigger>
             <TabsTrigger value="movements" className="text-xs md:text-sm px-2 py-2">Movs</TabsTrigger>
+            <TabsTrigger value="trading" className="text-xs md:text-sm px-2 py-2">Trading</TabsTrigger>
           </TabsList>
 
           {/* Dashboard Tab */}
@@ -1015,6 +1090,84 @@ export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
                     ))}
                   </TableBody>
                 </Table>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Trading Control Tab */}
+          <TabsContent value="trading" className="space-y-6 mt-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Clock className="h-5 w-5" />
+                  Controle Centralizado de Trading
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {/* Status Badge */}
+                <div className="flex items-center gap-4">
+                  <div>
+                    <p className="text-sm font-medium mb-1">Status Global</p>
+                    <Badge variant={tradingControlStatus?.isPaused ? "destructive" : "default"} className="text-base px-4 py-2">
+                      {tradingControlStatus?.isPaused ? "🛑 PAUSADO" : "▶️ ATIVO"}
+                    </Badge>
+                  </div>
+                </div>
+
+                {/* Pause Information */}
+                {tradingControlStatus?.isPaused && (
+                  <div className="bg-red-50 dark:bg-red-950 p-4 rounded-lg border border-red-200 dark:border-red-800">
+                    <p className="text-sm"><span className="font-semibold">Pausado por:</span> {tradingControlStatus.pausedBy}</p>
+                    <p className="text-sm"><span className="font-semibold">Data:</span> {tradingControlStatus.pausedAt ? new Date(tradingControlStatus.pausedAt).toLocaleString('pt-BR') : '-'}</p>
+                    <p className="text-sm"><span className="font-semibold">Motivo:</span> {tradingControlStatus.pauseReason}</p>
+                  </div>
+                )}
+
+                {/* Control Buttons */}
+                <div className="space-y-3">
+                  {!tradingControlStatus?.isPaused ? (
+                    <div className="space-y-2">
+                      <p className="text-sm font-medium">Pausar trading globalmente</p>
+                      <Input
+                        placeholder="Motivo da pausa..."
+                        value={pauseReason}
+                        onChange={(e) => setPauseReason(e.target.value)}
+                      />
+                      <Button
+                        onClick={() => pauseTradingMutation.mutate(pauseReason)}
+                        disabled={pauseTradingMutation.isPending || !pauseReason.trim()}
+                        variant="destructive"
+                        className="w-full"
+                      >
+                        {pauseTradingMutation.isPending ? "Pausando..." : "🛑 Pausar Trading para TODOS os Remixes"}
+                      </Button>
+                      <p className="text-xs text-muted-foreground">
+                        Isso pausará operações em TODOS os remixes da aplicação
+                      </p>
+                    </div>
+                  ) : (
+                    <Button
+                      onClick={() => resumeTradingMutation.mutate()}
+                      disabled={resumeTradingMutation.isPending}
+                      className="w-full bg-green-600 hover:bg-green-700"
+                    >
+                      {resumeTradingMutation.isPending ? "Retomando..." : "▶️ Retomar Trading para TODOS os Remixes"}
+                    </Button>
+                  )}
+                </div>
+
+                {/* Info */}
+                <div className="bg-blue-50 dark:bg-blue-950 p-4 rounded-lg border border-blue-200 dark:border-blue-800">
+                  <p className="text-sm text-muted-foreground">
+                    <span className="font-semibold block mb-2">ℹ️ Como funciona:</span>
+                    Este controle é <span className="font-semibold">centralizado</span> e compartilhado entre TODOS os remixes. Quando você pausar o trading aqui, todos os remixes irão:
+                  </p>
+                  <ul className="text-sm text-muted-foreground mt-2 ml-4 space-y-1">
+                    <li>✓ Verificar a flag de pausa antes de executar operações</li>
+                    <li>✓ Interromper novas operações imediatamente</li>
+                    <li>✓ Retomar automaticamente quando reativado</li>
+                  </ul>
+                </div>
               </CardContent>
             </Card>
           </TabsContent>

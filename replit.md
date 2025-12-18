@@ -1,5 +1,62 @@
 # InvestaPRO - Sistema de Renda Variável
 
+## 🛑 CONTROLE CENTRALIZADO DE PAUSA - 18 DEC 2025
+
+### ✅ IMPLEMENTAÇÃO COMPLETA
+
+**Problema**: Operações de trade continuavam em paralelo em múltiplos remixes sem controle centralizado
+
+**Solução Implementada**: Sistema de pausa/retoma centralizado compartilhado entre TODOS os remixes
+
+#### Componentes Implementados:
+
+1. **Schema (`shared/schema.ts`)**
+   - Tabela `tradingControl` com flag `isPaused` compartilhada entre todos os remixes
+   - Campos: `isPaused`, `pausedBy`, `pausedAt`, `pauseReason`, `resumedAt`
+
+2. **Storage (`server/storage.ts`)**
+   - `getTradingControlStatus()` - Obter status de pausa global
+   - `pauseTrading(pausedBy, reason)` - Pausar todas as operações
+   - `resumeTrading()` - Retomar operações
+
+3. **Scheduler (`server/services/auto-trading-scheduler.ts`)**
+   - Verifica a flag de pausa ANTES de executar qualquer operação
+   - Se pausado: retorna erro e não executa
+   - Log: `🛑 TRADING PAUSADO GLOBALMENTE`
+
+4. **Endpoints (`server/routes/auto-trading-routes.ts`)**
+   - `POST /api/auto-trading/pause-trading` - Pausar globalmente
+   - `POST /api/auto-trading/resume-trading` - Retomar globalmente
+   - `GET /api/auto-trading/trading-control-status` - Obter status
+
+5. **Admin Panel (`client/src/components/admin/admin-panel.tsx`)**
+   - Novo tab "Trading" no painel administrativo
+   - UI para visualizar status global
+   - Botões para pausar/retomar
+   - Exibe quem pausou, quando e por qual motivo
+
+#### Como Funciona:
+
+```
+1. Admin clica "Pausar Trading" no dashboard
+2. POST /pause-trading salva flag isPaused=true no banco de dados (PostgreSQL Supabase)
+3. TODOS os remixes (Remix1, Remix2, Remix3, etc) compartilham MESMO banco de dados
+4. Próxima operação em qualquer remix verifica a flag
+5. Se isPaused=true: operação é rejeitada, scheduler aguarda
+6. Admin clica "Retomar Trading"
+7. POST /resume-trading salva flag isPaused=false
+8. Todos os remixes retomam operações automaticamente
+```
+
+#### Resultado:
+- ✅ Controle centralizado: um clique pausa TUDO
+- ✅ Compartilhado entre remixes: mesmo banco de dados PostgreSQL
+- ✅ Sem delay: verificação em tempo real antes de cada operação
+- ✅ Auditoria: quem pausou, quando e por quê
+- ✅ Reversível: pode retomar a qualquer momento
+
+---
+
 ## 🚀 SISTEMA CONTROLADO E SINCRONIZADO - 18 DEC 2025
 
 ### ✅ CORREÇÕES APLICADAS

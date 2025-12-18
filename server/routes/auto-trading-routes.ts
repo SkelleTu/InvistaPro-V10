@@ -506,6 +506,59 @@ router.post('/fix-auto', isAuthenticated, isTradingAuthorized, asyncErrorHandler
   });
 }));
 
+// =================== ENDPOINTS DE CONTROLE CENTRALIZADO ===================
+
+// Pausar trading globalmente (afeta todos os remixes)
+router.post('/pause-trading', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+  const { reason } = req.body;
+  const pausedBy = req.user.email;
+
+  if (!reason || reason.trim().length === 0) {
+    return res.status(400).json({ message: 'Motivo da pausa é obrigatório' });
+  }
+
+  const control = await storage.pauseTrading(pausedBy, reason);
+  
+  console.log(`🛑 [GLOBAL] Trading pausado por ${pausedBy}: ${reason}`);
+  
+  res.json({
+    message: 'Trading pausado globalmente para TODOS os remixes',
+    status: 'paused',
+    pausedBy,
+    pausedAt: control.pausedAt,
+    reason: control.pauseReason,
+  });
+}));
+
+// Retomar trading globalmente (afeta todos os remixes)
+router.post('/resume-trading', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+  const control = await storage.resumeTrading();
+  
+  console.log(`▶️ [GLOBAL] Trading retomado`);
+  
+  res.json({
+    message: 'Trading retomado globalmente para TODOS os remixes',
+    status: 'resumed',
+    resumedAt: control.resumedAt,
+  });
+}));
+
+// Obter status de pausa global
+router.get('/trading-control-status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+  const control = await storage.getTradingControlStatus();
+  
+  res.json({
+    isPaused: control?.isPaused || false,
+    pausedBy: control?.pausedBy || null,
+    pausedAt: control?.pausedAt || null,
+    pauseReason: control?.pauseReason || null,
+    resumedAt: control?.resumedAt || null,
+    message: control?.isPaused 
+      ? `Trading pausado por ${control.pausedBy}: ${control.pauseReason}` 
+      : 'Trading ativo',
+  });
+}));
+
 // =================== ENDPOINTS DE SINCRONIZAÇÃO DERIV ===================
 
 // Sincronizar trades do usuário com Deriv

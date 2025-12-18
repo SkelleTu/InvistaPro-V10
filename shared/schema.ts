@@ -636,7 +636,23 @@ export const systemHealthHeartbeat = sqliteTable('system_health_heartbeat', {
   updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
 });
 
+// Controle centralizado de trading (pausa/retoma) - compartilhado entre todos os remixes
+export const tradingControl = sqliteTable('trading_control', {
+  id: text('id').primaryKey().default(sql`(hex(randomblob(16)))`),
+  isPaused: integer('is_paused', { mode: 'boolean' }).default(false), // Flag centralizada de pausa
+  pausedBy: text('paused_by'), // Email do admin que pausou
+  pausedAt: text('paused_at'), // Quando foi pausado
+  pauseReason: text('pause_reason'), // Motivo da pausa
+  resumedAt: text('resumed_at'), // Quando foi retomado
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+});
+
 // SCHEMAS PARA SISTEMA DE RESILIÊNCIA
+
+export const insertTradingControlSchema = createInsertSchema(tradingControl).omit({
+  id: true,
+  updatedAt: true,
+});
 
 export const insertActiveTradingSessionSchema = createInsertSchema(activeTradingSessions).omit({
   id: true,
@@ -657,6 +673,8 @@ export const insertSystemHealthHeartbeatSchema = createInsertSchema(systemHealth
 
 // TYPES PARA SISTEMA DE RESILIÊNCIA
 
+export type TradingControl = typeof tradingControl.$inferSelect;
+export type InsertTradingControl = z.infer<typeof insertTradingControlSchema>;
 export type ActiveTradingSession = typeof activeTradingSessions.$inferSelect;
 export type InsertActiveTradingSession = z.infer<typeof insertActiveTradingSessionSchema>;
 export type ActiveWebSocketSubscription = typeof activeWebSocketSubscriptions.$inferSelect;

@@ -901,6 +901,13 @@ export class AutoTradingScheduler {
         }
       }
 
+      // 🔴 VERIFICAR FLAG DE PAUSA CENTRALIZADA - Todos os remixes respeita m
+      const tradingControlStatus = await storage.getTradingControlStatus();
+      if (tradingControlStatus?.isPaused) {
+        console.log(`🛑 [${operationId}] ⏸️ TRADING PAUSADO GLOBALMENTE - Pausado por: ${tradingControlStatus.pausedBy} | Motivo: ${tradingControlStatus.pauseReason}`);
+        return { success: false, error: `Trading pausado globalmente: ${tradingControlStatus.pauseReason}` };
+      }
+
       // Conectar ao Deriv (com timeout de 20 segundos)
       const CONNECTION_TIMEOUT = 20000;
       let connected = false;
