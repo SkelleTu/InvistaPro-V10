@@ -1735,8 +1735,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Middleware to check trading access (only for authorized users)
   const isTradingAuthorized = (req: any, res: any, next: any) => {
     const userEmail = req.user?.email;
+    const envAdminEmail = process.env.ADMIN_EMAIL;
     
-    if (!req.user || !userEmail || !isAuthorizedEmail(userEmail)) {
+    // Check if authorized via predefined list OR via ADMIN_EMAIL env variable
+    const isAuthorized = isAuthorizedEmail(userEmail) || 
+                         (envAdminEmail && userEmail?.toLowerCase() === envAdminEmail.toLowerCase());
+    
+    if (!req.user || !userEmail || !isAuthorized) {
       return res.status(403).json({ 
         message: ACCESS_DENIED_MESSAGE
       });
