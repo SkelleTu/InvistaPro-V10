@@ -515,23 +515,41 @@ export class AutoTradingScheduler {
       
       let selectedSymbol = bestSymbolResult.symbol;
       
-      // 🎯 DIVERSIFICAÇÃO: Verificar se este ativo pode ser aberto agora
-      const canOpenAsset = await this.canOpenTradeForAsset(config.userId, selectedSymbol);
-      if (!canOpenAsset) {
-        // Se não pode, tentar próximo melhor ativo (se disponível)
-        console.log(`⚠️ [${operationId}] Ativo ${selectedSymbol} em cool-off, procurando alternativa...`);
+      // 🎯 DIVERSIFICAÇÃO INTELIGENTE: Verificar se ativo pode ser aberto + jogo de cintura
+      const diversityCheck = await this.canOpenTradeForAsset(
+        config.userId, 
+        selectedSymbol, 
+        bestSymbolResult.aiConsensus?.consensusStrength // Passar consenso como parâmetro
+      );
+      
+      if (!diversityCheck.allowed) {
+        // Ativo em cool-off - tentar próximo melhor
+        console.log(`⚠️ [${operationId}] ${diversityCheck.reason} - procurando alternativa...`);
         
-        // Buscar 2º melhor símbolo
+        // Buscar 2º melhor símbolo (se disponível)
         if (bestSymbolResult.top5Symbols && bestSymbolResult.top5Symbols.length > 1) {
           selectedSymbol = bestSymbolResult.top5Symbols[1];
-          const canOpenAlt = await this.canOpenTradeForAsset(config.userId, selectedSymbol);
-          if (!canOpenAlt) {
-            return { success: false, error: 'Todos os ativos candidatos estão em cool-off de diversificação' };
+          const altCheck = await this.canOpenTradeForAsset(config.userId, selectedSymbol);
+          
+          if (!altCheck.allowed) {
+            // Tentar 3º melhor como último recurso
+            if (bestSymbolResult.top5Symbols.length > 2) {
+              selectedSymbol = bestSymbolResult.top5Symbols[2];
+              const thirdCheck = await this.canOpenTradeForAsset(config.userId, selectedSymbol);
+              if (!thirdCheck.allowed) {
+                return { success: false, error: 'Todos os ativos candidatos estão em cool-off' };
+              }
+            } else {
+              return { success: false, error: 'Ativos candidatos em cool-off e sem alternativas suficientes' };
+            }
           }
-          console.log(`✅ [${operationId}] Usando ativo alternativo: ${selectedSymbol}`);
+          console.log(`✅ [${operationId}] Alternativa selecionada: ${selectedSymbol}`);
         } else {
-          return { success: false, error: 'Ativo selecionado em cool-off e sem alternativas' };
+          return { success: false, error: 'Ativo melhor selecionado em cool-off e sem alternativas' };
         }
+      } else {
+        // Ativo permitido
+        console.log(`✅ [${operationId}] ${diversityCheck.reason}`);
       }
       
       // Registrar uso do ativo para diversificação
@@ -1521,23 +1539,46 @@ export class AutoTradingScheduler {
     }
   }
 
-  // 🎯 DIVERSIFICAÇÃO ENTRE ATIVOS - Evita repetição excessiva
-  async canOpenTradeForAsset(userId: string, symbol: string): Promise<boolean> {
+  // 🎯 DIVERSIFICAÇÃO INTELIGENTE COM JOGO DE CINTURA
+  // Evita repetição excessiva, mas permite quebrar regra se oportunidade for MUITO forte
+  async canOpenTradeForAsset(userId: string, symbol: string, consensusStrength?: number): Promise<{allowed: boolean, reason: string}> {
     if (!this.recentAssets.has(userId)) {
       this.recentAssets.set(userId, []);
     }
     
     const recentList = this.recentAssets.get(userId) || [];
-    
-    // Se o ativo foi usado recentemente (últimos 2 minutos), bloqueia
     const assetIndex = recentList.indexOf(symbol);
-    if (assetIndex >= 0) {
-      // Ativo foi usado recentemente - bloqueia
-      console.log(`🚫 [DIVERSIFICAÇÃO] Ativo ${symbol} usado recentemente - bloqueado para evitar repetição`);
-      return false;
+    
+    // Se NÃO foi usado recentemente, sempre permite
+    if (assetIndex < 0) {
+      return { allowed: true, reason: 'Ativo disponível para trading' };
     }
     
-    return true;
+    // Ativo em cool-off - verificar se oportunidade é forte o suficiente
+    const opportunityStrength = consensusStrength || 0;
+    
+    // 🎯 REGRAS DE JOGO DE CINTURA:
+    // 1. Consenso 95%+ → Quebra cool-off (oportunidade explosiva!)
+    // 2. Consenso 85-94% → Permite apenas se foi > 1 min desde último uso
+    // 3. Consenso <85% → Respeita cool-off (diversificação obrigatória)
+    
+    if (opportunityStrength >= 95) {
+      console.log(`🔥 [DIVERSIFICAÇÃO INTELIGENTE] OPORTUNIDADE EXPLOSIVA (${opportunityStrength}%)! Permitindo repetição de ${symbol}`);
+      return { allowed: true, reason: `Oportunidade explosiva (${opportunityStrength}%) - override inteligente` };
+    }
+    
+    if (opportunityStrength >= 85) {
+      // Verificar tempo desde último uso
+      const lastUseTime = Date.now() - (assetIndex * 60000); // Aproximar tempo baseado na posição
+      if (lastUseTime > 60000) { // Mais de 1 minuto
+        console.log(`⚡ [DIVERSIFICAÇÃO INTELIGENTE] Oportunidade forte (${opportunityStrength}%)! Permitindo repetição de ${symbol} (1+ min)`);
+        return { allowed: true, reason: `Oportunidade forte (${opportunityStrength}%) e 1+ min passado` };
+      }
+    }
+    
+    // Sem oportunidade forte - respeita cool-off
+    console.log(`🚫 [DIVERSIFICAÇÃO] Ativo ${symbol} em cool-off (consenso: ${opportunityStrength}%) - buscar alternativa`);
+    return { allowed: false, reason: `Ativo em cool-off de diversificação (consenso: ${opportunityStrength}%)` };
   }
 
   trackAssetUsage(userId: string, symbol: string): void {
