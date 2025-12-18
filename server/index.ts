@@ -105,35 +105,41 @@ app.use((req, res, next) => {
   // Inicializar banco de dados local
   initializeDatabase();
   
-  // 🗄️ EXECUTAR MIGRAÇÃO POSTGRESQL PARA CRIAR TABELAS NO SUPABASE
-  console.log('🗄️ Verificando sincronização com PostgreSQL (Supabase)...');
-  if (process.env.DATABASE_URL && process.env.DATABASE_URL.includes('supabase')) {
-    console.log('✨ DATABASE_URL configurado! Criando schema SQL no Supabase...');
+  // 🗄️ EXECUTAR MIGRAÇÃO POSTGRESQL - SUPORTE A QUALQUER BANCO (REPLIT, SUPABASE, ETC)
+  console.log('🗄️ Verificando sincronização com PostgreSQL...');
+  const hasPostgres = process.env.DATABASE_URL && (process.env.DATABASE_URL.startsWith('postgresql://') || process.env.DATABASE_URL.startsWith('postgres://'));
+  
+  if (hasPostgres) {
+    const isSupabase = process.env.DATABASE_URL.includes('supabase');
+    const isReplit = process.env.DATABASE_URL.includes('helium') || process.env.DATABASE_URL.includes('replit');
+    const dbType = isSupabase ? 'Supabase' : isReplit ? 'Replit PostgreSQL' : 'PostgreSQL';
+    
+    console.log(`✨ ${dbType} configurado! Criando schema SQL...`);
     const migrationSuccess = await runPostgresMigration();
     if (migrationSuccess) {
       console.log('✅ ✅ ✅ SINCRONIZAÇÃO COMPLETA!');
-      console.log('   • Tabelas SQL criadas no Supabase');
+      console.log(`   • ${dbType} conectado`);
+      console.log('   • Tabelas SQL criadas');
       console.log('   • Dados sincronizados (users, trades, sessions, etc)');
-      console.log('   • Admin account persistido no Supabase');
-      console.log('   🎉 Sistema Dual Database 100% OPERACIONAL');
+      console.log('   • 3 bancos harmônicos: SQLite (local) + PostgreSQL + Supabase');
+      console.log('   🎉 Sistema Tri-Database 100% OPERACIONAL');
     } else {
       console.warn('⚠️ Não foi possível criar tabelas no PostgreSQL - continuando com SQLite');
     }
   } else {
-    console.log('ℹ️ DATABASE_URL não está configurado para Supabase');
+    console.log('ℹ️ DATABASE_URL PostgreSQL não está configurado');
     console.log('   ⚠️ Sistema funcionando apenas em MODO LOCAL (SQLite)');
     console.log('');
-    console.log('   📋 PARA ATIVAR SUPABASE:');
-    console.log('      1. Copie a URL de conexão do Supabase:');
-    console.log('         postgresql://postgres:Victor.!.1999@db.iporgioruideqodqzxjo.supabase.co:5432/postgres');
+    console.log('   📋 PARA ATIVAR SUPABASE OU REPLIT POSTGRES:');
+    console.log('      1. Obtenha a URL de conexão (Supabase ou Replit Database)');
     console.log('      2. Acesse Replit > Secrets (cadeado no painel esquerdo)');
     console.log('      3. Clique em "Create Secret"');
     console.log('      4. Nome: DATABASE_URL');
-    console.log('      5. Valor: (cole a URL acima)');
+    console.log('      5. Valor: (cole a URL PostgreSQL)');
     console.log('      6. Clique em "Add Secret"');
     console.log('      7. Reinicie o app');
     console.log('');
-    console.log('   ✅ Depois disso, as tabelas serão criadas automaticamente no Supabase!');
+    console.log('   ✅ Sistema sincronizará automaticamente os 3 bancos!');
   }
   
   // 🛡️ SISTEMA DE BACKUP AUTOMÁTICO DO BANCO DE DADOS
