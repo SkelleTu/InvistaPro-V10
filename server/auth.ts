@@ -50,16 +50,20 @@ export function setupAuth(app: Express) {
   // Session configuration with MemoryStore (local storage)
   const sessionStore = new MemoryStore();
 
+  const isProduction = process.env.NODE_ENV === 'production';
+  
   const sessionSettings: session.SessionOptions = {
     secret: process.env.SESSION_SECRET || "change-this-in-production",
-    resave: false,
-    saveUninitialized: false,
+    resave: true, // Força re-save da sessão
+    saveUninitialized: true, // Salva sessões não inicializadas
     store: sessionStore,
+    name: 'investpro.sid', // Nome customizado para o cookie
     cookie: {
-      httpOnly: false, // Permitir acesso do JS para debugging
-      secure: false, // Não usar HTTPS para desenvolvimento no Replit
+      httpOnly: true,
+      secure: isProduction, // Usar HTTPS apenas em produção
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-      sameSite: 'lax', // Permitir cookies cross-origin
+      sameSite: isProduction ? 'none' : 'lax', // 'none' para cross-origin em produção
+      path: '/', // Garantir que cookie é válido para todo o site
     },
   };
 
