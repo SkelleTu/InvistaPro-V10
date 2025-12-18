@@ -102,6 +102,12 @@ export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
     refetchInterval: 5000, // Atualizar a cada 5 segundos
   });
 
+  // Buscar token Deriv salvo
+  const { data: savedTokenData, refetch: refetchTokenData } = useQuery<any>({
+    queryKey: ["/api/trading/deriv-token"],
+    enabled: isAdmin && isOpen,
+  });
+
   // Mutation para pausar trading
   const pauseTradingMutation = useMutation({
     mutationFn: async (reason: string) => {
@@ -192,6 +198,7 @@ export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
       setDerivToken("");
       setAccountType("demo");
       queryClient.invalidateQueries({ queryKey: ["/api/trading/deriv-token"] });
+      refetchTokenData();
     },
     onError: (error: Error) => {
       toast({
@@ -1142,52 +1149,91 @@ export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="space-y-3">
-                  <div>
-                    <Label htmlFor="deriv-token">Token API Deriv</Label>
-                    <Input
-                      id="deriv-token"
-                      type="password"
-                      placeholder="Cole sua token API da Deriv aqui..."
-                      value={derivToken}
-                      onChange={(e) => setDerivToken(e.target.value)}
-                      data-testid="input-deriv-token"
-                    />
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Obtenha em: https://app.deriv.com/account/api-token
-                    </p>
-                  </div>
-                  
-                  <div>
-                    <Label htmlFor="account-type">Tipo de Conta</Label>
-                    <select
-                      id="account-type"
-                      value={accountType}
-                      onChange={(e) => setAccountType(e.target.value as "demo" | "real")}
-                      className="w-full px-3 py-2 border rounded-md"
-                      data-testid="select-account-type"
+                {savedTokenData?.tokenConfigured ? (
+                  // Token Salva - Exibição
+                  <div className="space-y-4">
+                    <div className="bg-green-50 dark:bg-green-950 p-4 rounded-lg border border-green-200 dark:border-green-800">
+                      <p className="text-sm font-semibold text-green-700 dark:text-green-300 mb-3">✅ Token salva com sucesso!</p>
+                      <div className="space-y-2 text-sm">
+                        <div>
+                          <span className="font-medium text-muted-foreground">Token API:</span>
+                          <p className="text-base font-mono mt-1" data-testid="text-saved-token">{savedTokenData.token}</p>
+                        </div>
+                        <div>
+                          <span className="font-medium text-muted-foreground">Tipo de Conta:</span>
+                          <Badge className="ml-2" variant="default">{savedTokenData.accountType}</Badge>
+                        </div>
+                        <div>
+                          <span className="font-medium text-muted-foreground">Data de Configuração:</span>
+                          <p className="text-sm">{new Date(savedTokenData.createdAt).toLocaleString('pt-BR')}</p>
+                        </div>
+                        {savedTokenData.isActive && (
+                          <div className="pt-2">
+                            <Badge variant="default" className="bg-blue-600">🔗 Ativa</Badge>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <Button
+                      onClick={() => setDerivToken("")}
+                      variant="outline"
+                      className="w-full"
+                      data-testid="button-configure-new-token"
                     >
-                      <option value="demo">Demonstração (Demo)</option>
-                      <option value="real">Real</option>
-                    </select>
+                      Configurar Nova Token
+                    </Button>
                   </div>
+                ) : (
+                  // Formulário de Entrada
+                  <div className="space-y-4">
+                    <div className="space-y-3">
+                      <div>
+                        <Label htmlFor="deriv-token">Token API Deriv</Label>
+                        <Input
+                          id="deriv-token"
+                          type="password"
+                          placeholder="Cole sua token API da Deriv aqui..."
+                          value={derivToken}
+                          onChange={(e) => setDerivToken(e.target.value)}
+                          data-testid="input-deriv-token"
+                        />
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Obtenha em: https://app.deriv.com/account/api-token
+                        </p>
+                      </div>
+                      
+                      <div>
+                        <Label htmlFor="account-type">Tipo de Conta</Label>
+                        <select
+                          id="account-type"
+                          value={accountType}
+                          onChange={(e) => setAccountType(e.target.value as "demo" | "real")}
+                          className="w-full px-3 py-2 border rounded-md"
+                          data-testid="select-account-type"
+                        >
+                          <option value="demo">Demonstração (Demo)</option>
+                          <option value="real">Real</option>
+                        </select>
+                      </div>
 
-                  <Button
-                    onClick={() => configureTokenMutation.mutate()}
-                    disabled={configureTokenMutation.isPending || !derivToken.trim()}
-                    className="w-full"
-                    data-testid="button-save-token"
-                  >
-                    {configureTokenMutation.isPending ? "Salvando..." : "💾 Salvar Token"}
-                  </Button>
-                </div>
+                      <Button
+                        onClick={() => configureTokenMutation.mutate()}
+                        disabled={configureTokenMutation.isPending || !derivToken.trim()}
+                        className="w-full"
+                        data-testid="button-save-token"
+                      >
+                        {configureTokenMutation.isPending ? "Salvando..." : "💾 Salvar Token"}
+                      </Button>
+                    </div>
 
-                <div className="bg-blue-50 dark:bg-blue-950 p-3 rounded-lg border border-blue-200 dark:border-blue-800">
-                  <p className="text-sm text-muted-foreground">
-                    <span className="font-semibold block mb-2">ℹ️ Como funciona:</span>
-                    A token será validada com a Deriv e salva com segurança no banco de dados. Necessária para executar operações de trading automaticamente.
-                  </p>
-                </div>
+                    <div className="bg-blue-50 dark:bg-blue-950 p-3 rounded-lg border border-blue-200 dark:border-blue-800">
+                      <p className="text-sm text-muted-foreground">
+                        <span className="font-semibold block mb-2">ℹ️ Como funciona:</span>
+                        A token será validada com a Deriv e salva com segurança no banco de dados. Necessária para executar operações de trading automaticamente.
+                      </p>
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
 
