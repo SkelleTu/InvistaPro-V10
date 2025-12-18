@@ -1590,9 +1590,13 @@ export class AutoTradingScheduler {
     // Intervalo de 60 segundos (1 minuto) entre ciclos de análise
     // Cada ciclo pode abrir 1 trade (com stagger de 10s entre múltiplas configs)
     // = Máximo ~1 trade por minuto por config (controlado e previsível)
-    this.cronJob = setInterval(() => {
+    this.cronJob = setInterval(async () => {
       if (!this.schedulerRunning) {
-        this.executeAnaliseNaturalAnalysis();
+        try {
+          await this.executeAnaliseNaturalAnalysis();
+        } catch (error) {
+          console.error('❌ [SCHEDULER] Erro crítico na execução do ciclo:', error);
+        }
       }
     }, 60000); // 60 segundos (1 minuto) entre execuções
     
