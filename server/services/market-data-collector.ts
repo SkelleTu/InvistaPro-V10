@@ -26,6 +26,9 @@ export class MarketDataCollector extends EventEmitter {
     '1HZ10V', '1HZ25V', '1HZ50V', '1HZ75V', '1HZ100V'
   ];
   
+  // 🚫 BLOQUEADO 100%: Ativos causadores de loss - NUNCA serão operados
+  private static readonly BLOCKED_SYMBOLS_PATTERN = /\(1s\)/i;
+  
   // 🎯 DINÂMICO: CARREGADO DA DERIV EM TEMPO REAL
   // Sistema agora descobri automaticamente TODOS os ativos que suportam DIGITDIFF
   // Inicializado com fallback para garantir funcionamento mesmo se descoberta falhar
@@ -94,6 +97,12 @@ export class MarketDataCollector extends EventEmitter {
    */
   private processTick(tickData: DerivTickData): void {
     const { symbol } = tickData;
+    
+    // 🚫 BLOQUEIO TOTAL: Ignorar ativos com "(1s)" - CAUSADORES DE LOSS
+    if (MarketDataCollector.BLOCKED_SYMBOLS_PATTERN.test(symbol)) {
+      // Ignorar silenciosamente para não poluir logs
+      return;
+    }
     
     // 🎯 FILTRO: Ignorar símbolos que não suportam DIGITDIFF (economia de RAM e processamento)
     if (!this.DIGITDIFF_SUPPORTED_SYMBOLS.includes(symbol)) {

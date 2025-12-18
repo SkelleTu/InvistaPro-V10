@@ -31,6 +31,9 @@ export class AutoTradingScheduler {
   private setupPromise: Promise<void>;
   private isInitialized: boolean = false;
   
+  // 🚫 BLOQUEADO 100%: Ativos causadores de loss - NUNCA serão operados
+  private static readonly BLOCKED_SYMBOLS_PATTERN = /\(1s\)/i;
+  
   // 🔧 ANTI-DEADLOCK: Rastreamento de operações em execução
   private lastOperationId: string | null = null;
   private lastOperationStartTime: number = 0;
@@ -1170,16 +1173,21 @@ export class AutoTradingScheduler {
       
       // 🔥 EXPANSÃO MASSIVA: Usar TODOS os 120+ ativos disponíveis na Deriv
       // Foram expandidos de 5 → 120+ para máxima diversificação e cobertura de lucro
-      // NÃO FILTRAR - deixar passar todos os símbolos que têm dados
+      // 🚫 BLOQUEIO TOTAL: Filtrar 100% os ativos com "(1s)" - CAUSADORES DE LOSS
       
       const filteredSymbolsData = allSymbolsData.filter((symbolData: any) => {
         const symbol = symbolData.symbol;
         
-        // ✅ ACEITAR TODOS os símbolos com dados de mercado disponíveis
+        // 🚫 BLOQUEIO TOTAL: Ignorar ativos com "(1s)" no nome
+        if (AutoTradingScheduler.BLOCKED_SYMBOLS_PATTERN.test(symbol)) {
+          return false; // BLOQUEADO 100%
+        }
+        
+        // ✅ ACEITAR demais os símbolos com dados de mercado disponíveis
         // Qualquer ativo que Deriv permite para DIGITDIFF será analisado
         // Isso inclui: Forex, Commodities, Crypto, Stocks, Indices, etc
         
-        return true; // ✅ Deixar TODOS passarem - expansão de 5 para 120+ ativos
+        return true; // ✅ Deixar TODOS passarem (exceto os bloqueados) - expansão de 5 para 120+ ativos
       });
       
       if (filteredSymbolsData.length === 0) {
