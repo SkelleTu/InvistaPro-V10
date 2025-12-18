@@ -33,6 +33,7 @@ export class AutoTradingScheduler {
   // 🎯 SISTEMA DE DIVERSIFICAÇÃO DINÂMICA - "PERDA ZERO"
   private recentAssets: Map<string, string[]> = new Map(); // userId -> [asset1, asset2, ...]
   private assetPerformance: Map<string, {wins: number, losses: number, lastTrades: boolean[]}> = new Map(); // Track performance por ativo
+  private assetLastUsedTime: Map<string, number> = new Map(); // ✅ FIX: Guardar TEMPO REAL, não índice
   private assetCooldownMinutes: number = 2; // Base cool-off (pode variar)
   
   // 🧬 SISTEMA ADAPTATIVO - Breathing Room dinâmico
@@ -1654,6 +1655,10 @@ export class AutoTradingScheduler {
       return { allowed: true, reason: 'Ativo disponível para trading' };
     }
     
+    // ✅ FIX: Usar TEMPO REAL guardado, não calcular do índice
+    const lastUseTime = this.assetLastUsedTime.get(symbol) || 0;
+    const timeSinceLastUse = (Date.now() - lastUseTime) / 60000; // em minutos
+    
     // Ativo em cool-off - verificar respiração dinâmica + oportunidade
     const opportunityStrength = consensusStrength || 0;
     const breathingRoom = this.getBreathingRoom(symbol);
@@ -1677,16 +1682,15 @@ export class AutoTradingScheduler {
     }
     
     if (opportunityStrength >= 85) {
-      // Verificar tempo desde último uso
-      const lastUseTime = Date.now() - (assetIndex * 60000);
-      if (lastUseTime > (breathingRoom * 60000)) {
+      // ✅ FIX: Usar tempo real
+      if (timeSinceLastUse > breathingRoom) {
         console.log(`⚡ [DIVERSIFICAÇÃO INTELIGENTE] Oportunidade forte (${opportunityStrength}%)! ${symbol} passou breathing room (${breathingRoom.toFixed(1)}min)`);
         return { allowed: true, reason: `Signal ${opportunityStrength}% + breathing room (${breathingRoom.toFixed(1)}min) cumprido` };
       }
     }
     
-    // Sem oportunidade forte - respeita cool-off
-    const remainingMin = (breathingRoom - (Date.now() - (assetIndex * 60000)) / 60000).toFixed(1);
+    // ✅ FIX: Calcular tempo restante corretamente
+    const remainingMin = Math.max(0, breathingRoom - timeSinceLastUse).toFixed(1);
     console.log(`🚫 [DIVERSIFICAÇÃO] ${symbol} em cool-off (${consensusStrength}%) - W/L: ${performance?.wins}/${performance?.losses} - falta ${remainingMin}min`);
     return { allowed: false, reason: `Cool-off ativo: ${remainingMin}min restantes` };
   }
@@ -1705,6 +1709,9 @@ export class AutoTradingScheduler {
     if (recentList.length > 5) {
       recentList.pop();
     }
+    
+    // ✅ FIX: Guardar TEMPO REAL
+    this.assetLastUsedTime.set(symbol, Date.now());
     
     // Aplicar breathing room dinâmico baseado em performance
     const breathingRoom = this.getBreathingRoom(symbol);
