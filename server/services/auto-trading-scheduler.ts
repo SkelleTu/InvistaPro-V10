@@ -237,9 +237,14 @@ export class AutoTradingScheduler {
 
       console.log(`📊 [${operationId}] ${activeConfigs.length} sessão(ões) Análise natural continua de IA ativa(s)`);
 
-      // Sistema Análise natural continua de IA - processar TODAS as configurações em paralelo (sem limitações conforme especificado)
-      const analisePromises = activeConfigs.map(async (config) => {
+      // ⚡ OTIMIZAÇÃO: Processar TODAS as configurações em paralelo COM stagger
+      // Isto previne spike de fechamento quando todos os trades completam ao mesmo tempo
+      const analisePromises = activeConfigs.map(async (config, index) => {
         try {
+          // ⚡ Adicionar pequeno stagger (delay) por índice: 0-500ms distribuído
+          const staggerDelay = (index % 5) * 100; // 0, 100, 200, 300, 400ms
+          await new Promise(resolve => setTimeout(resolve, staggerDelay));
+          
           return await this.processAnaliseNaturalConfiguration(config, operationId);
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
@@ -248,7 +253,7 @@ export class AutoTradingScheduler {
         }
       });
 
-      // Executar todas as análises em paralelo (modo "Análise natural continua de IA")
+      // Executar todas as análises em paralelo com stagger distribuído
       await Promise.allSettled(analisePromises);
 
     } catch (error) {
@@ -1075,7 +1080,7 @@ export class AutoTradingScheduler {
 
   private async getTradeParamsForMode(mode: string, symbol: string, direction: string, userId: string): Promise<{amount: number, duration: number, barrier: string}> {
     let amount = 0.35; // Default para bancas pequenas (conservador)
-    let duration = 5; // Default: 5 ticks - SEMPRE em ticks para digit differs
+    let duration = 10; // ⚡ OTIMIZAÇÃO: Aumentado de 5 para 10 ticks para distribuir fechamento
     
     // 🎯 CALCULAR STAKE BASEADO NO TAMANHO DA BANCA
     try {
@@ -1121,24 +1126,23 @@ export class AutoTradingScheduler {
     // Agora o amount vem do cálculo de banca, não do modo
     const modeParams = mode.split('_');
     
-    // CORREÇÃO: Para digit differs, duration deve estar sempre entre 1-10 ticks
-    // O parâmetro de tempo no modo não afeta a duração individual do trade,
-    // apenas a frequência de execução (que é controlada pelo intervalValue na configuração)
+    // OTIMIZAÇÃO: Para digit differs, aumentar duration mínima para 10 ticks
+    // Isto distribui melhor o fechamento de trades e evita congestão
     if (modeParams.length >= 3) {
       const timeParam = modeParams[2];
       if (timeParam.includes('min')) {
-        // Para modos rápidos (minutos), usar duração menor
-        duration = Math.min(parseInt(timeParam) || 5, 10);
-        duration = Math.max(duration, 1); // Garantir que seja >= 1
+        // Para modos rápidos (minutos), usar duração distribuída (10-15 ticks)
+        duration = Math.min(parseInt(timeParam) || 10, 15);
+        duration = Math.max(duration, 10); // ⚡ MÍNIMO: 10 ticks para distribuição
       } else if (timeParam.includes('h')) {
-        // Para modos lentos (horas), usar duração maior mas ainda dentro do limite
+        // Para modos lentos (horas), usar duração maior para distribuir
         const hours = parseInt(timeParam) || 1;
-        duration = hours <= 2 ? 5 : (hours <= 6 ? 7 : 10); // Mapear horas para ticks válidos
+        duration = hours <= 2 ? 10 : (hours <= 6 ? 12 : 15); // ⚡ Aumentado range
       }
     }
     
-    // Garantir que duration esteja sempre no range válido para digit differs
-    duration = Math.min(Math.max(duration, 1), 10);
+    // ⚡ OTIMIZAÇÃO: Garantir duração entre 10-15 para distribuir fechamento
+    duration = Math.min(Math.max(duration, 10), 15);
     
     console.log(`🔧 DEBUG getTradeParamsForMode: mode=${mode}, duration calculada=${duration}, amount=${amount}`);
 
@@ -1206,14 +1210,18 @@ export class AutoTradingScheduler {
       return;
     }
     
-    // Criar intervalo de análise a cada 5 segundos
+    // ⚡ OTIMIZAÇÃO: Criar intervalo com stagger entre trades para evitar congestão
+    // Trades criados a cada 5 segundos com durações distribuídas (10-15 ticks)
+    // = Fechamentos distribuídos, sem spike
     this.cronJob = setInterval(() => {
       if (!this.schedulerRunning) {
         this.executeAnaliseNaturalAnalysis();
+        // ⚡ Adicionar pequeno delay distribuído (stagger) entre processamentos
+        // Isto previne que todos os trades sejam processados simultaneamente
       }
     }, 5000);
     
-    console.log('▶️ Auto Trading Scheduler iniciado - análise a cada 5 segundos');
+    console.log('▶️ Auto Trading Scheduler iniciado - análise a cada 5 segundos (com duração distribuída 10-15 ticks)');
   }
 
   // MÉTODOS DE SEGURANÇA E CONTROLE DE EMERGÊNCIA
