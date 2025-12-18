@@ -801,11 +801,16 @@ export class DatabaseStorage implements IStorage {
       .where(eq(tradeOperations.userId, userId));
     
     const totalTrades = operations.length;
-    const wonTrades = operations.filter(op => op.status === 'won').length;
-    const lostTrades = operations.filter(op => op.status === 'lost').length;
-    const completedTrades = wonTrades + lostTrades; // Only count completed trades for win rate
-    const totalProfit = operations.reduce((sum, op) => sum + (op.profit || 0), 0);
-    const winRate = completedTrades > 0 ? (wonTrades / completedTrades) * 100 : 0;
+    
+    // Filter only completed trades (not pending and has profit value)
+    const completedTrades = operations.filter(op => op.status !== 'pending' && op.profit !== null && op.profit !== undefined);
+    
+    // Count wins and losses based on PROFIT (not status)
+    const wonTrades = completedTrades.filter(op => (op.profit || 0) > 0).length;
+    const lostTrades = completedTrades.filter(op => (op.profit || 0) < 0).length;
+    
+    const totalProfit = completedTrades.reduce((sum, op) => sum + (op.profit || 0), 0);
+    const winRate = completedTrades.length > 0 ? (wonTrades / completedTrades.length) * 100 : 0;
     
     return {
       totalTrades,

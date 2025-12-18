@@ -551,15 +551,19 @@ export class PostgresStorage implements IStorage {
     winRate: number;
   }> {
     const operations = await this.getUserTradeOperations(userId, 1000);
-    const completedOps = operations.filter(op => op.status === 'won' || op.status === 'lost');
     
-    const totalTrades = completedOps.length;
-    const wonTrades = completedOps.filter(op => op.status === 'won').length;
-    const lostTrades = completedOps.filter(op => op.status === 'lost').length;
-    const totalProfit = completedOps.reduce((sum, op) => sum + (op.profit || 0), 0);
+    // Filter only completed trades (not pending and has profit value)
+    const completedTrades = operations.filter(op => op.status !== 'pending' && op.profit !== null && op.profit !== undefined);
+    
+    // Count wins and losses based on PROFIT (not status)
+    const wonTrades = completedTrades.filter(op => (op.profit || 0) > 0).length;
+    const lostTrades = completedTrades.filter(op => (op.profit || 0) < 0).length;
+    
+    const totalTrades = completedTrades.length;
+    const totalProfit = completedTrades.reduce((sum, op) => sum + (op.profit || 0), 0);
     const winRate = totalTrades > 0 ? (wonTrades / totalTrades) * 100 : 0;
     
-    return { totalTrades, wonTrades, lostTrades, totalProfit, winRate };
+    return { totalTrades, wonTrades, lostTrades, totalProfit, winRate: Math.round(winRate * 100) / 100 };
   }
 
   async getActiveTradesCount(userId: string): Promise<number> {
