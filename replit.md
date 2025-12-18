@@ -62,6 +62,28 @@ Preferred communication style: Simple, everyday language.
 - **User Flow**: Optimized deposit button overlay, improved biometric login experience, simplified authentication.
 - **Mobile Optimization**: Responsive interface with specific mobile optimizations.
 
+## Recent Changes (Dec 18, 2025)
+
+### ✅ Implemented Automated Deriv Trade Synchronization
+- **New File**: `server/services/deriv-trade-sync.ts` - Fully automated trade synchronization system
+- **Features**:
+  - Automatic sync every 30 seconds for all active users
+  - Manual sync endpoints: `POST /api/auto-trading/sync-trades`, `GET /api/auto-trading/sync-status`
+  - Force immediate sync: `POST /api/auto-trading/force-sync`
+  - Smart caching to prevent duplicate syncs (1-minute cache per user)
+  - Concurrent sync management to prevent race conditions
+  - Automatically updates trade profit/loss based on Deriv contract data
+  - Integrated with Auto Trading Scheduler startup
+
+- **Integration Points**:
+  - Imported and started in `AutoTradingScheduler.startScheduler()`
+  - Endpoints registered in `server/routes/auto-trading-routes.ts`
+  - Uses existing `storage.updateTradeOperation()` for persistent updates
+
+### Bug Fixes
+- Fixed `getDailyPnL` error in routes.ts (replaced with `createOrUpdateDailyPnL`)
+- Corrected TypeScript type errors in deriv-trade-sync.ts
+
 ## External Dependencies
 
 ### Core Services

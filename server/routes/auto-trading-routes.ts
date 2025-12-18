@@ -5,6 +5,7 @@ import { isAuthenticated } from '../auth';
 import { asyncErrorHandler } from '../middleware/error-handler';
 import { isAuthorizedEmail } from '../config/access';
 import { dynamicThresholdTracker } from '../services/dynamic-threshold-tracker';
+import { derivTradeSync } from '../services/deriv-trade-sync';
 
 const router = Router();
 
@@ -502,6 +503,47 @@ router.post('/fix-auto', isAuthenticated, isTradingAuthorized, asyncErrorHandler
     corrigoesAplicadas: fixes.length,
     detalhes: fixes,
     proximoPasso: 'Aguarde 10-30 segundos para o sistema começar a executar operações automaticamente'
+  });
+}));
+
+// =================== ENDPOINTS DE SINCRONIZAÇÃO DERIV ===================
+
+// Sincronizar trades do usuário com Deriv
+router.post('/sync-trades', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+  const userId = req.user.id;
+  console.log(`🔄 [SYNC] Sincronizando trades para ${userId}...`);
+  const result = await derivTradeSync.syncUserTrades(userId);
+  
+  res.json({
+    message: 'Sincronização de trades concluída',
+    synced: result.synced,
+    updated: result.updated,
+    errors: result.errors,
+    timestamp: new Date().toISOString()
+  });
+}));
+
+// Status da sincronização automática
+router.get('/sync-status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+  const stats = derivTradeSync.getStats();
+  
+  res.json({
+    syncing: stats.syncing,
+    lastSyncs: stats.lastSyncTimes,
+    message: `${stats.syncing} sincronizações em progresso`,
+    timestamp: new Date().toISOString()
+  });
+}));
+
+// Forçar sincronização imediata
+router.post('/force-sync', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+  const userId = req.user.id;
+  console.log(`⚡ [SYNC] Forçando sincronização imediata para ${userId}...`);
+  await derivTradeSync.forceSyncNow(userId);
+  
+  res.json({
+    message: 'Sincronização forçada concluída',
+    timestamp: new Date().toISOString()
   });
 }));
 

@@ -2562,7 +2562,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const today = new Date().toISOString().split('T')[0];
       
       // Buscar PnL diário
-      const dailyPnL = await dbStorage.getDailyPnL(userId, today);
+      const dailyPnL = await dbStorage.createOrUpdateDailyPnL(userId, {
+        openingBalance: 10000,
+        currentBalance: 10000,
+        dailyPnL: 0
+      });
       
       // Buscar todas as operações de hoje
       const todayOperations = await dbStorage.getUserTradeOperations(userId);

@@ -6,6 +6,7 @@ import { errorTracker } from '../services/error-tracker';
 import { marketDataCollector } from './market-data-collector';
 import { dynamicThresholdTracker } from './dynamic-threshold-tracker';
 import { resilienceSupervisor } from './resilience-supervisor';
+import { derivTradeSync } from './deriv-trade-sync';
 
 export interface ActiveTradeSession {
   userId: string;
@@ -1391,7 +1392,11 @@ export class AutoTradingScheduler {
       }
     }, 5000);
     
+    // 🔄 Iniciar sincronização automática de trades da Deriv
+    derivTradeSync.startAutoSync();
+    
     console.log('▶️ Auto Trading Scheduler iniciado - análise a cada 5 segundos (com duração distribuída 10-15 ticks)');
+    console.log('🔄 Sincronização automática de trades ativada a cada 30 segundos');
   }
 
   // MÉTODOS DE SEGURANÇA E CONTROLE DE EMERGÊNCIA
