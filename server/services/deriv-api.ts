@@ -770,21 +770,41 @@ export class DerivAPIService extends EventEmitter {
   async buyDigitDifferContract(params: DigitDifferContract): Promise<DerivContractInfo | null> {
     if (!this.isConnected) return null;
 
+    const OPERATION_TIMEOUT = 15000; // 15 segundos timeout máximo
+
     try {
-      // Passo 1: Criar proposta para validar o contrato
-      const proposal = await this.createDigitDifferProposal(params);
+      // Passo 1: Criar proposta para validar o contrato (com timeout via Promise.race)
+      const proposalPromise = this.createDigitDifferProposal(params);
+      const timeoutPromise = new Promise<null>((_, reject) => {
+        setTimeout(() => reject(new Error('Timeout ao criar proposta digit differs')), OPERATION_TIMEOUT);
+      });
+      
+      let proposal: any;
+      try {
+        proposal = await Promise.race([proposalPromise, timeoutPromise]);
+      } catch (timeoutError) {
+        console.error(`⏱️ TIMEOUT ao criar proposta digit differs (${OPERATION_TIMEOUT}ms)`);
+        return null;
+      }
+      
       if (!proposal) {
         console.error('❌ Falha ao criar proposta para digit differs');
         return null;
       }
 
-      // Passo 2: Comprar usando o ID da proposta
-      return new Promise((resolve) => {
-        const reqId = this.generateRequestId();
-        
-        const buyHandler = (message: any) => {
+      // Passo 2: Comprar usando o ID da proposta (com timeout e cleanup de listener)
+      const reqId = this.generateRequestId();
+      let buyHandler: ((message: any) => void) | null = null;
+      let timeoutId: NodeJS.Timeout | null = null;
+      
+      const buyPromise = new Promise<DerivContractInfo | null>((resolve) => {
+        buyHandler = (message: any) => {
           if (message.req_id === reqId) {
-            this.removeListener('message', buyHandler);
+            // Limpar timeout e listener
+            if (timeoutId) clearTimeout(timeoutId);
+            this.removeListener('message', buyHandler!);
+            buyHandler = null;
+            
             if (message.buy) {
               const contract: DerivContractInfo = {
                 contract_id: message.buy.contract_id,
@@ -806,6 +826,16 @@ export class DerivAPIService extends EventEmitter {
 
         this.on('message', buyHandler);
 
+        // Timeout com limpeza de listener
+        timeoutId = setTimeout(() => {
+          if (buyHandler) {
+            this.removeListener('message', buyHandler);
+            buyHandler = null;
+          }
+          console.error(`⏱️ TIMEOUT ao comprar contrato digit differs (${OPERATION_TIMEOUT}ms)`);
+          resolve(null);
+        }, OPERATION_TIMEOUT);
+
         // Comprar usando o ID da proposta (método correto da Deriv API)
         const buyMessage = {
           buy: proposal.id,
@@ -816,6 +846,8 @@ export class DerivAPIService extends EventEmitter {
         console.log(`📝 Comprando contrato digit differs com proposta ID: ${proposal.id}`);
         this.sendMessage(buyMessage);
       });
+
+      return await buyPromise;
 
     } catch (error) {
       console.error('❌ Erro no processo de compra digit differs:', error);

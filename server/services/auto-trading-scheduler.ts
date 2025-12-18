@@ -31,6 +31,11 @@ export class AutoTradingScheduler {
   private setupPromise: Promise<void>;
   private isInitialized: boolean = false;
   
+  // 🔧 ANTI-DEADLOCK: Rastreamento de operações em execução
+  private lastOperationId: string | null = null;
+  private lastOperationStartTime: number = 0;
+  private readonly OPERATION_TIMEOUT_MS = 45000; // 45 segundos máximo por ciclo
+  
   // 🎯 SISTEMA DE DIVERSIFICAÇÃO DINÂMICA - "PERDA ZERO"
   // Com 120+ ativos, cada um pode ter cool-off mais curto
   private recentAssets: Map<string, string[]> = new Map(); // userId -> [asset1, asset2, ...]
@@ -110,17 +115,100 @@ export class AutoTradingScheduler {
     // Reportar saúde ao supervisor a cada 60 segundos
     setInterval(async () => {
       try {
+        // Verificar se operação atual está travada
+        const isOperationStale = this.lastOperationStartTime > 0 && 
+          (Date.now() - this.lastOperationStartTime) > this.OPERATION_TIMEOUT_MS;
+        
         await resilienceSupervisor.reportHeartbeat('scheduler', {
           schedulerRunning: this.schedulerRunning,
           activeSessions: this.activeSessions.size,
           emergencyStop: this.emergencyStop,
           isInitialized: this.isInitialized,
+          lastOperationId: this.lastOperationId,
+          isOperationStale,
+          lastOperationAge: this.lastOperationStartTime > 0 ? Date.now() - this.lastOperationStartTime : 0,
         });
+        
+        // Auto-cleanup se operação travada
+        if (isOperationStale) {
+          console.warn(`⚠️ [HEARTBEAT] Operação travada detectada: ${this.lastOperationId} (${Date.now() - this.lastOperationStartTime}ms)`);
+          await this.forceCleanupCurrentOperation();
+        }
       } catch (error) {
         console.error('❌ Erro ao reportar heartbeat ao supervisor:', error);
       }
     }, 60000);
     console.log(`💓 Heartbeat do ResilienceSupervisor iniciado para scheduler`);
+  }
+  
+  // 🔧 CLEANUP: Força limpeza de operação atual travada
+  private async forceCleanupCurrentOperation(): Promise<void> {
+    console.log(`🔧 [CLEANUP] Forçando limpeza de operação travada: ${this.lastOperationId}`);
+    
+    // Desconectar Deriv forçadamente
+    try {
+      await derivAPI.disconnect();
+      console.log(`✅ [CLEANUP] Deriv desconectado forçadamente`);
+    } catch (e) {
+      console.error(`⚠️ [CLEANUP] Erro ao desconectar Deriv:`, e);
+    }
+    
+    // Reconciliar sessões com operações pendentes
+    for (const [sessionKey, session] of this.activeSessions.entries()) {
+      // Se sessão estava em execução durante o timeout, resetar para retry
+      if (session.executedOperations < session.operationsCount && session.lastExecutionTime) {
+        console.log(`🔄 [CLEANUP] Sessão ${sessionKey}: resetando para retry (${session.executedOperations}/${session.operationsCount})`);
+        
+        // Resetar timing para permitir retry imediato
+        session.lastExecutionTime = null;
+        
+        // Persistir estado atualizado
+        try {
+          await this.persistSession(sessionKey, session);
+        } catch (e) {
+          console.error(`⚠️ [CLEANUP] Erro ao persistir sessão ${sessionKey}:`, e);
+        }
+      }
+    }
+    
+    // Resetar estado do scheduler
+    this.schedulerRunning = false;
+    this.lastOperationId = null;
+    this.lastOperationStartTime = 0;
+    
+    console.log(`✅ [CLEANUP] Estado do scheduler resetado - pronto para próximo ciclo`);
+  }
+  
+  // 🔧 CLEANUP: Limpar sessões travadas antes de novo ciclo
+  private async cleanupStaleSessions(): Promise<void> {
+    const now = Date.now();
+    const staleThreshold = 120000; // 2 minutos sem atualização = sessão travada
+    
+    for (const [sessionKey, session] of this.activeSessions.entries()) {
+      if (session.lastExecutionTime) {
+        const sessionAge = now - session.lastExecutionTime.getTime();
+        
+        if (sessionAge > staleThreshold) {
+          console.warn(`⚠️ [CLEANUP] Sessão travada detectada: ${sessionKey} (${Math.round(sessionAge/1000)}s sem atividade)`);
+          
+          // Resetar timing para permitir retry
+          session.lastExecutionTime = null;
+          
+          // Persistir estado atualizado
+          try {
+            await this.persistSession(sessionKey, session);
+            console.log(`✅ [CLEANUP] Sessão ${sessionKey} resetada e persistida para retry`);
+          } catch (e) {
+            console.error(`⚠️ [CLEANUP] Erro ao persistir sessão ${sessionKey}:`, e);
+          }
+        }
+      }
+    }
+    
+    // Se scheduler travado há muito tempo, forçar reset
+    if (this.lastOperationStartTime > 0 && (now - this.lastOperationStartTime) > this.OPERATION_TIMEOUT_MS) {
+      await this.forceCleanupCurrentOperation();
+    }
   }
 
   private async recoverActiveSessions(): Promise<void> {
@@ -248,15 +336,21 @@ export class AutoTradingScheduler {
       return; // Bloquear execução se controles de segurança ativos
     }
     
+    // 🔧 CLEANUP: Limpar sessões travadas antes de iniciar novo ciclo
+    await this.cleanupStaleSessions();
+    
     this.schedulerRunning = true;
     const operationId = `ANALISE_NATURAL_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    this.lastOperationId = operationId;
+    this.lastOperationStartTime = Date.now();
     
     try {
       // ✅ Enviar heartbeat para ResilienceSupervisor
       await storage.updateSystemHeartbeat('scheduler', 'healthy', {
         operationId,
         timestamp: new Date().toISOString(),
-        status: 'executing_analysis'
+        status: 'executing_analysis',
+        activeSessions: this.activeSessions.size
       }).catch(err => console.error('⚠️ Erro ao enviar heartbeat:', err));
       
       // Buscar todas as configurações ativas
@@ -766,8 +860,23 @@ export class AutoTradingScheduler {
         }
       }
 
-      // Conectar ao Deriv
-      const connected = await derivAPI.connect(tokenData.token, tokenData.accountType as "demo" | "real", operationId);
+      // Conectar ao Deriv (com timeout de 20 segundos)
+      const CONNECTION_TIMEOUT = 20000;
+      let connected = false;
+      
+      try {
+        const connectPromise = derivAPI.connect(tokenData.token, tokenData.accountType as "demo" | "real", operationId);
+        const timeoutPromise = new Promise<boolean>((_, reject) => {
+          setTimeout(() => reject(new Error('Timeout de conexão Deriv (20s)')), CONNECTION_TIMEOUT);
+        });
+        
+        connected = await Promise.race([connectPromise, timeoutPromise]);
+      } catch (timeoutError) {
+        console.error(`⏱️ [${operationId}] Timeout na conexão Deriv - pulando trade`);
+        try { await derivAPI.disconnect(); } catch (e) { /* ignore */ }
+        return { success: false, error: 'Timeout de conexão com Deriv (20s)' };
+      }
+      
       if (!connected) {
         return { success: false, error: 'Erro de conexão com Deriv' };
       }
