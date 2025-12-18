@@ -1604,6 +1604,18 @@ export class AutoTradingScheduler {
     // Intervalo de 60 segundos (1 minuto) entre ciclos de análise
     // Cada ciclo pode abrir 1 trade (com stagger de 10s entre múltiplas configs)
     // = Máximo ~1 trade por minuto por config (controlado e previsível)
+    
+    // 🔥 CRITICAL FIX: Executar imediatamente na primeira vez após start
+    // Para evitar atraso de 60 segundos na retomada após pausa
+    (async () => {
+      try {
+        console.log('▶️ [SCHEDULER] Executando ciclo IMEDIATO para recuperar operações após pausa...');
+        await this.executeAnaliseNaturalAnalysis();
+      } catch (error) {
+        console.error('❌ [SCHEDULER] Erro no ciclo imediato de retomada:', error);
+      }
+    })();
+    
     this.cronJob = setInterval(async () => {
       if (!this.schedulerRunning) {
         try {
@@ -1617,7 +1629,7 @@ export class AutoTradingScheduler {
     // 🔄 Iniciar sincronização automática de trades da Deriv
     derivTradeSync.startAutoSync();
     
-    console.log('▶️ Auto Trading Scheduler iniciado - análise a cada 5 segundos (com duração distribuída 10-15 ticks)');
+    console.log('▶️ Auto Trading Scheduler iniciado - análise a cada 60 segundos (com duração distribuída 10-15 ticks)');
     console.log('🔄 Sincronização automática de trades ativada a cada 30 segundos');
   }
 
