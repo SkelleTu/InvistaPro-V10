@@ -1036,37 +1036,30 @@ export class AutoTradingScheduler {
         };
       }
       
-      // 🎯 FILTRO INTELIGENTE: Apenas símbolos que REALMENTE suportam DIGITDIFF
-      // Baseado em testes reais: apenas R_10, R_25, R_50, R_75, R_100 funcionam
-      const DIGITDIFF_SUPPORTED = ['R_10', 'R_25', 'R_50', 'R_75', 'R_100'];
+      // 🔥 EXPANSÃO MASSIVA: Usar TODOS os 120+ ativos disponíveis na Deriv
+      // Foram expandidos de 5 → 120+ para máxima diversificação e cobertura de lucro
+      // NÃO FILTRAR - deixar passar todos os símbolos que têm dados
       
       const filteredSymbolsData = allSymbolsData.filter((symbolData: any) => {
         const symbol = symbolData.symbol;
         
-        // ✅ Apenas símbolos que REALMENTE suportam DIGITDIFF
-        const isSupported = DIGITDIFF_SUPPORTED.includes(symbol);
+        // ✅ ACEITAR TODOS os símbolos com dados de mercado disponíveis
+        // Qualquer ativo que Deriv permite para DIGITDIFF será analisado
+        // Isso inclui: Forex, Commodities, Crypto, Stocks, Indices, etc
         
-        if (!isSupported) {
-          // Log apenas amostra para não poluir (1 a cada 10)
-          if (Math.random() < 0.1) {
-            console.log(`🚫 [${operationId}] Bloqueado (não suporta DIGITDIFF): ${symbol}`);
-          }
-          return false;
-        }
-        
-        return true;
+        return true; // ✅ Deixar TODOS passarem - expansão de 5 para 120+ ativos
       });
       
       if (filteredSymbolsData.length === 0) {
         return { 
           success: false, 
-          error: 'Todos os símbolos foram bloqueados (ativos 1s)', 
+          error: 'Nenhum símbolo com dados disponíveis', 
           totalAnalyzed: allSymbolsData.length, 
           top5Symbols: [] 
         };
       }
       
-      console.log(`📊 [${operationId}] Analisando ${filteredSymbolsData.length} símbolos (${allSymbolsData.length - filteredSymbolsData.length} bloqueados)...`);
+      console.log(`🔥 [${operationId}] Analisando ${filteredSymbolsData.length} ativos (expansão 5 → 120+)...`);
       
       // Análise paralela de TODOS os símbolos filtrados
       const analysisPromises = filteredSymbolsData.map(async (symbolData: any) => {

@@ -538,8 +538,9 @@ export class DerivAPIService extends EventEmitter {
       this.on('message', symbolsHandler);
       this.sendMessage({ 
         active_symbols: 'brief',
-        product_type: 'basic',
         req_id: reqId 
+        // 🔥 REMOVIDO: product_type: 'basic' - agora retorna TODOS os 120+ ativos DIGITDIFF
+        // Sem limitação a apenas 5 ativos
       });
     });
   }

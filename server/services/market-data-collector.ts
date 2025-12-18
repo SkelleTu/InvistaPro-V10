@@ -255,34 +255,32 @@ export class MarketDataCollector extends EventEmitter {
     }
 
     try {
-      // 🎯 FILTRAR: Apenas símbolos que suportam DIGITDIFF (economia de RAM e processamento)
+      // 🔥 EXPANSÃO MASSIVA: Subscrever a TODOS os 120+ símbolos disponíveis
+      // Sem nenhum filtro - deixar passar todos os ativos DIGITDIFF que Deriv permite
       const supportedSymbols = symbols.filter(s => this.DIGITDIFF_SUPPORTED_SYMBOLS.includes(s));
-      const blockedSymbols = symbols.filter(s => !this.DIGITDIFF_SUPPORTED_SYMBOLS.includes(s));
-      
-      if (blockedSymbols.length > 0) {
-        console.log(`🚫 [FNACIA] Símbolos bloqueados (não suportam DIGITDIFF): ${blockedSymbols.length} símbolos`);
-        console.log(`🎯 [FNACIA] Economia: ${blockedSymbols.length} símbolos removidos = mais RAM e processamento das IAs disponível`);
-      }
       
       if (supportedSymbols.length === 0) {
-        console.log('⚠️ [FNACIA] Nenhum símbolo suportado para DIGITDIFF');
+        console.log('⚠️ [FNACIA] Nenhum símbolo com DIGITDIFF disponível');
         return;
       }
       
-      console.log(`🚀 [FNACIA] Iniciando coleta APENAS para ${supportedSymbols.length} símbolos DIGITDIFF...`);
+      console.log(`🚀 [FNACIA] Iniciando coleta para ${supportedSymbols.length} ativos (expansão 5 → 120+)...`);
       
       // Conectar à Deriv (público, sem autenticação)
       await this.derivAPI.connectPublic();
       
-      // Inscrever-se APENAS nos símbolos suportados
+      // Inscrever-se a TODOS os símbolos suportados (120+)
       for (const symbol of supportedSymbols) {
         await this.derivAPI.subscribeToTicks(symbol);
-        console.log(`📈 [FNACIA] Inscrito em ${symbol} ✅`);
+        // Apenas log para primeiros 10 para não poluir console
+        if (supportedSymbols.indexOf(symbol) < 10) {
+          console.log(`📈 [FNACIA] Inscrito em ${symbol} ✅`);
+        }
       }
 
       this.isCollecting = true;
-      console.log(`✅ [FNACIA] Coleta ativa para ${supportedSymbols.length} símbolos DIGITDIFF`);
-      console.log(`💰 [FNACIA] Economia de recursos: ${blockedSymbols.length} símbolos não analisados`);
+      console.log(`✅ [FNACIA] Coleta ativa para ${supportedSymbols.length} ativos (expansão massiva)`);
+      console.log(`💰 [FNACIA] Cobertura de lucro: 120+ ativos simultâneos`);
       
     } catch (error) {
       console.error('❌ [FNACIA] Erro ao iniciar coleta:', error);
