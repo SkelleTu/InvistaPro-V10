@@ -32,14 +32,15 @@ export class AutoTradingScheduler {
   private isInitialized: boolean = false;
   
   // 🎯 SISTEMA DE DIVERSIFICAÇÃO DINÂMICA - "PERDA ZERO"
+  // Com 120+ ativos, cada um pode ter cool-off mais curto
   private recentAssets: Map<string, string[]> = new Map(); // userId -> [asset1, asset2, ...]
   private assetPerformance: Map<string, {wins: number, losses: number, lastTrades: boolean[]}> = new Map(); // Track performance por ativo
   private assetLastUsedTime: Map<string, number> = new Map(); // ✅ FIX: Guardar TEMPO REAL, não índice
-  private assetCooldownMinutes: number = 2; // Base cool-off (pode variar)
+  private assetCooldownMinutes: number = 0.5; // ⚡ REDUZIDO: Com mais ativos, pode ser mais curto (30 segundos)
   
   // 🧬 SISTEMA ADAPTATIVO - Breathing Room dinâmico
-  // Se asset ganhando: permite mais rapidamente
-  // Se asset perdendo: aumenta cool-off automaticamente
+  // Se asset ganhando: permite IMEDIATAMENTE (rotation rápido em ganhadores)
+  // Se asset perdendo: aumenta cool-off automaticamente (force diversificação)
   private getBreathingRoom(symbol: string): number {
     const performance = this.assetPerformance.get(symbol);
     if (!performance) return this.assetCooldownMinutes;
@@ -49,18 +50,21 @@ export class AutoTradingScheduler {
     
     const winRate = performance.wins / totalTrades;
     
-    // 🎯 LÓGICA DE BREATHING ROOM:
-    // Win rate > 50% → Reduz cool-off 50% (incentiva ativo ganhador)
-    // Win rate 40-50% → Cool-off normal
-    // Win rate < 40% → Aumenta 50% (força diversificação)
+    // 🎯 LÓGICA DE BREATHING ROOM - EXTREMAMENTE AGRESSIVA COM 120+ ATIVOS:
+    // Win rate > 55% → Sem cool-off (0 segundos) - abrir IMEDIATAMENTE
+    // Win rate 45-55% → Cool-off super reduzido (15 segundos)
+    // Win rate 35-45% → Cool-off normal (30 segundos)
+    // Win rate < 35% → Aumenta cool-off (60 segundos) - força diversificação
     
-    if (winRate > 0.50) {
-      return Math.max(0.5, this.assetCooldownMinutes * 0.5); // 50% mais rápido
-    } else if (winRate < 0.40) {
-      return this.assetCooldownMinutes * 1.5; // 50% mais lento
+    if (winRate > 0.55) {
+      return 0; // 🔥 SEM COOL-OFF - Abrir imediatamente em ganhadores
+    } else if (winRate > 0.45) {
+      return 0.25; // 15 segundos
+    } else if (winRate >= 0.35) {
+      return this.assetCooldownMinutes; // 30 segundos (normal)
+    } else {
+      return this.assetCooldownMinutes * 2; // 60 segundos (força diversificação)
     }
-    
-    return this.assetCooldownMinutes; // Normal
   }
   
   // 🎯 SISTEMA DE OPERAÇÕES CONSERVADORAS DIÁRIAS (persistido no banco)
@@ -1155,12 +1159,56 @@ export class AutoTradingScheduler {
   }
 
   private getSymbolsForMode(mode: string): string[] {
-    // 🚫 ATIVOS (1s) BLOQUEADOS: Removidos 1HZ*V - causam loss por quebra de padrão
-    // Diferentes símbolos baseados no modo de operação
-    const baseSymbols = ['R_50', 'R_75', 'R_100']; // Mantém compatibilidade interna
-    // volatilitySymbols removidos permanentemente (1HZ50V, 1HZ75V, 1HZ100V)
+    // 🔥 TODOS OS ATIVOS SUPORTADOS - EXPANSÃO COMPLETA PARA MÁXIMA DIVERSIFICAÇÃO
+    // Sistema agora opera 120+ ativos simultaneamente em tempo real
+    const allSymbols = [
+      // Volatility Indices - 5 ativos
+      'R_10', 'R_25', 'R_50', 'R_75', 'R_100',
+      
+      // Forex Major Pairs - 10 ativos
+      'EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'AUDUSD', 'USDCAD', 'NZDUSD',
+      'EURJPY', 'EURGBP', 'GBPJPY',
+      
+      // Forex Minor Pairs - 16 ativos
+      'EURCAD', 'EURCHF', 'EURAUD', 'EURNZD', 'GBPAUD', 'GBPNZD', 'GBPCAD', 'GBPCHF',
+      'AUDCAD', 'AUDCHF', 'AUDNZD', 'CADCHF', 'CADJPY', 'CHFJPY', 'NZDJPY', 'NZDCAD',
+      'NZDCHF', 'AUDCAD', 'USDSEK', 'USDNOK', 'USDDKK', 'USDHKD', 'USDSGD', 'USDMXN',
+      
+      // Commodities - 6 ativos
+      'XAUUSD', 'XAGUSD', 'XPTUSD', 'XPDUSD', 'BRENUSD', 'WTIUSD',
+      
+      // Cryptocurrencies - 13 ativos
+      'BTCUSD', 'ETHUSD', 'LTCUSD', 'BCHUSD', 'BNBUSD', 'XRPUSD', 'ADAUSD', 'DOTUSD',
+      'LINKUSD', 'UNIUSD', 'SOLUSD', 'MATICUSD', 'AVAXUSD', 'AAAPEUSD',
+      
+      // Stock Indices - 9 ativos
+      'SPX500', 'UK100', 'DE40', 'FR40', 'AUS200', 'JPN225', 'HSI50', 'SHCOMP', 'IND50',
+      
+      // Individual Stocks (Blue Chips) - 50+ ativos
+      // Tech
+      'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'NFLX', 'CSCO', 'INTC',
+      'AMD', 'CRM', 'ADBE', 'PYPL', 'SQ',
+      
+      // Finance
+      'JPM', 'BAC', 'WFC', 'GS', 'MS', 'BLK', 'SCHW',
+      
+      // Pharma/Healthcare
+      'JNJ', 'PFE', 'UNH', 'AZN', 'NVO', 'MRK', 'ABT', 'TMO', 'GILD',
+      
+      // Consumer
+      'WMT', 'KO', 'PEP', 'MCD', 'SBUX', 'NKE', 'LULU', 'TJX', 'HD',
+      
+      // Energy
+      'XOM', 'CVX', 'COP', 'SLB', 'MPC',
+      
+      // Industrial
+      'BA', 'CAT', 'MMM', 'GE', 'HON', 'LMT',
+      
+      // Utilities
+      'DUK', 'SO', 'NEE', 'AEP', 'EXC'
+    ];
     
-    return baseSymbols; // Apenas símbolos base confiáveis
+    return allSymbols; // 120+ ativos para diversificação máxima
   }
 
   // ===== FLEXIBILIDADE DINÂMICA: STAKE + TICKS =====
@@ -1678,9 +1726,10 @@ export class AutoTradingScheduler {
     const recentList = this.recentAssets.get(userId) || [];
     const assetIndex = recentList.indexOf(symbol);
     
-    // Se NÃO foi usado recentemente, sempre permite
+    // 🔥 COM 120+ ATIVOS: Praticamente sempre permite (diversificação automática garante rotação)
+    // Se NÃO foi usado recentemente, SEMPRE permite
     if (assetIndex < 0) {
-      return { allowed: true, reason: 'Ativo disponível para trading' };
+      return { allowed: true, reason: 'Ativo disponível para trading (120+ ativos disponíveis)' };
     }
     
     // ✅ FIX: Usar TEMPO REAL guardado, não calcular do índice
@@ -1693,34 +1742,35 @@ export class AutoTradingScheduler {
     const performance = this.assetPerformance.get(symbol);
     const winRate = performance ? (performance.wins / (performance.wins + performance.losses)) : 0;
     
-    // 🎯 REGRAS DE JOGO DE CINTURA ADAPTATIVO:
-    // 1. Consenso 95%+ → SEMPRE quebra cool-off (oportunidade explosiva!)
-    // 2. Win rate >60% + consenso >75% → Quebra cool-off (ativo ganhador + signal bom)
-    // 3. Consenso 85-94% → Permite se passou breathing room dinâmico
-    // 4. <85% → Respeita cool-off (forçar diversificação)
+    // 🎯 REGRAS DE JOGO DE CINTURA ADAPTATIVO - VERSÃO AGRESSIVA COM 120+ ATIVOS:
+    // 1. Win rate >60% → SEMPRE quebra cool-off (ativo super ganhador!)
+    // 2. Consenso 90%+ → SEMPRE quebra cool-off (oportunidade explosiva!)
+    // 3. Consenso 80%+ → Permite se passou 50% do breathing room
+    // 4. Consenso <80% → Respeita cool-off (forçar diversificação aos outros ativos)
     
-    if (opportunityStrength >= 95) {
-      console.log(`🔥 [DIVERSIFICAÇÃO INTELIGENTE] OPORTUNIDADE EXPLOSIVA (${opportunityStrength}%)! Repetindo ${symbol} (W/L: ${performance?.wins}/${performance?.losses})`);
+    if (winRate > 0.60) {
+      console.log(`🔥 [DIVERSIFICAÇÃO] ATIVO SUPER GANHADOR (${(winRate*100).toFixed(0)}%)! Abrindo ${symbol} IMEDIATAMENTE (W/L: ${performance?.wins}/${performance?.losses})`);
+      return { allowed: true, reason: `Ativo ganhador ULTRA forte (${(winRate*100).toFixed(0)}%) - override garantido` };
+    }
+    
+    if (opportunityStrength >= 90) {
+      console.log(`🔥 [DIVERSIFICAÇÃO] OPORTUNIDADE EXPLOSIVA (${opportunityStrength}%)! Abrindo ${symbol} agora (W/L: ${performance?.wins}/${performance?.losses})`);
       return { allowed: true, reason: `Oportunidade explosiva (${opportunityStrength}%) - override garantido` };
     }
     
-    if (winRate > 0.60 && opportunityStrength > 75) {
-      console.log(`💰 [DIVERSIFICAÇÃO INTELIGENTE] Ativo GANHADOR (${(winRate*100).toFixed(0)}%)! Permitindo ${symbol} com signal ${opportunityStrength}%`);
-      return { allowed: true, reason: `Ativo ganhador (${(winRate*100).toFixed(0)}%) com signal forte` };
-    }
-    
-    if (opportunityStrength >= 85) {
-      // ✅ FIX: Usar tempo real
-      if (timeSinceLastUse > breathingRoom) {
-        console.log(`⚡ [DIVERSIFICAÇÃO INTELIGENTE] Oportunidade forte (${opportunityStrength}%)! ${symbol} passou breathing room (${breathingRoom.toFixed(1)}min)`);
-        return { allowed: true, reason: `Signal ${opportunityStrength}% + breathing room (${breathingRoom.toFixed(1)}min) cumprido` };
+    if (opportunityStrength >= 80) {
+      // Permitir se passou 50% do breathing room
+      const halfBreathingRoom = breathingRoom * 0.5;
+      if (timeSinceLastUse > halfBreathingRoom) {
+        console.log(`⚡ [DIVERSIFICAÇÃO] Opportunity forte (${opportunityStrength}%)! ${symbol} passou 50% breathing room (${halfBreathingRoom.toFixed(1)}min)`);
+        return { allowed: true, reason: `Signal forte (${opportunityStrength}%) + 50% breathing room cumprido` };
       }
     }
     
-    // ✅ FIX: Calcular tempo restante corretamente
+    // Com 120+ ativos, cool-off é MUITO mais flexível
     const remainingMin = Math.max(0, breathingRoom - timeSinceLastUse).toFixed(1);
-    console.log(`🚫 [DIVERSIFICAÇÃO] ${symbol} em cool-off (${consensusStrength}%) - W/L: ${performance?.wins}/${performance?.losses} - falta ${remainingMin}min`);
-    return { allowed: false, reason: `Cool-off ativo: ${remainingMin}min restantes` };
+    console.log(`⏳ [DIVERSIFICAÇÃO] ${symbol} em cool-off leve - falta ${remainingMin}min (${120 + 1} ativos disponíveis)`);
+    return { allowed: false, reason: `Cool-off leve: ${remainingMin}min restantes (use outro ativo dos 120+ disponíveis)` };
   }
 
   trackAssetUsage(userId: string, symbol: string): void {
