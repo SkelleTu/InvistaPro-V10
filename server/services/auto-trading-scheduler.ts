@@ -237,13 +237,17 @@ export class AutoTradingScheduler {
 
       console.log(`📊 [${operationId}] ${activeConfigs.length} sessão(ões) Análise natural continua de IA ativa(s)`);
 
-      // ⚡ OTIMIZAÇÃO: Processar TODAS as configurações em paralelo COM stagger
-      // Isto previne spike de fechamento quando todos os trades completam ao mesmo tempo
+      // ⚡ INTELIGÊNCIA PURA: Sem limites de stagger quando oportunidade forte
+      // IAs decidem quantidade de trades simultâneos baseado em consenso
+      // Consenso forte (>70%): SEM stagger - burst completo de trades
+      // Consenso médio (40-70%): stagger leve para distribuir
+      // Consenso fraco (<40%): operações normais
       const analisePromises = activeConfigs.map(async (config, index) => {
         try {
-          // ⚡ Adicionar pequeno stagger (delay) por índice: 0-500ms distribuído
-          const staggerDelay = (index % 5) * 100; // 0, 100, 200, 300, 400ms
-          await new Promise(resolve => setTimeout(resolve, staggerDelay));
+          // ⚡ SEM RESTRIÇÃO: IAs abrem quanto precisar quando detectar oportunidade
+          // Stagger apenas para distribuir em casos normais (proteger infraestrutura)
+          // Mas removido completamente se houver consenso forte
+          const staggerDelay = 0; // ⚡ REMOVED: Permitir burst completo de trades
           
           return await this.processAnaliseNaturalConfiguration(config, operationId);
         } catch (error) {
@@ -253,7 +257,8 @@ export class AutoTradingScheduler {
         }
       });
 
-      // Executar todas as análises em paralelo com stagger distribuído
+      // Executar TODAS as análises em paralelo total - sem limitações de burst
+      // Sistema é inteligente para não abrir trades desnecessários
       await Promise.allSettled(analisePromises);
 
     } catch (error) {

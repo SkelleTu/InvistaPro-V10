@@ -2546,6 +2546,108 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // =========================== DAILY P&L HISTORY - DASHBOARD ===========================
+
+  app.get('/api/trading/daily-history', isAuthenticated, isTradingAuthorized, async (req, res) => {
+    try {
+      if (!req.user?.id) {
+        return res.status(401).json({ message: 'Usuário não autenticado' });
+      }
+      
+      const userId = req.user.id;
+      const today = new Date().toISOString().split('T')[0];
+      
+      // Buscar PnL diário
+      const dailyPnL = await dbStorage.getDailyPnL(userId, today);
+      
+      // Buscar todas as operações de hoje
+      const todayOperations = await dbStorage.getUserTradeOperations(userId);
+      const todayTrades = todayOperations.filter((op: any) => 
+        op.createdAt && op.createdAt.split('T')[0] === today
+      );
+      
+      // Calcular stats de hoje
+      const completedTrades = todayTrades.filter((t: any) => t.status !== 'pending' && t.profit !== null);
+      const wonTrades = completedTrades.filter((t: any) => t.profit > 0).length;
+      const lostTrades = completedTrades.filter((t: any) => t.profit < 0).length;
+      const totalPnL = completedTrades.reduce((sum: number, t: any) => sum + (t.profit || 0), 0);
+      const avgProfit = completedTrades.length > 0 ? totalPnL / completedTrades.length : 0;
+      const winRate = completedTrades.length > 0 ? (wonTrades / completedTrades.length) * 100 : 0;
+      
+      // Agrupar trades por símbolo
+      const tradesBySymbol: {[key: string]: any[]} = {};
+      todayTrades.forEach((trade: any) => {
+        if (!tradesBySymbol[trade.symbol]) {
+          tradesBySymbol[trade.symbol] = [];
+        }
+        tradesBySymbol[trade.symbol].push({
+          id: trade.id,
+          direction: trade.direction,
+          amount: trade.amount,
+          profit: trade.profit,
+          status: trade.status,
+          createdAt: trade.createdAt,
+          completedAt: trade.completedAt
+        });
+      });
+      
+      // Calcular P&L por símbolo
+      const profitBySymbol: {[key: string]: {profit: number, count: number, winRate: number}} = {};
+      Object.entries(tradesBySymbol).forEach(([symbol, trades]: [string, any[]]) => {
+        const completed = trades.filter(t => t.status !== 'pending' && t.profit !== null);
+        const symbolWins = completed.filter(t => t.profit > 0).length;
+        const totalProfit = completed.reduce((sum, t) => sum + (t.profit || 0), 0);
+        const symbolWinRate = completed.length > 0 ? (symbolWins / completed.length) * 100 : 0;
+        
+        profitBySymbol[symbol] = {
+          profit: totalProfit,
+          count: completed.length,
+          winRate: symbolWinRate
+        };
+      });
+      
+      res.json({
+        date: today,
+        summary: {
+          totalTrades: todayTrades.length,
+          completedTrades: completedTrades.length,
+          pendingTrades: todayTrades.filter((t: any) => t.status === 'pending').length,
+          wonTrades,
+          lostTrades,
+          totalPnL: Math.round(totalPnL * 100) / 100,
+          avgProfit: Math.round(avgProfit * 100) / 100,
+          winRate: Math.round(winRate * 100) / 100,
+          maxProfit: Math.max(...completedTrades.map(t => t.profit || 0), 0),
+          maxLoss: Math.min(...completedTrades.map(t => t.profit || 0), 0)
+        },
+        dailyPnLRecord: dailyPnL ? {
+          openingBalance: dailyPnL.openingBalance,
+          currentBalance: dailyPnL.currentBalance,
+          dailyPnL: dailyPnL.dailyPnL,
+          maxDrawdown: dailyPnL.maxDrawdown,
+          isRecoveryActive: dailyPnL.isRecoveryActive,
+          recoveryOperations: dailyPnL.recoveryOperations
+        } : null,
+        profitBySymbol,
+        recentTrades: todayTrades.slice(0, 20).map((t: any) => ({
+          id: t.id,
+          symbol: t.symbol,
+          direction: t.direction,
+          amount: t.amount,
+          profit: t.profit,
+          status: t.status,
+          createdAt: t.createdAt,
+          completedAt: t.completedAt
+        }))
+      });
+      
+    } catch (error) {
+      console.error('❌ Erro ao buscar histórico diário:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ message: 'Erro ao buscar histórico diário', error: errorMessage });
+    }
+  });
+
   // =========================== DERIV ACCOUNT INFO ===========================
 
   app.get('/api/trading/account-info', isAuthenticated, isTradingAuthorized, async (req, res) => {
