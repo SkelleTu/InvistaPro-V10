@@ -76,6 +76,12 @@ export class AdvancedLearningSystem {
   private episodeMemory: Map<string, any[]> = new Map(); // symbol -> memories
   private detectedPatterns: Map<string, any[]> = new Map(); // symbol -> patterns
   
+  // THROTTLING & CONGESTION CONTROL
+  private lastAnalysisTime: Map<string, number> = new Map();
+  private readonly ANALYSIS_THROTTLE_MS = 500; // Min 500ms entre análises
+  private analysisQueue: Array<{symbol: string, callback: () => Promise<any>}> = [];
+  private isProcessingQueue = false;
+  
   constructor(config: AdvancedLearningConfig) {
     this.config = config;
     this.initializeSystem();
@@ -109,23 +115,68 @@ export class AdvancedLearningSystem {
     patterns: any[];
     weights: Record<string, number>;
   }> {
-    console.log(`🧠 [ADVANCED SYSTEM] Análise avançada para ${symbol}`);
+    // THROTTLE: Check if symbol was recently analyzed
+    const now = Date.now();
+    const lastTime = this.lastAnalysisTime.get(symbol) || 0;
+    if (now - lastTime < this.ANALYSIS_THROTTLE_MS) {
+      // Return cached result if available
+      const cachedResult = this.activeExperiments.get(symbol + '_cache');
+      if (cachedResult) {
+        return cachedResult as any;
+      }
+    }
     
-    const marketState: MarketState = {
-      symbol,
-      price: marketData[marketData.length - 1]?.price || 0,
-      volatility: this.calculateVolatility(marketData),
-      momentum: this.calculateMomentum(marketData),
-      volume: marketData[marketData.length - 1]?.volume,
-      marketRegime: this.determineMarketRegime(marketData),
-      timeContext: Date.now()
-    };
+    // QUEUE: Add to processing queue
+    return new Promise((resolve, reject) => {
+      this.analysisQueue.push({
+        symbol,
+        callback: async () => {
+          this.lastAnalysisTime.set(symbol, Date.now());
+          
+          const marketState: MarketState = {
+            symbol,
+            price: marketData[marketData.length - 1]?.price || 0,
+            volatility: this.calculateVolatility(marketData),
+            momentum: this.calculateMomentum(marketData),
+            volume: marketData[marketData.length - 1]?.volume,
+            marketRegime: this.determineMarketRegime(marketData),
+            timeContext: Date.now()
+          };
 
-    const result = await this.performAdvancedAnalysis(symbol, marketState, models);
+          const result = await this.performAdvancedAnalysis(symbol, marketState, models);
+          
+          // Cache result
+          this.activeExperiments.set(symbol + '_cache', result);
+          
+          return result;
+        }
+      });
+      
+      this.processQueue().then(() => {
+        const lastExperiment = this.activeExperiments.get(symbol + '_cache');
+        if (lastExperiment) {
+          resolve(lastExperiment as any);
+        } else {
+          reject(new Error('Failed to get analysis result'));
+        }
+      }).catch(reject);
+    });
+  }
+
+  private async processQueue(): Promise<void> {
+    if (this.isProcessingQueue || this.analysisQueue.length === 0) return;
     
-    console.log(`✅ [ADVANCED SYSTEM] Análise completa: ${result.prediction} (${result.confidence}%)`);
-    
-    return result;
+    this.isProcessingQueue = true;
+    try {
+      while (this.analysisQueue.length > 0) {
+        const { symbol, callback } = this.analysisQueue.shift()!;
+        await callback();
+        // Small delay between queue items to prevent CPU spike
+        await new Promise(r => setTimeout(r, 50));
+      }
+    } finally {
+      this.isProcessingQueue = false;
+    }
   }
 
   // Funções híbridas movidas para HybridOrchestrator
@@ -134,8 +185,18 @@ export class AdvancedLearningSystem {
    * ⚡ ANÁLISE AVANÇADA REAL - MÁXIMA PRECISÃO
    * Implementação robusta com algoritmos reais de machine learning
    */
+  private analysisLogThrottle = new Map<string, number>();
+  
   private async performAdvancedAnalysis(symbol: string, marketState: MarketState, models: string[]): Promise<any> {
-    console.log(`🔥 [REAL ANALYSIS] Executando análise avançada REAL para ${symbol}`);
+    // LOG THROTTLE: Only log once per 5 seconds per symbol
+    const now = Date.now();
+    const lastLog = this.analysisLogThrottle.get(symbol) || 0;
+    const shouldLog = now - lastLog > 5000;
+    
+    if (shouldLog) {
+      console.log(`🧠 [ANALYSIS] ${symbol} - Executando análise avançada`);
+      this.analysisLogThrottle.set(symbol, now);
+    }
     
     // 1. CALCULAR PERFORMANCE REAL DOS MODELOS baseado em dados históricos
     const realPerformances: ModelPerformance[] = await this.calculateRealModelPerformances(symbol, models, marketState);
@@ -151,8 +212,6 @@ export class AdvancedLearningSystem {
     
     // 5. CALCULAR CONFIANÇA baseado em MÚLTIPLAS MÉTRICAS
     const confidence = await this.calculateRealConfidence(symbol, prediction, realPerformances, emergentPatterns, marketState);
-    
-    console.log(`✅ [REAL ANALYSIS] Análise completa: ${prediction.action} (${confidence.toFixed(1)}% confiança)`);
     
     return {
       prediction: prediction.action,
@@ -968,10 +1027,26 @@ export class AdvancedLearningSystem {
     return clusters;
   }
 
+  private validationBatch: Map<string, any[]> = new Map();
+  private lastValidationLog = 0;
+  
   private async validatePattern(symbol: string, pattern: any): Promise<void> {
-    // Validação simplificada de padrões
+    // Validação simplificada de padrões - SEM LOGS INDIVIDUAIS
     if (pattern.confidence > 0.7) {
-      console.log(`✅ [PATTERN VALIDATION] Padrão validado: ${pattern.type} em ${symbol}`);
+      if (!this.validationBatch.has(symbol)) {
+        this.validationBatch.set(symbol, []);
+      }
+      this.validationBatch.get(symbol)!.push(pattern.type);
+      
+      // LOG BATCHED a cada 1 segundo
+      const now = Date.now();
+      if (now - this.lastValidationLog > 1000) {
+        this.validationBatch.forEach((patterns, sym) => {
+          console.log(`✅ [PATTERN VALIDATION BATCH] ${sym}: ${patterns.length} padrões validados`);
+        });
+        this.validationBatch.clear();
+        this.lastValidationLog = now;
+      }
     }
   }
 

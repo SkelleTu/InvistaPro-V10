@@ -167,7 +167,10 @@ export class MicroscopicTechnicalAnalyzer extends EventEmitter {
     }
   }
 
+  private lastMicroscopicLog = new Map<string, number>();
+  
   private performMicroscopicAnalysis(): void {
+    const now = Date.now();
     this.tickBuffer.forEach((ticks, symbol) => {
       if (ticks.length < 50) return; // Precisa de dados mínimos
 
@@ -175,11 +178,11 @@ export class MicroscopicTechnicalAnalyzer extends EventEmitter {
         const analysis = this.analyzeMicroscopic(symbol, ticks);
         this.emit('analysis', analysis);
         
-        // Log apenas se houver sinal forte
-        if (analysis.cooperativeSignal.confidence > 70) {
-          console.log(`🔬 [MICROSCOPIC ${symbol}] ${analysis.cooperativeSignal.technicalDirection.toUpperCase()} (${analysis.cooperativeSignal.confidence.toFixed(1)}% confiança)`);
-          console.log(`📈 [PRICE ACTION] Trend: ${analysis.priceAction.trend}, Velocity: ${analysis.priceAction.velocity.toFixed(6)}`);
-          console.log(`🎯 [DIGIT] Last: ${analysis.digitAnalysis.lastDigit}, Momentum: ${analysis.digitAnalysis.digitMomentum}`);
+        // Log apenas se houver sinal forte E se passaram > 2 segundos desde último log
+        const lastLog = this.lastMicroscopicLog.get(symbol) || 0;
+        if (analysis.cooperativeSignal.confidence > 70 && now - lastLog > 2000) {
+          console.log(`🔬 [MICROSCOPIC ${symbol}] ${analysis.cooperativeSignal.technicalDirection.toUpperCase()} (${analysis.cooperativeSignal.confidence.toFixed(1)}%)`);
+          this.lastMicroscopicLog.set(symbol, now);
         }
       } catch (error) {
         console.warn(`⚠️ [MICROSCOPIC] Erro na análise de ${symbol}:`, error);

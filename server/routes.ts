@@ -38,6 +38,7 @@ import { autoTradingScheduler } from './services/auto-trading-scheduler';
 import { isAuthorizedEmail, ACCESS_DENIED_MESSAGE } from './config/access';
 import { errorTracker } from './services/error-tracker';
 import { asyncErrorHandler } from './middleware/error-handler';
+import { tpmSystem } from './services/tpm-system';
 
 
 // PIX payload generator compatível com Santander
@@ -2819,6 +2820,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: 'Erro ao verificar sistema', error });
     }
   });
+
+  // =========================== AI HEALTH METRICS (TPM - Total Production Maintenance) ===========================
+
+  app.get('/api/trading/ai-health', isAuthenticated, isTradingAuthorized, async (req, res) => {
+    try {
+      const report = tpmSystem.getHealthReport();
+      
+      res.json({
+        success: true,
+        tpm: report,
+        message: `🔧 TPM Status: ${report.healthSummary.healthy} modelos saudáveis, ${report.healthSummary.critical} críticos`,
+        timestamp: new Date().toISOString()
+      });
+
+    } catch (error) {
+      console.error('❌ Erro ao buscar TPM:', error);
+      res.status(500).json({ message: 'Erro ao buscar métricas TPM', error });
+    }
+  });
+
+  // Iniciar TPM monitoring
+  tpmSystem.startMonitoring();
 
   // =========================== DERIV ACCOUNT INFO ===========================
 

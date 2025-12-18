@@ -119,6 +119,8 @@ export class HybridOrchestrator {
   /**
    * ANÁLISE HÍBRIDA SUPREMA - SEM DEPENDÊNCIAS CIRCULARES
    */
+  private lastHybridLog = new Map<string, number>();
+
   async analyzeHybridSupreme(
     symbol: string,
     marketData: any[],
@@ -141,7 +143,13 @@ export class HybridOrchestrator {
       await this.initialize();
     }
 
-    console.log(`🔥 [HYBRID ORCHESTRATOR] Análise híbrida para ${symbol}`);
+    // LOG THROTTLE: Only log once per 3 seconds per symbol
+    const now = Date.now();
+    const lastLog = this.lastHybridLog.get(symbol) || 0;
+    if (now - lastLog > 3000) {
+      console.log(`🎯 [HYBRID] Análise para ${symbol}`);
+      this.lastHybridLog.set(symbol, now);
+    }
 
     // 1. Alimentar dados para sistema microscópico (se ativo)
     if (this.microscopicSystem && marketData.length > 0) {
