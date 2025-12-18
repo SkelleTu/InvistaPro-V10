@@ -701,9 +701,15 @@ export class DerivAPIService extends EventEmitter {
     }
   }
 
+  private normalizeSymbol(symbol: string): string {
+    // Converter R_75 → R75, R_50 → R50, etc (remover underscore)
+    return symbol.replace('_', '');
+  }
+
   private async createCallPutProposal(symbol: string, contractType: 'CALL' | 'PUT', duration: number, amount: number): Promise<{id: string, ask_price: number} | null> {
     return new Promise((resolve) => {
       const reqId = this.generateRequestId();
+      const normalizedSymbol = this.normalizeSymbol(symbol);
       
       const proposalHandler = (message: any) => {
         if (message.req_id === reqId) {
@@ -727,7 +733,7 @@ export class DerivAPIService extends EventEmitter {
       const proposalMessage = {
         proposal: 1,
         contract_type: contractType,
-        symbol: symbol,
+        symbol: normalizedSymbol,
         duration: duration,
         duration_unit: 't',
         currency: 'USD',
@@ -736,7 +742,7 @@ export class DerivAPIService extends EventEmitter {
         req_id: reqId
       };
 
-      console.log(`📋 Criando proposta ${contractType}: ${symbol} | Duration: ${duration}t | Amount: $${amount}`);
+      console.log(`📋 Criando proposta ${contractType}: ${normalizedSymbol} (${symbol}) | Duration: ${duration}t | Amount: $${amount}`);
       this.sendMessage(proposalMessage);
     });
   }
@@ -744,6 +750,7 @@ export class DerivAPIService extends EventEmitter {
   private async createDigitDifferProposal(params: DigitDifferContract): Promise<{id: string, ask_price: number} | null> {
     return new Promise((resolve) => {
       const reqId = this.generateRequestId();
+      const normalizedSymbol = this.normalizeSymbol(params.symbol);
       
       const proposalHandler = (message: any) => {
         if (message.req_id === reqId) {
@@ -767,7 +774,7 @@ export class DerivAPIService extends EventEmitter {
       const proposalMessage = {
         proposal: 1,
         contract_type: 'DIGITDIFF',
-        symbol: params.symbol,
+        symbol: normalizedSymbol,
         duration: params.duration,
         duration_unit: 't',
         barrier: params.barrier,
@@ -777,7 +784,7 @@ export class DerivAPIService extends EventEmitter {
         req_id: reqId
       };
 
-      console.log(`📋 Criando proposta digit differs: ${params.symbol} | Barrier: ${params.barrier} | Duration: ${params.duration}t`);
+      console.log(`📋 Criando proposta digit differs: ${normalizedSymbol} (${params.symbol}) | Barrier: ${params.barrier} | Duration: ${params.duration}t`);
       this.sendMessage(proposalMessage);
     });
   }
