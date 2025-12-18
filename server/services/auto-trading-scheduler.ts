@@ -744,7 +744,11 @@ export class AutoTradingScheduler {
       try {
         // Determinar parâmetros do trade baseado no modo e banca
         // 🔥 SISTEMA DE RECUPERAÇÃO INTELIGENTE DE PERDAS
-      let tradeParams = await this.getTradeParamsForMode(config.mode, selectedSymbol, aiConsensus.finalDecision, config.userId);
+      // 🚀 FLEXIBILIDADE DINÂMICA: Passar consenso + aplicar dynamic stake/ticks
+      let tradeParams = await this.getTradeParamsForMode(config.mode, selectedSymbol, aiConsensus.finalDecision, config.userId, aiConsensus.consensusStrength, aiConsensus.volatility || 0.5);
+      
+      // 📈 APLICAR TICKS DINÂMICOS baseado em win rate do ativo
+      tradeParams.duration = this.calculateDynamicTicks(selectedSymbol, tradeParams.duration);
       let isRecoveryMode = false;
       let recoveryMultiplier = 1.0;
 
@@ -1148,17 +1152,81 @@ export class AutoTradingScheduler {
   private getSymbolsForMode(mode: string): string[] {
     // 🚫 ATIVOS (1s) BLOQUEADOS: Removidos 1HZ*V - causam loss por quebra de padrão
     // Diferentes símbolos baseados no modo de operação
-    const baseSymbols = ['R_50', 'R_75', 'R_100'];
+    const baseSymbols = ['R_50', 'R_75', 'R_100']; // Mantém compatibilidade interna
     // volatilitySymbols removidos permanentemente (1HZ50V, 1HZ75V, 1HZ100V)
     
     return baseSymbols; // Apenas símbolos base confiáveis
   }
 
-  private async getTradeParamsForMode(mode: string, symbol: string, direction: string, userId: string): Promise<{amount: number, duration: number, barrier: string}> {
+  // ===== FLEXIBILIDADE DINÂMICA: STAKE + TICKS =====
+  
+  /**
+   * Calcular STAKE DINÂMICO baseado em consenso da IA
+   * - Consenso alto (>70%) → Stake maior (risco maior controlado)
+   * - Consenso médio (50-70%) → Stake normal
+   * - Consenso baixo (<50%) → Stake menor (proteção)
+   */
+  private calculateDynamicStake(baseAmount: number, consensoStrength: number, volatility: number = 0.5): number {
+    // Consenso range: 0-100
+    // Volatility range: 0-1
+    
+    let multiplier = 1.0;
+    
+    // PILAR 1: Consenso da IA
+    if (consensoStrength >= 70) {
+      multiplier = 1.4; // +40% se consenso forte
+    } else if (consensoStrength >= 55) {
+      multiplier = 1.1; // +10% se consenso moderado
+    } else if (consensoStrength < 50) {
+      multiplier = 0.7; // -30% se consenso fraco
+    }
+    
+    // PILAR 2: Volatilidade (reduz stake se volatilidade alta)
+    if (volatility > 0.8) {
+      multiplier *= 0.8; // -20% em volatilidade alta
+    } else if (volatility > 0.6) {
+      multiplier *= 0.9; // -10% em volatilidade média
+    }
+    
+    const dynamicStake = Math.round(baseAmount * multiplier * 100) / 100;
+    console.log(`💰 [DYNAMIC STAKE] Base: $${baseAmount} × ${multiplier.toFixed(2)} (consenso: ${consensoStrength}%, vol: ${(volatility*100).toFixed(0)}%) = $${dynamicStake}`);
+    
+    return dynamicStake;
+  }
+
+  /**
+   * Calcular TICKS DINÂMICOS baseado em histórico de win rate
+   * - Win rate alto (>60%) → Ticks maiores (deixar ganho crescer)
+   * - Win rate médio (40-60%) → Ticks normais
+   * - Win rate baixo (<40%) → Ticks menores (sair rápido)
+   */
+  private calculateDynamicTicks(symbol: string, baseTicks: number = 10): number {
+    const performance = this.assetPerformance.get(symbol);
+    if (!performance) return baseTicks;
+    
+    const totalTrades = performance.wins + performance.losses;
+    if (totalTrades === 0) return baseTicks;
+    
+    const winRate = performance.wins / totalTrades;
+    
+    let ticksAdjustment = baseTicks;
+    
+    if (winRate > 0.60) {
+      ticksAdjustment = Math.min(15, baseTicks + 5); // Máx 15 ticks (+50%)
+      console.log(`📈 [DYNAMIC TICKS] Alto win rate (${(winRate*100).toFixed(0)}%) → ${ticksAdjustment} ticks`);
+    } else if (winRate < 0.40) {
+      ticksAdjustment = Math.max(5, baseTicks - 3); // Mín 5 ticks
+      console.log(`📉 [DYNAMIC TICKS] Baixo win rate (${(winRate*100).toFixed(0)}%) → ${ticksAdjustment} ticks`);
+    }
+    
+    return ticksAdjustment;
+  }
+
+  private async getTradeParamsForMode(mode: string, symbol: string, direction: string, userId: string, consensoStrength?: number, volatility?: number): Promise<{amount: number, duration: number, barrier: string}> {
     let amount = 0.35; // Default para bancas pequenas (conservador)
     let duration = 10; // ⚡ OTIMIZAÇÃO: Aumentado de 5 para 10 ticks para distribuir fechamento
     
-    // 🎯 CALCULAR STAKE BASEADO NO TAMANHO DA BANCA
+    // 🎯 CALCULAR STAKE BASEADO NO TAMANHO DA BANCA + CONSENSO DINÂMICO
     try {
       // Buscar saldo do usuário
       const balanceAnalysis = await storage.getBalanceAnalysis(userId);
@@ -1187,6 +1255,11 @@ export class AutoTradingScheduler {
           amount = bankSize * 0.01; // 1% da banca (máximo conservador)
           amount = Math.max(1.00, Math.min(amount, 3.00)); // Entre $1.00 e $3.00
           console.log(`💰 [STAKE] Banca muito grande ($${bankSize.toFixed(2)}): stake $${amount.toFixed(2)} (1%)`);
+        }
+        
+        // 🚀 APLICAR FLEXIBILIDADE DINÂMICA (se consenso fornecido)
+        if (consensoStrength !== undefined) {
+          amount = this.calculateDynamicStake(amount, consensoStrength, volatility || 0.5);
         }
         
         // Arredondar para 2 casas decimais
