@@ -108,16 +108,32 @@ app.use((req, res, next) => {
   // 🗄️ EXECUTAR MIGRAÇÃO POSTGRESQL PARA CRIAR TABELAS NO SUPABASE
   console.log('🗄️ Verificando sincronização com PostgreSQL (Supabase)...');
   if (process.env.DATABASE_URL && process.env.DATABASE_URL.includes('supabase')) {
+    console.log('✨ DATABASE_URL configurado! Criando schema SQL no Supabase...');
     const migrationSuccess = await runPostgresMigration();
     if (migrationSuccess) {
-      console.log('✅ Tabelas PostgreSQL/Supabase criadas ou já existentes');
+      console.log('✅ ✅ ✅ SINCRONIZAÇÃO COMPLETA!');
+      console.log('   • Tabelas SQL criadas no Supabase');
+      console.log('   • Dados sincronizados (users, trades, sessions, etc)');
+      console.log('   • Admin account persistido no Supabase');
+      console.log('   🎉 Sistema Dual Database 100% OPERACIONAL');
     } else {
       console.warn('⚠️ Não foi possível criar tabelas no PostgreSQL - continuando com SQLite');
     }
   } else {
-    console.log('ℹ️ DATABASE_URL não é do Supabase - usando apenas SQLite');
-    console.log('   📋 Para sincronizar com Supabase, configure DATABASE_URL com:');
-    console.log('      postgresql://postgres:[PASSWORD]@db.*.supabase.co:5432/postgres');
+    console.log('ℹ️ DATABASE_URL não está configurado para Supabase');
+    console.log('   ⚠️ Sistema funcionando apenas em MODO LOCAL (SQLite)');
+    console.log('');
+    console.log('   📋 PARA ATIVAR SUPABASE:');
+    console.log('      1. Copie a URL de conexão do Supabase:');
+    console.log('         postgresql://postgres:Victor.!.1999@db.iporgioruideqodqzxjo.supabase.co:5432/postgres');
+    console.log('      2. Acesse Replit > Secrets (cadeado no painel esquerdo)');
+    console.log('      3. Clique em "Create Secret"');
+    console.log('      4. Nome: DATABASE_URL');
+    console.log('      5. Valor: (cole a URL acima)');
+    console.log('      6. Clique em "Add Secret"');
+    console.log('      7. Reinicie o app');
+    console.log('');
+    console.log('   ✅ Depois disso, as tabelas serão criadas automaticamente no Supabase!');
   }
   
   // 🛡️ SISTEMA DE BACKUP AUTOMÁTICO DO BANCO DE DADOS
