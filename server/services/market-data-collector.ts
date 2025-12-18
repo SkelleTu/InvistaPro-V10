@@ -18,10 +18,18 @@ export class MarketDataCollector extends EventEmitter {
   private tickBuffers: Map<string, TickBuffer> = new Map();
   private saveInterval: NodeJS.Timeout | null = null;
   private isCollecting = false;
+  private isDiscoveryComplete = false;
+  
+  // 🎯 FALLBACK SEGURO: Símbolos que SEMPRE suportam DIGITDIFF (garantido pela Deriv)
+  private static readonly FALLBACK_SYMBOLS = [
+    'R_10', 'R_25', 'R_50', 'R_75', 'R_100',
+    '1HZ10V', '1HZ25V', '1HZ50V', '1HZ75V', '1HZ100V'
+  ];
   
   // 🎯 DINÂMICO: CARREGADO DA DERIV EM TEMPO REAL
-  // Sistema agora descobri automaticamente TODOS os ativos que suportam DIGITDIFF (300+)
-  private DIGITDIFF_SUPPORTED_SYMBOLS: string[] = [];
+  // Sistema agora descobri automaticamente TODOS os ativos que suportam DIGITDIFF
+  // Inicializado com fallback para garantir funcionamento mesmo se descoberta falhar
+  private DIGITDIFF_SUPPORTED_SYMBOLS: string[] = [...MarketDataCollector.FALLBACK_SYMBOLS];
   private allDerivSymbols: Map<string, any> = new Map();
   private symbolsRefreshInterval: NodeJS.Timeout | null = null;
   private lastSymbolsUpdate: number = 0;
@@ -64,9 +72,21 @@ export class MarketDataCollector extends EventEmitter {
 
   /**
    * Obter lista de símbolos que suportam DIGITDIFF
+   * Retorna fallback seguro se a lista estiver vazia
    */
   getSupportedSymbols(): string[] {
+    if (this.DIGITDIFF_SUPPORTED_SYMBOLS.length === 0) {
+      console.warn('⚠️ [getSupportedSymbols] Lista vazia - usando fallback');
+      return [...MarketDataCollector.FALLBACK_SYMBOLS];
+    }
     return [...this.DIGITDIFF_SUPPORTED_SYMBOLS];
+  }
+
+  /**
+   * Verificar se a descoberta dinâmica foi concluída
+   */
+  isDiscoveryDone(): boolean {
+    return this.isDiscoveryComplete;
   }
 
   /**
@@ -192,6 +212,7 @@ export class MarketDataCollector extends EventEmitter {
 
   /**
    * Descobrir e carregar todos os ativos DIGITDIFF disponíveis
+   * Retorna fallback seguro se a descoberta falhar
    */
   async discoverAndLoadAllAssets(): Promise<string[]> {
     try {
@@ -210,15 +231,24 @@ export class MarketDataCollector extends EventEmitter {
       const digitDiffSymbols = await this.derivAPI.getDigitDiffSupportedSymbols(allSymbols);
       console.log(`💎 [DISCOVERY] ${digitDiffSymbols.length} ativos com DIGITDIFF suportado`);
       
-      // Atualizar lista interna
-      this.DIGITDIFF_SUPPORTED_SYMBOLS = digitDiffSymbols;
-      this.allDerivSymbols = new Map(allSymbols.map(s => [s.symbol, s]));
-      this.lastSymbolsUpdate = Date.now();
+      // Só atualizar lista se encontrou símbolos (não sobrescrever com lista vazia)
+      if (digitDiffSymbols.length > 0) {
+        this.DIGITDIFF_SUPPORTED_SYMBOLS = digitDiffSymbols;
+        this.allDerivSymbols = new Map(allSymbols.map(s => [s.symbol, s]));
+        this.lastSymbolsUpdate = Date.now();
+        this.isDiscoveryComplete = true;
+        console.log(`✅ [DISCOVERY] Lista atualizada com ${digitDiffSymbols.length} ativos DIGITDIFF`);
+      } else {
+        console.warn('⚠️ [DISCOVERY] Nenhum símbolo descoberto - mantendo fallback');
+        // Manter a lista atual (fallback)
+      }
       
-      return digitDiffSymbols;
+      return this.DIGITDIFF_SUPPORTED_SYMBOLS;
     } catch (error) {
       console.error('❌ [DISCOVERY] Erro ao descobrir ativos:', error);
-      throw error;
+      console.warn('⚠️ [DISCOVERY] Usando fallback seguro');
+      // Não fazer throw - retornar a lista atual (fallback)
+      return this.DIGITDIFF_SUPPORTED_SYMBOLS;
     }
   }
 
@@ -239,13 +269,17 @@ export class MarketDataCollector extends EventEmitter {
         console.log('🔍 [FNACIA] Nenhum símbolo passado - descobrindo dinamicamente...');
         supportedSymbols = await this.discoverAndLoadAllAssets();
       } else {
-        // Atualizar lista interna com os símbolos passados
-        this.DIGITDIFF_SUPPORTED_SYMBOLS = supportedSymbols;
+        // Atualizar lista interna com os símbolos passados (se não estiver vazia)
+        if (supportedSymbols.length > 0) {
+          this.DIGITDIFF_SUPPORTED_SYMBOLS = supportedSymbols;
+        }
       }
       
+      // Garantir que temos pelo menos os fallback symbols
       if (supportedSymbols.length === 0) {
-        console.log('⚠️ [FNACIA] Nenhum símbolo com DIGITDIFF disponível');
-        return;
+        console.warn('⚠️ [FNACIA] Nenhum símbolo descoberto - usando fallback');
+        supportedSymbols = [...MarketDataCollector.FALLBACK_SYMBOLS];
+        this.DIGITDIFF_SUPPORTED_SYMBOLS = supportedSymbols;
       }
       
       console.log(`🚀 [FNACIA] Iniciando coleta para ${supportedSymbols.length} ativos descobertos dinamicamente...`);
