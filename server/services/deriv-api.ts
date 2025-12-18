@@ -25,6 +25,20 @@ export interface DerivContractInfo {
   exit_tick?: number;
   profit?: number;
   buy_price: number;
+  sell_price?: number;
+  entry_tick_time?: number;
+  exit_tick_time?: number;
+  contract_type?: string;
+  barrier?: string;
+  payout?: number;
+  is_valid_to_sell?: boolean;
+  is_sold?: boolean;
+  is_expired?: boolean;
+  is_settleable?: boolean;
+  date_start?: number;
+  date_expiry?: number;
+  current_spot?: number;
+  current_spot_time?: number;
 }
 
 export interface DigitDifferContract {
@@ -963,6 +977,20 @@ export class DerivAPIService extends EventEmitter {
               exit_tick: contract.exit_tick,
               profit: contract.profit,
               buy_price: contract.buy_price,
+              sell_price: contract.sell_price,
+              entry_tick_time: contract.entry_tick_time,
+              exit_tick_time: contract.exit_tick_time,
+              contract_type: contract.contract_type,
+              barrier: contract.barrier,
+              payout: contract.payout,
+              is_valid_to_sell: contract.is_valid_to_sell,
+              is_sold: contract.is_sold,
+              is_expired: contract.is_expired,
+              is_settleable: contract.is_settleable,
+              date_start: contract.date_start,
+              date_expiry: contract.date_expiry,
+              current_spot: contract.current_spot,
+              current_spot_time: contract.current_spot_time,
             });
           } else {
             resolve(null);
