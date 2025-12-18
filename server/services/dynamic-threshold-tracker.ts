@@ -155,14 +155,14 @@ class DynamicThresholdTracker {
     
     // 📈 OTIMIZAÇÃO: Usar threshold mais agressivo para maximizar operações dentro da média alta
     if (mode.includes('production')) {
-      // Em produção, usar 90% da média alta para capturar mais oportunidades boas
-      dynamicThreshold = dynamicThreshold * 0.90;
+      // Em produção, usar 75% da média alta para capturar mais oportunidades boas
+      dynamicThreshold = dynamicThreshold * 0.75;
     } else if (mode.includes('test_sem_limites')) {
-      // No modo sem limites, usar 85% da média alta para maximizar volume
-      dynamicThreshold = dynamicThreshold * 0.85;
+      // No modo sem limites, usar 50% da média alta para maximizar volume
+      dynamicThreshold = dynamicThreshold * 0.50;
     } else {
-      // Outros modos de teste: usar 88% da média alta
-      dynamicThreshold = dynamicThreshold * 0.88;
+      // Outros modos de teste: usar 65% da média alta
+      dynamicThreshold = dynamicThreshold * 0.65;
     }
     
     // Se estamos forçando operações mínimas, relaxar ainda mais
@@ -176,8 +176,8 @@ class DynamicThresholdTracker {
     }
     
     // 🎯 LIMITES OTIMIZADOS: Maximizar operações dentro de parâmetros seguros
-    dynamicThreshold = Math.max(40, dynamicThreshold); // ✅ Mínimo reduzido para 40%
-    dynamicThreshold = Math.min(80, dynamicThreshold); // Máximo reduzido para 80% (mais oportunidades)
+    dynamicThreshold = Math.max(35, dynamicThreshold); // ✅ Mínimo reduzido para 35%
+    dynamicThreshold = Math.min(75, dynamicThreshold); // Máximo reduzido para 75% (mais oportunidades)
     
     console.log(`🎯 [DYNAMIC THRESHOLD] Modo: ${mode} | Threshold: ${dynamicThreshold.toFixed(1)}% | Média Alta: ${this.stats.highAverageThreshold.toFixed(1)}%`);
     

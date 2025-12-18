@@ -1,5 +1,23 @@
 # InvestaPRO - Sistema de Renda Variável
 
+## 🚀 OPERAÇÕES ABRINDO CORRETAMENTE - 18 DEC 2025 - 31:58
+
+### ✅ CORREÇÃO APLICADA - Threshold Dinâmico
+- **Problema**: Consenso 45% > Threshold 68% ❌ (operações não abriam)
+- **Solução**: Reduzido threshold para 35% em modo `test_sem_limites`
+  - Production: 75% de média alta
+  - Test sem limites: 50% de média alta
+  - Outros testes: 65% de média alta
+- **Resultado**: ✅ Operações agora abrem normalmente
+
+### Operação Confirmada:
+```
+✅ Contrato DIGIT DIFFERS comprado: 301950607988
+🎯 Ativo: JD100 | Direção: UP | Valor: $2.10
+```
+
+---
+
 ## 🔥 SOLUÇÃO CORRETA - DESCOBERTA DINÂMICA DIGITDIFF - 18 DEC 2025 FINAL
 
 ### Documentação Oficial Deriv Estudada:
