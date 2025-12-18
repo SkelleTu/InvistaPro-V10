@@ -107,7 +107,7 @@ app.use((req, res, next) => {
   
   // 🗄️ EXECUTAR MIGRAÇÃO POSTGRESQL PARA CRIAR TABELAS NO SUPABASE
   console.log('🗄️ Verificando sincronização com PostgreSQL (Supabase)...');
-  if (process.env.DATABASE_URL) {
+  if (process.env.DATABASE_URL && process.env.DATABASE_URL.includes('supabase')) {
     const migrationSuccess = await runPostgresMigration();
     if (migrationSuccess) {
       console.log('✅ Tabelas PostgreSQL/Supabase criadas ou já existentes');
@@ -115,7 +115,9 @@ app.use((req, res, next) => {
       console.warn('⚠️ Não foi possível criar tabelas no PostgreSQL - continuando com SQLite');
     }
   } else {
-    console.log('ℹ️ DATABASE_URL não definida - usando apenas SQLite');
+    console.log('ℹ️ DATABASE_URL não é do Supabase - usando apenas SQLite');
+    console.log('   📋 Para sincronizar com Supabase, configure DATABASE_URL com:');
+    console.log('      postgresql://postgres:[PASSWORD]@db.*.supabase.co:5432/postgres');
   }
   
   // 🛡️ SISTEMA DE BACKUP AUTOMÁTICO DO BANCO DE DADOS
