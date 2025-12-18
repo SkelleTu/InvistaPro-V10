@@ -544,6 +544,62 @@ export class DerivAPIService extends EventEmitter {
     });
   }
 
+  // 🔥 NOVO: Descobrir DINAMICAMENTE quais ativos suportam DIGITDIFF (conforme docs oficiais Deriv)
+  async getDigitDiffSupportedSymbols(allSymbols: DerivActiveSymbol[]): Promise<string[]> {
+    if (!this.isConnected) return [];
+    
+    const supportedSymbols: string[] = [];
+    
+    for (const symbolInfo of allSymbols) {
+      const symbol = symbolInfo.symbol;
+      
+      try {
+        const contracts = await this.getContractsFor(symbol);
+        
+        // Verificar se DIGITDIFF está disponível
+        const hasDigitDiff = contracts.some((c: any) => c.contract_type === 'DIGITDIFF');
+        
+        if (hasDigitDiff) {
+          supportedSymbols.push(symbol);
+          console.log(`✅ ${symbol} suporta DIGITDIFF`);
+        }
+      } catch (error) {
+        // Ignorar erros - alguns símbolos podem não ter dados
+      }
+    }
+    
+    console.log(`🔥 [DIGITDIFF DESCOBERTA] ${supportedSymbols.length} ativos suportam DIGITDIFF`);
+    return supportedSymbols;
+  }
+
+  // 🔥 NOVO: Buscar contratos disponíveis para um símbolo (conforme docs Deriv)
+  async getContractsFor(symbol: string): Promise<any[]> {
+    if (!this.isConnected) return [];
+
+    return new Promise((resolve) => {
+      const reqId = this.generateRequestId();
+      
+      const contractsHandler = (message: any) => {
+        if (message.req_id === reqId) {
+          this.removeListener('message', contractsHandler);
+          if (message.contracts_for) {
+            const contracts = message.contracts_for.available || [];
+            resolve(contracts);
+          } else {
+            resolve([]);
+          }
+        }
+      };
+
+      this.on('message', contractsHandler);
+      this.sendMessage({
+        contracts_for: symbol,
+        currency: 'USD',
+        req_id: reqId
+      });
+    });
+  }
+
   async subscribeToTicks(symbol: string): Promise<void> {
     if (!this.isConnected) {
       this.sendMessage({ type: 'subscribe_ticks', symbol });

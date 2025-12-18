@@ -197,27 +197,26 @@ export class AutoTradingScheduler {
       const tempDerivAPI = new DerivAPIService();
       await tempDerivAPI.connectPublic('GET_ALL_SYMBOLS');
       
-      // BUSCAR 100% DOS ATIVOS DISPONÍVEIS DINAMICAMENTE DA API DA DERIV
+      // BUSCAR TODOS OS ATIVOS DISPONÍVEIS DA API DA DERIV
       const activeSymbols = await tempDerivAPI.getActiveSymbols();
+      console.log(`✅ Recuperados ${activeSymbols.length} símbolos ativos da Deriv API`);
       
-      // Extrair apenas os símbolos (identificadores)
-      const symbols = activeSymbols.map((s: any) => s.symbol);
+      // 🔥 DESCOBRIR DINAMICAMENTE quais suportam DIGITDIFF (conforme docs oficiais Deriv)
+      const digitdiffSymbols = await tempDerivAPI.getDigitDiffSupportedSymbols(activeSymbols);
+      console.log(`🔥 Ativos com suporte DIGITDIFF: ${digitdiffSymbols.length}`);
       
       // Desconectar a conexão temporária
       await tempDerivAPI.disconnect();
       
-      console.log(`✅ Recuperados ${symbols.length} símbolos ativos da Deriv API`);
-      console.log('📋 Categorias:', {
-        synthetic: symbols.filter((s: string) => s.startsWith('R_')).length,
-        volatility: symbols.filter((s: string) => s.includes('HZ')).length,
-        forex: symbols.filter((s: string) => s.startsWith('frx')).length,
-        indices: symbols.filter((s: string) => s.startsWith('OTC_')).length,
-        outros: symbols.filter((s: string) => !s.startsWith('R_') && !s.includes('HZ') && !s.startsWith('frx') && !s.startsWith('OTC_')).length
-      });
+      // Se nenhum símbolo foi descoberto dinamicamente, usar fallback (compatibilidade)
+      const symbolsToUse = digitdiffSymbols.length > 0 ? digitdiffSymbols : 
+        ['R_10', 'R_25', 'R_50', 'R_75', 'R_100']; // Fallback - sempre suportados
       
-      await marketDataCollector.startCollection(symbols);
+      console.log(`🎯 Símbolos para coleta: ${symbolsToUse.join(', ')}`);
       
-      console.log('✅ Coleta de dados iniciada para TODOS os símbolos disponíveis');
+      await marketDataCollector.startCollection(symbolsToUse);
+      
+      console.log('✅ Coleta de dados iniciada para todos os ativos DIGITDIFF descobertos');
       
       // Escutar processamento de ticks para análises contínuas
       marketDataCollector.on('tick_processed', (data) => {

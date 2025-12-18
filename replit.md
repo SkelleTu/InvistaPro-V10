@@ -1,49 +1,64 @@
 # InvestaPRO - Sistema de Renda Variável
 
-## 📊 REALIDADE DE ATIVOS DISPONÍVEIS - 18 DEC 2025
+## 🔥 SOLUÇÃO CORRETA - DESCOBERTA DINÂMICA DIGITDIFF - 18 DEC 2025 FINAL
 
-### DESCOBERTA IMPORTANTE:
-Após investigação profunda, **Deriv REALMENTE suporta APENAS 5 ativos para DIGITDIFF**:
-- R_10, R_25, R_50, R_75, R_100 (Volatility Indices)
+### Documentação Oficial Deriv Estudada:
+Conforme a documentação oficial de hoje, **DIGITDIFF não é disponível para todos os ativos**. A forma correta de descobrir é:
 
-Outros ativos (Forex, Commodities, Crypto, Stocks) **NÃO suportam contratos DIGITDIFF** na plataforma Deriv.
+1. **Chamar `active_symbols`** para pegar todos os símbolos
+2. **Para CADA símbolo, chamar `contracts_for`** para verificar se suporta DIGITDIFF
+3. **Filtrar dinamicamente** quais realmente têm suporte
 
-### MUDANÇAS IMPLEMENTADAS (18 DEC):
-1. **Removido `product_type: 'basic'`** em deriv-api.ts (linha 540-542)
-   - Teste: Confirmado que Deriv retorna apenas 5 ativos mesmo sem limitador
-   
-2. **Removido filtro hardcoded** em auto-trading-scheduler.ts (linha 1041-1058)
-   - Sistema agora ACEITA todos os símbolos disponíveis (não rejeita arbitrariamente)
-   - Deixa DINÂMICO: se Deriv adicionar novos ativos DIGITDIFF, sistema aceita automaticamente
+### ✅ IMPLEMENTAÇÃO CORRETA (18 DEC 2025):
 
-3. **Mantido 120+ símbolos** em market-data-collector.ts para FUTURO
-   - Quando/se Deriv expandir suporte DIGITDIFF, sistema está pronto
-   - Lista completa: Forex, Commodities, Crypto, Stocks, Indices
+**Adicionado em deriv-api.ts:**
+- `getContractsFor(symbol)` - Busca contratos disponíveis para um símbolo
+- `getDigitDiffSupportedSymbols(allSymbols)` - Descobre DINAMICAMENTE todos os ativos com DIGITDIFF
 
-### 🎯 CONFIGURAÇÃO ATUAL OTIMIZADA:
-- ✅ **5 ATIVOS DIGITDIFF** operando (máximo disponível na Deriv)
-- ✅ Cool-off reduzido: 2min → 30seg
-- ✅ Cool-off agressivo: 0seg para ativos >55% win rate
-- ✅ Breathing room adaptativo: 0-60seg baseado em performance
-- ✅ IA escolhe MELHOR entre os 5 disponíveis
-- ✅ Nenhuma repetição (diversificação dentro das 5 opções)
-- ✅ Margem de segurança: sistema rotaciona entre os 5 com inteligência
+**Resultado:**
+- ✅ Sistema descobre TODOS os ativos DIGITDIFF automaticamente
+- ✅ Não depende de lista hardcoded
+- ✅ Se Deriv adicionar novos ativos, sistema os detecta sozinho
+- ✅ Fallback para R_10-R_100 se descoberta falhar
 
-### 📈 IMPACTO REAL:
-Com 5 ativos DIGITDIFF operando com diversificação inteligente:
-- Margem de erro reduzida vs 1 ativo
-- Cool-off ultra-rápido maximiza oportunidades
-- IA adaptation garante lucro mesmo com volatilidade
-- Sistema pronto para quando Deriv expandir DIGITDIFF
+### 📊 ATIVOS DESCOBERTOS:
+Ao inicializar, sistema chama `getDigitDiffSupportedSymbols()` que:
+- Verifica cada símbolo ativo na Deriv
+- Valida quais suportam DIGITDIFF
+- Retorna lista dinâmica (pode variar por conta/região)
+- Log mostra: `✅ Ativo suporta DIGITDIFF`
+
+### 🎯 FUNCIONALIDADE ATUAL:
+- ✅ Cool-off: 2min → 30seg
+- ✅ Cool-off agressivo: 0seg para >55% W/R
+- ✅ Breathing room: 0-60seg adaptativo
+- ✅ IA escolhe MELHOR entre ativos disponíveis
+- ✅ **DINÂMICO**: Descobre ativos DIGITDIFF automaticamente
+- ✅ Sem repetição excessiva
+- ✅ Margem de segurança ampliada
+
+### 🔍 COMO FUNCIONA:
+```
+1. Inicialização → getActiveSymbols() → todos os símbolos Deriv
+2. Para cada símbolo → getContractsFor() → verifica DIGITDIFF
+3. Filtra apenas suportados → startCollection()
+4. Sistema opera com ativos DIGITDIFF descobertos dinamicamente
+```
+
+### 📈 VANTAGENS:
+- Funciona em qualquer conta/região (adapta-se)
+- Se Deriv expandir DIGITDIFF, sistema automaticamente inclui
+- Sem dependência de lista hardcoded
+- Totalmente conforme documentação oficial Deriv
 
 ---
 
 ## Overview
-Trading automation system for variable income (Deriv DIGITDIFF contracts - 5 ativos suportados).
+Trading automation system for variable income (Deriv DIGITDIFF contracts - descoberta dinâmica).
 
 ## Current Status
-- ✅ Full system operational with 5 DIGITDIFF assets (máximo suportado)
+- ✅ Full system operational with dynamic DIGITDIFF asset discovery
 - ✅ Real-time microscopic analysis
-- ✅ Dynamic diversification within 5 assets
+- ✅ Dynamic diversification
 - ✅ Ultra-fast adaptive cool-off (0-30 sec)
-- ✅ Code ready for 120+ when Deriv expands DIGITDIFF support
+- ✅ Code ready for ALL Deriv DIGITDIFF assets (auto-discovers)
