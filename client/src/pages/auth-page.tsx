@@ -91,9 +91,12 @@ export default function AuthPage() {
         title: "Login realizado!",
         description: "Bem-vindo de volta!",
       });
-      // Invalidate auth query and redirect to home
+      // Invalidate auth query and redirect to dashboard
       queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
-      setLocation("/");
+      // Small delay to allow auth state to update before redirecting
+      setTimeout(() => {
+        setLocation("/dashboard");
+      }, 300);
     },
     onError: (error) => {
       toast({
