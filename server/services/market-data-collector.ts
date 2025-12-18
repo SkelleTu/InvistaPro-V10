@@ -255,32 +255,31 @@ export class MarketDataCollector extends EventEmitter {
     }
 
     try {
-      // 🔥 EXPANSÃO MASSIVA: Subscrever a TODOS os 120+ símbolos disponíveis
-      // Sem nenhum filtro - deixar passar todos os ativos DIGITDIFF que Deriv permite
-      const supportedSymbols = symbols.filter(s => this.DIGITDIFF_SUPPORTED_SYMBOLS.includes(s));
+      // 🔥 EXPANSÃO DINÂMICA: Usar TODOS os símbolos descobertos dinamicamente
+      // Nenhum filtro - usar exatamente os ativos que foram detectados com DIGITDIFF
+      const supportedSymbols = symbols; // ✅ Usar todos os símbolos descobertos dinamicamente
       
       if (supportedSymbols.length === 0) {
         console.log('⚠️ [FNACIA] Nenhum símbolo com DIGITDIFF disponível');
         return;
       }
       
-      console.log(`🚀 [FNACIA] Iniciando coleta para ${supportedSymbols.length} ativos (expansão 5 → 120+)...`);
+      console.log(`🚀 [FNACIA] Iniciando coleta para ${supportedSymbols.length} ativos descobertos dinamicamente...`);
+      console.log(`🚀 [FNACIA] Símbolos: ${supportedSymbols.join(', ')}`);
       
       // Conectar à Deriv (público, sem autenticação)
       await this.derivAPI.connectPublic();
       
-      // Inscrever-se a TODOS os símbolos suportados (120+)
+      // Inscrever-se a TODOS os símbolos suportados descobertos
       for (const symbol of supportedSymbols) {
         await this.derivAPI.subscribeToTicks(symbol);
-        // Apenas log para primeiros 10 para não poluir console
-        if (supportedSymbols.indexOf(symbol) < 10) {
-          console.log(`📈 [FNACIA] Inscrito em ${symbol} ✅`);
-        }
+        // Log para todos os símbolos
+        console.log(`📈 [FNACIA] Inscrito em ${symbol} ✅`);
       }
 
       this.isCollecting = true;
-      console.log(`✅ [FNACIA] Coleta ativa para ${supportedSymbols.length} ativos (expansão massiva)`);
-      console.log(`💰 [FNACIA] Cobertura de lucro: 120+ ativos simultâneos`);
+      console.log(`✅ [FNACIA] Coleta ativa para ${supportedSymbols.length} ativos descobertos dinamicamente`);
+      console.log(`💰 [FNACIA] EXPANSÃO: 5 → ${supportedSymbols.length} ativos para máxima diversificação!`);
       
     } catch (error) {
       console.error('❌ [FNACIA] Erro ao iniciar coleta:', error);

@@ -191,32 +191,45 @@ export class AutoTradingScheduler {
 
   private async initializeMarketDataCollection(): Promise<void> {
     try {
-      console.log('📊 Iniciando coleta contínua de dados de mercado...');
+      console.log('📊 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('📊 [INIT] Iniciando coleta contínua de dados de mercado...');
       
       // Conectar à Deriv para buscar símbolos disponíveis
+      console.log('📊 [INIT] Conectando à Deriv API...');
       const tempDerivAPI = new DerivAPIService();
       await tempDerivAPI.connectPublic('GET_ALL_SYMBOLS');
+      console.log('✅ [INIT] Conectado à Deriv API');
       
       // BUSCAR TODOS OS ATIVOS DISPONÍVEIS DA API DA DERIV
+      console.log('📊 [INIT] Buscando ativos disponíveis...');
       const activeSymbols = await tempDerivAPI.getActiveSymbols();
-      console.log(`✅ Recuperados ${activeSymbols.length} símbolos ativos da Deriv API`);
+      console.log(`✅ [INIT] Recuperados ${activeSymbols.length} símbolos ativos da Deriv API`);
+      
+      if (activeSymbols.length === 0) {
+        console.warn('⚠️ [INIT] AVISO: getActiveSymbols() retornou 0 ativos!');
+      }
       
       // 🔥 DESCOBRIR DINAMICAMENTE quais suportam DIGITDIFF (conforme docs oficiais Deriv)
+      console.log('🔥 [INIT] Iniciando descoberta dinâmica de DIGITDIFF...');
       const digitdiffSymbols = await tempDerivAPI.getDigitDiffSupportedSymbols(activeSymbols);
-      console.log(`🔥 Ativos com suporte DIGITDIFF: ${digitdiffSymbols.length}`);
+      console.log(`🔥 [INIT] Ativos com suporte DIGITDIFF descobertos: ${digitdiffSymbols.length}`);
       
       // Desconectar a conexão temporária
+      console.log('📊 [INIT] Desconectando da Deriv API...');
       await tempDerivAPI.disconnect();
+      console.log('✅ [INIT] Desconectado');
       
       // Se nenhum símbolo foi descoberto dinamicamente, usar fallback (compatibilidade)
       const symbolsToUse = digitdiffSymbols.length > 0 ? digitdiffSymbols : 
         ['R_10', 'R_25', 'R_50', 'R_75', 'R_100']; // Fallback - sempre suportados
       
-      console.log(`🎯 Símbolos para coleta: ${symbolsToUse.join(', ')}`);
+      console.log(`🎯 [INIT] Usando ${symbolsToUse.length} símbolos para coleta`);
+      console.log(`🎯 [INIT] Símbolos: ${symbolsToUse.join(', ')}`);
       
       await marketDataCollector.startCollection(symbolsToUse);
       
-      console.log('✅ Coleta de dados iniciada para todos os ativos DIGITDIFF descobertos');
+      console.log('✅ [INIT] Coleta de dados iniciada para todos os ativos DIGITDIFF descobertos');
+      console.log('📊 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       
       // Escutar processamento de ticks para análises contínuas
       marketDataCollector.on('tick_processed', (data) => {

@@ -546,12 +546,24 @@ export class DerivAPIService extends EventEmitter {
 
   // 🔥 NOVO: Descobrir DINAMICAMENTE quais ativos suportam DIGITDIFF (conforme docs oficiais Deriv)
   async getDigitDiffSupportedSymbols(allSymbols: DerivActiveSymbol[]): Promise<string[]> {
-    if (!this.isConnected) return [];
+    console.log(`🔍 [DIGITDIFF DISCOVERY] Iniciando descoberta com ${allSymbols.length} símbolos`);
+    
+    if (!this.isConnected) {
+      console.warn('⚠️ [DIGITDIFF DISCOVERY] NÃO CONECTADO! Retornando array vazio');
+      return [];
+    }
     
     const supportedSymbols: string[] = [];
+    let checked = 0;
     
     for (const symbolInfo of allSymbols) {
       const symbol = symbolInfo.symbol;
+      checked++;
+      
+      // Log a cada 10 símbolos para rastreamento
+      if (checked % 10 === 0) {
+        console.log(`🔍 [DIGITDIFF DISCOVERY] Progresso: ${checked}/${allSymbols.length} símbolos verificados...`);
+      }
       
       try {
         const contracts = await this.getContractsFor(symbol);
@@ -561,14 +573,20 @@ export class DerivAPIService extends EventEmitter {
         
         if (hasDigitDiff) {
           supportedSymbols.push(symbol);
-          console.log(`✅ ${symbol} suporta DIGITDIFF`);
+          console.log(`✅ ${symbol} SUPORTA DIGITDIFF`);
         }
       } catch (error) {
-        // Ignorar erros - alguns símbolos podem não ter dados
+        console.warn(`⚠️ [DIGITDIFF DISCOVERY] Erro ao verificar ${symbol}:`, error);
       }
     }
     
-    console.log(`🔥 [DIGITDIFF DESCOBERTA] ${supportedSymbols.length} ativos suportam DIGITDIFF`);
+    console.log(`🔥 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+    console.log(`🔥 [DIGITDIFF DESCOBERTA COMPLETA]`);
+    console.log(`🔥 Símbolos verificados: ${checked}/${allSymbols.length}`);
+    console.log(`🔥 Ativos com DIGITDIFF encontrados: ${supportedSymbols.length}`);
+    console.log(`🔥 Símbolos: ${supportedSymbols.join(', ') || 'NENHUM'}`);
+    console.log(`🔥 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+    
     return supportedSymbols;
   }
 
