@@ -261,7 +261,7 @@ export const aiLogs = sqliteTable("ai_logs", {
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
 });
 
-// Trading operations tracking
+// Trading operations tracking - 100% Deriv data sync
 export const tradeOperations = sqliteTable("trade_operations", {
   id: text("id").primaryKey().default(sql`(hex(randomblob(16)))`),
   userId: text("user_id").notNull().references(() => users.id),
@@ -271,10 +271,23 @@ export const tradeOperations = sqliteTable("trade_operations", {
   direction: text("direction").notNull(), // 'up', 'down'
   amount: real("amount").notNull(), // Stake amount
   duration: integer("duration").notNull(), // Duration in ticks
-  status: text("status").default('pending'), // 'pending', 'active', 'won', 'lost'
+  status: text("status").default('pending'), // 'pending', 'active', 'won', 'lost', 'closed', 'sold'
   entryPrice: real("entry_price"),
   exitPrice: real("exit_price"),
   profit: real("profit"),
+  shortcode: text("shortcode"), // Deriv contract shortcode (100% from Deriv)
+  buyPrice: real("buy_price"), // Exact buy price from Deriv
+  sellPrice: real("sell_price"), // Exact sell price from Deriv
+  entryEpoch: integer("entry_epoch"), // Entry tick timestamp (epoch seconds)
+  exitEpoch: integer("exit_epoch"), // Exit tick timestamp (epoch seconds)
+  contractType: text("contract_type"), // 'DIGITDIFF', etc.
+  barrier: text("barrier"), // Barrier digit used
+  derivStatus: text("deriv_status"), // Raw status from Deriv (open, closed, sold)
+  derivProfit: real("deriv_profit"), // Exact profit from Deriv (no rounding)
+  payout: real("payout"), // Payout amount from Deriv
+  statusChangedAt: text("status_changed_at"), // When status last changed
+  lastSyncAt: text("last_sync_at"), // When last synced with Deriv
+  syncCount: integer("sync_count").default(0), // Number of syncs
   aiConsensus: text("ai_consensus").notNull(), // AI models' consensus in JSON
   isRecoveryMode: integer("isRecoveryMode", { mode: 'boolean' }).default(false), // Trade feito em modo recuperação
   recoveryMultiplier: real("recovery_multiplier").default(1.0), // Multiplicador aplicado
