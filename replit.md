@@ -1,8 +1,10 @@
 # InvestaPRO - Sistema de Renda Variável
 
-## 🚀 OPERAÇÕES ABRINDO CORRETAMENTE - 18 DEC 2025 - 31:58
+## 🚀 SISTEMA CONTROLADO E SINCRONIZADO - 18 DEC 2025
 
-### ✅ CORREÇÃO APLICADA - Threshold Dinâmico
+### ✅ CORREÇÕES APLICADAS
+
+#### 1. Threshold Dinâmico
 - **Problema**: Consenso 45% > Threshold 68% ❌ (operações não abriam)
 - **Solução**: Reduzido threshold para 35% em modo `test_sem_limites`
   - Production: 75% de média alta
@@ -10,10 +12,20 @@
   - Outros testes: 65% de média alta
 - **Resultado**: ✅ Operações agora abrem normalmente
 
-### Operação Confirmada:
+#### 2. Interval do Scheduler
+- **Problema**: Scheduler rodando a cada **5 segundos** = 12 trades/minuto 🚨
+- **Solução**: Aumentado para **60 segundos** (1 minuto)
+  - Máximo: 1 trade por minuto por configuração
+  - Stagger: 10 segundos entre múltiplas configs
+  - Controlado e previsível ✅
+- **Resultado**: Trades abertos de forma organizada
+
+### Operações Confirmadas:
 ```
 ✅ Contrato DIGIT DIFFERS comprado: 301950607988
+✅ Contrato DIGIT DIFFERS comprado: 301950715308
 🎯 Ativo: JD100 | Direção: UP | Valor: $2.10
+🎯 Ativo: R_50 | Direção: UP | Valor: $2.10
 ```
 
 ---

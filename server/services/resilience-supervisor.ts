@@ -110,7 +110,8 @@ export class ResilienceSupervisor extends EventEmitter {
     const heartbeat = await storage.getSystemHeartbeat(componentName);
 
     if (!heartbeat) {
-      // Componente nunca enviou heartbeat
+      // Componente nunca enviou heartbeat - considerar não-saudável
+      console.warn(`⚠️ [HEALTH] ${componentName}: Sem heartbeat`);
       return {
         componentName,
         isHealthy: false,
@@ -123,8 +124,13 @@ export class ResilienceSupervisor extends EventEmitter {
     const now = Date.now();
     const timeSinceLastHeartbeat = now - lastHeartbeatTime;
     
+    // Para scheduler: se não tiver heartbeat recente, marcar como não-saudável
     const isHealthy = timeSinceLastHeartbeat < this.heartbeatTimeout && 
                       heartbeat.status === 'healthy';
+    
+    if (!isHealthy && componentName === this.COMPONENT_NAMES.SCHEDULER) {
+      console.warn(`⚠️ [HEALTH] Scheduler: ${timeSinceLastHeartbeat}ms desde último heartbeat (timeout: ${this.heartbeatTimeout}ms)`);
+    }
 
     return {
       componentName: heartbeat.componentName,

@@ -252,6 +252,13 @@ export class AutoTradingScheduler {
     const operationId = `ANALISE_NATURAL_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
     
     try {
+      // ✅ Enviar heartbeat para ResilienceSupervisor
+      await storage.updateSystemHeartbeat('scheduler', 'healthy', {
+        operationId,
+        timestamp: new Date().toISOString(),
+        status: 'executing_analysis'
+      }).catch(err => console.error('⚠️ Erro ao enviar heartbeat:', err));
+      
       // Buscar todas as configurações ativas
       let activeConfigs = await storage.getActiveTradeConfigurations();
       
@@ -293,10 +300,13 @@ export class AutoTradingScheduler {
       // Consenso fraco (<40%): operações normais
       const analisePromises = activeConfigs.map(async (config, index) => {
         try {
-          // ⚡ SEM RESTRIÇÃO: IAs abrem quanto precisar quando detectar oportunidade
-          // Stagger apenas para distribuir em casos normais (proteger infraestrutura)
-          // Mas removido completamente se houver consenso forte
-          const staggerDelay = 0; // ⚡ REMOVED: Permitir burst completo de trades
+          // ⚡ CONTROLE DE BURST: Aplicar stagger mínimo para evitar avalanche
+          // Isto evita abrir múltiplos trades simultaneamente
+          // Delay: 10 segundos entre cada trade para manter controle
+          const staggerDelay = 10000; // 10 segundos mínimo entre trades
+          if (staggerDelay > 0) {
+            await new Promise(resolve => setTimeout(resolve, staggerDelay * index));
+          }
           
           return await this.processAnaliseNaturalConfiguration(config, operationId);
         } catch (error) {
@@ -1409,15 +1419,14 @@ export class AutoTradingScheduler {
     }
     
     // ⚡ OTIMIZAÇÃO: Criar intervalo com stagger entre trades para evitar congestão
-    // Trades criados a cada 5 segundos com durações distribuídas (10-15 ticks)
-    // = Fechamentos distribuídos, sem spike
+    // Intervalo de 60 segundos (1 minuto) entre ciclos de análise
+    // Cada ciclo pode abrir 1 trade (com stagger de 10s entre múltiplas configs)
+    // = Máximo ~1 trade por minuto por config (controlado e previsível)
     this.cronJob = setInterval(() => {
       if (!this.schedulerRunning) {
         this.executeAnaliseNaturalAnalysis();
-        // ⚡ Adicionar pequeno delay distribuído (stagger) entre processamentos
-        // Isto previne que todos os trades sejam processados simultaneamente
       }
-    }, 5000);
+    }, 60000); // 60 segundos (1 minuto) entre execuções
     
     // 🔄 Iniciar sincronização automática de trades da Deriv
     derivTradeSync.startAutoSync();

@@ -13,6 +13,7 @@ import { autoTradingScheduler } from "./services/auto-trading-scheduler";
 import { resilienceSupervisor } from "./services/resilience-supervisor";
 import { derivAPI } from "./services/deriv-api";
 import { createDatabaseBackup } from "./database-backup";
+import { storage } from "./storage";
 
 const app = express();
 app.use(express.json());
@@ -206,13 +207,27 @@ app.use((req, res, next) => {
     
     // Inicializar Auto Trading Scheduler DEPOIS que o servidor estiver rodando
     console.log('🤖 Inicializando Auto Trading Scheduler...');
-    autoTradingScheduler.startScheduler().then(() => {
+    try {
+      await autoTradingScheduler.startScheduler();
       console.log('✅ Sistema de trades automáticos ativo e RODANDO!');
-      console.log('📊 Monitora configurações ativas a cada 5 segundos');
+      console.log('📊 Scheduler a cada 60 segundos (1 minuto)');
       console.log('🔥 Sistema iniciará automaticamente sempre que o app for executado!');
-    }).catch((error) => {
+      
+      // Enviar heartbeat inicial
+      await storage.updateSystemHeartbeat('scheduler', 'healthy', {
+        startTime: new Date().toISOString(),
+        status: 'initialized'
+      }).catch((err: any) => console.error('⚠️ Erro ao enviar heartbeat inicial:', err));
+      
+    } catch (error: any) {
       console.error('❌ Erro ao iniciar Auto Trading Scheduler:', error);
-    });
+      console.error('⚠️ Scheduler não inicializado - ResilienceSupervisor tentará recuperar');
+      
+      // Reportar erro ao ResilienceSupervisor
+      await storage.incrementHeartbeatError('scheduler', String(error)).catch((err: any) => 
+        console.error('⚠️ Erro ao reportar erro:', err)
+      );
+    }
     
     // 🔍 SISTEMA DE DEBUG INTERNO (Apenas para logs e monitoramento)
     // ⚠️  IMPORTANTE: Keep-alive interno NÃO impede hibernação no Replit!
