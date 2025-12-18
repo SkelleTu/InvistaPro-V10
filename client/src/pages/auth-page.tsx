@@ -91,12 +91,12 @@ export default function AuthPage() {
         title: "Login realizado!",
         description: "Bem-vindo de volta!",
       });
-      // Invalidate auth query and redirect to dashboard
+      // Invalidate auth query and redirect to home
+      // The app will automatically detect authentication and show dashboard
       queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
-      // Small delay to allow auth state to update before redirecting
       setTimeout(() => {
-        setLocation("/dashboard");
-      }, 300);
+        setLocation("/");
+      }, 500);
     },
     onError: (error) => {
       toast({
