@@ -147,6 +147,45 @@ export class TPMSystem {
     console.log('⏹️  [TPM] Monitoramento PARADO');
   }
 
+  // ===== INTEGRAÇÃO REAL COM TRADES =====
+  recordTradeResult(
+    modelId: string,
+    symbol: string,
+    tradeProfit: number,
+    tradeWon: boolean,
+    responseTime: number,
+    stake: number
+  ): void {
+    if (!this.healthMetrics.has(modelId)) {
+      this.healthMetrics.set(modelId, []);
+    }
+
+    const profitability = tradeProfit / stake;
+    const accuracy = tradeWon ? 1.0 : 0.0;
+
+    // Chamar recordHealthMetric com dados REAIS
+    this.recordHealthMetric(
+      modelId,
+      symbol,
+      accuracy,
+      profitability,
+      responseTime,
+      tradeWon,
+      accuracy, // winRate
+      tradeProfit > 0 ? profitability : -profitability
+    );
+
+    const metrics = this.healthMetrics.get(modelId);
+    if (metrics && metrics.length > 0) {
+      const latest = metrics[metrics.length - 1];
+      
+      // PILAR 4: Feedback contínuo
+      latest.improvement.feedbackScore = Math.max(0, Math.min(100, profitability * 100));
+      
+      console.log(`💰 [TPM TRADE] ${modelId} @ ${symbol}: ${tradeWon ? '✅' : '❌'} | P&L: ${(tradeProfit > 0 ? '+' : '')}${tradeProfit.toFixed(2)} | Health: ${latest.healthScore.toFixed(1)}`);
+    }
+  }
+
   recordHealthMetric(
     modelId: string,
     symbol: string,
@@ -480,6 +519,32 @@ export class TPMSystem {
     }
   }
 
+  // ===== TRADE PERFORMANCE ANALYTICS =====
+  getTradePerformanceByModel() {
+    const performance: any = {};
+
+    this.healthMetrics.forEach((metrics, modelId) => {
+      const wins = metrics.filter(m => m.consistencyScore === 100).length;
+      const losses = metrics.filter(m => m.consistencyScore === 0).length;
+      const total = wins + losses;
+      const winRate = total > 0 ? (wins / total * 100) : 0;
+      const avgProfit = metrics.reduce((sum, m) => sum + m.profitability, 0) / Math.max(1, metrics.length);
+
+      performance[modelId] = {
+        trades: total,
+        wins,
+        losses,
+        winRate: winRate.toFixed(1) + '%',
+        avgProfit: (avgProfit * 100).toFixed(2) + '%',
+        recentTrend: metrics.length >= 2 
+          ? (metrics[metrics.length - 1].profitability > metrics[metrics.length - 2].profitability ? '📈' : '📉')
+          : '➡️'
+      };
+    });
+
+    return performance;
+  }
+
   getHealthReport() {
     const report: any = {
       timestamp: Date.now(),
@@ -488,6 +553,7 @@ export class TPMSystem {
       models: {},
       recentAlerts: this.alerts.slice(-10),
       maintenanceQueue: this.maintenanceQueue.slice(0, 10),
+      tradePerformance: this.getTradePerformanceByModel(),
       
       // PILARES
       pillars: {
@@ -526,6 +592,7 @@ export class TPMSystem {
         quarantined: latest.quality.quarantined,
         circuitStatus: latest.safety.status,
         autoHealAttempts: latest.autonomous.healingAttempts,
+        feedbackScore: latest.improvement.feedbackScore.toFixed(1),
         lastCheck: new Date(latest.lastCheck).toISOString()
       };
     });

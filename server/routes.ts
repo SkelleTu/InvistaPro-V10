@@ -2830,13 +2830,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({
         success: true,
         tpm: report,
-        message: `🔧 TPM Status: ${report.healthSummary.healthy} modelos saudáveis, ${report.healthSummary.critical} críticos`,
+        message: `🔧 TPM: ${report.healthSummary.healthy}✅ ${report.healthSummary.degraded}⚠️ ${report.healthSummary.critical}🔴 ${report.healthSummary.maintenance}🛠️`,
         timestamp: new Date().toISOString()
       });
 
     } catch (error) {
       console.error('❌ Erro ao buscar TPM:', error);
       res.status(500).json({ message: 'Erro ao buscar métricas TPM', error });
+    }
+  });
+
+  // =========================== TPM TRADE FEEDBACK (Real-time integration) ===========================
+
+  app.post('/api/trading/tpm-feedback', isAuthenticated, isTradingAuthorized, async (req, res) => {
+    try {
+      const { modelId, symbol, profit, won, responseTime, stake } = req.body;
+
+      if (!modelId || !symbol) {
+        return res.status(400).json({ message: 'modelId e symbol obrigatórios' });
+      }
+
+      tpmSystem.recordTradeResult(modelId, symbol, profit || 0, won || false, responseTime || 100, stake || 1);
+
+      res.json({
+        success: true,
+        message: `📊 Feedback registrado para ${modelId}`,
+        timestamp: new Date().toISOString()
+      });
+
+    } catch (error) {
+      console.error('❌ Erro ao registrar feedback TPM:', error);
+      res.status(500).json({ message: 'Erro ao registrar feedback', error });
     }
   });
 
