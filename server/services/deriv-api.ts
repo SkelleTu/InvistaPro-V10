@@ -784,6 +784,13 @@ export class DerivAPIService extends EventEmitter {
   async buyDigitDifferContract(params: DigitDifferContract): Promise<DerivContractInfo | null> {
     if (!this.isConnected) return null;
 
+    // 🚫 VALIDAÇÃO DEFENSIVA: BLOQUEIO DE SÍMBOLOS (1s) - DUPLA CAMADA DE PROTEÇÃO
+    const BLOCKED_SYMBOLS_PATTERN = /\(1s\)/i;
+    if (BLOCKED_SYMBOLS_PATTERN.test(params.symbol)) {
+      console.error(`❌ [DERIV API] BLOQUEIO ATIVADO: Símbolo "${params.symbol}" contém "(1s)" - CAUSADOR DE LOSS - TRADE NÃO EXECUTADO`);
+      return null;
+    }
+
     const OPERATION_TIMEOUT = 15000; // 15 segundos timeout máximo
 
     try {

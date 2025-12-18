@@ -34,6 +34,13 @@ export class AutoTradingScheduler {
   // 🚫 BLOQUEADO 100%: Ativos causadores de loss - NUNCA serão operados
   private static readonly BLOCKED_SYMBOLS_PATTERN = /\(1s\)/i;
   
+  /**
+   * Validar se símbolo está bloqueado (causador de loss)
+   */
+  private isSymbolBlocked(symbol: string): boolean {
+    return AutoTradingScheduler.BLOCKED_SYMBOLS_PATTERN.test(symbol);
+  }
+  
   // 🔧 ANTI-DEADLOCK: Rastreamento de operações em execução
   private lastOperationId: string | null = null;
   private lastOperationStartTime: number = 0;
@@ -668,6 +675,31 @@ export class AutoTradingScheduler {
       // 🔧 LIMPAR SÍMBOLO: Remover consenso formatado (ex: "R_50(45.0%)" → "R_50")
       let selectedSymbol = bestSymbolResult.symbol.split('(')[0].trim();
       
+      // 🚫 VALIDAÇÃO DEFENSIVA IMEDIATA: Verificar bloqueio de (1s) - CAMADA 1
+      if (this.isSymbolBlocked(selectedSymbol)) {
+        console.error(`❌ [${operationId}] BLOQUEIO ATIVADO: Símbolo "${selectedSymbol}" contém "(1s)" - CAUSADOR DE LOSS`);
+        console.error(`❌ [${operationId}] Pulando para alternativa...`);
+        
+        // Tentar próximo símbolo na lista top5
+        if (bestSymbolResult.top5Symbols && bestSymbolResult.top5Symbols.length > 1) {
+          for (let i = 1; i < bestSymbolResult.top5Symbols.length; i++) {
+            const altSymbol = bestSymbolResult.top5Symbols[i].split('(')[0].trim();
+            if (!this.isSymbolBlocked(altSymbol)) {
+              selectedSymbol = altSymbol;
+              console.log(`✅ [${operationId}] Símbolo alternativo selecionado (bloqueio evitado): ${selectedSymbol}`);
+              break;
+            }
+          }
+          
+          // Se todos os top5 estão bloqueados, retornar erro
+          if (this.isSymbolBlocked(selectedSymbol)) {
+            return { success: false, error: 'Todos os símbolos candidatos estão bloqueados (contêm "1s")' };
+          }
+        } else {
+          return { success: false, error: `Símbolo ${selectedSymbol} está bloqueado e sem alternativas` };
+        }
+      }
+      
       // 🎯 DIVERSIFICAÇÃO INTELIGENTE: Verificar se ativo pode ser aberto + jogo de cintura
       const diversityCheck = await this.canOpenTradeForAsset(
         config.userId, 
@@ -711,6 +743,12 @@ export class AutoTradingScheduler {
       
       console.log(`✅ [${operationId}] Melhor símbolo selecionado: ${selectedSymbol} (Consenso: ${aiConsensusPreCalculated.consensusStrength}%)`);
       console.log(`📊 [${operationId}] Analisados ${bestSymbolResult.totalAnalyzed} símbolos | TOP 5: ${bestSymbolResult.top5Symbols.join(', ')}`);
+      
+      // 🚫 TERCEIRA CAMADA DE PROTEÇÃO: Verificação final antes de buscar dados
+      if (this.isSymbolBlocked(selectedSymbol)) {
+        console.error(`❌ [${operationId}] ERRO CRÍTICO: Símbolo ${selectedSymbol} passou por filtros mas contém "(1s)" - SISTEMA RESPONSÁVEL BLOQUEANDO`);
+        return { success: false, error: `Símbolo bloqueado detectado em verificação final: ${selectedSymbol}` };
+      }
       
       // Buscar dados de mercado
       let marketDataInfo = await storage.getMarketData(selectedSymbol);
@@ -953,6 +991,12 @@ export class AutoTradingScheduler {
       }
         
         // Executar o trade
+        // 🚫 ÚLTIMA VERIFICAÇÃO: Validação defensiva antes de executar trade
+        if (this.isSymbolBlocked(selectedSymbol)) {
+          console.error(`❌ [${operationId}] ERRO CRÍTICO DE SEGURANÇA: Símbolo "${selectedSymbol}" está bloqueado - EXECUTANDO BLOQUEIO TOTAL`);
+          return { success: false, error: `BLOQUEIO DE SEGURANÇA ATIVADO: Símbolo ${selectedSymbol} contém "(1s)"` };
+        }
+        
         const digitDifferContract = {
           contract_type: 'DIGITDIFF' as const,
           symbol: selectedSymbol,
