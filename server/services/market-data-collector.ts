@@ -19,67 +19,12 @@ export class MarketDataCollector extends EventEmitter {
   private saveInterval: NodeJS.Timeout | null = null;
   private isCollecting = false;
   
-  // 🎯 SÍMBOLOS QUE SUPORTAM DIGITDIFF - TODOS OS ATIVOS DISPONÍVEIS
-  // Expansion completa para máxima diversificação e lucro
-  private readonly DIGITDIFF_SUPPORTED_SYMBOLS = [
-    // Volatility Indices - Todos suportam DIGITDIFF
-    'R_10', 'R_25', 'R_50', 'R_75', 'R_100',
-    
-    // Forex Major Pairs - Suportam DIGITDIFF
-    'EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'AUDUSD', 'USDCAD', 'NZDUSD',
-    'EURJPY', 'EURGBP', 'GBPJPY',
-    
-    // Forex Minor Pairs - Suportam DIGITDIFF
-    'EURCAD', 'EURCHF', 'EURAUD', 'EURNZD', 'GBPAUD', 'GBPNZD', 'GBPCAD', 'GBPCHF',
-    'AUDCAD', 'AUDCHF', 'AUDNZD', 'CADCHF', 'CADJPY', 'CHFJPY', 'NZDJPY', 'NZDCAD',
-    'NZDCHF', 'AUDCAD', 'USDSEK', 'USDNOK', 'USDDKK', 'USDHKD', 'USDSGD', 'USDMXN',
-    
-    // Commodities - Suportam DIGITDIFF
-    'XAUUSD', // Gold
-    'XAGUSD', // Silver
-    'XPTUSD', // Platinum
-    'XPDUSD', // Palladium
-    'BRENUSD', // Brent Crude Oil
-    'WTIUSD',  // WTI Crude Oil
-    
-    // Cryptocurrencies - Suportam DIGITDIFF
-    'BTCUSD', 'ETHUSD', 'LTCUSD', 'BCHUSD', 'BNBUSD', 'XRPUSD', 'ADAUSD', 'DOTUSD',
-    'LINKUSD', 'UNIUSD', 'SOLUSD', 'MATICUSD', 'AVAXUSD', 'AAAPEUSD',
-    
-    // Stock Indices - Suportam DIGITDIFF
-    'SPX500', // S&P 500
-    'UK100',  // FTSE 100
-    'DE40',   // DAX
-    'FR40',   // CAC 40
-    'AUS200', // ASX 200
-    'JPN225', // Nikkei 225
-    'HSI50',  // Hang Seng
-    'SHCOMP', // Shanghai Composite
-    'IND50',  // Sensex
-    
-    // Individual Stocks (Blue Chips) - Suportam DIGITDIFF
-    // Tech
-    'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'NFLX', 'CSCO', 'INTC',
-    'AMD', 'CRM', 'ADBE', 'PYPL', 'SQ',
-    
-    // Finance
-    'JPM', 'BAC', 'WFC', 'GS', 'MS', 'BLK', 'SCHW',
-    
-    // Pharma/Healthcare
-    'JNJ', 'PFE', 'UNH', 'AZN', 'NVO', 'MRK', 'ABT', 'TMO', 'GILD',
-    
-    // Consumer
-    'WMT', 'KO', 'PEP', 'MCD', 'SBUX', 'NKE', 'LULU', 'TJX', 'HD',
-    
-    // Energy
-    'XOM', 'CVX', 'COP', 'SLB', 'MPC',
-    
-    // Industrial
-    'BA', 'CAT', 'MMM', 'GE', 'HON', 'LMT',
-    
-    // Utilities
-    'DUK', 'SO', 'NEE', 'AEP', 'EXC'
-  ];
+  // 🎯 DINÂMICO: CARREGADO DA DERIV EM TEMPO REAL
+  // Sistema agora descobri automaticamente TODOS os ativos que suportam DIGITDIFF (300+)
+  private DIGITDIFF_SUPPORTED_SYMBOLS: string[] = [];
+  private allDerivSymbols: Map<string, any> = new Map();
+  private symbolsRefreshInterval: NodeJS.Timeout | null = null;
+  private lastSymbolsUpdate: number = 0;
   
   // Configurações do "Fluxo Natural de Análises Cooperativas de Inteligência Artificial" - análise microscópica contínua
   private readonly BUFFER_SIZE = 500; // Manter últimos 500 ticks por símbolo
