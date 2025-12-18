@@ -2358,6 +2358,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           aiConsensus: JSON.stringify(aiConsensus)
         });
 
+        // 🎯 RASTREAR ATIVO PARA DIVERSIFICAÇÃO
+        autoTradingScheduler.trackAssetUsage(userId, symbol);
+
         res.json({
           message: 'Trade executado com sucesso',
           tradeId: tradeOperation.id,
@@ -2769,6 +2772,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error('❌ Erro ao analisar perdas por ativo:', error);
       const errorMessage = error instanceof Error ? error.message : String(error);
       res.status(500).json({ message: 'Erro ao analisar perdas por ativo', error: errorMessage });
+    }
+  });
+
+  // =========================== RESET COOLDOWN SYSTEM (TPM - Total Productive Maintenance) ===========================
+
+  app.post('/api/trading/reset-cooldown', isAuthenticated, isTradingAuthorized, async (req, res) => {
+    try {
+      if (!req.user?.id) {
+        return res.status(401).json({ message: 'Usuário não autenticado' });
+      }
+
+      const result = autoTradingScheduler.resetCooldownSystem(req.user.id);
+      
+      res.json({
+        success: true,
+        message: `Sistema desbloqueado! ${result.cleared} ativos liberados`,
+        cleared: result.cleared,
+        reason: result.reason,
+        timestamp: new Date().toISOString()
+      });
+
+    } catch (error) {
+      console.error('❌ Erro ao resetar cool-off:', error);
+      res.status(500).json({ message: 'Erro ao resetar sistema', error });
+    }
+  });
+
+  // =========================== SYSTEM HEALTH STATUS (TPM - Total Productive Maintenance) ===========================
+
+  app.get('/api/trading/system-health', isAuthenticated, isTradingAuthorized, async (req, res) => {
+    try {
+      const health = autoTradingScheduler.getAssetHealthStatus();
+      
+      res.json({
+        health,
+        message: health.healthy ? '✅ Sistema saudável' : '⚠️ Bottlenecks detectados',
+        recommendation: health.bottlenecks.length > 0 
+          ? `Ativos com problemas: ${health.bottlenecks.map(b => `${b.symbol} (${b.winRate.toFixed(1)}%)`).join(', ')}`
+          : 'Todas os ativos operando normalmente',
+        timestamp: new Date().toISOString()
+      });
+
+    } catch (error) {
+      console.error('❌ Erro ao verificar saúde do sistema:', error);
+      res.status(500).json({ message: 'Erro ao verificar sistema', error });
     }
   });
 

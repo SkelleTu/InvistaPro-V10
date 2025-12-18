@@ -30,9 +30,36 @@ export class AutoTradingScheduler {
   private setupPromise: Promise<void>;
   private isInitialized: boolean = false;
   
-  // 🎯 SISTEMA DE DIVERSIFICAÇÃO - Evita repetição do mesmo ativo
+  // 🎯 SISTEMA DE DIVERSIFICAÇÃO DINÂMICA - "PERDA ZERO"
   private recentAssets: Map<string, string[]> = new Map(); // userId -> [asset1, asset2, ...]
-  private assetCooldownMinutes: number = 2; // Cool-off entre trades do mesmo ativo
+  private assetPerformance: Map<string, {wins: number, losses: number, lastTrades: boolean[]}> = new Map(); // Track performance por ativo
+  private assetCooldownMinutes: number = 2; // Base cool-off (pode variar)
+  
+  // 🧬 SISTEMA ADAPTATIVO - Breathing Room dinâmico
+  // Se asset ganhando: permite mais rapidamente
+  // Se asset perdendo: aumenta cool-off automaticamente
+  private getBreathingRoom(symbol: string): number {
+    const performance = this.assetPerformance.get(symbol);
+    if (!performance) return this.assetCooldownMinutes;
+    
+    const totalTrades = performance.wins + performance.losses;
+    if (totalTrades === 0) return this.assetCooldownMinutes;
+    
+    const winRate = performance.wins / totalTrades;
+    
+    // 🎯 LÓGICA DE BREATHING ROOM:
+    // Win rate > 50% → Reduz cool-off 50% (incentiva ativo ganhador)
+    // Win rate 40-50% → Cool-off normal
+    // Win rate < 40% → Aumenta 50% (força diversificação)
+    
+    if (winRate > 0.50) {
+      return Math.max(0.5, this.assetCooldownMinutes * 0.5); // 50% mais rápido
+    } else if (winRate < 0.40) {
+      return this.assetCooldownMinutes * 1.5; // 50% mais lento
+    }
+    
+    return this.assetCooldownMinutes; // Normal
+  }
   
   // 🎯 SISTEMA DE OPERAÇÕES CONSERVADORAS DIÁRIAS (persistido no banco)
   // Limites específicos por modo de operação
@@ -1539,8 +1566,8 @@ export class AutoTradingScheduler {
     }
   }
 
-  // 🎯 DIVERSIFICAÇÃO INTELIGENTE COM JOGO DE CINTURA
-  // Evita repetição excessiva, mas permite quebrar regra se oportunidade for MUITO forte
+  // 🎯 DIVERSIFICAÇÃO INTELIGENTE COM JOGO DE CINTURA + BREATHING ROOM DINÂMICO
+  // Evita repetição excessiva, permite quebrar regra se oportunidade for forte OU se ativo ganhando
   async canOpenTradeForAsset(userId: string, symbol: string, consensusStrength?: number): Promise<{allowed: boolean, reason: string}> {
     if (!this.recentAssets.has(userId)) {
       this.recentAssets.set(userId, []);
@@ -1554,31 +1581,41 @@ export class AutoTradingScheduler {
       return { allowed: true, reason: 'Ativo disponível para trading' };
     }
     
-    // Ativo em cool-off - verificar se oportunidade é forte o suficiente
+    // Ativo em cool-off - verificar respiração dinâmica + oportunidade
     const opportunityStrength = consensusStrength || 0;
+    const breathingRoom = this.getBreathingRoom(symbol);
+    const performance = this.assetPerformance.get(symbol);
+    const winRate = performance ? (performance.wins / (performance.wins + performance.losses)) : 0;
     
-    // 🎯 REGRAS DE JOGO DE CINTURA:
-    // 1. Consenso 95%+ → Quebra cool-off (oportunidade explosiva!)
-    // 2. Consenso 85-94% → Permite apenas se foi > 1 min desde último uso
-    // 3. Consenso <85% → Respeita cool-off (diversificação obrigatória)
+    // 🎯 REGRAS DE JOGO DE CINTURA ADAPTATIVO:
+    // 1. Consenso 95%+ → SEMPRE quebra cool-off (oportunidade explosiva!)
+    // 2. Win rate >60% + consenso >75% → Quebra cool-off (ativo ganhador + signal bom)
+    // 3. Consenso 85-94% → Permite se passou breathing room dinâmico
+    // 4. <85% → Respeita cool-off (forçar diversificação)
     
     if (opportunityStrength >= 95) {
-      console.log(`🔥 [DIVERSIFICAÇÃO INTELIGENTE] OPORTUNIDADE EXPLOSIVA (${opportunityStrength}%)! Permitindo repetição de ${symbol}`);
-      return { allowed: true, reason: `Oportunidade explosiva (${opportunityStrength}%) - override inteligente` };
+      console.log(`🔥 [DIVERSIFICAÇÃO INTELIGENTE] OPORTUNIDADE EXPLOSIVA (${opportunityStrength}%)! Repetindo ${symbol} (W/L: ${performance?.wins}/${performance?.losses})`);
+      return { allowed: true, reason: `Oportunidade explosiva (${opportunityStrength}%) - override garantido` };
+    }
+    
+    if (winRate > 0.60 && opportunityStrength > 75) {
+      console.log(`💰 [DIVERSIFICAÇÃO INTELIGENTE] Ativo GANHADOR (${(winRate*100).toFixed(0)}%)! Permitindo ${symbol} com signal ${opportunityStrength}%`);
+      return { allowed: true, reason: `Ativo ganhador (${(winRate*100).toFixed(0)}%) com signal forte` };
     }
     
     if (opportunityStrength >= 85) {
       // Verificar tempo desde último uso
-      const lastUseTime = Date.now() - (assetIndex * 60000); // Aproximar tempo baseado na posição
-      if (lastUseTime > 60000) { // Mais de 1 minuto
-        console.log(`⚡ [DIVERSIFICAÇÃO INTELIGENTE] Oportunidade forte (${opportunityStrength}%)! Permitindo repetição de ${symbol} (1+ min)`);
-        return { allowed: true, reason: `Oportunidade forte (${opportunityStrength}%) e 1+ min passado` };
+      const lastUseTime = Date.now() - (assetIndex * 60000);
+      if (lastUseTime > (breathingRoom * 60000)) {
+        console.log(`⚡ [DIVERSIFICAÇÃO INTELIGENTE] Oportunidade forte (${opportunityStrength}%)! ${symbol} passou breathing room (${breathingRoom.toFixed(1)}min)`);
+        return { allowed: true, reason: `Signal ${opportunityStrength}% + breathing room (${breathingRoom.toFixed(1)}min) cumprido` };
       }
     }
     
     // Sem oportunidade forte - respeita cool-off
-    console.log(`🚫 [DIVERSIFICAÇÃO] Ativo ${symbol} em cool-off (consenso: ${opportunityStrength}%) - buscar alternativa`);
-    return { allowed: false, reason: `Ativo em cool-off de diversificação (consenso: ${opportunityStrength}%)` };
+    const remainingMin = (breathingRoom - (Date.now() - (assetIndex * 60000)) / 60000).toFixed(1);
+    console.log(`🚫 [DIVERSIFICAÇÃO] ${symbol} em cool-off (${consensusStrength}%) - W/L: ${performance?.wins}/${performance?.losses} - falta ${remainingMin}min`);
+    return { allowed: false, reason: `Cool-off ativo: ${remainingMin}min restantes` };
   }
 
   trackAssetUsage(userId: string, symbol: string): void {
@@ -1592,23 +1629,106 @@ export class AutoTradingScheduler {
     recentList.unshift(symbol);
     
     // Manter apenas os últimos N ativos (simular cool-off)
-    // Limpar ativo da lista após cool-off (2 minutos)
     if (recentList.length > 5) {
       recentList.pop();
     }
     
-    // Resetar cool-off após 2 minutos automaticamente
+    // Aplicar breathing room dinâmico baseado em performance
+    const breathingRoom = this.getBreathingRoom(symbol);
+    
+    // Resetar cool-off após breathing room automaticamente
     setTimeout(() => {
       const currentList = this.recentAssets.get(userId) || [];
       const idx = currentList.indexOf(symbol);
       if (idx >= 0) {
         currentList.splice(idx, 1);
-        console.log(`🔄 [DIVERSIFICAÇÃO] Cool-off de ${symbol} finalizado`);
+        const performance = this.assetPerformance.get(symbol);
+        console.log(`🔄 [DIVERSIFICAÇÃO] Cool-off de ${symbol} finalizado (${breathingRoom.toFixed(1)}min). Performance: ${performance?.wins}W/${performance?.losses}L`);
       }
-    }, this.assetCooldownMinutes * 60 * 1000);
+    }, breathingRoom * 60 * 1000);
     
     this.recentAssets.set(userId, recentList);
-    console.log(`✅ [DIVERSIFICAÇÃO] Ativo ${symbol} rastreado. Lista recente: ${recentList.join(', ')}`);
+    const performance = this.assetPerformance.get(symbol);
+    console.log(`✅ [DIVERSIFICAÇÃO] ${symbol} rastreado (breathing: ${breathingRoom.toFixed(1)}min). Performance: ${performance?.wins}W/${performance?.losses}L`);
+  }
+  
+  // 📊 RASTREAR PERFORMANCE DO ATIVO (para ajustar breathing room)
+  updateAssetPerformance(symbol: string, won: boolean): void {
+    if (!this.assetPerformance.has(symbol)) {
+      this.assetPerformance.set(symbol, { wins: 0, losses: 0, lastTrades: [] });
+    }
+    
+    const perf = this.assetPerformance.get(symbol)!;
+    if (won) {
+      perf.wins++;
+    } else {
+      perf.losses++;
+    }
+    
+    // Manter últimas 20 trades para histórico recente
+    perf.lastTrades.push(won);
+    if (perf.lastTrades.length > 20) {
+      perf.lastTrades.shift();
+    }
+    
+    const totalTrades = perf.wins + perf.losses;
+    const winRate = (perf.wins / totalTrades * 100).toFixed(1);
+    const breathing = this.getBreathingRoom(symbol);
+    
+    console.log(`📈 [PERFORMANCE] ${symbol}: ${perf.wins}W/${perf.losses}L (${winRate}%) - Breathing: ${breathing.toFixed(1)}min`);
+  }
+  
+  // 🚨 RESET INTELIGENTE - Limpar sistema quando travado (todos ativos em cool-off)
+  resetCooldownSystem(userId: string): {cleared: number, reason: string} {
+    if (!this.recentAssets.has(userId)) {
+      return { cleared: 0, reason: 'Nenhum cool-off ativo' };
+    }
+    
+    const recentList = this.recentAssets.get(userId) || [];
+    const cleared = recentList.length;
+    
+    // Limpar lista de cool-off
+    this.recentAssets.set(userId, []);
+    
+    console.log(`🚨 [RESET TPM] Sistema desbloqueado! ${cleared} ativos liberados do cool-off`);
+    return { cleared, reason: `${cleared} ativos foram liberados do cool-off` };
+  }
+  
+  // 🏭 STATUS DE SAÚDE DO SISTEMA (TPM - Total Productive Maintenance)
+  getAssetHealthStatus(): {
+    totalAssets: number;
+    assetsWithPerformance: number;
+    averageWinRate: number;
+    bottlenecks: Array<{symbol: string, winRate: number, trades: number}>;
+    healthy: boolean;
+  } {
+    let totalWins = 0, totalLosses = 0;
+    const bottlenecks: Array<{symbol: string, winRate: number, trades: number}> = [];
+    
+    for (const [symbol, perf] of this.assetPerformance) {
+      totalWins += perf.wins;
+      totalLosses += perf.losses;
+      
+      const trades = perf.wins + perf.losses;
+      const winRate = trades > 0 ? perf.wins / trades : 0;
+      
+      // Identificar ativos com problemas (win rate < 40%)
+      if (trades >= 5 && winRate < 0.40) {
+        bottlenecks.push({ symbol, winRate: winRate * 100, trades });
+      }
+    }
+    
+    const totalTrades = totalWins + totalLosses;
+    const avgWinRate = totalTrades > 0 ? (totalWins / totalTrades) * 100 : 0;
+    const healthy = bottlenecks.length === 0 && avgWinRate > 45;
+    
+    return {
+      totalAssets: this.assetPerformance.size,
+      assetsWithPerformance: this.assetPerformance.size,
+      averageWinRate: avgWinRate,
+      bottlenecks,
+      healthy
+    };
   }
 
   /**
