@@ -14,6 +14,7 @@ import { resilienceSupervisor } from "./services/resilience-supervisor";
 import { derivAPI } from "./services/deriv-api";
 import { createDatabaseBackup } from "./database-backup";
 import { storage } from "./storage";
+import { derivTradeSync } from "./services/deriv-trade-sync";
 
 const app = express();
 app.use(express.json());
@@ -212,6 +213,11 @@ app.use((req, res, next) => {
       console.log('✅ Sistema de trades automáticos ativo e RODANDO!');
       console.log('📊 Scheduler a cada 60 segundos (1 minuto)');
       console.log('🔥 Sistema iniciará automaticamente sempre que o app for executado!');
+      
+      // 🔄 INICIAR SINCRONIZAÇÃO DE TRADES COM DERIV
+      console.log('🔄 Iniciando sincronização contínua com Deriv...');
+      derivTradeSync.startAutoSync();
+      console.log('✅ Sincronização de trades ATIVA - recebendo resultados em tempo real!');
       
       // Enviar heartbeat inicial
       await storage.updateSystemHeartbeat('scheduler', 'healthy', {

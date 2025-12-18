@@ -24,8 +24,8 @@ export class DerivTradeSync {
   private syncInterval: NodeJS.Timeout | null = null;
   private lastSyncTime: Map<string, number> = new Map(); // userId -> lastSync
   private syncInProgress: Set<string> = new Set(); // userId
-  private readonly SYNC_INTERVAL_MS = 30000; // Sincroniza a cada 30 segundos
-  private readonly CACHE_DURATION_MS = 60000; // Cache de 1 minuto por usuário
+  private readonly SYNC_INTERVAL_MS = 15000; // 🔄 ACELERADO: Sincroniza a cada 15 segundos
+  private readonly CACHE_DURATION_MS = 10000; // Cache reduzido para 10 segundos (mais real-time)
 
   constructor() {
     console.log('🔄 [DERIV SYNC] Sistema de sincronização de trades inicializado');
