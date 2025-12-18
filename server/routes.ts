@@ -1751,7 +1751,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // =========================== DERIV TOKEN MANAGEMENT ===========================
   
-  app.post('/api/trading/deriv-token', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+  app.post('/api/trading/deriv-token', isAuthenticated, asyncErrorHandler(async (req: any, res: any) => {
     const operationId = `DERIV_TOKEN_CONFIG_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
     const startTime = Date.now();
     
@@ -2058,7 +2058,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   }));
 
-  app.get('/api/trading/deriv-token', isAuthenticated, isTradingAuthorized, async (req, res) => {
+  app.get('/api/trading/deriv-token', isAuthenticated, async (req, res) => {
     try {
       if (!req.user?.id) {
         return res.status(401).json({ message: 'Usuário não autenticado' });
