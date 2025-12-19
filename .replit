@@ -61,6 +61,8 @@ DERIV_APP_ID = "101716"
 DERIV_API_KEY_DEMO = "v7j2uDsYHLfEjlj"
 SUPABASE_URL = "https://iporgioruideqodqzxjo.supabase.co"
 SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlwb3JnaW9ydWlkZXFvZHF6eGpvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYwMDkxNjgsImV4cCI6MjA4MTU4NTE2OH0.oydev7DW7peO7m5fzuWZ9PaYS_3buwYaW50UekIJbSU"
+DATABASE_URL = "postgresql://neondb_owner:npg_0jaPdFiLS2wr@ep-solitary-violet-ahxfbdgj-pooler.c-3.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+SESSION_SECRET = "+7DCSHJmNUxnv7r51rv5JX9T2GDfzeIS+RE+1Cx50GqQtp8AV6qNTxIcJMAj5dlbT85SS5MZocRCqMckGHWQrw=="
 
 [userenv.development]
 
