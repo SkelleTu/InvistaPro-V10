@@ -28,7 +28,6 @@ import {
   Hash,
   Infinity
 } from "lucide-react";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
@@ -80,8 +79,6 @@ export default function TradingSystemPage() {
   const { user } = useAuth();
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState("dashboard");
-  const [derivToken, setDerivToken] = useState("");
-  const [accountType, setAccountType] = useState<"demo" | "real">("demo");
 
   // Verificar acesso autorizado via backend centralizado
   const { data: accessCheck } = useQuery({
@@ -123,13 +120,6 @@ export default function TradingSystemPage() {
     refetchInterval: 2000, // Atualiza a cada 2 segundos para ver novas análises
   });
 
-  const { data: savedDerivToken } = useQuery<
-    { tokenConfigured: false } | 
-    { tokenConfigured: true; token: string; accountType: string; isActive: boolean; createdAt: string }
-  >({
-    queryKey: ["/api/trading/deriv-token"],
-    enabled: hasAccess
-  });
 
   // Queries em tempo real para atualizações automáticas
   const { data: realTimeData } = useQuery({
@@ -146,7 +136,7 @@ export default function TradingSystemPage() {
 
   const { data: liveBalance } = useQuery({
     queryKey: ["/api/trading/live-balance"],
-    enabled: hasAccess && !!savedDerivToken && (savedDerivToken as any)?.tokenConfigured === true,
+    enabled: hasAccess,
     refetchInterval: 2000, // Saldo atualizado a cada 2 segundos
   });
 
@@ -164,43 +154,8 @@ export default function TradingSystemPage() {
     refetchInterval: 2000, // Atualização a cada 2 segundos
   });
 
-  // Debug logging to identify the issue
-  useEffect(() => {
-    console.log('🔍 Trading System Debug:', {
-      hasAccess,
-      savedDerivToken,
-      tokenConfigured: (savedDerivToken as any)?.tokenConfigured,
-      liveBalanceEnabled: hasAccess && !!savedDerivToken && (savedDerivToken as any)?.tokenConfigured === true
-    });
-  }, [hasAccess, savedDerivToken]);
 
   // Mutations
-  const saveTokenMutation = useMutation({
-    mutationFn: async (data: { token: string; accountType: "demo" | "real" }) => {
-      const response = await apiRequest("/api/trading/deriv-token", {
-        method: "POST",
-        body: JSON.stringify(data)
-      });
-      return response.json();
-    },
-    onSuccess: () => {
-      toast({
-        title: "Token salvo com sucesso!",
-        description: "Conexão com Deriv estabelecida."
-      });
-      queryClient.invalidateQueries({ queryKey: ["/api/trading/account-info"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/trading/deriv-token"] });
-      setDerivToken(""); // Limpar campo após salvar
-    },
-    onError: (error: any) => {
-      toast({
-        title: "Erro ao salvar token",
-        description: error.message,
-        variant: "destructive"
-      });
-    }
-  });
-
   const updateConfigMutation = useMutation({
     mutationFn: async (mode: string) => {
       const response = await apiRequest("/api/trading/config", {
@@ -671,83 +626,6 @@ export default function TradingSystemPage() {
                     <li>Aumenta limites para modo demo</li>
                   </ul>
                 </div>
-              </CardContent>
-            </Card>
-
-            {/* Token Deriv */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Configuração da API Deriv</CardTitle>
-                <CardDescription>
-                  Configure seu token de API para conectar com a plataforma Deriv
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {/* Mostrar token salvo se existir */}
-                {savedDerivToken?.tokenConfigured && (
-                  <div className="p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
-                    <div className="flex items-center space-x-2 mb-2">
-                      <CheckCircle2 className="h-4 w-4 text-green-600" />
-                      <span className="text-sm font-medium text-green-800 dark:text-green-200">
-                        Token Configurado
-                      </span>
-                    </div>
-                    <p className="text-sm text-green-700 dark:text-green-300">
-                      Token: {savedDerivToken.token}
-                    </p>
-                    <p className="text-sm text-green-700 dark:text-green-300">
-                      Tipo de conta: {savedDerivToken.accountType === 'demo' ? 'Demo (Teste)' : 'Real (Produção)'}
-                    </p>
-                  </div>
-                )}
-
-                <div className="space-y-2">
-                  <Label htmlFor="token">
-                    {savedDerivToken?.tokenConfigured ? 'Novo Token da API (opcional)' : 'Token da API'}
-                  </Label>
-                  <Input
-                    id="token"
-                    type="password"
-                    placeholder={savedDerivToken?.tokenConfigured ? "Insira um novo token para substituir" : "Insira seu token da API Deriv"}
-                    value={derivToken}
-                    onChange={(e) => setDerivToken(e.target.value)}
-                    data-testid="input-deriv-token"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="account-type">Tipo de Conta</Label>
-                  <Select value={accountType} onValueChange={(value: "demo" | "real") => setAccountType(value)}>
-                    <SelectTrigger data-testid="select-account-type">
-                      <SelectValue placeholder="Selecione o tipo de conta" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="demo">Demo (Teste)</SelectItem>
-                      <SelectItem value="real">Real (Produção)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <Button 
-                  onClick={() => saveTokenMutation.mutate({ token: derivToken, accountType })}
-                  disabled={!derivToken || saveTokenMutation.isPending}
-                  data-testid="button-save-token"
-                >
-                  {saveTokenMutation.isPending ? 
-                    "Salvando..." : 
-                    savedDerivToken?.tokenConfigured ? "Atualizar Token" : "Salvar Token"
-                  }
-                </Button>
-                
-                {/* Limpar campo após salvar */}
-                {savedDerivToken?.tokenConfigured && (
-                  <Button 
-                    variant="outline"
-                    onClick={() => setDerivToken("")}
-                    disabled={saveTokenMutation.isPending}
-                    data-testid="button-clear-token"
-                  >
-                    Limpar Campo
-                  </Button>
-                )}
               </CardContent>
             </Card>
 
