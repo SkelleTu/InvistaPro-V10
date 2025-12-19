@@ -12,6 +12,7 @@ database-backups/
 **/DOCUMENT*CREDENCIAIS*.txt
 server/config/password-recovery/*.txt
 attached_assets/*.txt
+SECRETS-ESSENCIAIS.md
 
 # Database files
 *.db
