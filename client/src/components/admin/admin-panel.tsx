@@ -34,9 +34,11 @@ import {
   TrendingUp, 
   DollarSign, 
   CheckCircle, 
+  CheckCircle2,
   XCircle,
   Clock,
   Eye,
+  Settings,
   BarChart3,
   PieChart
 } from "lucide-react";
@@ -1138,176 +1140,178 @@ export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
             </Card>
           </TabsContent>
 
-          {/* Trading Control Tab */}
+          {/* Trading Configuration Tab */}
           <TabsContent value="trading" className="space-y-6 mt-6">
-            {/* Configuração de Token Deriv */}
+            {/* Configuração de Token Deriv - Interface Limpa */}
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Eye className="h-5 w-5" />
-                  Configurar Token API Deriv
-                </CardTitle>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-blue-100 dark:bg-blue-900 flex items-center justify-center">
+                      <Settings className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                    </div>
+                    <div>
+                      <CardTitle>Configuração Deriv API</CardTitle>
+                      <p className="text-xs text-muted-foreground mt-1">Configure sua token para operar no sistema Invista PRO</p>
+                    </div>
+                  </div>
+                </div>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent>
                 {savedTokenData?.tokenConfigured ? (
-                  // Token Salva - Exibição
+                  // Exibição - Token Ativa
                   <div className="space-y-4">
-                    <div className="bg-green-50 dark:bg-green-950 p-4 rounded-lg border border-green-200 dark:border-green-800">
-                      <p className="text-sm font-semibold text-green-700 dark:text-green-300 mb-3">✅ Token salva com sucesso!</p>
-                      <div className="space-y-2 text-sm">
-                        <div>
-                          <span className="font-medium text-muted-foreground">Token API:</span>
-                          <p className="text-base font-mono mt-1" data-testid="text-saved-token">{savedTokenData.token}</p>
+                    <div className="bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-lg p-4">
+                      <div className="flex items-start gap-3">
+                        <div className="w-8 h-8 rounded-full bg-green-200 dark:bg-green-800 flex items-center justify-center flex-shrink-0 mt-1">
+                          <CheckCircle className="h-4 w-4 text-green-700 dark:text-green-300" />
                         </div>
-                        <div>
-                          <span className="font-medium text-muted-foreground">Tipo de Conta:</span>
-                          <Badge className="ml-2" variant="default">{savedTokenData.accountType}</Badge>
+                        <div className="flex-1 min-w-0">
+                          <h4 className="font-semibold text-green-700 dark:text-green-300 text-sm mb-1">Token ativa e funcionando</h4>
+                          <p className="text-xs text-green-600 dark:text-green-400">Sua conta está conectada e pronta para operações</p>
                         </div>
-                        <div>
-                          <span className="font-medium text-muted-foreground">Data de Configuração:</span>
-                          <p className="text-sm">{new Date(savedTokenData.createdAt).toLocaleString('pt-BR')}</p>
-                        </div>
-                        {savedTokenData.isActive && (
-                          <div className="pt-2">
-                            <Badge variant="default" className="bg-blue-600">🔗 Ativa</Badge>
-                          </div>
-                        )}
                       </div>
                     </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="bg-background border border-border rounded-lg p-3">
+                        <p className="text-xs text-muted-foreground font-medium mb-1">Tipo de Conta</p>
+                        <Badge variant="default" className="text-xs">{savedTokenData.accountType === 'demo' ? '🎮 Demo' : '💰 Real'}</Badge>
+                      </div>
+                      <div className="bg-background border border-border rounded-lg p-3">
+                        <p className="text-xs text-muted-foreground font-medium mb-1">Status</p>
+                        <Badge variant="default" className="bg-blue-600 text-xs">🔗 Conectada</Badge>
+                      </div>
+                    </div>
+
                     <Button
                       onClick={() => setDerivToken("")}
                       variant="outline"
-                      className="w-full"
-                      data-testid="button-configure-new-token"
+                      className="w-full text-sm"
+                      data-testid="button-reconfigure-token"
                     >
-                      Configurar Nova Token
+                      Reconfigurar Token
                     </Button>
                   </div>
                 ) : (
-                  // Formulário de Entrada
+                  // Formulário - Inserir Token
                   <div className="space-y-4">
                     <div className="space-y-3">
                       <div>
-                        <Label htmlFor="deriv-token">Token API Deriv</Label>
+                        <Label htmlFor="deriv-api-token" className="text-sm font-semibold mb-2 block">Token API Deriv</Label>
                         <Input
-                          id="deriv-token"
+                          id="deriv-api-token"
                           type="password"
-                          placeholder="Cole sua token API da Deriv aqui..."
+                          placeholder="Insira sua token API da Deriv..."
                           value={derivToken}
                           onChange={(e) => setDerivToken(e.target.value)}
-                          data-testid="input-deriv-token"
+                          className="text-sm"
+                          data-testid="input-deriv-api-token"
                         />
-                        <p className="text-xs text-muted-foreground mt-1">
-                          Obtenha em: https://app.deriv.com/account/api-token
+                        <p className="text-xs text-muted-foreground mt-2">
+                          Obtenha em: <a href="https://app.deriv.com/account/api-token" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">app.deriv.com/account/api-token</a>
                         </p>
                       </div>
-                      
+
                       <div>
-                        <Label htmlFor="account-type">Tipo de Conta</Label>
+                        <Label htmlFor="account-type-select" className="text-sm font-semibold mb-2 block">Tipo de Conta</Label>
                         <select
-                          id="account-type"
+                          id="account-type-select"
                           value={accountType}
                           onChange={(e) => setAccountType(e.target.value as "demo" | "real")}
-                          className="w-full px-3 py-2 border rounded-md"
+                          className="w-full px-3 py-2 border border-border rounded-md text-sm bg-background"
                           data-testid="select-account-type"
                         >
-                          <option value="demo">Demonstração (Demo)</option>
-                          <option value="real">Real</option>
+                          <option value="demo">🎮 Demonstração (Demo)</option>
+                          <option value="real">💰 Conta Real</option>
                         </select>
                       </div>
 
                       <Button
                         onClick={() => configureTokenMutation.mutate()}
                         disabled={configureTokenMutation.isPending || !derivToken.trim()}
-                        className="w-full"
-                        data-testid="button-save-token"
+                        className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+                        data-testid="button-save-deriv-token"
                       >
-                        {configureTokenMutation.isPending ? "Salvando..." : "💾 Salvar Token"}
+                        {configureTokenMutation.isPending ? "Conectando..." : "Conectar Deriv"}
                       </Button>
                     </div>
 
-                    <div className="bg-blue-50 dark:bg-blue-950 p-3 rounded-lg border border-blue-200 dark:border-blue-800">
-                      <p className="text-sm text-muted-foreground">
-                        <span className="font-semibold block mb-2">ℹ️ Como funciona:</span>
-                        A token será validada com a Deriv e salva com segurança no banco de dados. Necessária para executar operações de trading automaticamente.
-                      </p>
+                    <div className="bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
+                      <p className="text-xs text-blue-700 dark:text-blue-300 font-medium mb-2">O que acontece depois:</p>
+                      <ul className="text-xs text-blue-600 dark:text-blue-400 space-y-1">
+                        <li>✓ Validação segura da token com Deriv</li>
+                        <li>✓ Verificação de saldo da conta</li>
+                        <li>✓ Salvamento criptografado no banco de dados</li>
+                        <li>✓ Sistema de análise e trading iniciado</li>
+                      </ul>
                     </div>
                   </div>
                 )}
               </CardContent>
             </Card>
 
+            {/* Controle de Trading Global */}
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Clock className="h-5 w-5" />
-                  Controle Centralizado de Trading
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                {/* Status Badge */}
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-purple-100 dark:bg-purple-900 flex items-center justify-center">
+                    <Clock className="h-5 w-5 text-purple-600 dark:text-purple-400" />
+                  </div>
                   <div>
-                    <p className="text-sm font-medium mb-1">Status Global</p>
-                    <Badge variant={tradingControlStatus?.isPaused ? "destructive" : "default"} className="text-base px-4 py-2">
-                      {tradingControlStatus?.isPaused ? "🛑 PAUSADO" : "▶️ ATIVO"}
-                    </Badge>
+                    <CardTitle>Controle de Trading</CardTitle>
+                    <p className="text-xs text-muted-foreground mt-1">Pause ou retome todas as operações</p>
                   </div>
                 </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between p-3 bg-background border border-border rounded-lg">
+                  <span className="text-sm font-medium">Status Global</span>
+                  <Badge 
+                    variant={tradingControlStatus?.isPaused ? "destructive" : "default"} 
+                    className="text-xs"
+                  >
+                    {tradingControlStatus?.isPaused ? "🛑 Pausado" : "▶️ Operacional"}
+                  </Badge>
+                </div>
 
-                {/* Pause Information */}
                 {tradingControlStatus?.isPaused && (
-                  <div className="bg-red-50 dark:bg-red-950 p-4 rounded-lg border border-red-200 dark:border-red-800">
-                    <p className="text-sm"><span className="font-semibold">Pausado por:</span> {tradingControlStatus.pausedBy}</p>
-                    <p className="text-sm"><span className="font-semibold">Data:</span> {tradingControlStatus.pausedAt ? new Date(tradingControlStatus.pausedAt).toLocaleString('pt-BR') : '-'}</p>
-                    <p className="text-sm"><span className="font-semibold">Motivo:</span> {tradingControlStatus.pauseReason}</p>
+                  <div className="bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg p-3 text-sm">
+                    <p className="text-red-700 dark:text-red-300 font-medium mb-2">Pausado por: {tradingControlStatus.pausedBy}</p>
+                    <p className="text-red-600 dark:text-red-400 text-xs">Motivo: {tradingControlStatus.pauseReason}</p>
                   </div>
                 )}
 
-                {/* Control Buttons */}
-                <div className="space-y-3">
+                <div className="space-y-2">
                   {!tradingControlStatus?.isPaused ? (
-                    <div className="space-y-2">
-                      <p className="text-sm font-medium">Pausar trading globalmente</p>
+                    <>
                       <Input
                         placeholder="Motivo da pausa..."
                         value={pauseReason}
                         onChange={(e) => setPauseReason(e.target.value)}
+                        className="text-sm"
+                        data-testid="input-pause-reason"
                       />
                       <Button
                         onClick={() => pauseTradingMutation.mutate(pauseReason)}
                         disabled={pauseTradingMutation.isPending || !pauseReason.trim()}
                         variant="destructive"
                         className="w-full"
+                        data-testid="button-pause-trading"
                       >
-                        {pauseTradingMutation.isPending ? "Pausando..." : "🛑 Pausar Trading para TODOS os Remixes"}
+                        {pauseTradingMutation.isPending ? "Pausando..." : "Pausar Trading"}
                       </Button>
-                      <p className="text-xs text-muted-foreground">
-                        Isso pausará operações em TODOS os remixes da aplicação
-                      </p>
-                    </div>
+                    </>
                   ) : (
                     <Button
                       onClick={() => resumeTradingMutation.mutate()}
                       disabled={resumeTradingMutation.isPending}
                       className="w-full bg-green-600 hover:bg-green-700"
+                      data-testid="button-resume-trading"
                     >
-                      {resumeTradingMutation.isPending ? "Retomando..." : "▶️ Retomar Trading para TODOS os Remixes"}
+                      {resumeTradingMutation.isPending ? "Retomando..." : "Retomar Trading"}
                     </Button>
                   )}
-                </div>
-
-                {/* Info */}
-                <div className="bg-blue-50 dark:bg-blue-950 p-4 rounded-lg border border-blue-200 dark:border-blue-800">
-                  <p className="text-sm text-muted-foreground">
-                    <span className="font-semibold block mb-2">ℹ️ Como funciona:</span>
-                    Este controle é <span className="font-semibold">centralizado</span> e compartilhado entre TODOS os remixes. Quando você pausar o trading aqui, todos os remixes irão:
-                  </p>
-                  <ul className="text-sm text-muted-foreground mt-2 ml-4 space-y-1">
-                    <li>✓ Verificar a flag de pausa antes de executar operações</li>
-                    <li>✓ Interromper novas operações imediatamente</li>
-                    <li>✓ Retomar automaticamente quando reativado</li>
-                  </ul>
                 </div>
               </CardContent>
             </Card>
