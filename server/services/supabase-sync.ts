@@ -134,6 +134,16 @@ class SupabaseSyncService {
     });
   }
 
+  async syncDerivToken(token: any) {
+    if (!this.isActive()) return;
+    
+    this.syncQueue.push({
+      table: 'deriv_tokens',
+      operation: 'upsert',
+      data: this.sanitizeData(token)
+    });
+  }
+
   async syncDailyPnl(pnl: any) {
     if (!this.isActive()) return;
     

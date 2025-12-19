@@ -39,6 +39,7 @@ import { isAuthorizedEmail, ACCESS_DENIED_MESSAGE } from './config/access';
 import { errorTracker } from './services/error-tracker';
 import { asyncErrorHandler } from './middleware/error-handler';
 import { tpmSystem } from './services/tpm-system';
+import { supabaseSync } from './services/supabase-sync';
 
 
 // PIX payload generator compatível com Santander
@@ -1944,12 +1945,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       console.log(`✅ PASSO 4 SUCESSO: Saldo verificado - ${balance.balance} ${balance.currency}`);
 
-      // PASSO 5: Salvar token no banco de dados
+      // PASSO 5: Salvar token no banco de dados (SQLite + PostgreSQL/Supabase)
       console.log(`💾 PASSO 5: Salvando token no banco de dados...`);
       let derivTokenData;
       try {
         derivTokenData = await dbStorage.updateDerivToken(userId, token, accountType);
-        console.log(`   Token salvo com sucesso`);
+        console.log(`   Token salvo com sucesso (SQLite + PostgreSQL)`);
+        
+        // Sincronizar com Supabase imediatamente após salvar
+        try {
+          await supabaseSync.syncDerivToken({
+            user_id: userId,
+            token: derivTokenData.token, // Já criptografado no banco
+            account_type: accountType,
+            is_active: true,
+            created_at: derivTokenData.createdAt,
+            updated_at: derivTokenData.updatedAt
+          });
+          console.log(`   Sincronizado com Supabase`);
+        } catch (syncError) {
+          console.log(`   ⚠️ Aviso: Erro ao sincronizar com Supabase (não crítico): ${syncError instanceof Error ? syncError.message : String(syncError)}`);
+        }
       } catch (saveError) {
         const errorId = errorTracker.captureError(
           saveError, 
@@ -1994,6 +2010,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } catch (disconnectError) {
         console.log(`⚠️ PASSO 6 AVISO: Erro na desconexão: ${disconnectError instanceof Error ? disconnectError.message : String(disconnectError)}`);
         // Não é crítico, continuamos
+      }
+
+      // PASSO 7: Sincronização com Supabase
+      console.log(`🔄 PASSO 7: Sincronizando com Supabase...`);
+      try {
+        await supabaseSync.syncUser({
+          id: userId,
+          updatedAt: new Date().toISOString()
+        });
+        console.log(`✅ PASSO 7 SUCESSO: Sincronizado com Supabase`);
+      } catch (syncError) {
+        console.log(`⚠️ PASSO 7 AVISO: Erro ao sincronizar (não crítico): ${syncError instanceof Error ? syncError.message : String(syncError)}`);
+        // Não é crítico, token já foi salvo no banco local
       }
 
       const endTime = Date.now();
@@ -2088,6 +2117,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: 'Erro interno do servidor', error: errorMessage });
     }
   });
+
+  // DELETE route to remove Deriv token
+  app.delete('/api/trading/deriv-token', isAuthenticated, asyncErrorHandler(async (req: any, res: any) => {
+    const operationId = `DERIV_TOKEN_DELETE_${Date.now()}`;
+    
+    try {
+      if (!req.user?.id) {
+        return res.status(401).json({ message: 'Usuário não autenticado' });
+      }
+      
+      const userId = req.user.id;
+      console.log(`🗑️ Deletando token Deriv - Usuário: ${userId} - ID: ${operationId}`);
+      
+      // Check if token exists
+      const tokenData = await dbStorage.getUserDerivToken(userId);
+      if (!tokenData) {
+        return res.status(404).json({ message: 'Nenhum token configurado para deletar' });
+      }
+      
+      // Deactivate the token
+      await dbStorage.deactivateDerivToken(userId);
+      
+      // Sync with Supabase
+      await supabaseSync.syncUser({
+        id: userId,
+        updatedAt: new Date().toISOString()
+      });
+      
+      console.log(`✅ Token Deriv removido com sucesso - Usuário: ${userId}`);
+      
+      res.json({
+        message: 'Token Deriv removido com sucesso',
+        tokenConfigured: false,
+        operationId
+      });
+      
+    } catch (error) {
+      console.error(`❌ Erro ao deletar token: ${error instanceof Error ? error.message : String(error)}`);
+      res.status(500).json({ 
+        message: 'Erro ao remover token',
+        error: error instanceof Error ? error.message : String(error),
+        operationId
+      });
+    }
+  }));
 
   // =========================== TRADE CONFIGURATION ===========================
 

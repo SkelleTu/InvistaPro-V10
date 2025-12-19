@@ -10,6 +10,7 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import Header from "@/components/dashboard/header";
+import DerivTokenSettings from "@/components/deriv-token-settings";
 import { 
   TrendingUp, 
   TrendingDown, 
@@ -560,6 +561,9 @@ export default function TradingSystemPage() {
 
           {/* Configurações Tab */}
           <TabsContent value="config" className="space-y-6">
+            {/* Configuração de Token Deriv */}
+            <DerivTokenSettings />
+
             {/* Diagnóstico e Correção Automática */}
             <Card className="border-yellow-200 dark:border-yellow-900">
               <CardHeader>
