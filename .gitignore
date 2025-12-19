@@ -63,3 +63,7 @@ Thumbs.db
 .idea/
 .vscode/
 *.sublime-*
+
+# Secrets management
+SECRETS-ESSENCIAIS.md
+COMO-USAR-DATABASE-URL.md
