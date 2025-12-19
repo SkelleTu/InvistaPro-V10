@@ -227,8 +227,20 @@ curl -X DELETE http://localhost:5000/api/trading/deriv-token
 - [ ] Notificações de expiração próxima
 - [ ] Rate limiting para proteção
 
+## Documentação Adicional
+
+### Referência Rápida de Chamadas da API
+Veja `DERIV_API_QUICK_REFERENCE.md` para:
+- Todas as chamadas WebSocket suportadas
+- Estrutura de requisição/resposta completa
+- Exemplos de cada operação
+- Símbolos disponíveis para Digit Differs
+- Configuração de tokens e escopos
+- Rate limits e timeouts
+
 ---
 
 **Data:** 19 de dezembro de 2025
 **Versão:** 1.0.0
 **Status:** ✅ Produção Pronto
+**Compatível com:** Deriv API v3 (WebSocket)

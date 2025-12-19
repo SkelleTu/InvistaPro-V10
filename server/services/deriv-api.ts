@@ -85,6 +85,7 @@ export class DerivAPIService extends EventEmitter {
   private digitDiffCache: string[] = [];
   private lastCacheUpdate: number = 0;
   private cacheExpireMs: number = 5 * 60 * 1000; // 5 minutos
+  private keepAliveInterval: NodeJS.Timeout | null = null;
 
   constructor() {
     super();
@@ -233,6 +234,7 @@ export class DerivAPIService extends EventEmitter {
               this.emit('connected');
               this.processMessageQueue();
               this.startHeartbeat();
+              this.startKeepAlive(); // Previne timeout de 2 minutos
               
               // Resubscrever todas as subscrições após reconexão
               // TEMPORARIAMENTE DESABILITADO: await this.resubscribeAll();
@@ -1082,9 +1084,31 @@ export class DerivAPIService extends EventEmitter {
     return ++this.connectionId;
   }
 
+  // Keep-Alive: Deriv closes connections after 2 minutes of inactivity
+  private startKeepAlive(): void {
+    this.stopKeepAlive(); // Clear any existing interval
+    
+    this.keepAliveInterval = setInterval(() => {
+      if (this.ws && this.ws.readyState === 1) { // 1 = OPEN
+        // Send time request as keep-alive ping
+        this.sendMessage({ time: 1 });
+      }
+    }, 30000); // Every 30 seconds (well before 2-minute timeout)
+    
+    console.log('✅ Keep-Alive iniciado (ping a cada 30 segundos)');
+  }
+
+  private stopKeepAlive(): void {
+    if (this.keepAliveInterval) {
+      clearInterval(this.keepAliveInterval);
+      this.keepAliveInterval = null;
+    }
+  }
+
   async disconnect(): Promise<void> {
     this.isConnected = false;
     this.activeSubscriptions.clear();
+    this.stopKeepAlive();
     
     if (this.ws) {
       this.ws.close();

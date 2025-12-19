@@ -232,7 +232,7 @@ export default function DerivTokenSettings() {
                 </button>
               </div>
               <p className="text-xs text-muted-foreground">
-                Obtenha sua token em: https://api.deriv.com/dashboard/ → API Tokens
+                Obtenha sua token em: https://api.deriv.com → API Tokens
               </p>
             </div>
 
@@ -265,16 +265,26 @@ export default function DerivTokenSettings() {
 
             <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3 space-y-2">
               <p className="text-sm font-medium text-blue-800 dark:text-blue-200">
-                Como obter sua token:
+                Como obter sua token (Passo-a-passo):
               </p>
               <ol className="text-xs text-blue-700 dark:text-blue-300 space-y-1 list-decimal list-inside">
-                <li>Acesse https://api.deriv.com/dashboard/</li>
+                <li>Acesse https://api.deriv.com</li>
                 <li>Faça login com sua conta Deriv</li>
-                <li>Vá para "API Tokens"</li>
+                <li>Clique em "API Tokens" ou "Account" → "API Tokens"</li>
                 <li>Clique em "Create new token"</li>
-                <li>Selecione os escopos necessários (Admin, Trade, Read)</li>
-                <li>Copie a token e cole aqui</li>
+                <li>Selecione a conta (CR para trading real)</li>
+                <li>Ative os escopos: <strong>Trade</strong> + <strong>Read</strong></li>
+                <li>Copie a token e cole aqui imediatamente (não será mostrada novamente!)</li>
               </ol>
+              <div className="bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-800 rounded p-2 mt-2">
+                <p className="text-xs text-yellow-800 dark:text-yellow-200">
+                  ⚠️ <strong>Escopos Necessários:</strong>
+                </p>
+                <ul className="text-xs text-yellow-700 dark:text-yellow-300 mt-1 space-y-0.5 list-disc list-inside">
+                  <li><strong>Trade</strong> - Executar operações de trading</li>
+                  <li><strong>Read</strong> - Ver saldo e dados da conta</li>
+                </ul>
+              </div>
             </div>
 
             <Button
