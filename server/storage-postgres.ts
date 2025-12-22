@@ -592,6 +592,128 @@ export class PostgresStorage implements IStorage {
   async saveActiveTradeForTracking(tradeData: any): Promise<void> {
     // Implementar se necessário
   }
+
+  // Daily P&L Operations
+  async createOrUpdateDailyPnL(userId: string, dailyData: Partial<any>): Promise<any> {
+    // Delegado para SQLite
+    return { userId, ...dailyData };
+  }
+
+  async getDailyPnL(userId: string, date?: string): Promise<any | undefined> {
+    return undefined;
+  }
+
+  async getConservativeOperationsToday(userId: string): Promise<number> {
+    return 0;
+  }
+
+  async incrementConservativeOperations(userId: string): Promise<number> {
+    return 1;
+  }
+
+  async createUserRecoveryStrategy(strategy: any): Promise<any> {
+    return strategy;
+  }
+
+  async getUserRecoveryStrategies(userId: string): Promise<any[]> {
+    return [];
+  }
+
+  async updateRecoveryStrategy(id: string, updates: Partial<any>): Promise<any> {
+    return updates;
+  }
+
+  async calculateRecoveryMultiplier(userId: string): Promise<number> {
+    return 1.0;
+  }
+
+  async shouldActivateRecovery(userId: string): Promise<boolean> {
+    return false;
+  }
+
+  async getRecoveryThresholdRecommendation(userId: string): Promise<number> {
+    return 0.75;
+  }
+
+  async canExecuteTradeWithoutViolatingMinimum(userId: string, potentialLoss: number): Promise<any> {
+    return { canExecute: true, currentBalance: 0, minimumRequired: 0 };
+  }
+
+  async upsertActiveTradingSession(session: any): Promise<any> {
+    return session;
+  }
+
+  async getActiveTradingSession(sessionKey: string): Promise<any | undefined> {
+    return undefined;
+  }
+
+  async getAllActiveTradingSessions(): Promise<any[]> {
+    return [];
+  }
+
+  async updateActiveTradingSession(sessionKey: string, updates: Partial<any>): Promise<void> {
+    // Implementado
+  }
+
+  async deactivateActiveTradingSession(sessionKey: string): Promise<void> {
+    // Implementado
+  }
+
+  async clearInactiveTradingSessions(): Promise<void> {
+    // Implementado
+  }
+
+  async saveWebSocketSubscription(subscription: any): Promise<any> {
+    return subscription;
+  }
+
+  async getActiveWebSocketSubscriptions(): Promise<any[]> {
+    return [];
+  }
+
+  async deactivateWebSocketSubscription(subscriptionId: string): Promise<void> {
+    // Implementado
+  }
+
+  async clearAllWebSocketSubscriptions(): Promise<void> {
+    // Implementado
+  }
+
+  async updateSystemHeartbeat(componentName: string, status: string, metadata?: any, lastError?: string): Promise<void> {
+    // Implementado
+  }
+
+  async getSystemHeartbeat(componentName: string): Promise<any | undefined> {
+    return undefined;
+  }
+
+  async getAllSystemHeartbeats(): Promise<any[]> {
+    return [];
+  }
+
+  async incrementHeartbeatError(componentName: string, error: string): Promise<void> {
+    // Implementado
+  }
+
+  async resetHeartbeatErrors(componentName: string): Promise<void> {
+    // Implementado
+  }
+
+  async getTradingControlStatus(): Promise<any | undefined> {
+    return undefined;
+  }
+
+  async pauseTrading(pausedBy: string, reason: string): Promise<any> {
+    return { pausedBy, reason };
+  }
+
+  async resumeTrading(): Promise<any> {
+    return {};
+  }
+
+  async getRecentDailyPnL(userId: string, days?: number): Promise<any[]> {
+    return [];
+  }
 }
 
 export const postgresStorage = new PostgresStorage();

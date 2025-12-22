@@ -144,7 +144,7 @@ export class DualStorage implements IStorage {
   async getUser(id: string): Promise<User | undefined> {
     return this.dualRead(
       () => this.sqlite.getUser(id),
-      () => this.postgres.getUser(id),
+      () => this.postgres!.getUser(id),
       `getUser(${id})`
     );
   }
@@ -152,7 +152,7 @@ export class DualStorage implements IStorage {
   async getUserByEmail(email: string): Promise<User | undefined> {
     return this.dualRead(
       () => this.sqlite.getUserByEmail(email),
-      () => this.postgres.getUserByEmail(email),
+      () => this.postgres!.getUserByEmail(email),
       `getUserByEmail(${email})`
     );
   }
@@ -160,7 +160,7 @@ export class DualStorage implements IStorage {
   async getUserByCpf(cpf: string): Promise<User | undefined> {
     return this.dualRead(
       () => this.sqlite.getUserByCpf(cpf),
-      () => this.postgres.getUserByCpf(cpf),
+      () => this.postgres!.getUserByCpf(cpf),
       `getUserByCpf(${cpf})`
     );
   }
@@ -168,7 +168,7 @@ export class DualStorage implements IStorage {
   async getAllUsers(): Promise<User[]> {
     return this.dualRead(
       () => this.sqlite.getAllUsers(),
-      () => this.postgres.getAllUsers(),
+      () => this.postgres!.getAllUsers(),
       'getAllUsers'
     );
   }
@@ -176,7 +176,7 @@ export class DualStorage implements IStorage {
   async createUser(userData: InsertUser): Promise<User> {
     return this.dualWrite(
       () => this.sqlite.createUser(userData),
-      () => this.postgres.createUser(userData),
+      () => this.postgres!.createUser(userData),
       'createUser'
     );
   }
@@ -184,7 +184,7 @@ export class DualStorage implements IStorage {
   async updateUser(id: string, data: UpdateUser): Promise<User> {
     return this.dualWrite(
       () => this.sqlite.updateUser(id, data),
-      () => this.postgres.updateUser(id, data),
+      () => this.postgres!.updateUser(id, data),
       `updateUser(${id})`
     );
   }
@@ -192,7 +192,7 @@ export class DualStorage implements IStorage {
   async updateVerificationCode(userId: string, code: string, expiresAt: Date): Promise<void> {
     await this.dualWrite(
       () => this.sqlite.updateVerificationCode(userId, code, expiresAt),
-      () => this.postgres.updateVerificationCode(userId, code, expiresAt),
+      () => this.postgres!.updateVerificationCode(userId, code, expiresAt),
       `updateVerificationCode(${userId})`
     );
   }
@@ -200,7 +200,7 @@ export class DualStorage implements IStorage {
   async verifyPhone(userId: string): Promise<User> {
     return this.dualWrite(
       () => this.sqlite.verifyPhone(userId),
-      () => this.postgres.verifyPhone(userId),
+      () => this.postgres!.verifyPhone(userId),
       `verifyPhone(${userId})`
     );
   }
@@ -208,16 +208,15 @@ export class DualStorage implements IStorage {
   async approveAccount(userId: string, approvedBy: string): Promise<User> {
     return this.dualWrite(
       () => this.sqlite.approveAccount(userId, approvedBy),
-      () => this.postgres.approveAccount(userId, approvedBy),
+      () => this.postgres!.approveAccount(userId, approvedBy),
       `approveAccount(${userId})`
     );
   }
 
-  // MOVEMENT OPERATIONS
   async createMovimento(movimento: InsertMovimento): Promise<Movimento> {
     return this.dualWrite(
       () => this.sqlite.createMovimento(movimento),
-      () => this.postgres.createMovimento(movimento),
+      () => this.postgres!.createMovimento(movimento),
       'createMovimento'
     );
   }
@@ -225,7 +224,7 @@ export class DualStorage implements IStorage {
   async getUserMovimentos(userId: string, limit?: number): Promise<Movimento[]> {
     return this.dualRead(
       () => this.sqlite.getUserMovimentos(userId, limit),
-      () => this.postgres.getUserMovimentos(userId, limit),
+      () => this.postgres!.getUserMovimentos(userId, limit),
       `getUserMovimentos(${userId})`
     );
   }
@@ -234,11 +233,10 @@ export class DualStorage implements IStorage {
     return this.sqlite.calcularRendimento(saldo);
   }
 
-  // DOCUMENT OPERATIONS
   async createDocumento(documento: InsertDocumento): Promise<Documento> {
     return this.dualWrite(
       () => this.sqlite.createDocumento(documento),
-      () => this.postgres.createDocumento(documento),
+      () => this.postgres!.createDocumento(documento),
       'createDocumento'
     );
   }
@@ -246,7 +244,7 @@ export class DualStorage implements IStorage {
   async getUserDocumentos(userId: string): Promise<Documento[]> {
     return this.dualRead(
       () => this.sqlite.getUserDocumentos(userId),
-      () => this.postgres.getUserDocumentos(userId),
+      () => this.postgres!.getUserDocumentos(userId),
       `getUserDocumentos(${userId})`
     );
   }
@@ -254,16 +252,15 @@ export class DualStorage implements IStorage {
   async updateDocumentoStatus(id: string, status: string, motivoRejeicao?: string): Promise<Documento> {
     return this.dualWrite(
       () => this.sqlite.updateDocumentoStatus(id, status, motivoRejeicao),
-      () => this.postgres.updateDocumentoStatus(id, status, motivoRejeicao),
+      () => this.postgres!.updateDocumentoStatus(id, status, motivoRejeicao),
       `updateDocumentoStatus(${id})`
     );
   }
 
-  // DERIV TOKEN OPERATIONS
   async createDerivToken(token: InsertDerivToken): Promise<DerivToken> {
     return this.dualWrite(
       () => this.sqlite.createDerivToken(token),
-      () => this.postgres.createDerivToken(token),
+      () => this.postgres!.createDerivToken(token),
       'createDerivToken'
     );
   }
@@ -271,7 +268,7 @@ export class DualStorage implements IStorage {
   async getUserDerivToken(userId: string): Promise<DerivToken | undefined> {
     return this.dualRead(
       () => this.sqlite.getUserDerivToken(userId),
-      () => this.postgres.getUserDerivToken(userId),
+      () => this.postgres!.getUserDerivToken(userId),
       `getUserDerivToken(${userId})`
     );
   }
@@ -279,7 +276,7 @@ export class DualStorage implements IStorage {
   async updateDerivToken(userId: string, token: string, accountType: string): Promise<DerivToken> {
     return this.dualWrite(
       () => this.sqlite.updateDerivToken(userId, token, accountType),
-      () => this.postgres.updateDerivToken(userId, token, accountType),
+      () => this.postgres!.updateDerivToken(userId, token, accountType),
       `updateDerivToken(${userId})`
     );
   }
@@ -287,16 +284,15 @@ export class DualStorage implements IStorage {
   async deactivateDerivToken(userId: string): Promise<void> {
     await this.dualWrite(
       () => this.sqlite.deactivateDerivToken(userId),
-      () => this.postgres.deactivateDerivToken(userId),
+      () => this.postgres!.deactivateDerivToken(userId),
       `deactivateDerivToken(${userId})`
     );
   }
 
-  // TRADE CONFIGURATION OPERATIONS
   async createTradeConfig(config: InsertTradeConfiguration): Promise<TradeConfiguration> {
     return this.dualWrite(
       () => this.sqlite.createTradeConfig(config),
-      () => this.postgres.createTradeConfig(config),
+      () => this.postgres!.createTradeConfig(config),
       'createTradeConfig'
     );
   }
@@ -304,15 +300,23 @@ export class DualStorage implements IStorage {
   async getUserTradeConfig(userId: string): Promise<TradeConfiguration | undefined> {
     return this.dualRead(
       () => this.sqlite.getUserTradeConfig(userId),
-      () => this.postgres.getUserTradeConfig(userId),
+      () => this.postgres!.getUserTradeConfig(userId),
       `getUserTradeConfig(${userId})`
+    );
+  }
+
+  async getAllTradeConfigurations(): Promise<TradeConfiguration[]> {
+    return this.dualRead(
+      () => this.sqlite.getAllTradeConfigurations(),
+      () => this.postgres!.getAllTradeConfigurations(),
+      'getAllTradeConfigurations'
     );
   }
 
   async updateTradeConfig(userId: string, mode: string): Promise<TradeConfiguration> {
     return this.dualWrite(
       () => this.sqlite.updateTradeConfig(userId, mode),
-      () => this.postgres.updateTradeConfig(userId, mode),
+      () => this.postgres!.updateTradeConfig(userId, mode),
       `updateTradeConfig(${userId})`
     );
   }
@@ -320,16 +324,31 @@ export class DualStorage implements IStorage {
   async deactivateAllTradeConfigs(userId: string): Promise<void> {
     await this.dualWrite(
       () => this.sqlite.deactivateAllTradeConfigs(userId),
-      () => this.postgres.deactivateAllTradeConfigs(userId),
+      () => this.postgres!.deactivateAllTradeConfigs(userId),
       `deactivateAllTradeConfigs(${userId})`
     );
   }
 
-  // TRADE OPERATIONS
+  async reactivateTradeConfiguration(id: string): Promise<void> {
+    await this.dualWrite(
+      () => this.sqlite.reactivateTradeConfiguration(id),
+      () => this.postgres!.reactivateTradeConfiguration(id),
+      `reactivateTradeConfiguration(${id})`
+    );
+  }
+
+  async deactivateTradeConfiguration(id: string): Promise<void> {
+    await this.dualWrite(
+      () => this.sqlite.deactivateTradeConfiguration(id),
+      () => this.postgres!.deactivateTradeConfiguration(id),
+      `deactivateTradeConfiguration(${id})`
+    );
+  }
+
   async createTradeOperation(operation: InsertTradeOperation): Promise<TradeOperation> {
     return this.dualWrite(
       () => this.sqlite.createTradeOperation(operation),
-      () => this.postgres.createTradeOperation(operation),
+      () => this.postgres!.createTradeOperation(operation),
       'createTradeOperation'
     );
   }
@@ -337,7 +356,7 @@ export class DualStorage implements IStorage {
   async getUserTradeOperations(userId: string, limit?: number): Promise<TradeOperation[]> {
     return this.dualRead(
       () => this.sqlite.getUserTradeOperations(userId, limit),
-      () => this.postgres.getUserTradeOperations(userId, limit),
+      () => this.postgres!.getUserTradeOperations(userId, limit),
       `getUserTradeOperations(${userId})`
     );
   }
@@ -345,7 +364,7 @@ export class DualStorage implements IStorage {
   async updateTradeOperation(id: string, updates: Partial<TradeOperation>): Promise<TradeOperation> {
     return this.dualWrite(
       () => this.sqlite.updateTradeOperation(id, updates),
-      () => this.postgres.updateTradeOperation(id, updates),
+      () => this.postgres!.updateTradeOperation(id, updates),
       `updateTradeOperation(${id})`
     );
   }
@@ -353,16 +372,15 @@ export class DualStorage implements IStorage {
   async getActiveTradeOperations(userId: string): Promise<TradeOperation[]> {
     return this.dualRead(
       () => this.sqlite.getActiveTradeOperations(userId),
-      () => this.postgres.getActiveTradeOperations(userId),
+      () => this.postgres!.getActiveTradeOperations(userId),
       `getActiveTradeOperations(${userId})`
     );
   }
 
-  // AI LOGS OPERATIONS
   async createAiLog(log: InsertAiLog): Promise<AiLog> {
     return this.dualWrite(
       () => this.sqlite.createAiLog(log),
-      () => this.postgres.createAiLog(log),
+      () => this.postgres!.createAiLog(log),
       'createAiLog'
     );
   }
@@ -370,7 +388,7 @@ export class DualStorage implements IStorage {
   async getUserAiLogs(userId: string, limit?: number): Promise<AiLog[]> {
     return this.dualRead(
       () => this.sqlite.getUserAiLogs(userId, limit),
-      () => this.postgres.getUserAiLogs(userId, limit),
+      () => this.postgres!.getUserAiLogs(userId, limit),
       `getUserAiLogs(${userId})`
     );
   }
@@ -378,16 +396,15 @@ export class DualStorage implements IStorage {
   async getLatestAiAnalysis(userId: string): Promise<AiLog[]> {
     return this.dualRead(
       () => this.sqlite.getLatestAiAnalysis(userId),
-      () => this.postgres.getLatestAiAnalysis(userId),
+      () => this.postgres!.getLatestAiAnalysis(userId),
       `getLatestAiAnalysis(${userId})`
     );
   }
 
-  // MARKET DATA OPERATIONS
   async upsertMarketData(data: InsertMarketData): Promise<MarketData> {
     return this.dualWrite(
       () => this.sqlite.upsertMarketData(data),
-      () => this.postgres.upsertMarketData(data),
+      () => this.postgres!.upsertMarketData(data),
       'upsertMarketData'
     );
   }
@@ -395,7 +412,7 @@ export class DualStorage implements IStorage {
   async getMarketData(symbol: string): Promise<MarketData | undefined> {
     return this.dualRead(
       () => this.sqlite.getMarketData(symbol),
-      () => this.postgres.getMarketData(symbol),
+      () => this.postgres!.getMarketData(symbol),
       `getMarketData(${symbol})`
     );
   }
@@ -403,22 +420,15 @@ export class DualStorage implements IStorage {
   async getAllMarketData(): Promise<MarketData[]> {
     return this.dualRead(
       () => this.sqlite.getAllMarketData(),
-      () => this.postgres.getAllMarketData(),
+      () => this.postgres!.getAllMarketData(),
       'getAllMarketData'
     );
   }
 
-  // TRADING ANALYTICS
-  async getTradingStats(userId: string): Promise<{
-    totalTrades: number;
-    wonTrades: number;
-    lostTrades: number;
-    totalProfit: number;
-    winRate: number;
-  }> {
+  async getTradingStats(userId: string): Promise<{ totalTrades: number; wonTrades: number; lostTrades: number; totalProfit: number; winRate: number }> {
     return this.dualRead(
       () => this.sqlite.getTradingStats(userId),
-      () => this.postgres.getTradingStats(userId),
+      () => this.postgres!.getTradingStats(userId),
       `getTradingStats(${userId})`
     );
   }
@@ -426,7 +436,7 @@ export class DualStorage implements IStorage {
   async getActiveTradesCount(userId: string): Promise<number> {
     return this.dualRead(
       () => this.sqlite.getActiveTradesCount(userId),
-      () => this.postgres.getActiveTradesCount(userId),
+      () => this.postgres!.getActiveTradesCount(userId),
       `getActiveTradesCount(${userId})`
     );
   }
@@ -434,7 +444,7 @@ export class DualStorage implements IStorage {
   async getDailyLossCount(userId: string, date: string): Promise<number> {
     return this.dualRead(
       () => this.sqlite.getDailyLossCount(userId, date),
-      () => this.postgres.getDailyLossCount(userId, date),
+      () => this.postgres!.getDailyLossCount(userId, date),
       `getDailyLossCount(${userId})`
     );
   }
@@ -442,7 +452,7 @@ export class DualStorage implements IStorage {
   async saveActiveTradeForTracking(tradeData: any): Promise<void> {
     await this.dualWrite(
       () => this.sqlite.saveActiveTradeForTracking(tradeData),
-      () => this.postgres.saveActiveTradeForTracking(tradeData),
+      () => this.postgres!.saveActiveTradeForTracking(tradeData),
       'saveActiveTradeForTracking'
     );
   }

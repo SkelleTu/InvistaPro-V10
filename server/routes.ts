@@ -23,6 +23,7 @@ import adminRoutes from "./routes/admin";
 import fetch from "node-fetch";
 import express from "express";
 import { keepAliveSystem } from "./services/keep-alive-system";
+import { marketDataCollector } from "./services/market-data-collector";
 import { 
   derivTokenConfigSchema, 
   tradeModeConfigSchema, 
@@ -2422,7 +2423,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const supportedSymbols = marketDataCollector.getSupportedSymbols();
 
       // Agrupar ativos por categoria
-      const assetsByCategory: { [key: string]: typeof allAssets } = {};
+      const assetsByCategory: { [key: string]: (typeof allAssets) } = {};
       
       allAssets.forEach((asset: any) => {
         const category = asset.market_display_name || 'Outros';
@@ -2459,7 +2460,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           })),
           moreAssets: Math.max(0, assets.length - 10)
         })),
-        supportedSymbolsList: supportedSymbols.slice(0, 50).map((symbol: string) => ({
+        supportedSymbolsList: supportedSymbols.slice(0, 50).map((symbol) => ({
           symbol,
           info: marketDataCollector.getAssetInfo(symbol)
         })),
