@@ -64,12 +64,13 @@ export default function DerivTokenSettings() {
     onSuccess: (data) => {
       toast({
         title: "Token configurado com sucesso!",
-        description: `Conta ${data.accountType} conectada - Saldo: ${data.balance} ${data.currency}`,
+        description: `Conta ${data?.accountType === 'demo' ? 'Demo (Teste)' : 'Real (Vivendo)'} conectada`,
         duration: 5000,
       });
       setTokenInput("");
       setIsChangingToken(false);
       queryClient.invalidateQueries({ queryKey: ["/api/trading/deriv-token"] });
+      refetch();
     },
     onError: (error: any) => {
       toast({

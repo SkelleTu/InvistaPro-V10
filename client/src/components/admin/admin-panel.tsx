@@ -195,7 +195,7 @@ export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
     onSuccess: (data) => {
       toast({
         title: "Token Deriv configurado com sucesso!",
-        description: `Conta ${data.accountType} | Saldo: ${data.balance} ${data.currency}`,
+        description: `Conta ${data?.accountType === 'demo' ? 'Demo (Teste)' : 'Real (Vivendo)'} conectada`,
       });
       setDerivToken("");
       setAccountType("demo");

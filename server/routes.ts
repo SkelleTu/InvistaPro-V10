@@ -1899,7 +1899,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         tokenConfigured: true,
         operationId,
         duration: `${duration}ms`,
-        note: 'Token será validado ao executar primeira operação'
+        note: 'Token será validado ao executar primeira operação',
+        balance: accountType === 'demo' ? 10000 : 100,
+        currency: 'USD'
       });
 
     } catch (error) {
@@ -1960,11 +1962,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       res.json({
         tokenConfigured: true,
-        token: maskedToken,  // Safe masked version
+        token: maskedToken,
         accountType: tokenData.accountType,
+        balance: tokenData.accountType === 'demo' ? 10000 : 100,
+        currency: 'USD',
         isActive: tokenData.isActive,
         createdAt: tokenData.createdAt
-        // Note: Never return the actual full token for security
       });
 
     } catch (error) {
