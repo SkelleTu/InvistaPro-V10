@@ -457,6 +457,38 @@ export class DualStorage implements IStorage {
     );
   }
 
+  async createOrUpdateDailyPnL(userId: string, dailyData: Partial<any>): Promise<any> {
+    return this.dualWrite(
+      () => this.sqlite.createOrUpdateDailyPnL(userId, dailyData),
+      () => this.postgres!.createOrUpdateDailyPnL(userId, dailyData),
+      'createOrUpdateDailyPnL'
+    );
+  }
+
+  async getAllTradeConfigurations(): Promise<any[]> {
+    return this.dualRead(
+      () => this.sqlite.getAllTradeConfigurations(),
+      () => this.postgres!.getAllTradeConfigurations(),
+      'getAllTradeConfigurations'
+    );
+  }
+
+  async reactivateTradeConfiguration(id: string): Promise<void> {
+    await this.dualWrite(
+      () => this.sqlite.reactivateTradeConfiguration(id),
+      () => this.postgres!.reactivateTradeConfiguration(id),
+      'reactivateTradeConfiguration'
+    );
+  }
+
+  async deactivateTradeConfiguration(id: string): Promise<void> {
+    await this.dualWrite(
+      () => this.sqlite.deactivateTradeConfiguration(id),
+      () => this.postgres!.deactivateTradeConfiguration(id),
+      'deactivateTradeConfiguration'
+    );
+  }
+
   /**
    * Sistema de reconciliação - sincroniza dados entre os bancos
    * Pode ser chamado periodicamente ou após detectar inconsistências
