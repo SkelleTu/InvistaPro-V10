@@ -69,7 +69,10 @@ export default function DerivTokenSettings() {
       });
       setTokenInput("");
       setIsChangingToken(false);
+      // Invalidate multiple keys to ensure UI updates
       queryClient.invalidateQueries({ queryKey: ["/api/trading/deriv-token"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/trading/account-info"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/trading/balance"] });
       refetch();
     },
     onError: (error: any) => {

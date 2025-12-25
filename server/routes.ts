@@ -1820,43 +1820,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // PASSO 3: Teste de conexão com Deriv
       console.log(`🌐 PASSO 3: Testando conexão com Deriv API...`);
-      console.log(`   Token: ${token.substring(0, 10)}... (parcial)`);
+      console.log(`   Token: ${token.substring(0, 5)}... (parcial)`);
       console.log(`   Account Type: ${accountType}`);
-      console.log(`   Endpoint: wss://ws.derivws.com/websockets/v3`);
       
-      let connected;
+      let connected = false;
       try {
+        // Garantir que não há conexão pendente antes de tentar uma nova
+        await derivAPI.disconnect();
+        
+        // Tentar conectar com timeout curto para feedback rápido
         connected = await derivAPI.connect(token, accountType, operationId);
         console.log(`   Resultado da conexão: ${connected}`);
       } catch (connectionError: any) {
-        const errorId = errorTracker.captureError(
-          connectionError, 
-          'ERROR', 
-          'WEBSOCKET',
-          {
-            ...errorTracker.createContextFromRequest(req),
-            requestBody: { 
-              token: token.substring(0, 10) + '...',
-              accountType,
-              operationId, 
-              step: 'DERIV_CONNECTION',
-              connectionDetails: {
-                endpoint: 'wss://ws.derivws.com/websockets/v3',
-                headers: { Origin: 'https://app.deriv.com' }
-              }
-            }
-          }
-        );
-        
-        console.log(`❌ PASSO 3 FALHOU: Erro na conexão - Error ID: ${errorId}`);
-        console.log(`   Detalhes do erro: ${connectionError.message}`);
-        console.log(`   Stack: ${connectionError.stack}`);
-        
+        console.log(`❌ PASSO 3 FALHOU: Erro na conexão - ${connectionError.message}`);
         return res.status(400).json({ 
-          message: 'Token inválido ou erro de conexão com Deriv',
-          errorId,
-          operationId,
-          details: connectionError.message
+          message: `Erro de conexão: ${connectionError.message}`,
+          operationId
         });
       }
       

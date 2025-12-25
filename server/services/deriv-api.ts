@@ -1109,9 +1109,17 @@ export class DerivAPIService extends EventEmitter {
     this.isConnected = false;
     this.activeSubscriptions.clear();
     this.stopKeepAlive();
+    this.stopHeartbeat();
     
     if (this.ws) {
-      this.ws.close();
+      this.ws.removeAllListeners();
+      if (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) {
+        try {
+          this.ws.close();
+        } catch (e) {
+          // ignore
+        }
+      }
       this.ws = null;
     }
     
