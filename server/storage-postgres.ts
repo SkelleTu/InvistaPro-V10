@@ -281,30 +281,31 @@ export class PostgresStorage implements IStorage {
   }
 
   async updateDerivToken(userId: string, token: string, accountType: string): Promise<DerivToken> {
-    return await db.transaction(async (tx) => {
-      await tx
-        .update(pgSchema.derivTokens)
-        .set({
-          isActive: false,
-          updatedAt: new Date(),
-        })
-        .where(eq(pgSchema.derivTokens.userId, userId));
-      
-      const [newToken] = await tx
-        .insert(pgSchema.derivTokens)
-        .values({
-          userId,
-          token: EncryptionService.encrypt(token),
-          accountType,
-          isActive: true,
-        })
-        .returning();
-      
-      return {
-        ...newToken,
-        token: EncryptionService.decrypt(newToken.token)
-      } as DerivToken;
-    });
+    // Deactivate all existing tokens first
+    await db
+      .update(pgSchema.derivTokens)
+      .set({
+        isActive: false,
+        updatedAt: new Date(),
+      })
+      .where(eq(pgSchema.derivTokens.userId, userId));
+    
+    // Create new active token with encryption
+    const [newToken] = await db
+      .insert(pgSchema.derivTokens)
+      .values({
+        userId,
+        token: EncryptionService.encrypt(token),
+        accountType,
+        isActive: true,
+      })
+      .returning();
+    
+    // Decrypt token for return value
+    return {
+      ...newToken,
+      token: EncryptionService.decrypt(newToken.token)
+    } as DerivToken;
   }
 
   async deactivateDerivToken(userId: string): Promise<void> {
