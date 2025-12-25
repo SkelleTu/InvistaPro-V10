@@ -42,7 +42,7 @@ export class DualStorage implements IStorage {
     this.sqlite = new DatabaseStorage();
     
     // Modo dual ativado - sincroniza SQLite com PostgreSQL (Neon)
-    const FORCE_SQLITE_ONLY = false;
+    const FORCE_SQLITE_ONLY = true;
     
     this.postgres = (isPostgresAvailable && !FORCE_SQLITE_ONLY) ? new PostgresStorage() : null;
     this.isDualMode = isPostgresAvailable && !FORCE_SQLITE_ONLY;
