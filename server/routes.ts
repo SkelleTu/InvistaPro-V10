@@ -40,8 +40,6 @@ import { isAuthorizedEmail, ACCESS_DENIED_MESSAGE } from './config/access';
 import { errorTracker } from './services/error-tracker';
 import { asyncErrorHandler } from './middleware/error-handler';
 import { tpmSystem } from './services/tpm-system';
-import { supabaseSync } from './services/supabase-sync';
-
 
 // PIX payload generator compatível com Santander
 function generatePixPayload(data: {
@@ -2070,7 +2068,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // DELETE route to remove Deriv token
-  app.delete('/api/trading/deriv-token', isAuthenticated, asyncErrorHandler(async (req: any, res: any) => {
+  app.delete('/api/trading/deriv-token', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
     const operationId = `DERIV_TOKEN_DELETE_${Date.now()}`;
     
     try {
@@ -2089,12 +2087,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Deactivate the token
       await dbStorage.deactivateDerivToken(userId);
-      
-      // Sync with Supabase
-      await supabaseSync.syncUser({
-        id: userId,
-        updatedAt: new Date().toISOString()
-      });
       
       console.log(`✅ Token Deriv removido com sucesso - Usuário: ${userId}`);
       

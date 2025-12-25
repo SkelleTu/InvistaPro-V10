@@ -46,7 +46,6 @@ import {
 import { db } from "./db";
 import { eq, desc, and, isNotNull, sql } from "drizzle-orm";
 import { createHash, randomBytes, createCipheriv, createDecipheriv } from "crypto";
-import { supabaseSync } from "./services/supabase-sync";
 
 // Encryption utilities for sensitive data
 class EncryptionService {
@@ -252,9 +251,6 @@ export class DatabaseStorage implements IStorage {
       .values(userData)
       .returning();
     
-    // Sincronizar com Supabase em tempo real
-    supabaseSync.syncUser(user);
-    
     return user;
   }
 
@@ -264,9 +260,6 @@ export class DatabaseStorage implements IStorage {
       .set({ ...data, updatedAt: new Date().toISOString() })
       .where(eq(users.id, id))
       .returning();
-    
-    // Sincronizar com Supabase em tempo real
-    supabaseSync.syncUser(user);
     
     return user;
   }
@@ -295,9 +288,6 @@ export class DatabaseStorage implements IStorage {
       .where(eq(users.id, userId))
       .returning();
     
-    // Sincronizar com Supabase
-    supabaseSync.syncUser(user);
-    
     return user;
   }
 
@@ -313,9 +303,6 @@ export class DatabaseStorage implements IStorage {
       .where(eq(users.id, userId))
       .returning();
     
-    // Sincronizar com Supabase
-    supabaseSync.syncUser(user);
-    
     return user;
   }
 
@@ -325,9 +312,6 @@ export class DatabaseStorage implements IStorage {
       .insert(movimentos)
       .values(movimento)
       .returning();
-    
-    // Sincronizar com Supabase
-    supabaseSync.syncMovimento(newMovimento);
     
     return newMovimento;
   }

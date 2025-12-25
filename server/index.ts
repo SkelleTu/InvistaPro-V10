@@ -110,9 +110,8 @@ app.use((req, res, next) => {
   const hasPostgres = process.env.DATABASE_URL && (process.env.DATABASE_URL.startsWith('postgresql://') || process.env.DATABASE_URL.startsWith('postgres://'));
   
   if (hasPostgres) {
-    const isSupabase = process.env.DATABASE_URL.includes('supabase');
     const isReplit = process.env.DATABASE_URL.includes('helium') || process.env.DATABASE_URL.includes('replit');
-    const dbType = isSupabase ? 'Supabase' : isReplit ? 'Replit PostgreSQL' : 'PostgreSQL';
+    const dbType = isReplit ? 'Replit PostgreSQL (Neon)' : 'PostgreSQL';
     
     console.log(`✨ ${dbType} configurado! Criando schema SQL...`);
     const migrationSuccess = await runPostgresMigration();
@@ -121,8 +120,8 @@ app.use((req, res, next) => {
       console.log(`   • ${dbType} conectado`);
       console.log('   • Tabelas SQL criadas');
       console.log('   • Dados sincronizados (users, trades, sessions, etc)');
-      console.log('   • 3 bancos harmônicos: SQLite (local) + PostgreSQL + Supabase');
-      console.log('   🎉 Sistema Tri-Database 100% OPERACIONAL');
+      console.log('   • 2 bancos harmônicos: SQLite (local) + Neon PostgreSQL');
+      console.log('   🎉 Sistema Dual-Database 100% OPERACIONAL');
     } else {
       console.warn('⚠️ Não foi possível criar tabelas no PostgreSQL - continuando com SQLite');
     }
@@ -130,8 +129,8 @@ app.use((req, res, next) => {
     console.log('ℹ️ DATABASE_URL PostgreSQL não está configurado');
     console.log('   ⚠️ Sistema funcionando apenas em MODO LOCAL (SQLite)');
     console.log('');
-    console.log('   📋 PARA ATIVAR SUPABASE OU REPLIT POSTGRES:');
-    console.log('      1. Obtenha a URL de conexão (Supabase ou Replit Database)');
+    console.log('   📋 PARA ATIVAR NEON POSTGRESQL:');
+    console.log('      1. Obtenha a URL de conexão do Replit Database');
     console.log('      2. Acesse Replit > Secrets (cadeado no painel esquerdo)');
     console.log('      3. Clique em "Create Secret"');
     console.log('      4. Nome: DATABASE_URL');
@@ -139,7 +138,7 @@ app.use((req, res, next) => {
     console.log('      6. Clique em "Add Secret"');
     console.log('      7. Reinicie o app');
     console.log('');
-    console.log('   ✅ Sistema sincronizará automaticamente os 3 bancos!');
+    console.log('   ✅ Sistema sincronizará automaticamente SQLite + Neon!');
   }
   
   // 🛡️ SISTEMA DE BACKUP AUTOMÁTICO DO BANCO DE DADOS

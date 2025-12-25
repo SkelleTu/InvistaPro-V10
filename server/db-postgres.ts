@@ -9,7 +9,7 @@ let isPostgresAvailable = false;
 try {
   const databaseUrl = process.env.DATABASE_URL;
 
-  // Aceitar QUALQUER URL PostgreSQL válida (não apenas Supabase)
+  // Aceitar QUALQUER URL PostgreSQL válida (Neon, Replit Database, etc)
   if (databaseUrl && (databaseUrl.startsWith('postgresql://') || databaseUrl.startsWith('postgres://'))) {
     // Usar a URL de conexão completa
     const client = postgres(databaseUrl);
@@ -17,9 +17,8 @@ try {
     isPostgresAvailable = true;
     
     // Detectar tipo de database
-    const isSupabase = databaseUrl.includes('supabase');
-    const isReplit = databaseUrl.includes('helium') || databaseUrl.includes('replit');
-    const dbType = isSupabase ? 'Supabase' : isReplit ? 'Replit PostgreSQL' : 'PostgreSQL';
+    const isReplit = databaseUrl.includes('helium') || databaseUrl.includes('replit') || databaseUrl.includes('neon');
+    const dbType = isReplit ? 'Replit PostgreSQL (Neon)' : 'PostgreSQL';
     
     console.log(`✅ ${dbType} conectado - Sistema Dual Database ativo`);
     
