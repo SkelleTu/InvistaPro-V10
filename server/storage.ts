@@ -85,9 +85,15 @@ class EncryptionService {
       const algorithm = 'aes-256-gcm';
       const key = this.getKey();
       
+      // Handle plain text tokens (for backward compatibility)
+      if (!encryptedData.includes(':')) {
+        console.warn('⚠️ Token appears to be in plain text format, returning as-is');
+        return encryptedData;
+      }
+      
       const parts = encryptedData.split(':');
       if (parts.length !== 3) {
-        throw new Error('Invalid encrypted data format');
+        throw new Error(`Invalid encrypted data format: expected 3 parts separated by ':', got ${parts.length}`);
       }
       
       const iv = Buffer.from(parts[0], 'hex');
@@ -102,6 +108,11 @@ class EncryptionService {
       
       return decrypted;
     } catch (error: any) {
+      console.error('❌ Decryption error details:', {
+        message: error?.message,
+        dataLength: encryptedData?.length,
+        dataPreview: encryptedData?.substring(0, 50) + '...'
+      });
       throw new Error('Failed to decrypt data: ' + (error?.message || 'Unknown error'));
     }
   }

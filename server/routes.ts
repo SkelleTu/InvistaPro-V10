@@ -1753,7 +1753,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // =========================== DERIV TOKEN MANAGEMENT ===========================
   
-  app.post('/api/trading/deriv-token', isAuthenticated, asyncErrorHandler(async (req: any, res: any) => {
+  app.post('/api/trading/deriv-token', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
     const operationId = `DERIV_TOKEN_CONFIG_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
     const startTime = Date.now();
     
@@ -1818,27 +1818,140 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = req.user.id;
       console.log(`✅ PASSO 2 SUCESSO: Usuário autenticado - ID: ${userId}`);
 
-      // PASSO 3: Salvar token no banco de dados (REMOVIDO TESTE DE CONEXÃO QUE CAUSAVA TIMEOUT)
-      console.log(`💾 PASSO 3: Salvando token no banco de dados...`);
+      // PASSO 3: Teste de conexão com Deriv
+      console.log(`🌐 PASSO 3: Testando conexão com Deriv API...`);
+      console.log(`   Token: ${token.substring(0, 10)}... (parcial)`);
+      console.log(`   Account Type: ${accountType}`);
+      console.log(`   Endpoint: wss://ws.derivws.com/websockets/v3`);
+      
+      let connected;
+      try {
+        connected = await derivAPI.connect(token, accountType, operationId);
+        console.log(`   Resultado da conexão: ${connected}`);
+      } catch (connectionError: any) {
+        const errorId = errorTracker.captureError(
+          connectionError, 
+          'ERROR', 
+          'WEBSOCKET',
+          {
+            ...errorTracker.createContextFromRequest(req),
+            requestBody: { 
+              token: token.substring(0, 10) + '...',
+              accountType,
+              operationId, 
+              step: 'DERIV_CONNECTION',
+              connectionDetails: {
+                endpoint: 'wss://ws.derivws.com/websockets/v3',
+                headers: { Origin: 'https://app.deriv.com' }
+              }
+            }
+          }
+        );
+        
+        console.log(`❌ PASSO 3 FALHOU: Erro na conexão - Error ID: ${errorId}`);
+        console.log(`   Detalhes do erro: ${connectionError.message}`);
+        console.log(`   Stack: ${connectionError.stack}`);
+        
+        return res.status(400).json({ 
+          message: 'Token inválido ou erro de conexão com Deriv',
+          errorId,
+          operationId,
+          details: connectionError.message
+        });
+      }
+      
+      if (!connected) {
+        const errorId = errorTracker.captureError(
+          new Error('Falha na conexão - conexão retornou false'), 
+          'ERROR', 
+          'WEBSOCKET',
+          {
+            ...errorTracker.createContextFromRequest(req),
+            requestBody: { 
+              token: token.substring(0, 10) + '...',
+              accountType,
+              operationId, 
+              step: 'DERIV_CONNECTION_FAILED'
+            }
+          }
+        );
+        
+        console.log(`❌ PASSO 3 FALHOU: Conexão retornou false - Error ID: ${errorId}`);
+        return res.status(400).json({ 
+          message: 'Token inválido ou erro de conexão com Deriv',
+          errorId,
+          operationId
+        });
+      }
+      console.log(`✅ PASSO 3 SUCESSO: Conectado à Deriv API`);
+
+      // PASSO 4: Verificação do saldo da conta
+      console.log(`💰 PASSO 4: Verificando saldo da conta...`);
+      let balance;
+      try {
+        balance = await derivAPI.getBalance();
+        console.log(`   Saldo obtido: ${JSON.stringify(balance, null, 2)}`);
+      } catch (balanceError) {
+        const errorId = errorTracker.captureError(
+          balanceError, 
+          'ERROR', 
+          'API_EXTERNAL',
+          {
+            ...errorTracker.createContextFromRequest(req),
+            requestBody: { 
+              operationId, 
+              step: 'BALANCE_VERIFICATION',
+              connectionStatus: 'connected'
+            }
+          }
+        );
+        
+        console.log(`❌ PASSO 4 FALHOU: Erro ao obter saldo - Error ID: ${errorId}`);
+        console.log(`   Detalhes do erro: ${balanceError instanceof Error ? balanceError.message : String(balanceError)}`);
+        
+        await derivAPI.disconnect();
+        console.log(`🔌 Desconectado da Deriv API após erro`);
+        
+        return res.status(400).json({ 
+          message: 'Não foi possível verificar a conta Deriv',
+          errorId,
+          operationId,
+          details: balanceError instanceof Error ? balanceError.message : String(balanceError)
+        });
+      }
+      
+      if (!balance) {
+        const errorId = errorTracker.captureError(
+          new Error('Saldo retornado é null/undefined'), 
+          'ERROR', 
+          'API_EXTERNAL',
+          {
+            ...errorTracker.createContextFromRequest(req),
+            requestBody: { 
+              operationId, 
+              step: 'BALANCE_NULL'
+            }
+          }
+        );
+        
+        console.log(`❌ PASSO 4 FALHOU: Saldo é null - Error ID: ${errorId}`);
+        await derivAPI.disconnect();
+        console.log(`🔌 Desconectado da Deriv API após saldo null`);
+        
+        return res.status(400).json({ 
+          message: 'Não foi possível verificar a conta Deriv',
+          errorId,
+          operationId
+        });
+      }
+      console.log(`✅ PASSO 4 SUCESSO: Saldo verificado - ${balance.balance} ${balance.currency}`);
+
+      // PASSO 5: Salvar token no banco de dados
+      console.log(`💾 PASSO 5: Salvando token no banco de dados...`);
       let derivTokenData;
       try {
         derivTokenData = await dbStorage.updateDerivToken(userId, token, accountType);
-        console.log(`   Token salvo com sucesso (SQLite + PostgreSQL)`);
-        
-        // Sincronizar com Supabase imediatamente após salvar
-        try {
-          await supabaseSync.syncDerivToken({
-            user_id: userId,
-            token: derivTokenData.token, // Já criptografado no banco
-            account_type: accountType,
-            is_active: true,
-            created_at: derivTokenData.createdAt,
-            updated_at: derivTokenData.updatedAt
-          });
-          console.log(`   Sincronizado com Supabase`);
-        } catch (syncError) {
-          console.log(`   ⚠️ Aviso: Erro ao sincronizar com Supabase (não crítico): ${syncError instanceof Error ? syncError.message : String(syncError)}`);
-        }
+        console.log(`   Token salvo com sucesso`);
       } catch (saveError) {
         const errorId = errorTracker.captureError(
           saveError, 
@@ -1855,8 +1968,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         );
         
-        console.log(`❌ PASSO 3 FALHOU: Erro ao salvar no banco - Error ID: ${errorId}`);
+        console.log(`❌ PASSO 5 FALHOU: Erro ao salvar no banco - Error ID: ${errorId}`);
         console.log(`   Detalhes do erro: ${saveError instanceof Error ? saveError.message : String(saveError)}`);
+        
+        await derivAPI.disconnect();
+        console.log(`🔌 Desconectado da Deriv API após erro de BD`);
         
         // Check if it's an encryption configuration error
         if (saveError instanceof Error && saveError.message.includes('ENCRYPTION_KEY')) {
@@ -1870,38 +1986,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
         
         throw saveError; // Re-throw para ser capturado pelo error handler global
       }
-      console.log(`✅ PASSO 3 SUCESSO: Token salvo no banco de dados`);
+      console.log(`✅ PASSO 5 SUCESSO: Token salvo no banco de dados`);
+
+      // PASSO 6: Desconexão limpa
+      console.log(`🔌 PASSO 6: Desconectando da Deriv API...`);
       try {
-        await supabaseSync.syncUser({
-          id: userId,
-          updatedAt: new Date().toISOString()
-        });
-        console.log(`✅ PASSO 7 SUCESSO: Sincronizado com Supabase`);
-      } catch (syncError) {
-        console.log(`⚠️ PASSO 7 AVISO: Erro ao sincronizar (não crítico): ${syncError instanceof Error ? syncError.message : String(syncError)}`);
-        // Não é crítico, token já foi salvo no banco local
+        await derivAPI.disconnect();
+        console.log(`✅ PASSO 6 SUCESSO: Desconectado da Deriv API`);
+      } catch (disconnectError) {
+        console.log(`⚠️ PASSO 6 AVISO: Erro na desconexão: ${disconnectError instanceof Error ? disconnectError.message : String(disconnectError)}`);
+        // Não é crítico, continuamos
       }
 
       const endTime = Date.now();
       const duration = endTime - startTime;
       
       console.log('\n' + '🎉'.repeat(60));
-      console.log(`🎉 SUCESSO: Token Deriv configurado - ID: ${operationId}`);
+      console.log(`🎉 SUCESSO TOTAL: Token Deriv configurado - ID: ${operationId}`);
       console.log(`⏱️ Duração total: ${duration}ms`);
       console.log(`👤 Usuário: ${req.user.email}`);
+      console.log(`💰 Saldo: ${balance.balance} ${balance.currency}`);
       console.log(`📊 Tipo de conta: ${accountType}`);
-      console.log(`📝 Observação: Token será testado ao iniciar operações`);
       console.log('🎉'.repeat(60) + '\n');
 
       res.json({
         message: 'Token Deriv configurado com sucesso',
         accountType,
+        balance: balance.balance,
+        currency: balance.currency,
         tokenConfigured: true,
         operationId,
-        duration: `${duration}ms`,
-        note: 'Token será validado ao executar primeira operação',
-        balance: accountType === 'demo' ? 10000 : 100,
-        currency: 'USD'
+        duration: `${duration}ms`
       });
 
     } catch (error) {
@@ -1945,7 +2060,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   }));
 
-  app.get('/api/trading/deriv-token', isAuthenticated, async (req, res) => {
+  app.get('/api/trading/deriv-token', isAuthenticated, isTradingAuthorized, async (req, res) => {
     try {
       if (!req.user?.id) {
         return res.status(401).json({ message: 'Usuário não autenticado' });
@@ -1964,8 +2079,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         tokenConfigured: true,
         token: maskedToken,
         accountType: tokenData.accountType,
-        balance: tokenData.accountType === 'demo' ? 10000 : 100,
-        currency: 'USD',
         isActive: tokenData.isActive,
         createdAt: tokenData.createdAt
       });
