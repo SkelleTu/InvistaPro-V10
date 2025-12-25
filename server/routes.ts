@@ -1021,29 +1021,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const saldo = Number(user.saldo) || 0;
       const rendimento = await dbStorage.calcularRendimento(saldo);
-      const depositoData = user.depositoData ? new Date(user.depositoData) : new Date();
       const ultimoDiaMes = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
       
-      // Get recent movements for chart
+      // Get trading statistics directly from database
+      const stats = await dbStorage.getTradingStats(userId);
       const movimentos = await dbStorage.getUserMovimentos(userId, 10);
-      
-      // Get daily PnL for trading stats
-      const dailyPnLData = await dbStorage.getRecentDailyPnL(userId, 30);
-      
-      // Calculate statistics
-      const totalTrades = dailyPnLData.reduce((sum, d) => sum + (d.totalTrades || 0), 0);
-      const wonTrades = dailyPnLData.reduce((sum, d) => sum + (d.wonTrades || 0), 0);
-      const winRate = totalTrades > 0 ? (wonTrades / totalTrades * 100) : 0;
-      const totalPnL = dailyPnLData.reduce((sum, d) => sum + (d.dailyPnL || 0), 0);
 
       res.json({
         saldo,
         rendimento,
         proximoSaque: ultimoDiaMes,
-        totalTrades,
-        wonTrades,
-        winRate: Math.round(winRate * 100) / 100,
-        totalPnL: Math.round(totalPnL * 100) / 100,
+        totalTrades: stats.totalTrades || 0,
+        wonTrades: stats.wonTrades || 0,
+        winRate: stats.winRate || 0,
+        totalPnL: stats.totalProfit || 0,
         investidoMesAtual: movimentos.filter(m => m.tipo === 'deposito').reduce((sum, m) => sum + Number(m.valor), 0),
         movimentos: movimentos.map(m => ({
           tipo: m.tipo,
@@ -1053,7 +1044,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error) {
       console.error("Error fetching variable income dashboard:", error);
-      res.status(500).json({ message: "Failed to fetch dashboard data" });
+      res.status(500).json({ message: "Failed to fetch dashboard data", error: (error as any).message });
     }
   });
 
