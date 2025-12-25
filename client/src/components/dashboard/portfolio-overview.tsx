@@ -10,10 +10,12 @@ export default function PortfolioOverview() {
   const { user } = useAuth();
   const { theme } = useTheme();
 
-  const { data: currentYield } = useQuery({
-    queryKey: ["/api/yield/current"],
+  const { data: dashboardData } = useQuery({
+    queryKey: ["/api/dashboard/variable-income"],
     enabled: !!user,
   });
+
+  const currentYield = dashboardData ? { rendimento: dashboardData.rendimento } : undefined;
 
   // Welcome Section
   const WelcomeSection = () => (
@@ -93,7 +95,7 @@ export default function PortfolioOverview() {
               <div>
                 <p className="text-muted-foreground text-sm">Saldo Total</p>
                 <p className="text-3xl font-bold text-foreground">
-                  {formatCurrency(user?.saldo || 0)}
+                  {formatCurrency(dashboardData?.saldo || user?.saldo || 0)}
                 </p>
               </div>
               <div className={`w-12 h-12 ${theme === 'fluent' ? 'bg-primary/10 border border-border' : 'bg-background/20 rounded-xl'} flex items-center justify-center`}>
@@ -134,7 +136,7 @@ export default function PortfolioOverview() {
               <div>
                 <p className="text-muted-foreground text-sm">Próximo Saque</p>
                 <p className="text-2xl font-bold text-card-foreground">
-                  Dia {calculateNextWithdrawalDay()}
+                  Dia {dashboardData?.proximoSaque || calculateNextWithdrawalDay()}
                 </p>
               </div>
               <div className={`w-12 h-12 ${theme === 'fluent' ? 'bg-amber-500/10 border border-amber-200' : 'bg-amber-500/20 rounded-xl'} flex items-center justify-center`}>
@@ -147,6 +149,38 @@ export default function PortfolioOverview() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Trading Statistics Cards */}
+      {dashboardData && (
+        <div className={`grid grid-cols-1 md:grid-cols-4 ${theme === 'fluent' ? 'fluent-grid gap-3' : 'gap-6'} mb-8`}>
+          <Card className={`${theme === 'fluent' ? 'fluent-card bg-card shadow-lg border-0' : 'bg-card border-border'}`}>
+            <CardContent className="p-6">
+              <p className="text-muted-foreground text-sm">Total de Operações</p>
+              <p className="text-2xl font-bold text-card-foreground">{dashboardData.totalTrades}</p>
+            </CardContent>
+          </Card>
+          <Card className={`${theme === 'fluent' ? 'fluent-card bg-card shadow-lg border-0' : 'bg-card border-border'}`}>
+            <CardContent className="p-6">
+              <p className="text-muted-foreground text-sm">Taxa de Sucesso</p>
+              <p className="text-2xl font-bold text-green-600">{dashboardData.winRate.toFixed(2)}%</p>
+            </CardContent>
+          </Card>
+          <Card className={`${theme === 'fluent' ? 'fluent-card bg-card shadow-lg border-0' : 'bg-card border-border'}`}>
+            <CardContent className="p-6">
+              <p className="text-muted-foreground text-sm">Operações Vencidas</p>
+              <p className="text-2xl font-bold text-card-foreground">{dashboardData.wonTrades}/{dashboardData.totalTrades}</p>
+            </CardContent>
+          </Card>
+          <Card className={`${theme === 'fluent' ? 'fluent-card bg-card shadow-lg border-0' : 'bg-card border-border'}`}>
+            <CardContent className="p-6">
+              <p className="text-muted-foreground text-sm">Lucro/Prejuízo</p>
+              <p className={`text-2xl font-bold ${dashboardData.totalPnL >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                {formatCurrency(dashboardData.totalPnL)}
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Gráficos para tema Fluent Design */}
       {theme === 'fluent' && (

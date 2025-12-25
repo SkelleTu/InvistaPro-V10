@@ -1009,6 +1009,54 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Complete variable income dashboard data
+  app.get('/api/dashboard/variable-income', isAuthenticated, isApproved, async (req: any, res) => {
+    try {
+      const userId = req.user.id;
+      const user = await dbStorage.getUser(userId);
+      
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const saldo = Number(user.saldo) || 0;
+      const rendimento = await dbStorage.calcularRendimento(saldo);
+      const depositoData = user.depositoData ? new Date(user.depositoData) : new Date();
+      const ultimoDiaMes = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
+      
+      // Get recent movements for chart
+      const movimentos = await dbStorage.getUserMovimentos(userId, 10);
+      
+      // Get daily PnL for trading stats
+      const dailyPnLData = await dbStorage.getRecentDailyPnL(userId, 30);
+      
+      // Calculate statistics
+      const totalTrades = dailyPnLData.reduce((sum, d) => sum + (d.totalTrades || 0), 0);
+      const wonTrades = dailyPnLData.reduce((sum, d) => sum + (d.wonTrades || 0), 0);
+      const winRate = totalTrades > 0 ? (wonTrades / totalTrades * 100) : 0;
+      const totalPnL = dailyPnLData.reduce((sum, d) => sum + (d.dailyPnL || 0), 0);
+
+      res.json({
+        saldo,
+        rendimento,
+        proximoSaque: ultimoDiaMes,
+        totalTrades,
+        wonTrades,
+        winRate: Math.round(winRate * 100) / 100,
+        totalPnL: Math.round(totalPnL * 100) / 100,
+        investidoMesAtual: movimentos.filter(m => m.tipo === 'deposito').reduce((sum, m) => sum + Number(m.valor), 0),
+        movimentos: movimentos.map(m => ({
+          tipo: m.tipo,
+          valor: m.valor,
+          data: m.createdAt
+        }))
+      });
+    } catch (error) {
+      console.error("Error fetching variable income dashboard:", error);
+      res.status(500).json({ message: "Failed to fetch dashboard data" });
+    }
+  });
+
   // 🔐 SISTEMA HÍBRIDO: Configurar senha de fallback para PCs
   app.post('/api/security/setup-password-fallback', isAuthenticated, isApproved, async (req: any, res) => {
     try {
