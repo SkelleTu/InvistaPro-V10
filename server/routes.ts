@@ -1027,23 +1027,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const stats = await dbStorage.getTradingStats(userId);
       const movimentos = await dbStorage.getUserMovimentos(userId, 10);
 
-      res.json({
-        saldo,
-        rendimento,
+      console.log('📊 [DASHBOARD] Stats completos:', {
+        totalTrades: stats?.totalTrades,
+        wonTrades: stats?.wonTrades,
+        winRate: stats?.winRate,
+        totalProfit: stats?.totalProfit
+      });
+
+      const responseData = {
+        saldo: Math.round(saldo * 100) / 100,
+        rendimento: Math.round(rendimento * 100) / 100,
         proximoSaque: ultimoDiaMes,
-        totalTrades: stats.totalTrades || 0,
-        wonTrades: stats.wonTrades || 0,
-        winRate: stats.winRate || 0,
-        totalPnL: stats.totalProfit || 0,
+        totalTrades: Math.max(0, parseInt(String(stats?.totalTrades || 0))),
+        wonTrades: Math.max(0, parseInt(String(stats?.wonTrades || 0))),
+        winRate: Math.max(0, parseFloat(String(stats?.winRate || 0))),
+        totalPnL: Math.max(0, parseFloat(String(stats?.totalProfit || 0))),
         investidoMesAtual: movimentos.filter(m => m.tipo === 'deposito').reduce((sum, m) => sum + Number(m.valor), 0),
         movimentos: movimentos.map(m => ({
           tipo: m.tipo,
           valor: m.valor,
           data: m.createdAt
         }))
-      });
+      };
+
+      console.log('✅ [DASHBOARD] Resposta enviada:', responseData);
+      res.json(responseData);
     } catch (error) {
-      console.error("Error fetching variable income dashboard:", error);
+      console.error("❌ Error fetching variable income dashboard:", error);
       res.status(500).json({ message: "Failed to fetch dashboard data", error: (error as any).message });
     }
   });
