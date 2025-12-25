@@ -387,6 +387,18 @@ export function initializeDatabase() {
       )
     `);
 
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS trading_control (
+        id TEXT PRIMARY KEY DEFAULT (hex(randomblob(16))),
+        is_paused INTEGER DEFAULT 0,
+        paused_by TEXT,
+        paused_at DATETIME,
+        pause_reason TEXT,
+        resumed_at DATETIME,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     console.log('✅ Banco de dados local inicializado com sucesso!');
     console.log('🛡️ Sistema de resiliência e auto-restart configurado!');
     console.log(`📍 Local do arquivo: ${dbPath}`);

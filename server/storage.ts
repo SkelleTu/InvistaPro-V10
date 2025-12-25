@@ -444,7 +444,7 @@ export class DatabaseStorage implements IStorage {
         .run();
       
       // Create new active token with encryption (método síncrono)
-      const newToken = tx
+      const [newToken] = tx
         .insert(derivTokens)
         .values({
           userId,
@@ -452,8 +452,7 @@ export class DatabaseStorage implements IStorage {
           accountType,
           isActive: true,
         })
-        .returning()
-        .get();
+        .returning();
       
       // Decrypt token for return value
       return {

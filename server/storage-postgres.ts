@@ -281,28 +281,30 @@ export class PostgresStorage implements IStorage {
   }
 
   async updateDerivToken(userId: string, token: string, accountType: string): Promise<DerivToken> {
-    await db
-      .update(pgSchema.derivTokens)
-      .set({
-        isActive: false,
-        updatedAt: new Date(),
-      })
-      .where(eq(pgSchema.derivTokens.userId, userId));
-    
-    const [newToken] = await db
-      .insert(pgSchema.derivTokens)
-      .values({
-        userId,
-        token: EncryptionService.encrypt(token),
-        accountType,
-        isActive: true,
-      })
-      .returning();
-    
-    return {
-      ...newToken,
-      token: EncryptionService.decrypt(newToken.token)
-    } as DerivToken;
+    return await db.transaction(async (tx) => {
+      await tx
+        .update(pgSchema.derivTokens)
+        .set({
+          isActive: false,
+          updatedAt: new Date(),
+        })
+        .where(eq(pgSchema.derivTokens.userId, userId));
+      
+      const [newToken] = await tx
+        .insert(pgSchema.derivTokens)
+        .values({
+          userId,
+          token: EncryptionService.encrypt(token),
+          accountType,
+          isActive: true,
+        })
+        .returning();
+      
+      return {
+        ...newToken,
+        token: EncryptionService.decrypt(newToken.token)
+      } as DerivToken;
+    });
   }
 
   async deactivateDerivToken(userId: string): Promise<void> {
@@ -700,15 +702,50 @@ export class PostgresStorage implements IStorage {
   }
 
   async getTradingControlStatus(): Promise<any | undefined> {
-    return undefined;
+    const [control] = await db.select().from(pgSchema.tradingControl).limit(1);
+    return control;
   }
 
   async pauseTrading(pausedBy: string, reason: string): Promise<any> {
-    return { pausedBy, reason };
+    const existing = await this.getTradingControlStatus();
+    if (existing) {
+      const [updated] = await db
+        .update(pgSchema.tradingControl)
+        .set({
+          isPaused: true,
+          pausedBy,
+          pauseReason: reason,
+          pausedAt: new Date(),
+          resumedAt: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(pgSchema.tradingControl.id, existing.id))
+        .returning();
+      return updated;
+    } else {
+      const [created] = await db
+        .insert(pgSchema.tradingControl)
+        .values({
+          isPaused: true,
+          pausedBy,
+          pauseReason: reason,
+          pausedAt: new Date(),
+        })
+        .returning();
+      return created;
+    }
   }
 
   async resumeTrading(): Promise<any> {
-    return {};
+    const [control] = await db
+      .update(pgSchema.tradingControl)
+      .set({
+        isPaused: false,
+        resumedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .returning();
+    return control;
   }
 
   async getRecentDailyPnL(userId: string, days?: number): Promise<any[]> {
