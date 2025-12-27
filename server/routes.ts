@@ -2554,54 +2554,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ message: 'Usuário não autenticado' });
       }
 
-      const stats = marketDataCollector.getDiscoveryStats();
       const allAssets = marketDataCollector.getAllAssets();
       const supportedSymbols = marketDataCollector.getSupportedSymbols();
 
-      // Agrupar ativos por categoria
-      const assetsByCategory: { [key: string]: (typeof allAssets) } = {};
-      
-      allAssets.forEach((asset: any) => {
-        const category = asset.market_display_name || 'Outros';
-        if (!assetsByCategory[category]) {
-          assetsByCategory[category] = [];
-        }
-        assetsByCategory[category].push(asset);
-      });
+      // Retornar lista simples e formatada para o frontend
+      const assets = allAssets.map((asset: any) => ({
+        symbol: asset.symbol,
+        displayName: asset.display_name || asset.symbol,
+        category: asset.market_display_name || asset.submarket_display_name || 'Outros',
+        supportsDigitDiff: supportedSymbols.includes(asset.symbol),
+      }));
 
-      res.json({
-        stats: {
-          totalAssetsDiscovered: stats.totalSymbols,
-          digitDiffSupported: stats.digitDiffSupported,
-          lastUpdateSeconds: stats.timeAgoSeconds,
-          percentageWithDigitDiff: stats.totalSymbols > 0 ? Math.round((stats.digitDiffSupported / stats.totalSymbols) * 100) : 0
-        },
-        summary: {
-          categoriesCount: Object.keys(assetsByCategory).length,
-          supportedSymbols: supportedSymbols.length,
-          totalSymbols: allAssets.length
-        },
-        categories: Object.entries(assetsByCategory).map(([category, assets]) => ({
-          name: category,
-          count: assets.length,
-          withDigitDiff: assets.filter(a => supportedSymbols.includes(a.symbol)).length,
-          symbols: assets.slice(0, 10).map((a: any) => ({
-            symbol: a.symbol,
-            displayName: a.display_name,
-            marketDisplayName: a.market_display_name,
-            submartketDisplayName: a.submarket_display_name,
-            supportsDigitDiff: supportedSymbols.includes(a.symbol),
-            exchangeOpen: a.exchange_is_open === 1,
-            tradingSuspended: a.is_trading_suspended === 1
-          })),
-          moreAssets: Math.max(0, assets.length - 10)
-        })),
-        supportedSymbolsList: supportedSymbols.slice(0, 50).map((symbol) => ({
-          symbol,
-          info: marketDataCollector.getAssetInfo(symbol)
-        })),
-        moreSymbols: Math.max(0, supportedSymbols.length - 50)
-      });
+      res.json(assets);
 
     } catch (error) {
       console.error('❌ Erro ao buscar ativos disponíveis:', error);

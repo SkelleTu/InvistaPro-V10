@@ -7,8 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { AlertCircle, Clock, Ban, Plus, Trash2 } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Slider } from "@/components/ui/slider";
+import { AlertCircle, Clock, Ban, Plus, Trash2, CheckSquare2, Square } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface AssetBlacklist {
   id: string;
@@ -29,12 +32,29 @@ interface PauseConfig {
   isPausedNow: boolean;
 }
 
+interface AvailableAsset {
+  symbol: string;
+  displayName: string;
+  category: string;
+  supportsDigitDiff: boolean;
+}
+
 export default function TradingConfigPanel() {
   const { toast } = useToast();
-  const [newAsset, setNewAsset] = useState("");
-  const [assetPattern, setAssetPattern] = useState("contains");
+  const [selectedAssets, setSelectedAssets] = useState<string[]>([]);
+  
+  // Pause config states
+  const [operatingDuration, setOperatingDuration] = useState([15]);
+  const [pauseMinDuration, setPauseMinDuration] = useState([60]);
+  const [pauseMaxDuration, setPauseMaxDuration] = useState([180]);
+  const [minAIConsensus, setMinAIConsensus] = useState([0.7]);
 
   // Queries
+  const { data: availableAssets = [] } = useQuery({
+    queryKey: ['/api/trading/assets'],
+    queryFn: () => apiRequest('/api/trading/assets').then(r => r.json()),
+  });
+
   const { data: blacklists = [] } = useQuery({
     queryKey: ['/api/trading/asset-blacklist'],
     queryFn: () => apiRequest('/api/trading/asset-blacklist').then(r => r.json()),
@@ -45,22 +65,42 @@ export default function TradingConfigPanel() {
     queryFn: () => apiRequest('/api/trading/pause-config').then(r => r.json()),
   });
 
+  // Sincronizar valores iniciais
+  useEffect(() => {
+    if (pauseConfig) {
+      setOperatingDuration([pauseConfig.operatingDurationMinutes]);
+      setPauseMinDuration([pauseConfig.pauseDurationMinSeconds]);
+      setPauseMaxDuration([pauseConfig.pauseDurationMaxSeconds]);
+      setMinAIConsensus([pauseConfig.minAIConsensusForPause]);
+    }
+  }, [pauseConfig]);
+
   // Mutations
-  const createBlacklistMutation = useMutation({
-    mutationFn: async (data: any) => {
-      const response = await apiRequest('/api/trading/asset-blacklist', {
-        method: 'POST',
-        body: JSON.stringify(data),
-      });
-      return response.json();
+  const bulkBlockAssetsMutation = useMutation({
+    mutationFn: async (assets: string[]) => {
+      const promises = assets.map(asset =>
+        apiRequest('/api/trading/asset-blacklist', {
+          method: 'POST',
+          body: JSON.stringify({
+            assetPattern: asset,
+            patternType: 'exact',
+            reason: `Bloqueado manualmente - ${asset}`,
+          }),
+        }).then(r => r.json())
+      );
+      return Promise.all(promises);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/trading/asset-blacklist'] });
-      setNewAsset("");
-      toast({ title: "Ativo bloqueado com sucesso!" });
+      setSelectedAssets([]);
+      toast({ title: "Ativos bloqueados com sucesso!" });
     },
-    onError: () => {
-      toast({ title: "Erro ao bloquear ativo", variant: "destructive" });
+    onError: (error: any) => {
+      toast({ 
+        title: "Erro ao bloquear ativos", 
+        description: error.message,
+        variant: "destructive" 
+      });
     },
   });
 
@@ -84,24 +124,39 @@ export default function TradingConfigPanel() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/trading/pause-config'] });
-      toast({ title: "Configuração atualizada!" });
+      toast({ title: "Configuração de pausas atualizada!" });
     },
   });
 
-  const handleAddAsset = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newAsset.trim()) return;
-    
-    createBlacklistMutation.mutate({
-      assetPattern: newAsset,
-      patternType: assetPattern,
-      reason: `Bloqueado - ${assetPattern === 'exact' ? 'Exato' : 'Contém'}: ${newAsset}`,
-    });
+  const handleSelectAsset = (symbol: string) => {
+    setSelectedAssets(prev =>
+      prev.includes(symbol)
+        ? prev.filter(s => s !== symbol)
+        : [...prev, symbol]
+    );
   };
+
+  const handleSelectAll = () => {
+    if (selectedAssets.length === (availableAssets as AvailableAsset[]).length) {
+      setSelectedAssets([]);
+    } else {
+      setSelectedAssets((availableAssets as AvailableAsset[]).map(a => a.symbol));
+    }
+  };
+
+  const handleBlockSelected = () => {
+    if (selectedAssets.length === 0) {
+      toast({ title: "Selecione pelo menos um ativo" });
+      return;
+    }
+    bulkBlockAssetsMutation.mutate(selectedAssets);
+  };
+
+  const isAllSelected = selectedAssets.length === (availableAssets as AvailableAsset[]).length && (availableAssets as AvailableAsset[]).length > 0;
 
   return (
     <div className="space-y-6">
-      {/* Asset Blacklist */}
+      {/* Asset Blacklist Multi-Select */}
       <Card data-testid="card-asset-blacklist">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -109,73 +164,124 @@ export default function TradingConfigPanel() {
             Bloqueio de Ativos
           </CardTitle>
           <CardDescription>
-            Bloqueia operações com ativos "Jump" e "(1s)" para evitar losses desnecessárias
+            Selecione múltiplos ativos para bloquear de uma vez. Padrão recomendado: todos os "Jump" e "(1s)"
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <Alert className="border-amber-200 bg-amber-50">
             <AlertCircle className="h-4 w-4 text-amber-600" />
             <AlertDescription className="text-amber-800">
-              Padrão recomendado: Bloqueie todos os "Jump" e ativos contendo "(1s)"
+              💡 Selecione vários ativos com os checkboxes e clique em "Bloquear Selecionados" para bloqueá-los todos de uma vez!
             </AlertDescription>
           </Alert>
 
-          <form onSubmit={handleAddAsset} className="space-y-3">
-            <div className="grid grid-cols-3 gap-2">
-              <Input
-                placeholder="Ex: Jump, (1s)"
-                value={newAsset}
-                onChange={(e) => setNewAsset(e.target.value)}
-                data-testid="input-asset-pattern"
-              />
-              <select
-                value={assetPattern}
-                onChange={(e) => setAssetPattern(e.target.value)}
-                className="px-3 py-2 border rounded-md text-sm"
-                data-testid="select-pattern-type"
+          {/* Lista de Ativos com Checkboxes */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <Label className="text-base font-semibold">Ativos Disponíveis ({(availableAssets as AvailableAsset[]).length})</Label>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleSelectAll}
+                data-testid="button-select-all-assets"
               >
-                <option value="contains">Contém</option>
-                <option value="exact">Exato</option>
-              </select>
-              <Button type="submit" size="sm" data-testid="button-add-asset">
-                <Plus className="h-4 w-4 mr-1" /> Bloquear
+                {isAllSelected ? (
+                  <>
+                    <CheckSquare2 className="h-4 w-4 mr-1" />
+                    Desselecionar Todos
+                  </>
+                ) : (
+                  <>
+                    <Square className="h-4 w-4 mr-1" />
+                    Selecionar Todos
+                  </>
+                )}
               </Button>
             </div>
-          </form>
 
-          <div className="space-y-2">
-            {(blacklists as AssetBlacklist[]).map((item) => (
-              <div
-                key={item.id}
-                className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50"
-                data-testid={`blacklist-item-${item.id}`}
-              >
-                <div>
-                  <Badge variant="outline" className="mb-1">
-                    {item.patternType === 'contains' ? 'Contém' : 'Exato'}
-                  </Badge>
-                  <p className="font-mono text-sm">{item.assetPattern}</p>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => deleteBlacklistMutation.mutate(item.id)}
-                  data-testid={`button-delete-blacklist-${item.id}`}
-                >
-                  <Trash2 className="h-4 w-4 text-destructive" />
-                </Button>
+            <ScrollArea className="h-96 border rounded-lg p-4 bg-muted/30">
+              <div className="space-y-2">
+                {(availableAssets as AvailableAsset[]).map((asset) => {
+                  const isBlocked = (blacklists as AssetBlacklist[]).some(b => b.assetPattern === asset.symbol);
+                  
+                  return (
+                    <div
+                      key={asset.symbol}
+                      className={`flex items-center space-x-3 p-2 rounded-lg hover:bg-muted/50 cursor-pointer transition ${
+                        isBlocked ? 'opacity-50 bg-red-50' : ''
+                      }`}
+                      onClick={() => !isBlocked && handleSelectAsset(asset.symbol)}
+                      data-testid={`asset-item-${asset.symbol}`}
+                    >
+                      <Checkbox
+                        checked={selectedAssets.includes(asset.symbol)}
+                        onCheckedChange={() => handleSelectAsset(asset.symbol)}
+                        disabled={isBlocked}
+                        data-testid={`checkbox-${asset.symbol}`}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-semibold text-sm">{asset.symbol}</span>
+                          {isBlocked && (
+                            <Badge variant="destructive" className="text-xs">
+                              Bloqueado
+                            </Badge>
+                          )}
+                          {asset.supportsDigitDiff && (
+                            <Badge variant="outline" className="text-xs">
+                              ✓ DIGITDIFF
+                            </Badge>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground truncate">
+                          {asset.displayName} • {asset.category}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            ))}
-            {blacklists.length === 0 && (
-              <p className="text-sm text-muted-foreground text-center py-4">
-                Nenhum ativo bloqueado. Recomendamos bloquear "Jump" e "(1s)"
-              </p>
-            )}
+            </ScrollArea>
+
+            <div className="flex gap-2">
+              <Button
+                onClick={handleBlockSelected}
+                disabled={selectedAssets.length === 0 || bulkBlockAssetsMutation.isPending}
+                className="flex-1"
+                data-testid="button-block-selected"
+              >
+                <Ban className="h-4 w-4 mr-2" />
+                Bloquear {selectedAssets.length} Selecionado{selectedAssets.length !== 1 ? 's' : ''}
+              </Button>
+            </div>
           </div>
+
+          {/* Ativos Bloqueados */}
+          {(blacklists as AssetBlacklist[]).length > 0 && (
+            <div className="space-y-2 pt-4 border-t">
+              <Label className="text-sm font-semibold">Ativos Bloqueados ({(blacklists as AssetBlacklist[]).length})</Label>
+              <div className="flex flex-wrap gap-2">
+                {(blacklists as AssetBlacklist[]).map((item) => (
+                  <Badge
+                    key={item.id}
+                    variant="destructive"
+                    className="cursor-pointer group relative"
+                    data-testid={`blocked-badge-${item.id}`}
+                  >
+                    {item.assetPattern}
+                    <Trash2
+                      className="h-3 w-3 ml-1 opacity-0 group-hover:opacity-100 transition cursor-pointer"
+                      onClick={() => deleteBlacklistMutation.mutate(item.id)}
+                    />
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
-      {/* Pause Configuration */}
+      {/* Pause Configuration com Sliders */}
       {pauseConfig && (
         <Card data-testid="card-pause-config">
           <CardHeader>
@@ -184,104 +290,130 @@ export default function TradingConfigPanel() {
               Configuração de Pausas Inteligentes
             </CardTitle>
             <CardDescription>
-              Pausas aleatórias com análise técnica para melhorar o desempenho
+              Ajuste manualmente os sliders para configurar duração de operação e pausas aleatórias
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="operating-duration" className="text-sm font-medium">
-                  Tempo de Operação (minutos)
+          <CardContent className="space-y-8">
+            {/* Operating Duration Slider */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="operating-duration" className="text-base font-medium">
+                  ⏱️ Tempo de Operação Contínua
                 </Label>
-                <Input
-                  id="operating-duration"
-                  type="number"
-                  min="1"
-                  max="120"
-                  value={pauseConfig.operatingDurationMinutes}
-                  onChange={(e) =>
-                    updatePauseConfigMutation.mutate({
-                      operatingDurationMinutes: parseInt(e.target.value),
-                    })
-                  }
-                  data-testid="input-operating-duration"
-                />
+                <Badge variant="default" className="text-lg px-3 py-1">
+                  {operatingDuration[0]} min
+                </Badge>
               </div>
-
-              <div>
-                <Label htmlFor="pause-duration-min" className="text-sm font-medium">
-                  Pausa Mínima (segundos)
-                </Label>
-                <Input
-                  id="pause-duration-min"
-                  type="number"
-                  min="10"
-                  max="600"
-                  value={pauseConfig.pauseDurationMinSeconds}
-                  onChange={(e) =>
-                    updatePauseConfigMutation.mutate({
-                      pauseDurationMinSeconds: parseInt(e.target.value),
-                    })
-                  }
-                  data-testid="input-pause-duration-min"
-                />
-              </div>
-
-              <div>
-                <Label htmlFor="pause-duration-max" className="text-sm font-medium">
-                  Pausa Máxima (segundos)
-                </Label>
-                <Input
-                  id="pause-duration-max"
-                  type="number"
-                  min="10"
-                  max="600"
-                  value={pauseConfig.pauseDurationMaxSeconds}
-                  onChange={(e) =>
-                    updatePauseConfigMutation.mutate({
-                      pauseDurationMaxSeconds: parseInt(e.target.value),
-                    })
-                  }
-                  data-testid="input-pause-duration-max"
-                />
-              </div>
-
-              <div>
-                <Label htmlFor="min-consensus" className="text-sm font-medium">
-                  Consenso Mínimo de IAs (%)
-                </Label>
-                <Input
-                  id="min-consensus"
-                  type="number"
-                  min="0.3"
-                  max="1.0"
-                  step="0.1"
-                  value={pauseConfig.minAIConsensusForPause}
-                  onChange={(e) =>
-                    updatePauseConfigMutation.mutate({
-                      minAIConsensusForPause: parseFloat(e.target.value),
-                    })
-                  }
-                  data-testid="input-min-consensus"
-                />
-              </div>
+              <Slider
+                id="operating-duration"
+                min={1}
+                max={120}
+                step={1}
+                value={operatingDuration}
+                onValueChange={(val) => {
+                  setOperatingDuration(val);
+                  updatePauseConfigMutation.mutate({ operatingDurationMinutes: val[0] });
+                }}
+                className="w-full"
+                data-testid="slider-operating-duration"
+              />
+              <p className="text-xs text-muted-foreground">
+                O sistema operará continuamente por este tempo antes de fazer uma pausa
+              </p>
             </div>
 
-            <div className="p-4 border rounded-lg bg-blue-50">
-              <p className="text-sm font-medium mb-2">Configuração Atual:</p>
-              <ul className="text-sm space-y-1 text-gray-700">
-                <li>Operação: {pauseConfig.operatingDurationMinutes} minutos</li>
-                <li>
-                  Pausa: {pauseConfig.pauseDurationMinSeconds}s -{" "}
-                  {pauseConfig.pauseDurationMaxSeconds}s
-                </li>
-                <li>
-                  Status: {pauseConfig.isPausedNow ? "EM PAUSA" : "Operando"}
-                </li>
-                <li>
-                  Análise Técnica:{" "}
-                  {pauseConfig.useTechnicalAnalysisConsensus ? "Ativa" : "Inativa"}
-                </li>
+            {/* Pause Min Duration Slider */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="pause-min" className="text-base font-medium">
+                  ⏸️ Pausa Mínima
+                </Label>
+                <Badge variant="secondary" className="text-lg px-3 py-1">
+                  {pauseMinDuration[0]}s
+                </Badge>
+              </div>
+              <Slider
+                id="pause-min"
+                min={10}
+                max={300}
+                step={10}
+                value={pauseMinDuration}
+                onValueChange={(val) => {
+                  setPauseMinDuration(val);
+                  updatePauseConfigMutation.mutate({ pauseDurationMinSeconds: val[0] });
+                }}
+                className="w-full"
+                data-testid="slider-pause-min"
+              />
+              <p className="text-xs text-muted-foreground">
+                Duração mínima aleatória de cada pausa (varia entre min e máx)
+              </p>
+            </div>
+
+            {/* Pause Max Duration Slider */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="pause-max" className="text-base font-medium">
+                  ⏸️ Pausa Máxima
+                </Label>
+                <Badge variant="secondary" className="text-lg px-3 py-1">
+                  {pauseMaxDuration[0]}s
+                </Badge>
+              </div>
+              <Slider
+                id="pause-max"
+                min={10}
+                max={600}
+                step={10}
+                value={pauseMaxDuration}
+                onValueChange={(val) => {
+                  setPauseMaxDuration(val);
+                  updatePauseConfigMutation.mutate({ pauseDurationMaxSeconds: val[0] });
+                }}
+                className="w-full"
+                data-testid="slider-pause-max"
+              />
+              <p className="text-xs text-muted-foreground">
+                Duração máxima aleatória de cada pausa
+              </p>
+            </div>
+
+            {/* AI Consensus Slider */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="min-consensus" className="text-base font-medium">
+                  🤖 Consenso Mínimo de IAs
+                </Label>
+                <Badge variant="outline" className="text-lg px-3 py-1">
+                  {(minAIConsensus[0] * 100).toFixed(0)}%
+                </Badge>
+              </div>
+              <Slider
+                id="min-consensus"
+                min={0.3}
+                max={1.0}
+                step={0.05}
+                value={minAIConsensus}
+                onValueChange={(val) => {
+                  setMinAIConsensus(val);
+                  updatePauseConfigMutation.mutate({ minAIConsensusForPause: val[0] });
+                }}
+                className="w-full"
+                data-testid="slider-min-consensus"
+              />
+              <p className="text-xs text-muted-foreground">
+                Nível de acordo entre as IAs para ativar a pausa automática (análise técnica)
+              </p>
+            </div>
+
+            {/* Status Card */}
+            <div className="p-4 border-2 border-blue-200 rounded-lg bg-blue-50">
+              <p className="text-sm font-bold text-blue-900 mb-3">📊 RESUMO DA CONFIGURAÇÃO ATUAL:</p>
+              <ul className="text-sm space-y-2 text-blue-800">
+                <li>✅ Operação: <span className="font-mono font-bold">{operatingDuration[0]} minutos</span></li>
+                <li>⏸️ Pausa Aleatória: <span className="font-mono font-bold">{pauseMinDuration[0]}s - {pauseMaxDuration[0]}s</span></li>
+                <li>🤖 Consenso de IAs: <span className="font-mono font-bold">{(minAIConsensus[0] * 100).toFixed(0)}%</span></li>
+                <li>🟢 Status: <span className="font-bold">{pauseConfig.isPausedNow ? '⏸️ EM PAUSA' : '▶️ OPERANDO'}</span></li>
               </ul>
             </div>
           </CardContent>
