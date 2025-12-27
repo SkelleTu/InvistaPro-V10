@@ -647,11 +647,61 @@ export const tradingControl = sqliteTable('trading_control', {
   updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
 });
 
+// Asset Blacklist - Bloqueia ativos que causam loss
+export const assetBlacklist = sqliteTable('asset_blacklist', {
+  id: text('id').primaryKey().default(sql`(hex(randomblob(16)))`),
+  userId: text('user_id').notNull().references(() => users.id),
+  assetPattern: text('asset_pattern').notNull(), // Ex: "Jump", "(1s)"
+  patternType: text('pattern_type').notNull(), // 'exact', 'contains'
+  isActive: integer('is_active', { mode: 'boolean' }).default(true),
+  reason: text('reason'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+});
+
+// Pause Configuration - Sistema inteligente de pausas aleatórias
+export const pauseConfiguration = sqliteTable('pause_configuration', {
+  id: text('id').primaryKey().default(sql`(hex(randomblob(16)))`),
+  userId: text('user_id').notNull().references(() => users.id),
+  isEnabled: integer('is_enabled', { mode: 'boolean' }).default(true),
+  operatingDurationMinutes: integer('operating_duration_minutes').default(15), // Tempo de operação antes de pausa
+  pauseDurationMinSeconds: integer('pause_duration_min_seconds').default(60), // Pausa mínima
+  pauseDurationMaxSeconds: integer('pause_duration_max_seconds').default(180), // Pausa máxima
+  useTechnicalAnalysisConsensus: integer('use_technical_analysis_consensus', { mode: 'boolean' }).default(true),
+  minAIConsensusForPause: real('min_ai_consensus_for_pause').default(0.7), // 70% consensus
+  lastPauseStartedAt: text('last_pause_started_at'),
+  lastOperatingStartedAt: text('last_operating_started_at'),
+  isPausedNow: integer('is_paused_now', { mode: 'boolean' }).default(false),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+});
+
 // SCHEMAS PARA SISTEMA DE RESILIÊNCIA
 
 export const insertTradingControlSchema = createInsertSchema(tradingControl).omit({
   id: true,
   updatedAt: true,
+});
+
+export const insertAssetBlacklistSchema = createInsertSchema(assetBlacklist).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertPauseConfigurationSchema = createInsertSchema(pauseConfiguration).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const updatePauseConfigurationSchema = z.object({
+  isEnabled: z.boolean().optional(),
+  operatingDurationMinutes: z.number().min(1).max(120).optional(),
+  pauseDurationMinSeconds: z.number().min(10).max(600).optional(),
+  pauseDurationMaxSeconds: z.number().min(10).max(600).optional(),
+  useTechnicalAnalysisConsensus: z.boolean().optional(),
+  minAIConsensusForPause: z.number().min(0.3).max(1.0).optional(),
 });
 
 export const insertActiveTradingSessionSchema = createInsertSchema(activeTradingSessions).omit({
@@ -682,4 +732,11 @@ export type InsertActiveWebSocketSubscription = z.infer<typeof insertActiveWebSo
 export type SystemHealthHeartbeat = typeof systemHealthHeartbeat.$inferSelect;
 export type InsertSystemHealthHeartbeat = z.infer<typeof insertSystemHealthHeartbeatSchema>;
 
+// TYPES PARA ASSET BLACKLIST E PAUSE CONFIG
+
+export type AssetBlacklist = typeof assetBlacklist.$inferSelect;
+export type InsertAssetBlacklist = z.infer<typeof insertAssetBlacklistSchema>;
+export type PauseConfiguration = typeof pauseConfiguration.$inferSelect;
+export type InsertPauseConfiguration = z.infer<typeof insertPauseConfigurationSchema>;
+export type UpdatePauseConfiguration = z.infer<typeof updatePauseConfigurationSchema>;
 

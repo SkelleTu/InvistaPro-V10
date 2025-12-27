@@ -220,6 +220,18 @@ export interface IStorage {
   pauseTrading(pausedBy: string, reason: string): Promise<TradingControl>;
   resumeTrading(): Promise<TradingControl>;
 
+  // Asset Blacklist operations
+  createAssetBlacklist(blacklist: InsertAssetBlacklist): Promise<AssetBlacklist>;
+  getUserAssetBlacklists(userId: string): Promise<AssetBlacklist[]>;
+  deleteAssetBlacklist(id: string): Promise<void>;
+  isAssetBlocked(userId: string, assetName: string): Promise<boolean>;
+
+  // Pause Configuration operations
+  getUserPauseConfig(userId: string): Promise<PauseConfiguration | undefined>;
+  createPauseConfig(config: InsertPauseConfiguration): Promise<PauseConfiguration>;
+  updatePauseConfig(userId: string, config: UpdatePauseConfiguration): Promise<PauseConfiguration>;
+  updatePausedNowStatus(userId: string, isPausedNow: boolean): Promise<void>;
+
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1579,6 +1591,68 @@ export class DatabaseStorage implements IStorage {
         .returning();
       return created;
     }
+  }
+
+  // Asset Blacklist operations
+  async createAssetBlacklist(blacklist: any): Promise<any> {
+    const { assetBlacklist } = await import('@shared/schema');
+    const [result] = await db.insert(assetBlacklist).values(blacklist).returning();
+    return result;
+  }
+
+  async getUserAssetBlacklists(userId: string): Promise<any[]> {
+    const { assetBlacklist } = await import('@shared/schema');
+    return await db.select().from(assetBlacklist).where(eq(assetBlacklist.userId, userId));
+  }
+
+  async deleteAssetBlacklist(id: string): Promise<void> {
+    const { assetBlacklist } = await import('@shared/schema');
+    await db.delete(assetBlacklist).where(eq(assetBlacklist.id, id));
+  }
+
+  async isAssetBlocked(userId: string, assetName: string): Promise<boolean> {
+    const { assetBlacklist } = await import('@shared/schema');
+    const blockedAssets = await db.select().from(assetBlacklist).where(eq(assetBlacklist.userId, userId));
+    
+    return blockedAssets.some(ba => {
+      if (ba.patternType === 'exact') {
+        return ba.assetPattern === assetName;
+      } else if (ba.patternType === 'contains') {
+        return assetName.includes(ba.assetPattern);
+      }
+      return false;
+    });
+  }
+
+  // Pause Configuration operations
+  async getUserPauseConfig(userId: string): Promise<any | undefined> {
+    const { pauseConfiguration } = await import('@shared/schema');
+    const [config] = await db.select().from(pauseConfiguration).where(eq(pauseConfiguration.userId, userId));
+    return config;
+  }
+
+  async createPauseConfig(config: any): Promise<any> {
+    const { pauseConfiguration } = await import('@shared/schema');
+    const [result] = await db.insert(pauseConfiguration).values(config).returning();
+    return result;
+  }
+
+  async updatePauseConfig(userId: string, config: any): Promise<any> {
+    const { pauseConfiguration } = await import('@shared/schema');
+    const [result] = await db.update(pauseConfiguration).set({
+      ...config,
+      updatedAt: new Date().toISOString(),
+    }).where(eq(pauseConfiguration.userId, userId)).returning();
+    return result;
+  }
+
+  async updatePausedNowStatus(userId: string, isPausedNow: boolean): Promise<void> {
+    const { pauseConfiguration } = await import('@shared/schema');
+    await db.update(pauseConfiguration).set({
+      isPausedNow,
+      lastPauseStartedAt: isPausedNow ? new Date().toISOString() : pauseConfiguration.lastPauseStartedAt,
+      updatedAt: new Date().toISOString(),
+    }).where(eq(pauseConfiguration.userId, userId));
   }
 
 }

@@ -3084,6 +3084,82 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // =================== ASSET BLACKLIST & PAUSE CONFIG ROUTES ===================
+
+  // Criar blacklist de ativos
+  app.post('/api/trading/asset-blacklist', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+    const { assetPattern, patternType, reason } = req.body;
+    const userId = req.user.id;
+    
+    const blacklist = await dbStorage.createAssetBlacklist({
+      userId,
+      assetPattern,
+      patternType,
+      reason,
+      isActive: true,
+    });
+    
+    res.json({ success: true, blacklist });
+  }));
+
+  // Obter lista de blacklist do usuário
+  app.get('/api/trading/asset-blacklist', isAuthenticated, isTradingAuthorized, async (req: any, res: any) => {
+    const userId = req.user.id;
+    const blacklists = await dbStorage.getUserAssetBlacklists(userId);
+    res.json(blacklists);
+  });
+
+  // Remover item da blacklist
+  app.delete('/api/trading/asset-blacklist/:id', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+    const { id } = req.params;
+    await dbStorage.deleteAssetBlacklist(id);
+    res.json({ success: true, message: 'Removido da blacklist' });
+  }));
+
+  // Verificar se ativo está bloqueado
+  app.get('/api/trading/asset-blocked/:symbol', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+    const { symbol } = req.params;
+    const userId = req.user.id;
+    const isBlocked = await dbStorage.isAssetBlocked(userId, symbol);
+    res.json({ isBlocked, symbol });
+  }));
+
+  // Obter configuração de pausas do usuário
+  app.get('/api/trading/pause-config', isAuthenticated, isTradingAuthorized, async (req: any, res: any) => {
+    const userId = req.user.id;
+    let config = await dbStorage.getUserPauseConfig(userId);
+    
+    if (!config) {
+      config = await dbStorage.createPauseConfig({
+        userId,
+        isEnabled: true,
+        operatingDurationMinutes: 15,
+        pauseDurationMinSeconds: 60,
+        pauseDurationMaxSeconds: 180,
+        useTechnicalAnalysisConsensus: true,
+        minAIConsensusForPause: 0.7,
+        isPausedNow: false,
+      });
+    }
+    
+    res.json(config);
+  });
+
+  // Atualizar configuração de pausas
+  app.put('/api/trading/pause-config', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+    const userId = req.user.id;
+    const config = await dbStorage.updatePauseConfig(userId, req.body);
+    res.json(config);
+  }));
+
+  // Atualizar status de pausa (pausado agora ou não)
+  app.post('/api/trading/pause-status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+    const { isPausedNow } = req.body;
+    const userId = req.user.id;
+    await dbStorage.updatePausedNowStatus(userId, isPausedNow);
+    res.json({ success: true, isPausedNow });
+  }));
+
   // =================== END TRADING SYSTEM ROUTES ===================
 
   // Endpoint especial para inicializar conta de dono (apenas desenvolvimento)
