@@ -661,30 +661,46 @@ export class DerivAPIService extends EventEmitter {
     }
 
     try {
+      // Pequeno delay para garantir que a conexão está pronta após connectPublic
+      if (this.ws?.readyState !== WebSocket.OPEN) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+
+      console.log('📡 [DerivAPI] Enviando requisição active_symbols...');
       const response: any = await this.wsRequest({
         active_symbols: "brief",
         product_type: "basic"
       });
 
       if (!response || !response.active_symbols) {
-        console.warn('⚠️ [DerivAPI] Resposta vazia da Deriv para active_symbols');
-        return [];
+        console.warn('⚠️ [DerivAPI] Resposta vazia da Deriv para active_symbols, tentando backup hardcoded...');
+        return [
+          { symbol: 'R_10', display_name: 'Volatility 10 Index' },
+          { symbol: 'R_25', display_name: 'Volatility 25 Index' },
+          { symbol: 'R_50', display_name: 'Volatility 50 Index' },
+          { symbol: 'R_75', display_name: 'Volatility 75 Index' },
+          { symbol: 'R_100', display_name: 'Volatility 100 Index' },
+          { symbol: '1HZ10V', display_name: 'Volatility 10 (1s) Index' },
+          { symbol: '1HZ100V', display_name: 'Volatility 100 (1s) Index' }
+        ];
       }
 
       console.log(`📊 [DerivAPI] Filtrando ${response.active_symbols.length} símbolos para o modo ${mode}`);
 
-      return response.active_symbols
+      const filtered = response.active_symbols
         .filter((symbol: any) => {
-          // No momento o dashboard usa 'digit_diff' como modo padrão
-          // Filtrar por índices sintéticos/volatilidade que geralmente suportam digit_diff
-          const isSynthetic = symbol.submarket === 'random_index' || symbol.market === 'synthetic_index';
-          const isOpen = symbol.exchange_is_open === 1;
-          return isSynthetic && isOpen;
+          // Filtrar por índices sintéticos/volatilidade
+          const isSynthetic = symbol.submarket === 'random_index' || symbol.market === 'synthetic_index' || symbol.market === 'indices';
+          // Deriv pode retornar exchange_is_open: 1 ou 0. Sintéticos são 24/7.
+          return isSynthetic;
         })
         .map((symbol: any) => ({
           symbol: symbol.symbol,
           display_name: symbol.display_name
         }));
+
+      console.log(`✅ [DerivAPI] Encontrados ${filtered.length} ativos compatíveis`);
+      return filtered;
     } catch (error) {
       console.error('❌ [DerivAPI] Erro ao buscar símbolos:', error);
       return [];
