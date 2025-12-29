@@ -107,15 +107,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/trading/assets", isAuthenticated, async (req, res) => {
     const { mode } = req.query;
 
-    if (!mode) {
-      return res.status(400).json({ error: "Modo não informado" });
-    }
+    console.log(`🔍 [API] Buscando ativos para o modo: ${mode}`);
 
     try {
-      const assets = await derivAPI.getAvailableSymbolsByTradeMode(String(mode));
-      res.json(assets);
+      // Forçar conexão pública se necessário
+      await derivAPI.connectPublic('FETCH_ASSETS_API');
+      
+      const assets = await derivAPI.getAvailableSymbolsByTradeMode(String(mode || "digit_diff"));
+      console.log(`✅ [API] Retornados ${assets?.length || 0} ativos`);
+      res.json(assets || []);
     } catch (error) {
-      console.error("Erro ao buscar ativos:", error);
+      console.error("❌ Erro ao buscar ativos:", error);
       res.status(500).json({ error: "Erro ao buscar ativos da Deriv" });
     }
   });

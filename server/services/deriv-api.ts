@@ -656,30 +656,39 @@ export class DerivAPIService extends EventEmitter {
 
   async getAvailableSymbolsByTradeMode(mode: string) {
     if (!this.isConnected) {
-      // Tentar conectar se não estiver conectado
+      console.log('🔌 [DerivAPI] Não conectado, tentando connectPublic...');
       await this.connectPublic();
     }
 
-    const response: any = await this.wsRequest({
-      active_symbols: "brief",
-      product_type: "basic"
-    });
+    try {
+      const response: any = await this.wsRequest({
+        active_symbols: "brief",
+        product_type: "basic"
+      });
 
-    if (!response || !response.active_symbols) {
+      if (!response || !response.active_symbols) {
+        console.warn('⚠️ [DerivAPI] Resposta vazia da Deriv para active_symbols');
+        return [];
+      }
+
+      console.log(`📊 [DerivAPI] Filtrando ${response.active_symbols.length} símbolos para o modo ${mode}`);
+
+      return response.active_symbols
+        .filter((symbol: any) => {
+          // No momento o dashboard usa 'digit_diff' como modo padrão
+          // Filtrar por índices sintéticos/volatilidade que geralmente suportam digit_diff
+          const isSynthetic = symbol.submarket === 'random_index' || symbol.market === 'synthetic_index';
+          const isOpen = symbol.exchange_is_open === 1;
+          return isSynthetic && isOpen;
+        })
+        .map((symbol: any) => ({
+          symbol: symbol.symbol,
+          display_name: symbol.display_name
+        }));
+    } catch (error) {
+      console.error('❌ [DerivAPI] Erro ao buscar símbolos:', error);
       return [];
     }
-
-    return response.active_symbols
-      .filter((symbol: any) => {
-        // Mapear modos de operação para os campos da Deriv
-        // No momento o dashboard usa 'digit_diff' como modo padrão
-        const supported = symbol.submarket === 'random_index' || symbol.market === 'synthetic_index';
-        return supported;
-      })
-      .map((symbol: any) => ({
-        symbol: symbol.symbol,
-        display_name: symbol.display_name
-      }));
   }
 
   // Helper method for generic requests
