@@ -149,6 +149,45 @@ export default function TradingSystemPage() {
     refetchInterval: 3000, // Atualização a cada 3 segundos
   });
 
+  // Query para buscar ativos disponíveis e bloqueados
+  const { data: availableAssets } = useQuery({
+    queryKey: ["/api/trading/assets", "digit_diff"],
+    enabled: hasAccess,
+  });
+
+  const { data: initialBlockedAssets } = useQuery<string[]>({
+    queryKey: ["/api/trading/blocked-assets", "digit_diff"],
+    enabled: hasAccess,
+  });
+
+  const [blockedAssetsList, setBlockedAssetsList] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (initialBlockedAssets) {
+      setBlockedAssetsList(initialBlockedAssets);
+    }
+  }, [initialBlockedAssets]);
+
+  const saveBlockedAssetsMutation = useMutation({
+    mutationFn: async (symbols: string[]) => {
+      const response = await apiRequest("/api/trading/block-assets", {
+        method: "POST",
+        body: JSON.stringify({
+          tradeMode: "digit_diff",
+          symbols
+        })
+      });
+      return response.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: "Bloqueios salvos",
+        description: "A lista de ativos bloqueados foi atualizada."
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/trading/blocked-assets"] });
+    }
+  });
+
   // Status do scheduler (sistema de trading)
   const { data: schedulerStatus } = useQuery({
     queryKey: ["/api/auto-trading/status"],
@@ -279,6 +318,7 @@ export default function TradingSystemPage() {
           <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
             <TabsTrigger value="config">Configurações</TabsTrigger>
+            <TabsTrigger value="blocked">Bloqueio de Ativos</TabsTrigger>
             <TabsTrigger value="operations">Operações</TabsTrigger>
             <TabsTrigger value="ai-analysis">IA e Análises</TabsTrigger>
           </TabsList>

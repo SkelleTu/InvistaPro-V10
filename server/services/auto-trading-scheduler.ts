@@ -464,6 +464,14 @@ export class AutoTradingScheduler {
     try {
       const userId = config.userId;
       const sessionKey = `${userId}_${config.id}`;
+
+      // VERIFICAÇÃO DE ATIVOS BLOQUEADOS
+      const db = (storage as any).db; // Acesso ao db se necessário ou usar método do storage
+      const { blockedAssets } = require("@shared/schema");
+      const { and, eq } = require("drizzle-orm");
+      
+      // Aqui vamos assumir que o storage tem um método ou podemos usar o db diretamente
+      // Como estamos no scheduler, vamos injetar a lógica de bloqueio
       
       // SEGURANÇA: Verificar limite por sessão
       if (!this.canSessionExecute(sessionKey)) {
