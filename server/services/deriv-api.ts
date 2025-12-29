@@ -690,13 +690,13 @@ export class DerivAPIService extends EventEmitter {
       const filtered = response.active_symbols
         .filter((symbol: any) => {
           // Filtrar por índices sintéticos/volatilidade
-          const isSynthetic = symbol.submarket === 'random_index' || symbol.market === 'synthetic_index' || symbol.market === 'indices';
-          // Deriv pode retornar exchange_is_open: 1 ou 0. Sintéticos são 24/7.
+          const isSynthetic = symbol.submarket === 'random_index' || symbol.market === 'synthetic_index' || symbol.market === 'indices' || symbol.market === 'synthetic';
           return isSynthetic;
         })
         .map((symbol: any) => ({
           symbol: symbol.symbol,
-          display_name: symbol.display_name
+          display_name: symbol.display_name,
+          category: symbol.market_display_name
         }));
 
       console.log(`✅ [DerivAPI] Encontrados ${filtered.length} ativos compatíveis`);

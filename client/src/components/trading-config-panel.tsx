@@ -34,9 +34,9 @@ interface PauseConfig {
 
 interface AvailableAsset {
   symbol: string;
-  displayName: string;
-  category: string;
-  supportsDigitDiff: boolean;
+  display_name: string; // Corrigido para bater com a API
+  category?: string;
+  supportsDigitDiff?: boolean;
 }
 
 export default function TradingConfigPanel() {
@@ -50,7 +50,7 @@ export default function TradingConfigPanel() {
   const [minAIConsensus, setMinAIConsensus] = useState([0.7]);
 
   // Queries
-  const { data: availableAssets = [] } = useQuery({
+  const { data: availableAssets = [], isLoading: isLoadingAssets } = useQuery({
     queryKey: ['/api/trading/assets'],
     queryFn: () => apiRequest('/api/trading/assets').then(r => r.json()),
   });
@@ -201,45 +201,56 @@ export default function TradingConfigPanel() {
 
             <ScrollArea className="h-96 border rounded-lg p-4 bg-muted/30">
               <div className="space-y-2">
-                {(availableAssets as AvailableAsset[]).map((asset) => {
-                  const isBlocked = (blacklists as AssetBlacklist[]).some(b => b.assetPattern === asset.symbol);
-                  
-                  return (
-                    <div
-                      key={asset.symbol}
-                      className={`flex items-center space-x-3 p-2 rounded-lg hover:bg-muted/50 cursor-pointer transition ${
-                        isBlocked ? 'opacity-50 bg-red-50' : ''
-                      }`}
-                      onClick={() => !isBlocked && handleSelectAsset(asset.symbol)}
-                      data-testid={`asset-item-${asset.symbol}`}
-                    >
-                      <Checkbox
-                        checked={selectedAssets.includes(asset.symbol)}
-                        onCheckedChange={() => handleSelectAsset(asset.symbol)}
-                        disabled={isBlocked}
-                        data-testid={`checkbox-${asset.symbol}`}
-                      />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono font-semibold text-sm">{asset.symbol}</span>
-                          {isBlocked && (
-                            <Badge variant="destructive" className="text-xs">
-                              Bloqueado
-                            </Badge>
-                          )}
-                          {asset.supportsDigitDiff && (
-                            <Badge variant="outline" className="text-xs">
-                              ✓ DIGITDIFF
-                            </Badge>
-                          )}
+                {isLoadingAssets ? (
+                  <div className="flex flex-col items-center justify-center py-10 space-y-3">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                    <p className="text-sm text-muted-foreground italic">Conectando à Deriv e buscando ativos...</p>
+                  </div>
+                ) : (availableAssets as AvailableAsset[]).length > 0 ? (
+                  (availableAssets as AvailableAsset[]).map((asset) => {
+                    const isBlocked = (blacklists as AssetBlacklist[]).some(b => b.assetPattern === asset.symbol);
+                    
+                    return (
+                      <div
+                        key={asset.symbol}
+                        className={`flex items-center space-x-3 p-2 rounded-lg hover:bg-muted/50 cursor-pointer transition ${
+                          isBlocked ? 'opacity-50 bg-red-50' : ''
+                        }`}
+                        onClick={() => !isBlocked && handleSelectAsset(asset.symbol)}
+                        data-testid={`asset-item-${asset.symbol}`}
+                      >
+                        <Checkbox
+                          checked={selectedAssets.includes(asset.symbol)}
+                          onCheckedChange={() => handleSelectAsset(asset.symbol)}
+                          disabled={isBlocked}
+                          data-testid={`checkbox-${asset.symbol}`}
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono font-semibold text-sm">{asset.symbol}</span>
+                            {isBlocked && (
+                              <Badge variant="destructive" className="text-xs">
+                                Bloqueado
+                              </Badge>
+                            )}
+                            {asset.supportsDigitDiff && (
+                              <Badge variant="outline" className="text-xs">
+                                ✓ DIGITDIFF
+                              </Badge>
+                            )}
+                          </div>
+                          <p className="text-xs text-muted-foreground truncate">
+                            {asset.display_name} {asset.category ? `• ${asset.category}` : ''}
+                          </p>
                         </div>
-                        <p className="text-xs text-muted-foreground truncate">
-                          {asset.displayName} • {asset.category}
-                        </p>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })
+                ) : (
+                  <div className="text-center py-10 text-muted-foreground">
+                    Nenhum ativo disponível no momento.
+                  </div>
+                )}
               </div>
             </ScrollArea>
 
