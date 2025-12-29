@@ -31,8 +31,10 @@ import {
   type DerivToken,
   type TradeConfiguration,
   type TradeOperation,
-  type AiLog
+  type AiLog,
+  blockedAssets
 } from "@shared/schema";
+import { and } from "drizzle-orm";
 import { derivAPI } from './services/deriv-api';
 import { huggingFaceAI } from './services/huggingface-ai';
 import { autoTradingScheduler } from './services/auto-trading-scheduler';
@@ -101,6 +103,69 @@ function calculateCRC16(data: string): string {
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // API de Trading
+  app.get("/api/trading/assets", isAuthenticated, async (req, res) => {
+    const { mode } = req.query;
+
+    if (!mode) {
+      return res.status(400).json({ error: "Modo não informado" });
+    }
+
+    try {
+      const assets = await derivAPI.getAvailableSymbolsByTradeMode(String(mode));
+      res.json(assets);
+    } catch (error) {
+      console.error("Erro ao buscar ativos:", error);
+      res.status(500).json({ error: "Erro ao buscar ativos da Deriv" });
+    }
+  });
+
+  app.get("/api/trading/blocked-assets", isAuthenticated, async (req, res) => {
+    const userId = (req.user as any).id;
+    const { mode } = req.query;
+
+    const blocked = await db
+      .select()
+      .from(blockedAssets)
+      .where(
+        and(
+          eq(blockedAssets.userId, userId),
+          eq(blockedAssets.tradeMode, String(mode || "digit_diff"))
+        )
+      );
+
+    res.json(blocked.map(b => b.symbol));
+  });
+
+  app.post("/api/trading/block-assets", isAuthenticated, async (req, res) => {
+    const { tradeMode, symbols } = req.body;
+    const userId = (req.user as any).id;
+
+    if (!tradeMode || !Array.isArray(symbols)) {
+      return res.status(400).json({ error: "Dados inválidos" });
+    }
+
+    // Remove bloqueios antigos da modalidade
+    await db.delete(blockedAssets)
+      .where(
+        and(
+          eq(blockedAssets.userId, userId),
+          eq(blockedAssets.tradeMode, tradeMode)
+        )
+      );
+
+    // Insere novos bloqueios
+    for (const symbol of symbols) {
+      await db.insert(blockedAssets).values({
+        userId,
+        tradeMode,
+        symbol
+      });
+    }
+
+    res.json({ success: true });
+  });
+
   // Setup authentication
   setupAuth(app);
 

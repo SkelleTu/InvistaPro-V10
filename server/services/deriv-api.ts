@@ -654,6 +654,58 @@ export class DerivAPIService extends EventEmitter {
     return symbols;
   }
 
+  async getAvailableSymbolsByTradeMode(mode: string) {
+    if (!this.isConnected) {
+      // Tentar conectar se não estiver conectado
+      await this.connectPublic();
+    }
+
+    const response: any = await this.wsRequest({
+      active_symbols: "brief",
+      product_type: "basic"
+    });
+
+    if (!response || !response.active_symbols) {
+      return [];
+    }
+
+    return response.active_symbols
+      .filter((symbol: any) => {
+        // Mapear modos de operação para os campos da Deriv
+        // No momento o dashboard usa 'digit_diff' como modo padrão
+        const supported = symbol.submarket === 'random_index' || symbol.market === 'synthetic_index';
+        return supported;
+      })
+      .map((symbol: any) => ({
+        symbol: symbol.symbol,
+        display_name: symbol.display_name
+      }));
+  }
+
+  // Helper method for generic requests
+  private async wsRequest(payload: any): Promise<any> {
+    return new Promise((resolve, reject) => {
+      const reqId = this.generateRequestId();
+      const message = { ...payload, req_id: reqId };
+
+      const handler = (msg: any) => {
+        if (msg.req_id === reqId) {
+          this.removeListener('message', handler);
+          resolve(msg);
+        }
+      };
+
+      this.on('message', handler);
+      this.sendMessage(message);
+
+      // Timeout after 30 seconds
+      setTimeout(() => {
+        this.removeListener('message', handler);
+        reject(new Error('WebSocket request timeout'));
+      }, 30000);
+    });
+  }
+
   // 🔥 NOVO: Buscar contratos disponíveis para um símbolo (conforme docs Deriv)
   async getContractsFor(symbol: string): Promise<any[]> {
     if (!this.isConnected) return [];

@@ -296,6 +296,23 @@ export const tradeOperations = sqliteTable("trade_operations", {
   completedAt: text("completed_at"),
 });
 
+// Blocked assets table
+export const blockedAssets = sqliteTable("blocked_assets", {
+  id: text("id").primaryKey().default(sql`(hex(randomblob(16)))`),
+  userId: text("user_id").notNull().references(() => users.id),
+  tradeMode: text("trade_mode").notNull(), 
+  symbol: text("symbol").notNull(),
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`)
+});
+
+export const insertBlockedAssetSchema = createInsertSchema(blockedAssets).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type BlockedAsset = typeof blockedAssets.$inferSelect;
+export type InsertBlockedAsset = z.infer<typeof insertBlockedAssetSchema>;
+
 // Daily P&L tracking for loss recovery system
 export const dailyPnL = sqliteTable("daily_pnl", {
   id: text("id").primaryKey().default(sql`(hex(randomblob(16)))`),
