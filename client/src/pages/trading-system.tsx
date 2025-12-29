@@ -602,13 +602,11 @@ export default function TradingSystemPage() {
 
           {/* Configurações Tab */}
           <TabsContent value="config" className="space-y-6">
-            {/* Configuração de Token Deriv */}
-            <DerivTokenSettings />
-
-            {/* Asset Blacklist & Pause Configuration */}
-            <Separator className="my-6" />
-            <TradingConfigPanel />
-
+            <div className="grid gap-6 md:grid-cols-2">
+              <DerivTokenSettings />
+              <TradingConfigPanel />
+            </div>
+            
             {/* Diagnóstico e Correção Automática */}
             <Card className="border-yellow-200 dark:border-yellow-900">
               <CardHeader>

@@ -466,12 +466,25 @@ export class AutoTradingScheduler {
       const sessionKey = `${userId}_${config.id}`;
 
       // VERIFICAÇÃO DE ATIVOS BLOQUEADOS
-      const db = (storage as any).db; // Acesso ao db se necessário ou usar método do storage
+      const db = (storage as any).db;
       const { blockedAssets } = require("@shared/schema");
       const { and, eq } = require("drizzle-orm");
       
-      // Aqui vamos assumir que o storage tem um método ou podemos usar o db diretamente
-      // Como estamos no scheduler, vamos injetar a lógica de bloqueio
+      const blocked = await db
+        .select()
+        .from(blockedAssets)
+        .where(
+          and(
+            eq(blockedAssets.userId, userId),
+            eq(blockedAssets.tradeMode, "digit_diff"),
+            eq(blockedAssets.symbol, config.symbol || "R_100") // Símbolo atual
+          )
+        );
+
+      if (blocked.length > 0) {
+        console.log(`⛔ [${operationId}] Trade bloqueado para ${config.symbol || "R_100"} (Configuração do usuário)`);
+        return { success: false, error: 'Ativo bloqueado pelo usuário' };
+      }
       
       // SEGURANÇA: Verificar limite por sessão
       if (!this.canSessionExecute(sessionKey)) {
