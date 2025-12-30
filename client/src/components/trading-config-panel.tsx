@@ -51,8 +51,8 @@ export default function TradingConfigPanel() {
 
   // Queries
   const { data: availableAssets = [], isLoading: isLoadingAssets } = useQuery({
-    queryKey: ['/api/trading/assets'],
-    queryFn: () => apiRequest('/api/trading/assets').then(r => r.json()),
+    queryKey: ['/api/trading/assets', 'digit_diff'],
+    queryFn: () => apiRequest('/api/trading/assets?mode=digit_diff').then(r => r.json()),
   });
 
   const { data: blacklists = [] } = useQuery({

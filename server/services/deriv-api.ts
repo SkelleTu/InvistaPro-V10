@@ -655,6 +655,41 @@ export class DerivAPIService extends EventEmitter {
   }
 
   async getAvailableSymbolsByTradeMode(mode: string) {
+    console.log(`📡 [DerivAPI] Buscando símbolos para o modo: ${mode}`);
+    
+    // Se o modo for digit_diff, usar o sistema de descoberta especializado
+    if (mode === 'digit_diff' || mode === 'undefined') {
+      try {
+        console.log('🔍 [DerivAPI] Usando descoberta dinâmica para DIGITDIFF...');
+        
+        // 1. Garantir conexão
+        if (!this.isConnected) {
+          await this.connectPublic('GET_SYMBOLS_DIGITDIFF');
+        }
+
+        // 2. Obter símbolos ativos (com cache)
+        const allSymbols = await this.getActiveSymbolsCached();
+        
+        // 3. Filtrar os que suportam DIGITDIFF (com cache)
+        const supportedSymbols = await this.getDigitDiffSupportedSymbols(allSymbols);
+        
+        if (supportedSymbols.length > 0) {
+          // Mapear de volta para o formato esperado pelo frontend { symbol, display_name }
+          return supportedSymbols.map(sym => {
+            const info = allSymbols.find(s => s.symbol === sym);
+            return {
+              symbol: sym,
+              display_name: info?.display_name || sym,
+              supportsDigitDiff: true
+            };
+          });
+        }
+      } catch (error) {
+        console.error('❌ [DerivAPI] Erro na descoberta dinâmica:', error);
+      }
+    }
+
+    // Fallback ou outros modos
     if (!this.isConnected) {
       console.log('🔌 [DerivAPI] Não conectado, tentando connectPublic...');
       await this.connectPublic();
