@@ -669,77 +669,39 @@ export class DerivAPIService extends EventEmitter {
 
         // 2. Obter símbolos ativos (com cache)
         const allSymbols = await this.getActiveSymbolsCached();
+        console.log(`📊 [DerivAPI] Total de símbolos ativos: ${allSymbols.length}`);
         
         // 3. Filtrar os que suportam DIGITDIFF (com cache)
         const supportedSymbols = await this.getDigitDiffSupportedSymbols(allSymbols);
+        console.log(`📊 [DerivAPI] Símbolos com suporte DIGITDIFF: ${supportedSymbols.length}`);
         
         if (supportedSymbols.length > 0) {
           // Mapear de volta para o formato esperado pelo frontend { symbol, display_name }
-          return supportedSymbols.map(sym => {
-            const info = allSymbols.find(s => s.symbol === sym);
+          const mapped = supportedSymbols.map(s => {
+            const info = allSymbols.find(sym => sym.symbol === s);
             return {
-              symbol: sym,
-              display_name: info?.display_name || sym,
+              symbol: s,
+              display_name: info?.display_name || s,
               supportsDigitDiff: true
             };
           });
+          console.log(`✅ [DerivAPI] Retornando ${mapped.length} símbolos mapeados`);
+          return mapped;
         }
+        
+        console.warn('⚠️ [DerivAPI] Nenhum símbolo DIGITDIFF encontrado, usando fallback...');
       } catch (error) {
         console.error('❌ [DerivAPI] Erro na descoberta dinâmica:', error);
       }
     }
 
     // Fallback ou outros modos
-    if (!this.isConnected) {
-      console.log('🔌 [DerivAPI] Não conectado, tentando connectPublic...');
-      await this.connectPublic();
-    }
-
-    try {
-      // Pequeno delay para garantir que a conexão está pronta após connectPublic
-      if (this.ws?.readyState !== WebSocket.OPEN) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
-
-      console.log('📡 [DerivAPI] Enviando requisição active_symbols...');
-      const response: any = await this.wsRequest({
-        active_symbols: "brief",
-        product_type: "basic"
-      });
-
-      if (!response || !response.active_symbols) {
-        console.warn('⚠️ [DerivAPI] Resposta vazia da Deriv para active_symbols, tentando backup hardcoded...');
-        return [
-          { symbol: 'R_10', display_name: 'Volatility 10 Index' },
-          { symbol: 'R_25', display_name: 'Volatility 25 Index' },
-          { symbol: 'R_50', display_name: 'Volatility 50 Index' },
-          { symbol: 'R_75', display_name: 'Volatility 75 Index' },
-          { symbol: 'R_100', display_name: 'Volatility 100 Index' },
-          { symbol: '1HZ10V', display_name: 'Volatility 10 (1s) Index' },
-          { symbol: '1HZ100V', display_name: 'Volatility 100 (1s) Index' }
-        ];
-      }
-
-      console.log(`📊 [DerivAPI] Filtrando ${response.active_symbols.length} símbolos para o modo ${mode}`);
-
-      const filtered = response.active_symbols
-        .filter((symbol: any) => {
-          // Filtrar por índices sintéticos/volatilidade
-          const isSynthetic = symbol.submarket === 'random_index' || symbol.market === 'synthetic_index' || symbol.market === 'indices' || symbol.market === 'synthetic';
-          return isSynthetic;
-        })
-        .map((symbol: any) => ({
-          symbol: symbol.symbol,
-          display_name: symbol.display_name,
-          category: symbol.market_display_name
-        }));
-
-      console.log(`✅ [DerivAPI] Encontrados ${filtered.length} ativos compatíveis`);
-      return filtered;
-    } catch (error) {
-      console.error('❌ [DerivAPI] Erro ao buscar símbolos:', error);
-      return [];
-    }
+    const symbols = await this.getActiveSymbolsCached();
+    return symbols.map(s => ({
+      symbol: s.symbol,
+      display_name: s.display_name,
+      supportsDigitDiff: false
+    }));
   }
 
   // Helper method for generic requests

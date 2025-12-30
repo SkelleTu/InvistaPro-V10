@@ -110,11 +110,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     console.log(`🔍 [API] Buscando ativos para o modo: ${mode}`);
 
     try {
-      // Forçar conexão pública se necessário
-      await derivAPI.connectPublic('FETCH_ASSETS_API');
+      // Usar conexão autenticada se disponível, senão pública
+      if (!derivAPI.getIsConnected()) {
+        await derivAPI.connectPublic('FETCH_ASSETS_API');
+      }
       
       const assets = await derivAPI.getAvailableSymbolsByTradeMode(String(mode || "digit_diff"));
-      console.log(`✅ [API] Retornados ${assets?.length || 0} ativos`);
+      console.log(`✅ [API] Retornados ${assets?.length || 0} ativos para o modo ${mode}`);
+      
+      // Cache-Control: no-cache para evitar que o frontend pegue dados antigos
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
       res.json(assets || []);
     } catch (error) {
       console.error("❌ Erro ao buscar ativos:", error);

@@ -52,7 +52,12 @@ export default function TradingConfigPanel() {
   // Queries
   const { data: availableAssets = [], isLoading: isLoadingAssets } = useQuery({
     queryKey: ['/api/trading/assets', 'digit_diff'],
-    queryFn: () => apiRequest('/api/trading/assets?mode=digit_diff').then(r => r.json()),
+    queryFn: () => apiRequest('/api/trading/assets?mode=digit_diff&t=' + Date.now()).then(r => r.json()),
+  });
+
+  const { data: blockedSymbols = [] } = useQuery({
+    queryKey: ['/api/trading/blocked-assets', 'digit_diff'],
+    queryFn: () => apiRequest('/api/trading/blocked-assets?mode=digit_diff').then(r => r.json()),
   });
 
   const { data: blacklists = [] } = useQuery({
@@ -76,6 +81,23 @@ export default function TradingConfigPanel() {
   }, [pauseConfig]);
 
   // Mutations
+  const updateBlockedAssetsMutation = useMutation({
+    mutationFn: async (symbols: string[]) => {
+      await apiRequest('/api/trading/block-assets', {
+        method: 'POST',
+        body: JSON.stringify({
+          tradeMode: 'digit_diff',
+          symbols,
+        }),
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/trading/blocked-assets'] });
+      setSelectedAssets([]);
+      toast({ title: "Lista de bloqueio atualizada!" });
+    },
+  });
+
   const bulkBlockAssetsMutation = useMutation({
     mutationFn: async (assets: string[]) => {
       const promises = assets.map(asset =>
@@ -149,7 +171,17 @@ export default function TradingConfigPanel() {
       toast({ title: "Selecione pelo menos um ativo" });
       return;
     }
-    bulkBlockAssetsMutation.mutate(selectedAssets);
+    
+    // Pegar o que já está bloqueado e adicionar os novos
+    const currentBlocked = blockedSymbols || [];
+    const newBlocked = [...new Set([...currentBlocked, ...selectedAssets])];
+    updateBlockedAssetsMutation.mutate(newBlocked);
+  };
+
+  const handleUnblockAsset = (symbol: string) => {
+    const currentBlocked = blockedSymbols || [];
+    const newBlocked = currentBlocked.filter(s => s !== symbol);
+    updateBlockedAssetsMutation.mutate(newBlocked);
   };
 
   const isAllSelected = selectedAssets.length === (availableAssets as AvailableAsset[]).length && (availableAssets as AvailableAsset[]).length > 0;
@@ -208,7 +240,7 @@ export default function TradingConfigPanel() {
                   </div>
                 ) : (availableAssets as AvailableAsset[]).length > 0 ? (
                   (availableAssets as AvailableAsset[]).map((asset) => {
-                    const isBlocked = (blacklists as AssetBlacklist[]).some(b => b.assetPattern === asset.symbol);
+                    const isBlocked = (blockedSymbols as string[]).includes(asset.symbol);
                     
                     return (
                       <div
@@ -268,21 +300,21 @@ export default function TradingConfigPanel() {
           </div>
 
           {/* Ativos Bloqueados */}
-          {(blacklists as AssetBlacklist[]).length > 0 && (
+          (blockedSymbols as string[]).length > 0 && (
             <div className="space-y-2 pt-4 border-t">
-              <Label className="text-sm font-semibold">Ativos Bloqueados ({(blacklists as AssetBlacklist[]).length})</Label>
+              <Label className="text-sm font-semibold">Ativos Bloqueados ({(blockedSymbols as string[]).length})</Label>
               <div className="flex flex-wrap gap-2">
-                {(blacklists as AssetBlacklist[]).map((item) => (
+                {(blockedSymbols as string[]).map((symbol) => (
                   <Badge
-                    key={item.id}
+                    key={symbol}
                     variant="destructive"
                     className="cursor-pointer group relative"
-                    data-testid={`blocked-badge-${item.id}`}
+                    data-testid={`blocked-badge-${symbol}`}
                   >
-                    {item.assetPattern}
+                    {symbol}
                     <Trash2
                       className="h-3 w-3 ml-1 opacity-0 group-hover:opacity-100 transition cursor-pointer"
-                      onClick={() => deleteBlacklistMutation.mutate(item.id)}
+                      onClick={() => handleUnblockAsset(symbol)}
                     />
                   </Badge>
                 ))}
