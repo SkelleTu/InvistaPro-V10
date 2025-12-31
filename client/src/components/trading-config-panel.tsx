@@ -300,7 +300,7 @@ export default function TradingConfigPanel() {
           </div>
 
           {/* Ativos Bloqueados */}
-          (blockedSymbols as string[]).length > 0 && (
+          {(blockedSymbols as string[]).length > 0 && (
             <div className="space-y-2 pt-4 border-t">
               <Label className="text-sm font-semibold">Ativos Bloqueados ({(blockedSymbols as string[]).length})</Label>
               <div className="flex flex-wrap gap-2">
