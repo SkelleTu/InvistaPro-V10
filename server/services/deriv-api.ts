@@ -696,12 +696,17 @@ export class DerivAPIService extends EventEmitter {
     }
 
     // Fallback ou outros modos
-    const symbols = await this.getActiveSymbolsCached();
-    return symbols.map(s => ({
-      symbol: s.symbol,
-      display_name: s.display_name,
-      supportsDigitDiff: false
-    }));
+    try {
+      const symbols = await this.getActiveSymbolsCached();
+      return symbols.map(s => ({
+        symbol: s.symbol,
+        display_name: s.display_name,
+        supportsDigitDiff: false
+      }));
+    } catch (error) {
+      console.error('❌ [DerivAPI] Erro ao buscar símbolos (fallback):', error);
+      return [];
+    }
   }
 
   // Helper method for generic requests

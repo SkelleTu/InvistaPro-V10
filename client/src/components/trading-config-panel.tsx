@@ -173,14 +173,14 @@ export default function TradingConfigPanel() {
     }
     
     // Pegar o que já está bloqueado e adicionar os novos
-    const currentBlocked = blockedSymbols || [];
-    const newBlocked = [...new Set([...currentBlocked, ...selectedAssets])];
+    const currentBlocked = (blockedSymbols as string[]) || [];
+    const newBlocked = Array.from(new Set([...currentBlocked, ...selectedAssets]));
     updateBlockedAssetsMutation.mutate(newBlocked);
   };
 
   const handleUnblockAsset = (symbol: string) => {
-    const currentBlocked = blockedSymbols || [];
-    const newBlocked = currentBlocked.filter(s => s !== symbol);
+    const currentBlocked = (blockedSymbols as string[]) || [];
+    const newBlocked = currentBlocked.filter((s: string) => s !== symbol);
     updateBlockedAssetsMutation.mutate(newBlocked);
   };
 
