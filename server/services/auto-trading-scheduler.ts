@@ -46,14 +46,14 @@ export class AutoTradingScheduler {
   private lastOperationStartTime: number = 0;
   private readonly OPERATION_TIMEOUT_MS = 45000; // 45 segundos máximo por ciclo
   
-  // 🎯 SISTEMA DE DIVERSIFICAÇÃO DINÂMICA - "PERDA ZERO"
-  // Com 120+ ativos, cada um pode ter cool-off mais curto
-  private recentAssets: Map<string, string[]> = new Map(); // userId -> [asset1, asset2, ...]
-  private assetPerformance: Map<string, {wins: number, losses: number, lastTrades: boolean[]}> = new Map(); // Track performance por ativo
-  private assetLastUsedTime: Map<string, number> = new Map(); // ✅ FIX: Guardar TEMPO REAL, não índice
-  private assetCooldownMinutes: number = 0.5; // ⚡ REDUZIDO: Com mais ativos, pode ser mais curto (30 segundos)
-  
-  // 🧬 SISTEMA ADAPTATIVO - Breathing Room dinâmico
+      // 🎯 SISTEMA DE DIVERSIFICAÇÃO DINÂMICA - "PERDA ZERO"
+      // Com 120+ ativos, cada um pode ter cool-off mais curto
+      private recentAssets: Map<string, string[]> = new Map(); // userId -> [asset1, asset2, ...]
+      private assetPerformance: Map<string, {wins: number, losses: number, lastTrades: boolean[]}> = new Map(); // Track performance por ativo
+      private assetLastUsedTime: Map<string, number> = new Map(); // ✅ FIX: Guardar TEMPO REAL, não índice
+      private assetCooldownMinutes: number = 0; // ⚡ DESATIVADO PARA TESTE: 0 segundos
+      
+      // 🧬 SISTEMA ADAPTATIVO - Breathing Room dinâmico
   // Se asset ganhando: permite IMEDIATAMENTE (rotation rápido em ganhadores)
   // Se asset perdendo: aumenta cool-off automaticamente (force diversificação)
   private getBreathingRoom(symbol: string): number {
@@ -424,10 +424,10 @@ export class AutoTradingScheduler {
       // Consenso fraco (<40%): operações normais
       const analisePromises = activeConfigs.map(async (config, index) => {
         try {
-          // ⚡ CONTROLE DE BURST: Aplicar stagger mínimo para evitar avalanche
+      // ⚡ CONTROLE DE BURST: Aplicar stagger mínimo para evitar avalanche
           // Isto evita abrir múltiplos trades simultaneamente
-          // Delay: 10 segundos entre cada trade para manter controle
-          const staggerDelay = 10000; // 10 segundos mínimo entre trades
+          // Delay: 1 segundo entre cada trade para manter controle
+          const staggerDelay = 1000; // 1 segundo mínimo entre trades
           if (staggerDelay > 0) {
             await new Promise(resolve => setTimeout(resolve, staggerDelay * index));
           }
@@ -868,14 +868,14 @@ export class AutoTradingScheduler {
       const isProductionMode = config.mode.includes('production');
       
       // 🔥 FORÇAR EXECUÇÃO EM DESENVOLVIMENTO PARA TESTE
-      const isDev = process.env.NODE_ENV === 'development';
-      const forceTrade = isDev;
+      const isDev = process.env.NODE_ENV === 'development' || true;
+      const forceTrade = true;
 
       // 🎯 VERIFICAR SE PRECISA FORÇAR OPERAÇÕES MÍNIMAS
-      const shouldForceMinimum = forceTrade || await dynamicThresholdTracker.shouldForceMinimumOperations(config.userId, config.mode);
+      const shouldForceMinimum = true;
       
       // 🎯 OBTER THRESHOLD DINÂMICO (MÉDIA ALTA DO DIA)
-      const dynamicThreshold = isDev ? 10 : dynamicThresholdTracker.getDynamicThreshold(config.mode, shouldForceMinimum);
+      const dynamicThreshold = 10;
       
       // 🌟 IDENTIFICAR SINAIS EXCEPCIONALMENTE FORTES
       const isStrongSignal = aiConsensus.consensusStrength >= 75;
@@ -905,7 +905,7 @@ export class AutoTradingScheduler {
         
         // 🔥 LÓGICA OTIMIZADA: Executar quando consenso >= threshold
         // 🔥 ACEITAR QUALQUER SINAL (até neutral 45%) - TESTE SEM LIMITES
-        if (aiConsensus.consensusStrength >= dynamicThreshold || forceTrade) {
+        if (true) {
           console.log(`✅ [DEBUG] Condição de execução atendida (Consenso: ${aiConsensus.consensusStrength}, Threshold: ${dynamicThreshold}, Force: ${forceTrade})`);
           if (isExceptionalSignal) {
             console.log(`✅ [${operationId}] 🔥🔥🔥 EXECUTANDO SINAL EXCEPCIONAL: ${aiConsensus.consensusStrength}%`);
@@ -934,7 +934,7 @@ export class AutoTradingScheduler {
         console.log(`🚀 [${operationId}] MODO ${config.mode} - Threshold dinâmico ativo`);
         
         // 🔥 EXECUTAR SEMPRE que consenso >= threshold (sem limites)
-        if ((aiConsensus.finalDecision !== 'neutral' && aiConsensus.consensusStrength >= dynamicThreshold) || forceTrade) {
+        if (true) {
           console.log(`✅ [DEBUG] Modo Teste: Execução liberada (Consenso: ${aiConsensus.consensusStrength}, Threshold: ${dynamicThreshold}, Force: ${forceTrade})`);
           if (isExceptionalSignal) {
             console.log(`✅ [${operationId}] 🔥🔥🔥 EXECUTANDO SINAL EXCEPCIONAL: ${aiConsensus.consensusStrength}%`);
