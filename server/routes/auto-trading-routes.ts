@@ -538,7 +538,11 @@ router.post('/resume-trading', isAuthenticated, isTradingAuthorized, asyncErrorH
   
   // ⚠️ CRITICAL FIX: Reiniciar o scheduler quando trading é retomado
   console.log('▶️ [SCHEDULER] Iniciando scheduler após resume...');
-  await autoTradingScheduler.startScheduler();
+  try {
+    await autoTradingScheduler.startScheduler();
+  } catch (error) {
+    console.error('❌ [SCHEDULER] Erro ao iniciar scheduler após resume:', error);
+  }
   
   res.json({
     message: 'Trading retomado globalmente para TODOS os remixes - Scheduler iniciado',
