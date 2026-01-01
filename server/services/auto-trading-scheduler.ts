@@ -57,33 +57,7 @@ export class AutoTradingScheduler {
   // Se asset ganhando: permite IMEDIATAMENTE (rotation rápido em ganhadores)
   // Se asset perdendo: aumenta cool-off automaticamente (force diversificação)
   private getBreathingRoom(symbol: string): number {
-    const performance = this.assetPerformance.get(symbol);
-    if (!performance) return this.assetCooldownMinutes;
-    
-    const totalTrades = performance.wins + performance.losses;
-    if (totalTrades === 0) return this.assetCooldownMinutes;
-    
-    const winRate = performance.wins / totalTrades;
-    console.log(`📊 [DEBUG] WinRate para ${symbol}: ${(winRate * 100).toFixed(2)}% | Wins: ${performance.wins}, Losses: ${performance.losses}`);
-    
-    // 🔥 FORÇAR RETORNO 0 PARA TESTE DE ABERTURA
-    if (process.env.NODE_ENV === 'development') return 0;
-
-    // 🎯 LÓGICA DE BREATHING ROOM - EXTREMAMENTE AGRESSIVA COM 120+ ATIVOS:
-    // Win rate > 55% → Sem cool-off (0 segundos) - abrir IMEDIATAMENTE
-    // Win rate 45-55% → Cool-off super reduzido (15 segundos)
-    // Win rate 35-45% → Cool-off normal (30 segundos)
-    // Win rate < 35% → Aumenta cool-off (60 segundos) - força diversificação
-    
-    if (winRate > 0.55) {
-      return 0; // 🔥 SEM COOL-OFF - Abrir imediatamente em ganhadores
-    } else if (winRate > 0.45) {
-      return 0.25; // 15 segundos
-    } else if (winRate >= 0.35) {
-      return this.assetCooldownMinutes; // 30 segundos (normal)
-    } else {
-      return this.assetCooldownMinutes * 2; // 60 segundos (força diversificação)
-    }
+    return 0; // 🔥 SEMPRE 0 PARA TESTE
   }
   
   // 🎯 SISTEMA DE OPERAÇÕES CONSERVADORAS DIÁRIAS (persistido no banco)
@@ -868,7 +842,7 @@ export class AutoTradingScheduler {
       const isProductionMode = config.mode.includes('production');
       
       // 🔥 FORÇAR EXECUÇÃO EM DESENVOLVIMENTO PARA TESTE
-      const isDev = process.env.NODE_ENV === 'development' || true;
+      const isDev = true; // Forçado para teste
       const forceTrade = true;
 
       // 🎯 VERIFICAR SE PRECISA FORÇAR OPERAÇÕES MÍNIMAS

@@ -865,6 +865,8 @@ export class DerivAPIService extends EventEmitter {
   async buyDigitDifferContract(params: DigitDifferContract): Promise<DerivContractInfo | null> {
     if (!this.isConnected) return null;
 
+    console.log(`[DERIV_API] 🚀 Tentando abrir contrato: ${params.symbol}, Valor: ${params.amount}, Barreira: ${params.barrier}`);
+
     // 🚫 VALIDAÇÃO DEFENSIVA: BLOQUEIO DE SÍMBOLOS (1s) - DUPLA CAMADA DE PROTEÇÃO
     const BLOCKED_SYMBOLS_PATTERN = /\(1s\)/i;
     if (BLOCKED_SYMBOLS_PATTERN.test(params.symbol)) {
