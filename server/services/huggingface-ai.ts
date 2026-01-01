@@ -35,6 +35,9 @@ export interface MarketAnalysis {
   modelName: string;
   prediction: 'up' | 'down' | 'neutral';
   confidence: number;
+  upScore?: number;
+  downScore?: number;
+  neutralScore?: number;
   reasoning: string;
   marketData: DerivTickData[];
   timestamp: Date;
@@ -43,6 +46,9 @@ export interface MarketAnalysis {
 export interface AIConsensus {
   finalDecision: 'up' | 'down' | 'neutral';
   consensusStrength: number; // 0-100%
+  upScore?: number;
+  downScore?: number;
+  neutralScore?: number;
   participatingModels: number;
   analyses: MarketAnalysis[];
   reasoning: string;
