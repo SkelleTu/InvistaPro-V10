@@ -860,6 +860,28 @@ export class AutoTradingScheduler {
       // 🔥 LOG DE DECISÃO FINAL PARA DEBUG
       console.log(`🤔 [DEBUG] Decisão Final: ${aiConsensus.finalDecision}, Strength: ${aiConsensus.consensusStrength}, Threshold: ${dynamicThreshold}`);
       
+      // ✅ CORREÇÃO CRÍTICA: Forçar direção se o consenso for alto mesmo sendo neutral
+      if (aiConsensus.finalDecision === 'neutral') {
+        if (isExceptionalSignal || isStrongSignal) {
+          // Se o consenso for muito alto, a IA está "muito certa" de algo, mas o score de neutral venceu por pouco
+          // Vamos forçar a direção predominante entre UP e DOWN
+          const upScore = aiConsensus.upScore || 0;
+          const downScore = aiConsensus.downScore || 0;
+          if (upScore > downScore) {
+            aiConsensus.finalDecision = 'up';
+            console.log(`🔄 [${operationId}] Forçando UP devido a alto consenso (${aiConsensus.consensusStrength}%) apesar de Neutral`);
+          } else if (downScore > upScore) {
+            aiConsensus.finalDecision = 'down';
+            console.log(`🔄 [${operationId}] Forçando DOWN devido a alto consenso (${aiConsensus.consensusStrength}%) apesar de Neutral`);
+          }
+        }
+        
+        if (aiConsensus.finalDecision === 'neutral' && !forceTrade && !shouldForceMinimum) {
+          console.log(`⏸️ [${operationId}] Decisão NEUTRAL - aguardando sinal direcional mais forte`);
+          return { success: false, error: 'Decisão de IA é NEUTRAL - aguardando sinal claro' };
+        }
+      }
+
       if (isProductionMode) {
         // 🎯 MODO DE PRODUÇÃO OTIMIZADO - Maximizar operações dentro dos limites
         const limits = this.getOperationLimitsForMode(config.mode);

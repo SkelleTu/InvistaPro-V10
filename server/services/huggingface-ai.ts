@@ -489,6 +489,9 @@ Market Analysis for ${symbol}:
         modelName: model.name,
         prediction: this.normalizePrediction(analysisData.prediction || 'neutral'),
         confidence: Math.min(100, Math.max(0, analysisData.confidence || 50)),
+        upScore: analysisData.upScore || 0,
+        downScore: analysisData.downScore || 0,
+        neutralScore: analysisData.neutralScore || 0,
         reasoning: analysisData.reasoning || `Análise baseada em sentiment score`,
         marketData: tickData,
         timestamp: new Date()
@@ -725,13 +728,22 @@ Market Analysis for ${symbol}:
     // 🎯 REGISTRAR THRESHOLD NO SISTEMA DE MÉDIA ALTA DIÁRIA
     dynamicThresholdTracker.recordThreshold(consensusStrength, symbol, finalDecision);
 
-    return {
+    const consensus: AIConsensus = {
       finalDecision,
       consensusStrength,
+      upScore: upVotes,
+      downScore: downVotes,
+      neutralScore: neutralVotes,
       participatingModels: enhancedAnalyses.length,
       analyses: enhancedAnalyses,
       reasoning
     };
+
+    // 🔥 LOG DE CONSENSO PARA DEBUG
+    console.log(`🤖 [AI CONSENSUS] ${symbol}: ${finalDecision.toUpperCase()} (Strength: ${consensusStrength.toFixed(1)}%)`);
+    console.log(`   Detailed Scores: UP=${upVotes.toFixed(3)} DOWN=${downVotes.toFixed(3)} NEUTRAL=${neutralVotes.toFixed(3)}`);
+
+    return consensus;
   }
 
   // 🧠 NOVO: Sistema de Cross-Validation entre IAs
