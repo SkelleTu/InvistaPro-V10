@@ -64,7 +64,11 @@ export class AutoTradingScheduler {
     if (totalTrades === 0) return this.assetCooldownMinutes;
     
     const winRate = performance.wins / totalTrades;
+    console.log(`📊 [DEBUG] WinRate para ${symbol}: ${(winRate * 100).toFixed(2)}% | Wins: ${performance.wins}, Losses: ${performance.losses}`);
     
+    // 🔥 FORÇAR RETORNO 0 PARA TESTE DE ABERTURA
+    if (process.env.NODE_ENV === 'development') return 0;
+
     // 🎯 LÓGICA DE BREATHING ROOM - EXTREMAMENTE AGRESSIVA COM 120+ ATIVOS:
     // Win rate > 55% → Sem cool-off (0 segundos) - abrir IMEDIATAMENTE
     // Win rate 45-55% → Cool-off super reduzido (15 segundos)
@@ -376,6 +380,10 @@ export class AutoTradingScheduler {
       console.log(`🎯 [${operationId}] Sistema Análise natural continua de IA - Análise microscópica ativa...`);
       console.log(`📊 [${operationId}] Configurações ativas encontradas: ${activeConfigs.length}`);
       
+      if (activeConfigs.length > 0) {
+        activeConfigs.forEach(c => console.log(`📋 [DEBUG] Config Ativa: ID=${c.id}, Mode=${c.mode}, Active=${c.isActive}`));
+      }
+
       if (activeConfigs.length === 0) {
         console.log(`⚠️ [${operationId}] Nenhuma configuração ativa encontrada - verificando configurações desativadas no modo sem limites...`);
         
@@ -403,6 +411,11 @@ export class AutoTradingScheduler {
       }
 
       console.log(`📊 [${operationId}] ${activeConfigs.length} sessão(ões) Análise natural continua de IA ativa(s)`);
+      
+      // 🔥 LOG DE CONFIGURAÇÃO PARA DEBUG
+      activeConfigs.forEach(c => {
+        console.log(`🔍 [DEBUG] Config ${c.id}: userId=${c.userId}, symbol=${c.symbol}, mode=${c.mode}, isActive=${c.isActive}`);
+      });
 
       // ⚡ INTELIGÊNCIA PURA: Sem limites de stagger quando oportunidade forte
       // IAs decidem quantidade de trades simultâneos baseado em consenso
@@ -486,6 +499,8 @@ export class AutoTradingScheduler {
         return { success: false, error: 'Ativo bloqueado pelo usuário' };
       }
       
+      console.log(`🔓 [DEBUG] Símbolo ${config.symbol} NÃO está bloqueado.`);
+
       // SEGURANÇA: Verificar limite por sessão
       if (!this.canSessionExecute(sessionKey)) {
         return { success: false, error: 'Limite de operações por sessão atingido' };
@@ -852,17 +867,24 @@ export class AutoTradingScheduler {
       // 🎯 SISTEMA DE THRESHOLD DINÂMICO BASEADO EM MÉDIA ALTA DIÁRIA
       const isProductionMode = config.mode.includes('production');
       
+      // 🔥 FORÇAR EXECUÇÃO EM DESENVOLVIMENTO PARA TESTE
+      const isDev = process.env.NODE_ENV === 'development';
+      const forceTrade = isDev;
+
       // 🎯 VERIFICAR SE PRECISA FORÇAR OPERAÇÕES MÍNIMAS
-      const shouldForceMinimum = await dynamicThresholdTracker.shouldForceMinimumOperations(config.userId, config.mode);
+      const shouldForceMinimum = forceTrade || await dynamicThresholdTracker.shouldForceMinimumOperations(config.userId, config.mode);
       
       // 🎯 OBTER THRESHOLD DINÂMICO (MÉDIA ALTA DO DIA)
-      const dynamicThreshold = dynamicThresholdTracker.getDynamicThreshold(config.mode, shouldForceMinimum);
+      const dynamicThreshold = isDev ? 10 : dynamicThresholdTracker.getDynamicThreshold(config.mode, shouldForceMinimum);
       
       // 🌟 IDENTIFICAR SINAIS EXCEPCIONALMENTE FORTES
       const isStrongSignal = aiConsensus.consensusStrength >= 75;
       const isExceptionalSignal = aiConsensus.consensusStrength >= 85;
       
       console.log(`📊 [${operationId}] 🎯 Threshold: ${dynamicThreshold}% | 🧠 Consenso: ${aiConsensus.consensusStrength}%${isExceptionalSignal ? ' 🔥🔥🔥 EXCEPCIONAL' : isStrongSignal ? ' 🔥 FORTE' : ''} | ⚡ Forçar: ${shouldForceMinimum}`);
+
+      // 🔥 LOG DE DECISÃO FINAL PARA DEBUG
+      console.log(`🤔 [DEBUG] Decisão Final: ${aiConsensus.finalDecision}, Strength: ${aiConsensus.consensusStrength}, Threshold: ${dynamicThreshold}`);
       
       if (isProductionMode) {
         // 🎯 MODO DE PRODUÇÃO OTIMIZADO - Maximizar operações dentro dos limites
@@ -883,7 +905,8 @@ export class AutoTradingScheduler {
         
         // 🔥 LÓGICA OTIMIZADA: Executar quando consenso >= threshold
         // 🔥 ACEITAR QUALQUER SINAL (até neutral 45%) - TESTE SEM LIMITES
-        if (aiConsensus.consensusStrength >= dynamicThreshold) {
+        if (aiConsensus.consensusStrength >= dynamicThreshold || forceTrade) {
+          console.log(`✅ [DEBUG] Condição de execução atendida (Consenso: ${aiConsensus.consensusStrength}, Threshold: ${dynamicThreshold}, Force: ${forceTrade})`);
           if (isExceptionalSignal) {
             console.log(`✅ [${operationId}] 🔥🔥🔥 EXECUTANDO SINAL EXCEPCIONAL: ${aiConsensus.consensusStrength}%`);
           } else if (isStrongSignal) {
@@ -911,7 +934,8 @@ export class AutoTradingScheduler {
         console.log(`🚀 [${operationId}] MODO ${config.mode} - Threshold dinâmico ativo`);
         
         // 🔥 EXECUTAR SEMPRE que consenso >= threshold (sem limites)
-        if (aiConsensus.finalDecision !== 'neutral' && aiConsensus.consensusStrength >= dynamicThreshold) {
+        if ((aiConsensus.finalDecision !== 'neutral' && aiConsensus.consensusStrength >= dynamicThreshold) || forceTrade) {
+          console.log(`✅ [DEBUG] Modo Teste: Execução liberada (Consenso: ${aiConsensus.consensusStrength}, Threshold: ${dynamicThreshold}, Force: ${forceTrade})`);
           if (isExceptionalSignal) {
             console.log(`✅ [${operationId}] 🔥🔥🔥 EXECUTANDO SINAL EXCEPCIONAL: ${aiConsensus.consensusStrength}%`);
           } else if (isStrongSignal) {
@@ -1052,8 +1076,11 @@ export class AutoTradingScheduler {
         const contract = await derivAPI.buyDigitDifferContract(digitDifferContract);
         
         if (!contract) {
+          console.error(`❌ [${operationId}] Erro ao comprar contrato na Deriv para ${selectedSymbol}`);
           return { success: false, error: 'Falha ao executar trade na Deriv' };
         }
+
+        console.log(`✅ [${operationId}] Contrato comprado com sucesso: ${contract.contract_id}`);
 
         // Salvar operação no banco com informações de recuperação
         await storage.createTradeOperation({
