@@ -657,56 +657,52 @@ export class DerivAPIService extends EventEmitter {
   async getAvailableSymbolsByTradeMode(mode: string) {
     console.log(`📡 [DerivAPI] Buscando símbolos para o modo: ${mode}`);
     
+    // 1. Garantir conexão
+    if (!this.isConnected) {
+      await this.connectPublic('GET_SYMBOLS_' + (mode || 'DEFAULT'));
+    }
+
     // Se o modo for digit_diff, usar o sistema de descoberta especializado
-    if (mode === 'digit_diff' || mode === 'undefined') {
+    if (mode === 'digit_diff' || mode === 'undefined' || !mode) {
       try {
         console.log('🔍 [DerivAPI] Usando descoberta dinâmica para DIGITDIFF...');
         
-        // 1. Garantir conexão
-        if (!this.isConnected) {
-          await this.connectPublic('GET_SYMBOLS_DIGITDIFF');
-        }
-
         // 2. Obter símbolos ativos (com cache)
         const allSymbols = await this.getActiveSymbolsCached();
         console.log(`📊 [DerivAPI] Total de símbolos ativos: ${allSymbols.length}`);
         
         // 3. Filtrar os que suportam DIGITDIFF (com cache)
-        const supportedSymbols = await this.getDigitDiffSupportedSymbols(allSymbols);
-        console.log(`📊 [DerivAPI] Símbolos com suporte DIGITDIFF: ${supportedSymbols.length}`);
+        const digitDiffSymbols = await this.getDigitDiffSupportedSymbols(allSymbols);
         
-        if (supportedSymbols.length > 0) {
-          // Mapear de volta para o formato esperado pelo frontend { symbol, display_name }
-          const mapped = supportedSymbols.map(s => {
-            const info = allSymbols.find(sym => sym.symbol === s);
-            return {
-              symbol: s,
-              display_name: info?.display_name || s,
-              supportsDigitDiff: true
-            };
-          });
-          console.log(`✅ [DerivAPI] Retornando ${mapped.length} símbolos mapeados`);
-          return mapped;
-        }
-        
-        console.warn('⚠️ [DerivAPI] Nenhum símbolo DIGITDIFF encontrado, usando fallback...');
+        // 4. Mapear para o formato esperado pelo frontend
+        return digitDiffSymbols.map(symbol => {
+          const info = allSymbols.find(s => s.symbol === symbol);
+          return {
+            symbol: symbol,
+            display_name: info?.display_name || symbol,
+            market: info?.market || 'unknown'
+          };
+        });
       } catch (error) {
-        console.error('❌ [DerivAPI] Erro na descoberta dinâmica:', error);
+        console.error('❌ Erro na descoberta dinâmica DIGITDIFF:', error);
+        // Fallback básico se a descoberta falhar
+        return [
+          { symbol: 'R_10', display_name: 'Volatility 10 Index', market: 'synthetic_index' },
+          { symbol: 'R_25', display_name: 'Volatility 25 Index', market: 'synthetic_index' },
+          { symbol: 'R_50', display_name: 'Volatility 50 Index', market: 'synthetic_index' },
+          { symbol: 'R_75', display_name: 'Volatility 75 Index', market: 'synthetic_index' },
+          { symbol: 'R_100', display_name: 'Volatility 100 Index', market: 'synthetic_index' }
+        ];
       }
     }
 
-    // Fallback ou outros modos
-    try {
-      const symbols = await this.getActiveSymbolsCached();
-      return symbols.map(s => ({
-        symbol: s.symbol,
-        display_name: s.display_name,
-        supportsDigitDiff: false
-      }));
-    } catch (error) {
-      console.error('❌ [DerivAPI] Erro ao buscar símbolos (fallback):', error);
-      return [];
-    }
+    // Fallback para outros modos
+    const symbols = await this.getActiveSymbolsCached();
+    return symbols.map(s => ({
+      symbol: s.symbol,
+      display_name: s.display_name,
+      market: s.market
+    }));
   }
 
   // Helper method for generic requests

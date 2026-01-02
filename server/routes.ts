@@ -148,29 +148,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const { tradeMode, symbols } = req.body;
     const userId = (req.user as any).id;
 
+    console.log(`🚫 [API] Bloqueando ativos para usuário ${userId}, modo ${tradeMode}:`, symbols);
+
     if (!tradeMode || !Array.isArray(symbols)) {
       return res.status(400).json({ error: "Dados inválidos" });
     }
 
-    // Remove bloqueios antigos da modalidade
-    await db.delete(blockedAssets)
-      .where(
-        and(
-          eq(blockedAssets.userId, userId),
-          eq(blockedAssets.tradeMode, tradeMode)
-        )
-      );
+    try {
+      // Usar transação para garantir atomicidade
+      await db.transaction(async (tx) => {
+        // Remove bloqueios antigos da modalidade
+        await tx.delete(blockedAssets)
+          .where(
+            and(
+              eq(blockedAssets.userId, userId),
+              eq(blockedAssets.tradeMode, tradeMode)
+            )
+          );
 
-    // Insere novos bloqueios
-    for (const symbol of symbols) {
-      await db.insert(blockedAssets).values({
-        userId,
-        tradeMode,
-        symbol
+        // Insere novos bloqueios se houver
+        if (symbols.length > 0) {
+          for (const symbol of symbols) {
+            await tx.insert(blockedAssets).values({
+              userId,
+              tradeMode,
+              symbol
+            });
+          }
+        }
       });
-    }
 
-    res.json({ success: true });
+      console.log(`✅ [API] Bloqueio atualizado com sucesso para ${symbols.length} ativos`);
+      res.json({ success: true, count: symbols.length });
+    } catch (error) {
+      console.error("❌ Erro ao atualizar bloqueio de ativos:", error);
+      res.status(500).json({ error: "Erro ao salvar bloqueio de ativos" });
+    }
   });
 
   // Setup authentication
