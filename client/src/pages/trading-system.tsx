@@ -145,6 +145,12 @@ export default function TradingSystemPage() {
     refetchInterval: 2000, // Saldo atualizado a cada 2 segundos
   });
 
+  // Cotação USD/BRL em tempo real
+  const { data: exchangeRate } = useQuery({
+    queryKey: ["/api/market/exchange-rate"],
+    refetchInterval: 60000, // Atualiza a cada 1 minuto
+  });
+
   // Estatísticas históricas de threshold da IA em tempo real
   const { data: aiThresholdStats } = useQuery({
     queryKey: ["/api/auto-trading/ai-threshold-stats"],
@@ -271,6 +277,16 @@ export default function TradingSystemPage() {
       style: 'currency',
       currency: 'USD'
     }).format(value);
+  };
+
+  const usdBrlRate = (exchangeRate as any)?.rates?.USD_BRL;
+
+  const formatBRL = (usdValue: number) => {
+    if (!usdBrlRate) return null;
+    return new Intl.NumberFormat('pt-BR', {
+      style: 'currency',
+      currency: 'BRL'
+    }).format(usdValue * usdBrlRate);
   };
 
   const getOperationModeLabel = (mode: string) => {
@@ -442,10 +458,22 @@ export default function TradingSystemPage() {
                        accountInfo?.balance ? formatCurrency(accountInfo.balance) : '--'}
                     </span>
                   </div>
+                  {(() => {
+                    const bal = (liveBalance as any)?.balance ?? accountInfo?.balance;
+                    const brl = bal != null ? formatBRL(bal) : null;
+                    return brl ? (
+                      <p className="text-sm font-medium text-green-600 dark:text-green-400" data-testid="text-balance-brl">
+                        {brl}
+                      </p>
+                    ) : null;
+                  })()}
                   <p className="text-xs text-muted-foreground">
                     Conta {accountInfo?.accountType || 'não conectada'} 
                     {(realTimeData as any)?.lastUpdate && (
                       <span className="text-green-500 ml-2 animate-pulse">• Ao vivo</span>
+                    )}
+                    {usdBrlRate && (
+                      <span className="text-blue-500 ml-2">USD/BRL: {usdBrlRate.toFixed(2)}</span>
                     )}
                   </p>
                 </CardContent>
@@ -490,6 +518,11 @@ export default function TradingSystemPage() {
                   <div className="text-2xl font-bold" data-testid="text-profit">
                     {tradeStats?.totalProfit ? formatCurrency(tradeStats.totalProfit) : '$0.00'}
                   </div>
+                  {tradeStats?.totalProfit != null && formatBRL(tradeStats.totalProfit) && (
+                    <p className={`text-sm font-medium ${tradeStats.totalProfit >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`} data-testid="text-profit-brl">
+                      {formatBRL(tradeStats.totalProfit)}
+                    </p>
+                  )}
                   <p className="text-xs text-muted-foreground">
                     Resultado acumulado
                   </p>
@@ -630,9 +663,16 @@ export default function TradingSystemPage() {
                             {operation.status}
                           </Badge>
                           {operation.profit && (
-                            <p className={`text-sm ${operation.profit >= 0 ? 'text-green-600' : 'text-red-600'}`} data-testid={`operation-profit-${operation.id}`}>
-                              {operation.profit >= 0 ? '+' : ''}{formatCurrency(operation.profit)}
-                            </p>
+                            <div>
+                              <p className={`text-sm ${operation.profit >= 0 ? 'text-green-600' : 'text-red-600'}`} data-testid={`operation-profit-${operation.id}`}>
+                                {operation.profit >= 0 ? '+' : ''}{formatCurrency(operation.profit)}
+                              </p>
+                              {formatBRL(operation.profit) && (
+                                <p className={`text-xs ${operation.profit >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                  {operation.profit >= 0 ? '+' : ''}{formatBRL(operation.profit)}
+                                </p>
+                              )}
+                            </div>
                           )}
                         </div>
                       </div>
@@ -962,6 +1002,9 @@ export default function TradingSystemPage() {
                         </div>
                         <div className="text-center">
                           <p className="font-medium" data-testid={`history-amount-${operation.id}`}>{formatCurrency(operation.amount)}</p>
+                          {formatBRL(operation.amount) && (
+                            <p className="text-xs text-muted-foreground">{formatBRL(operation.amount)}</p>
+                          )}
                           <p className="text-sm text-muted-foreground">{operation.direction.toUpperCase()}</p>
                         </div>
                         <div className="text-right">
@@ -973,9 +1016,16 @@ export default function TradingSystemPage() {
                             {operation.status}
                           </Badge>
                           {operation.profit !== undefined && (
-                            <p className={`text-sm font-medium ${operation.profit >= 0 ? 'text-green-600' : 'text-red-600'}`} data-testid={`history-profit-${operation.id}`}>
-                              {operation.profit >= 0 ? '+' : ''}{formatCurrency(operation.profit)}
-                            </p>
+                            <div>
+                              <p className={`text-sm font-medium ${operation.profit >= 0 ? 'text-green-600' : 'text-red-600'}`} data-testid={`history-profit-${operation.id}`}>
+                                {operation.profit >= 0 ? '+' : ''}{formatCurrency(operation.profit)}
+                              </p>
+                              {formatBRL(operation.profit) && (
+                                <p className={`text-xs ${operation.profit >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                  {operation.profit >= 0 ? '+' : ''}{formatBRL(operation.profit)}
+                                </p>
+                              )}
+                            </div>
                           )}
                         </div>
                       </div>

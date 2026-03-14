@@ -1698,6 +1698,53 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // USD/BRL Exchange Rate - AwesomeAPI (oficial e gratuita)
+  app.get('/api/market/exchange-rate', async (req, res) => {
+    try {
+      const response = await fetch('https://economia.awesomeapi.com.br/json/last/USD-BRL,EUR-BRL');
+      if (!response.ok) throw new Error(`AwesomeAPI error: ${response.status}`);
+      const data = await response.json() as any;
+
+      const usdBrl = parseFloat(data.USDBRL?.bid || '0');
+      const eurBrl = parseFloat(data.EURBRL?.bid || '0');
+
+      if (!usdBrl) throw new Error('Invalid exchange rate data');
+
+      res.json({
+        success: true,
+        rates: {
+          USD_BRL: usdBrl,
+          EUR_BRL: eurBrl || null,
+        },
+        source: 'AwesomeAPI',
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error: any) {
+      // Fallback: tentar HG Brasil API
+      try {
+        const hgRes = await fetch('https://api.hgbrasil.com/finance?fields=only_results');
+        const hgData = await hgRes.json() as any;
+        const usdBrl = parseFloat(hgData?.results?.currencies?.USD?.buy || '0');
+        if (usdBrl) {
+          return res.json({
+            success: true,
+            rates: { USD_BRL: usdBrl, EUR_BRL: null },
+            source: 'HGBrasil',
+            timestamp: new Date().toISOString(),
+          });
+        }
+      } catch (_) {}
+
+      res.status(500).json({
+        success: false,
+        error: error.message,
+        rates: { USD_BRL: 5.20, EUR_BRL: null },
+        source: 'fallback',
+        timestamp: new Date().toISOString(),
+      });
+    }
+  });
+
   // KYC routes
   app.use('/api/kyc', kycRoutes);
 
