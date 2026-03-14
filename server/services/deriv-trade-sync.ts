@@ -112,6 +112,48 @@ export class DerivTradeSync {
 
       console.log(`📊 [DERIV SYNC] Encontradas ${pendingOps.length} operações pendentes`);
 
+      if (pendingOps.length === 0) {
+        return result;
+      }
+
+      // Conectar à Deriv para sincronização se não estiver conectado
+      let connectedForSync = false;
+      if (!derivAPI.isApiConnected()) {
+        try {
+          const accountType = derivToken.accountType === 'real' ? 'real' : 'demo';
+          const connected = await derivAPI.connect(derivToken.token, accountType, `SYNC_${userId}_${Date.now()}`);
+          if (connected) {
+            connectedForSync = true;
+            // Aguardar estabilização da conexão
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            console.log(`🔌 [DERIV SYNC] Conexão estabelecida para sincronização`);
+          } else {
+            console.log(`⚠️ [DERIV SYNC] Não foi possível conectar para sincronização`);
+            return result;
+          }
+        } catch (connError: any) {
+          console.log(`⚠️ [DERIV SYNC] Erro ao conectar para sync: ${connError?.message}`);
+          return result;
+        }
+      }
+
+      try {
+      // Buscar tabela de lucro (contratos fechados) em lote - muito mais eficiente
+      let profitTableMap: Map<string, any> = new Map();
+      try {
+        const profitTableEntries = await derivAPI.getProfitTable(200);
+        if (profitTableEntries.length > 0) {
+          for (const entry of profitTableEntries) {
+            if (entry.contract_id) {
+              profitTableMap.set(String(entry.contract_id), entry);
+            }
+          }
+          console.log(`📊 [DERIV SYNC] profit_table carregada: ${profitTableEntries.length} contratos históricos`);
+        }
+      } catch (ptError: any) {
+        console.log(`⚠️ [DERIV SYNC] Não foi possível carregar profit_table: ${ptError?.message}`);
+      }
+
       // Para cada operação pendente, buscar status da Deriv
       for (const operation of pendingOps) {
         try {
@@ -120,10 +162,60 @@ export class DerivTradeSync {
             continue;
           }
 
-          // Buscar informações do contrato na Deriv
+          const contractIdStr = String(operation.derivContractId);
+
+          // PASSO 1: Verificar profit_table (contratos fechados)
+          const ptEntry = profitTableMap.get(contractIdStr);
+          if (ptEntry) {
+            const profit = ptEntry.sell_price - ptEntry.buy_price;
+            const updates: any = {
+              status: profit > 0 ? 'won' : profit < 0 ? 'lost' : 'closed',
+              profit: profit,
+              derivProfit: profit,
+              derivStatus: 'closed',
+              buyPrice: ptEntry.buy_price,
+              sellPrice: ptEntry.sell_price || 0,
+              payout: ptEntry.payout || ptEntry.sell_price || 0,
+              shortcode: ptEntry.shortcode,
+              exitEpoch: ptEntry.sell_time,
+              entryEpoch: ptEntry.purchase_time,
+              lastSyncAt: new Date().toISOString(),
+              syncCount: (operation.syncCount || 0) + 1,
+              statusChangedAt: new Date().toISOString(),
+              completedAt: new Date().toISOString(),
+            };
+
+            if (operation.status !== 'won' && operation.status !== 'lost') {
+              result.updated++;
+              console.log(`✅ [DERIV SYNC] [profit_table] ${operation.symbol} ${updates.status}: Profit=$${profit.toFixed(2)} | Buy=$${ptEntry.buy_price} | Sell=$${ptEntry.sell_price || 0}`);
+            }
+
+            await storage.updateTradeOperation(operation.id, updates);
+            result.synced++;
+            continue;
+          }
+
+          // PASSO 2: Tentar proposal_open_contract (contratos ainda abertos)
           const contractInfo = await derivAPI.getContractInfo(Number(operation.derivContractId));
           if (!contractInfo) {
-            console.log(`⚠️ [DERIV SYNC] Não encontrou contrato ${operation.derivContractId}`);
+            // Contrato não encontrado em nenhum lugar - pode ter expirado antes de ser registrado
+            // Marcar como expirado após 30 tentativas de sync (>7.5 min)
+            const syncCount = (operation.syncCount || 0) + 1;
+            if (syncCount >= 30) {
+              await storage.updateTradeOperation(operation.id, {
+                status: 'expired',
+                derivStatus: 'not_found',
+                lastSyncAt: new Date().toISOString(),
+                syncCount,
+              });
+              console.log(`⏰ [DERIV SYNC] Contrato ${operation.derivContractId} marcado como expirado após ${syncCount} tentativas`);
+            } else {
+              await storage.updateTradeOperation(operation.id, {
+                lastSyncAt: new Date().toISOString(),
+                syncCount,
+              });
+              console.log(`⚠️ [DERIV SYNC] Contrato ${operation.derivContractId} não encontrado (tentativa ${syncCount})`);
+            }
             continue;
           }
 
@@ -183,6 +275,13 @@ export class DerivTradeSync {
       this.lastSyncTime.set(userId, now);
 
       console.log(`✅ [DERIV SYNC] Sincronização concluída para ${userId}: ${result.synced} verificados, ${result.updated} atualizados`);
+      } finally {
+        // Desconectar se conectamos especificamente para sync
+        if (connectedForSync && derivAPI.isApiConnected()) {
+          await derivAPI.disconnect();
+          console.log(`🔌 [DERIV SYNC] Conexão de sync encerrada`);
+        }
+      }
     } catch (error: any) {
       const msg = `Erro geral na sincronização: ${error.message}`;
       result.errors.push(msg);

@@ -1042,6 +1042,40 @@ export class DerivAPIService extends EventEmitter {
     });
   }
 
+  async getProfitTable(limit: number = 100): Promise<any[]> {
+    if (!this.isConnected) return [];
+
+    return new Promise((resolve) => {
+      const reqId = this.generateRequestId();
+      const timeout = setTimeout(() => {
+        this.removeListener('message', handler);
+        resolve([]);
+      }, 10000);
+
+      const handler = (message: any) => {
+        if (message.req_id === reqId) {
+          this.removeListener('message', handler);
+          clearTimeout(timeout);
+          if (message.profit_table?.transactions) {
+            resolve(message.profit_table.transactions);
+          } else {
+            resolve([]);
+          }
+        }
+      };
+
+      this.on('message', handler);
+      this.sendMessage({
+        profit_table: 1,
+        description: 1,
+        limit,
+        offset: 0,
+        sort: 'DESC',
+        req_id: reqId,
+      });
+    });
+  }
+
   async getContractInfo(contractId: number): Promise<DerivContractInfo | null> {
     if (!this.isConnected) return null;
 

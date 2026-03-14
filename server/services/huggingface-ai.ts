@@ -65,7 +65,7 @@ export interface DigitDifferAnalysis {
 export class HuggingFaceAIService {
   private apiKey: string = '';
   private isConfigured: boolean = true;
-  private baseURL = 'https://api-inference.huggingface.co';
+  private baseURL = 'https://router.huggingface.co';
   private hybridOrchestrator: HybridOrchestrator;
   private activeModels: AIModel[] = [
     {
@@ -355,10 +355,10 @@ export class HuggingFaceAIService {
       const prompt = this.createModelSpecificPrompt(model, marketSummary, tickData);
       console.log(`💭 [DEBUG] Prompt criado: ${prompt.substring(0, 150)}...`);
       
-      // Send request to Hugging Face - CORRIGIDO: Sem parâmetros inválidos para sentiment analysis
+      // Send request to Hugging Face - CORRIGIDO: Usando novo endpoint router.huggingface.co
       console.log(`📡 [DEBUG] Enviando requisição para Hugging Face: ${model.id}`);
       const response = await axios.post(
-        `${this.baseURL}/models/${model.id}`,
+        `${this.baseURL}/hf-inference/models/${model.id}`,
         {
           inputs: prompt
         },
@@ -528,6 +528,34 @@ Market Analysis for ${symbol}:
     let negativeScore = 0;
     let neutralScore = 0;
     
+    // Detectar se é modelo de estrelas (BERT-based review sentiment)
+    const isStarRating = sentimentArray.some(item =>
+      item.label?.toLowerCase().includes('star') || item.label?.toLowerCase().includes('estrela')
+    );
+
+    if (isStarRating) {
+      // Mapear estrelas para sentimento: 1-2=negativo, 3=neutro, 4-5=positivo
+      let weightedScore = 0;
+      let totalScore = 0;
+      sentimentArray.forEach(item => {
+        const label = item.label?.toLowerCase() || '';
+        const score = item.score || 0;
+        const starMatch = label.match(/(\d)/);
+        if (starMatch) {
+          const stars = parseInt(starMatch[1], 10);
+          weightedScore += stars * score;
+          totalScore += score;
+        }
+      });
+      const avgStars = totalScore > 0 ? weightedScore / totalScore : 3;
+      if (avgStars >= 3.7) {
+        positiveScore = Math.min(0.95, (avgStars - 3) / 2);
+      } else if (avgStars <= 2.3) {
+        negativeScore = Math.min(0.95, (3 - avgStars) / 2);
+      } else {
+        neutralScore = 0.7;
+      }
+    } else {
     sentimentArray.forEach(item => {
       const label = item.label?.toLowerCase() || '';
       const score = item.score || 0;
@@ -540,6 +568,7 @@ Market Analysis for ${symbol}:
         neutralScore = score;
       }
     });
+    }
     
     // Determinar predição baseada no maior score
     let prediction = 'neutral';
@@ -992,7 +1021,7 @@ Os modelos identificaram padrões convergentes nos dados de mercado que indicam 
   async testModelConnection(modelId: string): Promise<boolean> {
     try {
       const response = await axios.post(
-        `${this.baseURL}/models/${modelId}`,
+        `${this.baseURL}/hf-inference/models/${modelId}`,
         { inputs: "Test connection" },
         {
           headers: {
