@@ -104,6 +104,18 @@ export class DerivTradeSync {
         return result;
       }
 
+      // Limpeza automática: expirar trades pendentes irrecuperáveis (> 5 min)
+      // Contratos DIGIT DIFFER expiram em ~10 ticks (< 30 segundos), então qualquer
+      // trade pendente com mais de 5 minutos nunca terá resultado da Deriv
+      try {
+        const expired = await storage.expireOldPendingTrades(5);
+        if (expired > 0) {
+          console.log(`🧹 [DERIV SYNC] ${expired} trades pendentes antigos expirados automaticamente`);
+        }
+      } catch (cleanupError: any) {
+        console.log(`⚠️ [DERIV SYNC] Erro na limpeza de trades antigos: ${cleanupError?.message}`);
+      }
+
       // Buscar operações ativas/pendentes do usuário
       const operations = await storage.getUserTradeOperations(userId, 500);
       const pendingOps = operations.filter(op => 

@@ -317,6 +317,10 @@ export class DualStorage implements IStorage {
   async createPauseConfig(config: any) { return this.primaryWrite(() => this.turso!.createPauseConfig(config), () => this.sqlite.createPauseConfig(config), 'createPauseConfig'); }
   async updatePauseConfig(userId: string, config: any) { return this.primaryWrite(() => this.turso!.updatePauseConfig(userId, config), () => this.sqlite.updatePauseConfig(userId, config), 'updatePauseConfig'); }
   async updatePausedNowStatus(userId: string, isPausedNow: boolean) { return this.primaryWrite(() => this.turso!.updatePausedNowStatus(userId, isPausedNow), () => this.sqlite.updatePausedNowStatus(userId, isPausedNow), 'updatePausedNowStatus'); }
+
+  async expireOldPendingTrades(olderThanMinutes: number = 5): Promise<number> {
+    return this.sqlite.expireOldPendingTrades(olderThanMinutes);
+  }
 }
 
 export const dualStorage = new DualStorage();

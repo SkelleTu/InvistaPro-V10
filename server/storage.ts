@@ -52,7 +52,7 @@ import {
   type UpdatePauseConfiguration,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, and, isNotNull, sql } from "drizzle-orm";
+import { eq, desc, and, isNotNull, sql, lt } from "drizzle-orm";
 import { createHash, randomBytes, createCipheriv, createDecipheriv } from "crypto";
 
 // Encryption utilities for sensitive data
@@ -241,6 +241,9 @@ export interface IStorage {
   createPauseConfig(config: InsertPauseConfiguration): Promise<PauseConfiguration>;
   updatePauseConfig(userId: string, config: UpdatePauseConfiguration): Promise<PauseConfiguration>;
   updatePausedNowStatus(userId: string, isPausedNow: boolean): Promise<void>;
+
+  // Cleanup: expirar automaticamente trades pendentes irrecuperáveis
+  expireOldPendingTrades(olderThanMinutes?: number): Promise<number>;
 
 }
 
@@ -1671,6 +1674,31 @@ export class DatabaseStorage implements IStorage {
       lastPauseStartedAt: isPausedNow ? new Date().toISOString() : null,
       updatedAt: new Date().toISOString(),
     }).where(eq(pauseConfiguration.userId, userId));
+  }
+
+  /**
+   * Expira automaticamente trades pendentes irrecuperáveis.
+   * Contratos DIGIT DIFFER têm duração de ~10 ticks (< 30 segundos).
+   * Qualquer trade pendente com mais de `olderThanMinutes` minutos nunca será resolvido.
+   * @param olderThanMinutes Padrão: 5 minutos
+   * @returns Número de trades marcados como expirados
+   */
+  async expireOldPendingTrades(olderThanMinutes: number = 5): Promise<number> {
+    const cutoffTime = new Date(Date.now() - olderThanMinutes * 60 * 1000).toISOString();
+    const now = new Date().toISOString();
+
+    const result = await db.run(
+      sql`UPDATE trade_operations 
+          SET status = 'expired', 
+              profit = 0, 
+              deriv_status = 'expired_unresolved',
+              last_sync_at = ${now},
+              completed_at = ${now}
+          WHERE status = 'pending' 
+            AND created_at < ${cutoffTime}`
+    );
+
+    return (result as any).changes ?? 0;
   }
 
 }
