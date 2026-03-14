@@ -9,6 +9,7 @@ import { resilienceSupervisor } from './resilience-supervisor';
 import { derivTradeSync } from './deriv-trade-sync';
 import { digitFrequencyAnalyzer } from './digit-frequency-analyzer';
 import { assetScorer, AssetPerformanceRecord } from './asset-scorer';
+import { realStatsTracker } from './real-stats-tracker';
 
 export interface ActiveTradeSession {
   userId: string;
@@ -764,7 +765,61 @@ export class AutoTradingScheduler {
         console.error(`❌ [${operationId}] ERRO CRÍTICO: Símbolo ${selectedSymbol} passou por filtros mas contém "(1s)" - SISTEMA RESPONSÁVEL BLOQUEANDO`);
         return { success: false, error: `Símbolo bloqueado detectado em verificação final: ${selectedSymbol}` };
       }
-      
+
+      // 🛡️ MODO RECUPERAÇÃO HIPER-SELETIVO: verificar se há perda não recuperada
+      try {
+        // Atualizar saldo atual no tracker (para detectar recuperação automática)
+        const recoveryPnL = await storage.getDailyPnL(config.userId);
+        if (recoveryPnL?.currentBalance && recoveryPnL.currentBalance > 0) {
+          realStatsTracker.updateBalance(recoveryPnL.currentBalance);
+        }
+
+        if (realStatsTracker.isPostLossMode()) {
+          const reqs = realStatsTracker.getRecoveryRequirements();
+
+          console.log(`🛡️ [${operationId}] RECOVERY MODE ATIVO — Saldo alvo: $${reqs.balanceToRecover.toFixed(2)} | Consenso mínimo: ${reqs.minConsensus}%`);
+
+          // 1️⃣ Bloquear ativo que causou a perda
+          if (reqs.assetStillBlocked && realStatsTracker.isAssetBlocked(selectedSymbol)) {
+            console.log(`🚫 [${operationId}] RECOVERY MODE: Ativo ${selectedSymbol} em cooldown por perda. Buscando alternativa...`);
+
+            // Tentar alternar para outro ativo do top5
+            const topList = bestSymbolResult.top5Symbols || [];
+            let switched = false;
+            for (const alt of topList) {
+              const altClean = alt.split('(')[0].trim();
+              if (!realStatsTracker.isAssetBlocked(altClean) && !this.isSymbolBlocked(altClean)) {
+                const altConsensus = parseFloat(alt.match(/\(([0-9.]+)%?\)/)?.[1] || '0');
+                if (altConsensus >= reqs.minConsensus) {
+                  selectedSymbol = altClean;
+                  console.log(`🔄 [${operationId}] RECOVERY MODE: Alternativa selecionada: ${selectedSymbol} (${altConsensus}%)`);
+                  switched = true;
+                  break;
+                }
+              }
+            }
+
+            if (!switched) {
+              console.log(`⏳ [${operationId}] RECOVERY MODE: Sem alternativa com consenso ≥${reqs.minConsensus}% fora do cooldown. Aguardando próximo ciclo.`);
+              return { success: false, error: `RECOVERY MODE: Aguardando sinal excepcional (≥${reqs.minConsensus}%) em ativo diferente de ${reqs.blockedAsset}` };
+            }
+          }
+
+          // 2️⃣ Exigir consenso mínimo de 85% para qualquer trade em modo recuperação
+          const currentConsensus = aiConsensusPreCalculated?.consensusStrength ?? 0;
+          if (currentConsensus < reqs.minConsensus) {
+            console.log(`⛔ [${operationId}] RECOVERY MODE: Consenso ${currentConsensus}% < mínimo ${reqs.minConsensus}% exigido`);
+            console.log(`   → Sistema aguarda sinal excepcional antes de operar novamente`);
+            console.log(`   → Saldo atual estimado: $${recoveryPnL?.currentBalance?.toFixed(2) || '?'} | Alvo: $${reqs.balanceToRecover.toFixed(2)}`);
+            return { success: false, error: `RECOVERY MODE: Consenso ${currentConsensus}% insuficiente — exigido ≥${reqs.minConsensus}% após perda` };
+          }
+
+          console.log(`🔥 [${operationId}] RECOVERY MODE: Sinal EXCEPCIONAL ${currentConsensus}% ≥ ${reqs.minConsensus}% | Trade AUTORIZADO em ${selectedSymbol}`);
+        }
+      } catch (recoveryCheckError) {
+        console.warn(`⚠️ [${operationId}] Erro na verificação de recovery mode:`, recoveryCheckError);
+      }
+
       // Buscar dados de mercado
       let marketDataInfo = await storage.getMarketData(selectedSymbol);
       if (!marketDataInfo) {
