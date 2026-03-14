@@ -1121,14 +1121,15 @@ export class DatabaseStorage implements IStorage {
 
     const lossPercent = Math.abs(todayPnL.dailyPnL) / todayPnL.openingBalance;
     
-    // Gradual recovery multiplier based on loss percentage
-    if (lossPercent >= 0.20) return 3.5; // 20%+ loss = 3.5x multiplier
-    if (lossPercent >= 0.15) return 2.8; // 15%+ loss = 2.8x multiplier  
-    if (lossPercent >= 0.10) return 2.2; // 10%+ loss = 2.2x multiplier
-    if (lossPercent >= 0.05) return 1.6; // 5%+ loss = 1.6x multiplier
-    if (lossPercent >= 0.02) return 1.3; // 2%+ loss = 1.3x multiplier
+    // ANTI-MARTINGALE: Reduzir stakes gradualmente em perdas para proteger banca.
+    // Nunca aumentar acima de 1.0x — martingale em RNG/DIGITDIFF é matematicamente ruinoso.
+    if (lossPercent >= 0.20) return 0.5; // 20%+ loss: reduzir 50% para preservar banca
+    if (lossPercent >= 0.15) return 0.6; // 15%+ loss: reduzir 40%
+    if (lossPercent >= 0.10) return 0.7; // 10%+ loss: reduzir 30%
+    if (lossPercent >= 0.05) return 0.85; // 5%+ loss: reduzir 15%
+    if (lossPercent >= 0.02) return 0.95; // 2%+ loss: reduzir 5%
     
-    return 1.0; // No recovery needed
+    return 1.0; // Sem perdas relevantes = stake normal
   }
 
   async shouldActivateRecovery(userId: string): Promise<boolean> {

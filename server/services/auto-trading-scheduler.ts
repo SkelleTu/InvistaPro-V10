@@ -1427,25 +1427,17 @@ export class AutoTradingScheduler {
    * - Consenso baixo (<50%) → Stake menor (proteção)
    */
   private calculateDynamicStake(baseAmount: number, consensoStrength: number, volatility: number = 0.5): number {
-    // Consenso range: 0-100
-    // Volatility range: 0-1
+    // DIGITDIFF: dígitos sintéticos são RNG uniforme (cada dígito 0-9 tem 10% de chance).
+    // Aumentar stake com "confiança da IA" não melhora o resultado — só aumenta a exposição.
+    // Manter stake fixo em 1.0x; reduzir levemente apenas em volatilidade muito alta.
     
     let multiplier = 1.0;
     
-    // PILAR 1: Consenso da IA
-    if (consensoStrength >= 70) {
-      multiplier = 1.4; // +40% se consenso forte
-    } else if (consensoStrength >= 55) {
-      multiplier = 1.1; // +10% se consenso moderado
-    } else if (consensoStrength < 50) {
-      multiplier = 0.7; // -30% se consenso fraco
-    }
-    
-    // PILAR 2: Volatilidade (reduz stake se volatilidade alta)
+    // Apenas reduz stake em volatilidade extrema — nunca aumenta acima de 1.0
     if (volatility > 0.8) {
-      multiplier *= 0.8; // -20% em volatilidade alta
+      multiplier = 0.8; // -20% em volatilidade muito alta
     } else if (volatility > 0.6) {
-      multiplier *= 0.9; // -10% em volatilidade média
+      multiplier = 0.9; // -10% em volatilidade moderada
     }
     
     const dynamicStake = Math.round(baseAmount * multiplier * 100) / 100;
@@ -1560,23 +1552,14 @@ export class AutoTradingScheduler {
     // Mapear consenso e direção para barrier que faz sentido
     let barrier = '5'; // Default neutro
     
-    if (direction === 'up' && consensoStrength && consensoStrength > 0.5) {
-      // IA prevê movimento forte para UP = expectativa de mudança de dígito
-      // Usar barrier baseado em confiança (75-99% confiança = barriers altos 7-9)
-      const barrierValue = Math.min(9, Math.max(5, Math.floor((consensoStrength * 10))));
-      barrier = barrierValue.toString();
-      console.log(`📊 [DIGITDIFF] IA prevê UP forte (${(consensoStrength*100).toFixed(0)}%) → Barrier ${barrier} (espera mudança)`);
-    } else if (direction === 'down' && consensoStrength && consensoStrength > 0.5) {
-      // IA prevê movimento para DOWN = expectativa de estabilidade
-      // Usar barrier baixos (0-4) para apostar em menos mudança
-      const barrierValue = Math.max(0, Math.min(4, Math.floor((consensoStrength * 4))));
-      barrier = barrierValue.toString();
-      console.log(`📊 [DIGITDIFF] IA prevê DOWN (${(consensoStrength*100).toFixed(0)}%) → Barrier ${barrier} (espera estabilidade)`);
-    } else {
-      // Consensus baixo ou neutro = usar barrier médio com pequena variação
-      barrier = Math.floor(Math.random() * 3 + 4).toString(); // 4-6 (zona neutra)
-      console.log(`📊 [DIGITDIFF] Consenso baixo/neutro → Barrier ${barrier} (zona neutra)`);
-    }
+    // DIGITDIFF barrier: para índices sintéticos (RNG uniforme), cada dígito 0-9
+    // aparece com exatamente 10% de probabilidade. Qualquer barrier tem a mesma
+    // chance de ganhar (90%). Usar barrier 5 como padrão neutro e variar levemente
+    // para distribuir as apostas uniformemente ao longo do tempo.
+    const neutralBarriers = [4, 5, 5, 5, 6]; // Concentrado em 5, com leve variação
+    barrier = neutralBarriers[Math.floor(Math.random() * neutralBarriers.length)].toString();
+    console.log(`📊 [DIGITDIFF] Barrier ${barrier} selecionado (neutro, dir: ${direction}, consenso: ${(consensoStrength||0)*100}%)`);
+
 
     return { amount, duration, barrier };
   }
@@ -1889,37 +1872,36 @@ export class AutoTradingScheduler {
       let baseMultiplier = await storage.calculateRecoveryMultiplier(userId);
       let cooperativeBonus = 1.0;
       
-      // Aplicar bônus cooperativo baseado no nível de cooperação e threshold da estratégia
+      // PROTEÇÃO ANTI-MARTINGALE: Nunca aumentar stakes após perdas.
+      // Martingale em DIGITDIFF (RNG) é matematicamente ruinoso.
+      // Em recuperação, REDUZIR stakes para preservar banca.
       switch (cooperationLevel) {
         case 'maximum':
-          // Cooperação máxima: IAs trabalham com threshold 95%
-          if (lossPercent >= 0.20) cooperativeBonus = 1.4; // +40% quando cooperação máxima
-          else if (lossPercent >= 0.10) cooperativeBonus = 1.3;
-          else if (lossPercent >= 0.05) cooperativeBonus = 1.2;
+          if (lossPercent >= 0.20) cooperativeBonus = 0.7; // -30% em perdas graves
+          else if (lossPercent >= 0.10) cooperativeBonus = 0.8;
+          else if (lossPercent >= 0.05) cooperativeBonus = 0.9;
           break;
           
         case 'high':
-          // Cooperação alta: IAs trabalham com threshold 85-90%  
-          if (lossPercent >= 0.15) cooperativeBonus = 1.3; // +30% quando cooperação alta
-          else if (lossPercent >= 0.10) cooperativeBonus = 1.25;
-          else if (lossPercent >= 0.05) cooperativeBonus = 1.15;
+          if (lossPercent >= 0.15) cooperativeBonus = 0.75;
+          else if (lossPercent >= 0.10) cooperativeBonus = 0.85;
+          else if (lossPercent >= 0.05) cooperativeBonus = 0.9;
           break;
           
         case 'medium':
-          // Cooperação média: IAs trabalham com threshold 75-80%
-          if (lossPercent >= 0.10) cooperativeBonus = 1.2; // +20% quando cooperação média
-          else if (lossPercent >= 0.05) cooperativeBonus = 1.1;
+          if (lossPercent >= 0.10) cooperativeBonus = 0.85;
+          else if (lossPercent >= 0.05) cooperativeBonus = 0.9;
           break;
       }
       
-      // Aplicar taxa de sucesso da estratégia como fator adicional
+      // Bônus de sucesso histórico: apenas reduz o desconto, nunca ultrapassa 1.0
       const successFactor = Math.min((recoveryStrategy.successRate || 70) / 100, 1.0);
-      cooperativeBonus = cooperativeBonus * (0.8 + (successFactor * 0.2)); // Ajustar baseado no sucesso histórico
+      cooperativeBonus = Math.min(1.0, cooperativeBonus * (0.9 + (successFactor * 0.1)));
       
       const finalMultiplier = baseMultiplier * cooperativeBonus;
       
-      // Limitar multiplicador máximo baseado nos parâmetros da estratégia
-      const maxMultiplier = recoveryStrategy.parameters?.maxMultiplier || 3.5;
+      // Cap máximo em 1.0x — nunca apostar mais do que o stake base durante recuperação
+      const maxMultiplier = 1.0;
       const limitedMultiplier = Math.min(finalMultiplier, maxMultiplier);
       
       console.log(`🧠 [COOPERATIVE AI] Multiplicador calculado:`);

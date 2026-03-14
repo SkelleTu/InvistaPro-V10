@@ -615,11 +615,12 @@ export class TursoStorage implements IStorage {
       todayPnL = await this.createOrUpdateDailyPnL(userId, { openingBalance: initialBalance, currentBalance: initialBalance, dailyPnL: 0 });
     }
     const lossPercent = Math.abs(todayPnL.dailyPnL) / todayPnL.openingBalance;
-    if (lossPercent >= 0.20) return 3.5;
-    if (lossPercent >= 0.15) return 2.8;
-    if (lossPercent >= 0.10) return 2.2;
-    if (lossPercent >= 0.05) return 1.6;
-    if (lossPercent >= 0.02) return 1.3;
+    // ANTI-MARTINGALE: reduzir stakes em perdas, nunca aumentar acima de 1.0x
+    if (lossPercent >= 0.20) return 0.5;
+    if (lossPercent >= 0.15) return 0.6;
+    if (lossPercent >= 0.10) return 0.7;
+    if (lossPercent >= 0.05) return 0.85;
+    if (lossPercent >= 0.02) return 0.95;
     return 1.0;
   }
 
