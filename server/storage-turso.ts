@@ -24,6 +24,7 @@ import {
   systemHealthHeartbeat,
   tradingControl,
   assetBlacklist,
+  blockedAssets,
   pauseConfiguration,
   type User,
   type InsertUser,
@@ -836,12 +837,23 @@ export class TursoStorage implements IStorage {
   }
 
   async isAssetBlocked(userId: string, assetName: string): Promise<boolean> {
-    const blockedAssets = await getDb().select().from(assetBlacklist).where(eq(assetBlacklist.userId, userId));
-    return blockedAssets.some(ba => {
+    const blacklisted = await getDb().select().from(assetBlacklist).where(eq(assetBlacklist.userId, userId));
+    return blacklisted.some(ba => {
       if (ba.patternType === 'exact') return ba.assetPattern === assetName;
       if (ba.patternType === 'contains') return assetName.includes(ba.assetPattern);
       return false;
     });
+  }
+
+  async isUserBlockedAsset(userId: string, symbol: string, tradeMode: string): Promise<boolean> {
+    const rows = await getDb().select().from(blockedAssets).where(
+      and(
+        eq(blockedAssets.userId, userId),
+        eq(blockedAssets.tradeMode, tradeMode),
+        eq(blockedAssets.symbol, symbol)
+      )
+    );
+    return rows.length > 0;
   }
 
   async getUserPauseConfig(userId: string): Promise<PauseConfiguration | undefined> {

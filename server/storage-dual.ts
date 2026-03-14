@@ -306,6 +306,7 @@ export class DualStorage implements IStorage {
   async getUserAssetBlacklists(userId: string) { return this.primaryRead(() => this.turso!.getUserAssetBlacklists(userId), () => this.sqlite.getUserAssetBlacklists(userId), 'getUserAssetBlacklists'); }
   async deleteAssetBlacklist(id: string) { return this.primaryWrite(() => this.turso!.deleteAssetBlacklist(id), () => this.sqlite.deleteAssetBlacklist(id), 'deleteAssetBlacklist'); }
   async isAssetBlocked(userId: string, assetName: string) { return this.primaryRead(() => this.turso!.isAssetBlocked(userId, assetName), () => this.sqlite.isAssetBlocked(userId, assetName), 'isAssetBlocked'); }
+  async isUserBlockedAsset(userId: string, symbol: string, tradeMode: string) { return this.primaryRead(() => this.turso!.isUserBlockedAsset(userId, symbol, tradeMode), () => this.sqlite.isUserBlockedAsset(userId, symbol, tradeMode), 'isUserBlockedAsset'); }
 
   async getUserPauseConfig(userId: string) { return this.primaryRead(() => this.turso!.getUserPauseConfig(userId), () => this.sqlite.getUserPauseConfig(userId), 'getUserPauseConfig'); }
   async createPauseConfig(config: any) { return this.primaryWrite(() => this.turso!.createPauseConfig(config), () => this.sqlite.createPauseConfig(config), 'createPauseConfig'); }

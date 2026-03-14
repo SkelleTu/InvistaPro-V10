@@ -14,6 +14,7 @@ import {
   systemHealthHeartbeat,
   tradingControl,
   assetBlacklist,
+  blockedAssets,
   pauseConfiguration,
   type User,
   type InsertUser,
@@ -233,6 +234,7 @@ export interface IStorage {
   getUserAssetBlacklists(userId: string): Promise<AssetBlacklist[]>;
   deleteAssetBlacklist(id: string): Promise<void>;
   isAssetBlocked(userId: string, assetName: string): Promise<boolean>;
+  isUserBlockedAsset(userId: string, symbol: string, tradeMode: string): Promise<boolean>;
 
   // Pause Configuration operations
   getUserPauseConfig(userId: string): Promise<PauseConfiguration | undefined>;
@@ -1617,8 +1619,8 @@ export class DatabaseStorage implements IStorage {
   }
 
   async isAssetBlocked(userId: string, assetName: string): Promise<boolean> {
-    const blockedAssets = await db.select().from(assetBlacklist).where(eq(assetBlacklist.userId, userId));
-    return blockedAssets.some(ba => {
+    const blacklisted = await db.select().from(assetBlacklist).where(eq(assetBlacklist.userId, userId));
+    return blacklisted.some(ba => {
       if (ba.patternType === 'exact') {
         return ba.assetPattern === assetName;
       } else if (ba.patternType === 'contains') {
@@ -1626,6 +1628,17 @@ export class DatabaseStorage implements IStorage {
       }
       return false;
     });
+  }
+
+  async isUserBlockedAsset(userId: string, symbol: string, tradeMode: string): Promise<boolean> {
+    const rows = await db.select().from(blockedAssets).where(
+      and(
+        eq(blockedAssets.userId, userId),
+        eq(blockedAssets.tradeMode, tradeMode),
+        eq(blockedAssets.symbol, symbol)
+      )
+    );
+    return rows.length > 0;
   }
 
   // Pause Configuration operations

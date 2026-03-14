@@ -44,7 +44,7 @@ export class AutoTradingScheduler {
   // 🔧 ANTI-DEADLOCK: Rastreamento de operações em execução
   private lastOperationId: string | null = null;
   private lastOperationStartTime: number = 0;
-  private readonly OPERATION_TIMEOUT_MS = 45000; // 45 segundos máximo por ciclo
+  private readonly OPERATION_TIMEOUT_MS = 90000; // 90 segundos máximo por ciclo
   
       // 🎯 SISTEMA DE DIVERSIFICAÇÃO DINÂMICA - "PERDA ZERO"
       // Com 120+ ativos, cada um pode ter cool-off mais curto
@@ -453,22 +453,9 @@ export class AutoTradingScheduler {
       const sessionKey = `${userId}_${config.id}`;
 
       // VERIFICAÇÃO DE ATIVOS BLOQUEADOS
-      const db = (storage as any).db;
-      const { blockedAssets } = require("@shared/schema");
-      const { and, eq } = require("drizzle-orm");
-      
-      const blocked = await db
-        .select()
-        .from(blockedAssets)
-        .where(
-          and(
-            eq(blockedAssets.userId, userId),
-            eq(blockedAssets.tradeMode, "digit_diff"),
-            eq(blockedAssets.symbol, config.symbol || "R_100") // Símbolo atual
-          )
-        );
+      const isBlocked = await storage.isUserBlockedAsset(userId, config.symbol || "R_100", "digit_diff");
 
-      if (blocked.length > 0) {
+      if (isBlocked) {
         console.log(`⛔ [${operationId}] Trade bloqueado para ${config.symbol || "R_100"} (Configuração do usuário)`);
         return { success: false, error: 'Ativo bloqueado pelo usuário' };
       }
