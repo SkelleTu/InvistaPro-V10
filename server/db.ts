@@ -399,6 +399,157 @@ export function initializeDatabase() {
       )
     `);
 
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS blocked_assets (
+        id TEXT PRIMARY KEY DEFAULT (hex(randomblob(16))),
+        user_id TEXT NOT NULL REFERENCES users(id),
+        trade_mode TEXT NOT NULL,
+        symbol TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS asset_blacklist (
+        id TEXT PRIMARY KEY DEFAULT (hex(randomblob(16))),
+        user_id TEXT NOT NULL REFERENCES users(id),
+        asset_pattern TEXT NOT NULL,
+        pattern_type TEXT NOT NULL,
+        is_active INTEGER DEFAULT 1,
+        reason TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS pause_configuration (
+        id TEXT PRIMARY KEY DEFAULT (hex(randomblob(16))),
+        user_id TEXT NOT NULL REFERENCES users(id),
+        is_enabled INTEGER DEFAULT 1,
+        operating_duration_minutes INTEGER DEFAULT 15,
+        pause_duration_min_seconds INTEGER DEFAULT 60,
+        pause_duration_max_seconds INTEGER DEFAULT 180,
+        use_technical_analysis_consensus INTEGER DEFAULT 1,
+        min_ai_consensus_for_pause REAL DEFAULT 0.7,
+        last_pause_started_at DATETIME,
+        last_operating_started_at DATETIME,
+        is_paused_now INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS experiment_tracking (
+        id TEXT PRIMARY KEY DEFAULT (hex(randomblob(16))),
+        experiment_type TEXT NOT NULL,
+        experiment_name TEXT NOT NULL,
+        parameters TEXT NOT NULL,
+        results TEXT NOT NULL,
+        performance TEXT NOT NULL,
+        start_time TEXT NOT NULL,
+        end_time TEXT,
+        status TEXT NOT NULL DEFAULT 'running',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS dynamic_weights (
+        id TEXT PRIMARY KEY DEFAULT (hex(randomblob(16))),
+        model_name TEXT NOT NULL,
+        symbol TEXT NOT NULL,
+        base_weight REAL NOT NULL,
+        current_weight REAL NOT NULL,
+        performance REAL NOT NULL,
+        profitability REAL NOT NULL,
+        cooperation_score REAL NOT NULL,
+        adaptation_rate REAL NOT NULL DEFAULT 0.1,
+        update_reason TEXT NOT NULL,
+        last_updated TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS episodic_memory (
+        id TEXT PRIMARY KEY DEFAULT (hex(randomblob(16))),
+        symbol TEXT NOT NULL,
+        market_state TEXT NOT NULL,
+        action TEXT NOT NULL,
+        reward REAL NOT NULL,
+        next_state TEXT,
+        episode TEXT NOT NULL,
+        importance REAL NOT NULL DEFAULT 1.0,
+        timestamp TEXT NOT NULL,
+        decay REAL NOT NULL DEFAULT 1.0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS emergent_patterns (
+        id TEXT PRIMARY KEY DEFAULT (hex(randomblob(16))),
+        symbol TEXT NOT NULL,
+        pattern_type TEXT NOT NULL,
+        pattern_data TEXT NOT NULL,
+        confidence REAL NOT NULL,
+        frequency INTEGER NOT NULL,
+        profitability REAL,
+        status TEXT NOT NULL DEFAULT 'testing',
+        detected_at TEXT NOT NULL,
+        last_seen TEXT NOT NULL,
+        validation_count INTEGER NOT NULL DEFAULT 0
+      )
+    `);
+
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS strategy_evolution (
+        id TEXT PRIMARY KEY DEFAULT (hex(randomblob(16))),
+        parent_strategy TEXT,
+        strategy_code TEXT NOT NULL,
+        generation INTEGER NOT NULL,
+        mutation TEXT NOT NULL,
+        fitness REAL NOT NULL,
+        backtest_results TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'candidate',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        promoted_at TEXT,
+        retired_at TEXT
+      )
+    `);
+
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS meta_learning (
+        id TEXT PRIMARY KEY DEFAULT (hex(randomblob(16))),
+        source_symbol TEXT NOT NULL,
+        target_symbol TEXT NOT NULL,
+        transfer_type TEXT NOT NULL,
+        transfer_data TEXT NOT NULL,
+        effectiveness REAL NOT NULL,
+        confidence REAL NOT NULL,
+        applicability REAL NOT NULL,
+        status TEXT NOT NULL DEFAULT 'testing',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        last_applied TEXT
+      )
+    `);
+
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS performance_analytics (
+        id TEXT PRIMARY KEY DEFAULT (hex(randomblob(16))),
+        analysis_type TEXT NOT NULL,
+        timeframe TEXT NOT NULL,
+        symbol TEXT NOT NULL,
+        metrics TEXT NOT NULL,
+        insights TEXT NOT NULL,
+        recommendations TEXT NOT NULL,
+        confidence REAL NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     console.log('✅ Banco de dados local inicializado com sucesso!');
     console.log('🛡️ Sistema de resiliência e auto-restart configurado!');
     console.log(`📍 Local do arquivo: ${dbPath}`);

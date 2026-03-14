@@ -255,9 +255,9 @@ export class DualStorage implements IStorage {
   async getUserAiLogs(userId: string, limit?: number) { return this.primaryRead(() => this.turso!.getUserAiLogs(userId, limit), () => this.sqlite.getUserAiLogs(userId, limit), 'getUserAiLogs'); }
   async getLatestAiAnalysis(userId: string) { return this.primaryRead(() => this.turso!.getLatestAiAnalysis(userId), () => this.sqlite.getLatestAiAnalysis(userId), 'getLatestAiAnalysis'); }
 
-  async upsertMarketData(data: InsertMarketData) { return this.primaryWrite(() => this.turso!.upsertMarketData(data), () => this.sqlite.upsertMarketData(data), 'upsertMarketData'); }
-  async getMarketData(symbol: string) { return this.primaryRead(() => this.turso!.getMarketData(symbol), () => this.sqlite.getMarketData(symbol), 'getMarketData'); }
-  async getAllMarketData() { return this.primaryRead(() => this.turso!.getAllMarketData(), () => this.sqlite.getAllMarketData(), 'getAllMarketData'); }
+  async upsertMarketData(data: InsertMarketData) { return this.sqlite.upsertMarketData(data); }
+  async getMarketData(symbol: string) { return this.sqlite.getMarketData(symbol); }
+  async getAllMarketData() { return this.sqlite.getAllMarketData(); }
 
   async getTradingStats(userId: string) { return this.primaryRead(() => this.turso!.getTradingStats(userId), () => this.sqlite.getTradingStats(userId), 'getTradingStats'); }
   async getActiveTradesCount(userId: string) { return this.primaryRead(() => this.turso!.getActiveTradesCount(userId), () => this.sqlite.getActiveTradesCount(userId), 'getActiveTradesCount'); }

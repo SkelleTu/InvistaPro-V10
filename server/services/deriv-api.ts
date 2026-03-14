@@ -287,27 +287,6 @@ export class DerivAPIService extends EventEmitter {
           }
         });
 
-        this.ws.on('message', (data) => {
-          try {
-            const message = JSON.parse(data.toString());
-            this.handleMessage(message);
-          } catch (error) {
-            errorTracker.captureError(
-              error as Error,
-              'WARNING',
-              'WEBSOCKET',
-              {
-                requestPath: 'DERIV_MESSAGE_PARSE',
-                requestMethod: 'MESSAGE',
-                requestBody: {
-                  operationId: this.operationId,
-                  rawData: data.toString().substring(0, 200)
-                }
-              }
-            );
-          }
-        });
-
         this.setupWebSocketListeners(reject, connectionTimer, endpoint, accountType);
 
       } catch (error) {
@@ -978,8 +957,15 @@ export class DerivAPIService extends EventEmitter {
       const reqId = this.generateRequestId();
       const normalizedSymbol = this.normalizeSymbol(symbol);
       
+      const timer = setTimeout(() => {
+        this.removeListener('message', proposalHandler);
+        console.error(`⏰ Timeout ao criar proposta ${contractType} para ${normalizedSymbol}`);
+        resolve(null);
+      }, 15000);
+
       const proposalHandler = (message: any) => {
         if (message.req_id === reqId) {
+          clearTimeout(timer);
           this.removeListener('message', proposalHandler);
           if (message.proposal) {
             console.log(`✅ Proposta ${contractType} criada: ID ${message.proposal.id} | Preço: $${message.proposal.ask_price}`);

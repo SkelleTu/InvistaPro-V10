@@ -453,7 +453,13 @@ export class AutoTradingScheduler {
       const sessionKey = `${userId}_${config.id}`;
 
       // VERIFICAÇÃO DE ATIVOS BLOQUEADOS
-      const isBlocked = await storage.isUserBlockedAsset(userId, config.symbol || "R_100", "digit_diff");
+      let isBlocked = false;
+      try {
+        isBlocked = await storage.isUserBlockedAsset(userId, config.symbol || "R_100", "digit_diff");
+      } catch (blockedErr) {
+        console.warn(`⚠️ [${operationId}] Erro ao verificar ativo bloqueado, assumindo NÃO bloqueado:`, blockedErr instanceof Error ? blockedErr.message : String(blockedErr));
+        isBlocked = false;
+      }
 
       if (isBlocked) {
         console.log(`⛔ [${operationId}] Trade bloqueado para ${config.symbol || "R_100"} (Configuração do usuário)`);
