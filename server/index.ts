@@ -110,7 +110,7 @@ app.use((req, res, next) => {
   const hasPostgres = process.env.DATABASE_URL && (process.env.DATABASE_URL.startsWith('postgresql://') || process.env.DATABASE_URL.startsWith('postgres://'));
   
   if (hasPostgres) {
-    const isReplit = process.env.DATABASE_URL.includes('helium') || process.env.DATABASE_URL.includes('replit');
+    const isReplit = process.env.DATABASE_URL!.includes('helium') || process.env.DATABASE_URL!.includes('replit');
     const dbType = isReplit ? 'Replit PostgreSQL (Neon)' : 'PostgreSQL';
     
     console.log(`✨ ${dbType} configurado! Criando schema SQL...`);

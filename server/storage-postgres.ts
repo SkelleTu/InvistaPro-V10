@@ -583,7 +583,7 @@ export class PostgresStorage implements IStorage {
         eq(pgSchema.tradeOperations.status, 'lost')
       ));
     
-    const dailyLosses = ops.filter(op => {
+    const dailyLosses = ops.filter((op: any) => {
       if (!op.createdAt) return false;
       const opDate = new Date(op.createdAt).toISOString().split('T')[0];
       return opDate === date;
@@ -752,6 +752,34 @@ export class PostgresStorage implements IStorage {
   async getRecentDailyPnL(userId: string, days?: number): Promise<any[]> {
     return [];
   }
+
+  async createAssetBlacklist(blacklist: any): Promise<any> {
+    return blacklist;
+  }
+
+  async getUserAssetBlacklists(userId: string): Promise<any[]> {
+    return [];
+  }
+
+  async deleteAssetBlacklist(id: string): Promise<void> {}
+
+  async isAssetBlocked(userId: string, assetName: string): Promise<boolean> {
+    return false;
+  }
+
+  async getUserPauseConfig(userId: string): Promise<any | undefined> {
+    return undefined;
+  }
+
+  async createPauseConfig(config: any): Promise<any> {
+    return config;
+  }
+
+  async updatePauseConfig(userId: string, config: any): Promise<any> {
+    return config;
+  }
+
+  async updatePausedNowStatus(userId: string, isPausedNow: boolean): Promise<void> {}
 }
 
 export const postgresStorage = new PostgresStorage();

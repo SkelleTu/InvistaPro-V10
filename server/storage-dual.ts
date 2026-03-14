@@ -96,6 +96,7 @@ export class DualStorage implements IStorage {
   async createTradeConfig(c: InsertTradeConfiguration) { return this.primaryWrite(() => this.turso!.createTradeConfig(c), () => this.sqlite.createTradeConfig(c), 'createTradeConfig'); }
   async getUserTradeConfig(userId: string) { return this.primaryRead(() => this.turso!.getUserTradeConfig(userId), () => this.sqlite.getUserTradeConfig(userId), 'getUserTradeConfig'); }
   async getAllTradeConfigurations() { return this.primaryRead(() => this.turso!.getAllTradeConfigurations(), () => this.sqlite.getAllTradeConfigurations(), 'getAllTradeConfigurations'); }
+  async getActiveTradeConfigurations() { return this.primaryRead(() => this.turso!.getActiveTradeConfigurations(), () => this.sqlite.getActiveTradeConfigurations(), 'getActiveTradeConfigurations'); }
   async updateTradeConfig(userId: string, mode: string) { return this.primaryWrite(() => this.turso!.updateTradeConfig(userId, mode), () => this.sqlite.updateTradeConfig(userId, mode), 'updateTradeConfig'); }
   async deactivateAllTradeConfigs(userId: string) { return this.primaryWrite(() => this.turso!.deactivateAllTradeConfigs(userId), () => this.sqlite.deactivateAllTradeConfigs(userId), 'deactivateAllTradeConfigs'); }
   async reactivateTradeConfiguration(id: string) { return this.primaryWrite(() => this.turso!.reactivateTradeConfiguration(id), () => this.sqlite.reactivateTradeConfiguration(id), 'reactivateTradeConfiguration'); }

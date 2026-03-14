@@ -228,7 +228,7 @@ export class MarketDataCollector extends EventEmitter {
       console.log('🔍 [DISCOVERY] Iniciando descoberta de todos os ativos DIGITDIFF disponíveis...');
       
       // Conectar à Deriv se não estiver conectado
-      if (!this.derivAPI.isConnected) {
+      if (!this.derivAPI.getIsConnected()) {
         await this.derivAPI.connectPublic();
       }
       

@@ -1,4 +1,4 @@
-import { storage } from '../storage';
+import { dualStorage as storage } from '../storage-dual';
 
 /**
  * 🎯 SISTEMA DE THRESHOLD DINÂMICO BASEADO EM MÉDIA ALTA DIÁRIA

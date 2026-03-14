@@ -23,6 +23,8 @@ import {
   activeWebSocketSubscriptions,
   systemHealthHeartbeat,
   tradingControl,
+  assetBlacklist,
+  pauseConfiguration,
   type User,
   type InsertUser,
   type UpdateUser,
@@ -52,6 +54,11 @@ import {
   type InsertSystemHealthHeartbeat,
   type TradingControl,
   type InsertTradingControl,
+  type AssetBlacklist,
+  type InsertAssetBlacklist,
+  type PauseConfiguration,
+  type InsertPauseConfiguration,
+  type UpdatePauseConfiguration,
 } from "@shared/schema";
 import { tursoDb } from "./db-turso";
 import { eq, desc, and, sql } from "drizzle-orm";
@@ -285,6 +292,14 @@ export class TursoStorage implements IStorage {
     return await getDb()
       .select()
       .from(tradeConfigurations)
+      .orderBy(desc(tradeConfigurations.createdAt));
+  }
+
+  async getActiveTradeConfigurations(): Promise<TradeConfiguration[]> {
+    return await getDb()
+      .select()
+      .from(tradeConfigurations)
+      .where(eq(tradeConfigurations.isActive, true))
       .orderBy(desc(tradeConfigurations.createdAt));
   }
 
@@ -807,24 +822,20 @@ export class TursoStorage implements IStorage {
     }
   }
 
-  async createAssetBlacklist(blacklist: any): Promise<any> {
-    const { assetBlacklist } = await import('@shared/schema');
+  async createAssetBlacklist(blacklist: InsertAssetBlacklist): Promise<AssetBlacklist> {
     const [result] = await getDb().insert(assetBlacklist).values(blacklist).returning();
     return result;
   }
 
-  async getUserAssetBlacklists(userId: string): Promise<any[]> {
-    const { assetBlacklist } = await import('@shared/schema');
+  async getUserAssetBlacklists(userId: string): Promise<AssetBlacklist[]> {
     return await getDb().select().from(assetBlacklist).where(eq(assetBlacklist.userId, userId));
   }
 
   async deleteAssetBlacklist(id: string): Promise<void> {
-    const { assetBlacklist } = await import('@shared/schema');
     await getDb().delete(assetBlacklist).where(eq(assetBlacklist.id, id));
   }
 
   async isAssetBlocked(userId: string, assetName: string): Promise<boolean> {
-    const { assetBlacklist } = await import('@shared/schema');
     const blockedAssets = await getDb().select().from(assetBlacklist).where(eq(assetBlacklist.userId, userId));
     return blockedAssets.some(ba => {
       if (ba.patternType === 'exact') return ba.assetPattern === assetName;
@@ -833,29 +844,25 @@ export class TursoStorage implements IStorage {
     });
   }
 
-  async getUserPauseConfig(userId: string): Promise<any | undefined> {
-    const { pauseConfiguration } = await import('@shared/schema');
+  async getUserPauseConfig(userId: string): Promise<PauseConfiguration | undefined> {
     const [config] = await getDb().select().from(pauseConfiguration).where(eq(pauseConfiguration.userId, userId));
     return config;
   }
 
-  async createPauseConfig(config: any): Promise<any> {
-    const { pauseConfiguration } = await import('@shared/schema');
+  async createPauseConfig(config: InsertPauseConfiguration): Promise<PauseConfiguration> {
     const [result] = await getDb().insert(pauseConfiguration).values(config).returning();
     return result;
   }
 
-  async updatePauseConfig(userId: string, config: any): Promise<any> {
-    const { pauseConfiguration } = await import('@shared/schema');
+  async updatePauseConfig(userId: string, config: UpdatePauseConfiguration): Promise<PauseConfiguration> {
     const [result] = await getDb().update(pauseConfiguration).set({ ...config, updatedAt: new Date().toISOString() }).where(eq(pauseConfiguration.userId, userId)).returning();
     return result;
   }
 
   async updatePausedNowStatus(userId: string, isPausedNow: boolean): Promise<void> {
-    const { pauseConfiguration } = await import('@shared/schema');
     await getDb().update(pauseConfiguration).set({
       isPausedNow,
-      lastPauseStartedAt: isPausedNow ? new Date().toISOString() : pauseConfiguration.lastPauseStartedAt,
+      lastPauseStartedAt: isPausedNow ? new Date().toISOString() : null,
       updatedAt: new Date().toISOString(),
     }).where(eq(pauseConfiguration.userId, userId));
   }

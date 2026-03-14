@@ -4,7 +4,7 @@
  * em tempo real com o banco de dados local
  */
 
-import { storage } from '../storage';
+import { dualStorage as storage } from '../storage-dual';
 import { derivAPI } from './deriv-api';
 import { errorTracker } from './error-tracker';
 
@@ -201,7 +201,7 @@ export class DerivTradeSync {
     try {
       // Buscar todas as configurações ativas
       const configs = await storage.getActiveTradeConfigurations();
-      const userIds = [...new Set(configs.map(c => c.userId))];
+      const userIds = Array.from(new Set(configs.map(c => c.userId)));
 
       if (userIds.length === 0) {
         return;

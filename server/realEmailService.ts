@@ -93,7 +93,7 @@ class InvestProRealEmailService implements RealEmailService {
       return true;
     } catch (error) {
       console.error('Erro ao enviar email real:', error);
-      this.logDelivery(to, code, false, undefined, error.message);
+      this.logDelivery(to, code, false, undefined, (error as Error).message);
       return false;
     }
   }

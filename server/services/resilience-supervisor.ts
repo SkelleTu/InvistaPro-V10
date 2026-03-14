@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { storage } from '../storage';
+import { dualStorage as storage } from '../storage-dual';
 import { errorTracker } from './error-tracker';
 
 export interface ComponentHealth {

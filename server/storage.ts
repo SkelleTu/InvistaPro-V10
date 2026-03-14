@@ -13,6 +13,8 @@ import {
   activeWebSocketSubscriptions,
   systemHealthHeartbeat,
   tradingControl,
+  assetBlacklist,
+  pauseConfiguration,
   type User,
   type InsertUser,
   type UpdateUser,
@@ -42,6 +44,11 @@ import {
   type InsertSystemHealthHeartbeat,
   type TradingControl,
   type InsertTradingControl,
+  type AssetBlacklist,
+  type InsertAssetBlacklist,
+  type PauseConfiguration,
+  type InsertPauseConfiguration,
+  type UpdatePauseConfiguration,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, isNotNull, sql } from "drizzle-orm";
@@ -157,6 +164,7 @@ export interface IStorage {
   createTradeConfig(config: InsertTradeConfiguration): Promise<TradeConfiguration>;
   getUserTradeConfig(userId: string): Promise<TradeConfiguration | undefined>;
   getAllTradeConfigurations(): Promise<TradeConfiguration[]>;
+  getActiveTradeConfigurations(): Promise<TradeConfiguration[]>;
   updateTradeConfig(userId: string, mode: string): Promise<TradeConfiguration>;
   deactivateAllTradeConfigs(userId: string): Promise<void>;
   reactivateTradeConfiguration(id: string): Promise<void>;
@@ -448,7 +456,8 @@ export class DatabaseStorage implements IStorage {
           accountType,
           isActive: true,
         })
-        .returning();
+        .returning()
+        .all();
       
       // Decrypt token for return value
       return {
@@ -1594,26 +1603,21 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Asset Blacklist operations
-  async createAssetBlacklist(blacklist: any): Promise<any> {
-    const { assetBlacklist } = await import('@shared/schema');
+  async createAssetBlacklist(blacklist: InsertAssetBlacklist): Promise<AssetBlacklist> {
     const [result] = await db.insert(assetBlacklist).values(blacklist).returning();
     return result;
   }
 
-  async getUserAssetBlacklists(userId: string): Promise<any[]> {
-    const { assetBlacklist } = await import('@shared/schema');
+  async getUserAssetBlacklists(userId: string): Promise<AssetBlacklist[]> {
     return await db.select().from(assetBlacklist).where(eq(assetBlacklist.userId, userId));
   }
 
   async deleteAssetBlacklist(id: string): Promise<void> {
-    const { assetBlacklist } = await import('@shared/schema');
     await db.delete(assetBlacklist).where(eq(assetBlacklist.id, id));
   }
 
   async isAssetBlocked(userId: string, assetName: string): Promise<boolean> {
-    const { assetBlacklist } = await import('@shared/schema');
     const blockedAssets = await db.select().from(assetBlacklist).where(eq(assetBlacklist.userId, userId));
-    
     return blockedAssets.some(ba => {
       if (ba.patternType === 'exact') {
         return ba.assetPattern === assetName;
@@ -1625,20 +1629,17 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Pause Configuration operations
-  async getUserPauseConfig(userId: string): Promise<any | undefined> {
-    const { pauseConfiguration } = await import('@shared/schema');
+  async getUserPauseConfig(userId: string): Promise<PauseConfiguration | undefined> {
     const [config] = await db.select().from(pauseConfiguration).where(eq(pauseConfiguration.userId, userId));
     return config;
   }
 
-  async createPauseConfig(config: any): Promise<any> {
-    const { pauseConfiguration } = await import('@shared/schema');
+  async createPauseConfig(config: InsertPauseConfiguration): Promise<PauseConfiguration> {
     const [result] = await db.insert(pauseConfiguration).values(config).returning();
     return result;
   }
 
-  async updatePauseConfig(userId: string, config: any): Promise<any> {
-    const { pauseConfiguration } = await import('@shared/schema');
+  async updatePauseConfig(userId: string, config: UpdatePauseConfiguration): Promise<PauseConfiguration> {
     const [result] = await db.update(pauseConfiguration).set({
       ...config,
       updatedAt: new Date().toISOString(),
@@ -1647,10 +1648,9 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updatePausedNowStatus(userId: string, isPausedNow: boolean): Promise<void> {
-    const { pauseConfiguration } = await import('@shared/schema');
     await db.update(pauseConfiguration).set({
       isPausedNow,
-      lastPauseStartedAt: isPausedNow ? new Date().toISOString() : pauseConfiguration.lastPauseStartedAt,
+      lastPauseStartedAt: isPausedNow ? new Date().toISOString() : null,
       updatedAt: new Date().toISOString(),
     }).where(eq(pauseConfiguration.userId, userId));
   }

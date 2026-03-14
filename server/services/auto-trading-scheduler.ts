@@ -1,5 +1,5 @@
 import * as cron from 'node-cron';
-import { storage } from '../storage';
+import { dualStorage as storage } from '../storage-dual';
 import { huggingFaceAI } from './huggingface-ai';
 import { derivAPI, DerivAPIService } from './deriv-api';
 import { errorTracker } from '../services/error-tracker';
@@ -142,7 +142,7 @@ export class AutoTradingScheduler {
     }
     
     // Reconciliar sessões com operações pendentes
-    for (const [sessionKey, session] of this.activeSessions.entries()) {
+    for (const [sessionKey, session] of Array.from(this.activeSessions.entries())) {
       // Se sessão estava em execução durante o timeout, resetar para retry
       if (session.executedOperations < session.operationsCount && session.lastExecutionTime) {
         console.log(`🔄 [CLEANUP] Sessão ${sessionKey}: resetando para retry (${session.executedOperations}/${session.operationsCount})`);
@@ -172,7 +172,7 @@ export class AutoTradingScheduler {
     const now = Date.now();
     const staleThreshold = 120000; // 2 minutos sem atualização = sessão travada
     
-    for (const [sessionKey, session] of this.activeSessions.entries()) {
+    for (const [sessionKey, session] of Array.from(this.activeSessions.entries())) {
       if (session.lastExecutionTime) {
         const sessionAge = now - session.lastExecutionTime.getTime();
         
@@ -388,7 +388,7 @@ export class AutoTradingScheduler {
       
       // 🔥 LOG DE CONFIGURAÇÃO PARA DEBUG
       activeConfigs.forEach(c => {
-        console.log(`🔍 [DEBUG] Config ${c.id}: userId=${c.userId}, symbol=${c.symbol}, mode=${c.mode}, isActive=${c.isActive}`);
+        console.log(`🔍 [DEBUG] Config ${c.id}: userId=${c.userId}, mode=${c.mode}, isActive=${c.isActive}`);
       });
 
       // ⚡ INTELIGÊNCIA PURA: Sem limites de stagger quando oportunidade forte
@@ -2090,7 +2090,7 @@ export class AutoTradingScheduler {
     let totalWins = 0, totalLosses = 0;
     const bottlenecks: Array<{symbol: string, winRate: number, trades: number}> = [];
     
-    for (const [symbol, perf] of this.assetPerformance) {
+    for (const [symbol, perf] of Array.from(this.assetPerformance)) {
       totalWins += perf.wins;
       totalLosses += perf.losses;
       

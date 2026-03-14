@@ -1,7 +1,7 @@
 import WebSocket from 'ws';
 import { EventEmitter } from 'events';
 import { errorTracker } from './error-tracker';
-import { storage } from '../storage';
+import { dualStorage as storage } from '../storage-dual';
 import { resilienceSupervisor } from './resilience-supervisor';
 
 export interface DerivTickData {
@@ -123,6 +123,10 @@ export class DerivAPIService extends EventEmitter {
     // Setup graceful shutdown
     process.on('SIGTERM', () => this.gracefulShutdown());
     process.on('SIGINT', () => this.gracefulShutdown());
+  }
+
+  getIsConnected(): boolean {
+    return this.isConnected;
   }
 
   async connectPublic(operationId?: string): Promise<boolean> {
