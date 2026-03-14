@@ -171,23 +171,10 @@ router.get('/detailed-stats', isAuthenticated, isTradingAuthorized, asyncErrorHa
 router.get('/ai-threshold-stats', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
   const userId = req.user.id;
   
-  // Buscar operações do usuário com consenso de IA
-  const operations = await storage.getActiveTradeOperations(userId);
+  // Buscar TODAS as operações do usuário (não apenas ativas)
+  const operations = await storage.getUserTradeOperations(userId, 10000);
   
-  if (operations.length === 0) {
-    return res.json({
-      diasAtivo: 0,
-      totalAnalises: 0,
-      thresholdMedio: 0,
-      thresholdMaximo: 0,
-      thresholdMinimo: 0,
-      primeiraAnalise: null,
-      ultimaAnalise: null,
-      message: 'Nenhuma análise de IA encontrada ainda'
-    });
-  }
-  
-  // Extrair consensusStrength de cada operação
+  // Extrair consensusStrength de cada operação (inclui won, lost, expired, pending, active)
   const thresholds: number[] = [];
   const datas: Date[] = [];
   
@@ -195,8 +182,9 @@ router.get('/ai-threshold-stats', isAuthenticated, isTradingAuthorized, asyncErr
     if (op.aiConsensus) {
       try {
         const consensus = JSON.parse(op.aiConsensus);
-        if (consensus.consensusStrength) {
-          thresholds.push(consensus.consensusStrength);
+        const strength = consensus.consensusStrength ?? consensus.strength ?? consensus.confidence;
+        if (typeof strength === 'number' && strength > 0) {
+          thresholds.push(strength);
         }
       } catch (e) {
         // Ignorar erros de parse
@@ -208,7 +196,24 @@ router.get('/ai-threshold-stats', isAuthenticated, isTradingAuthorized, asyncErr
     }
   });
   
-  // Calcular estatísticas
+  // Se não há operações alguma, retornar zeros mas com uptime do servidor
+  const uptimeDias = Math.ceil(process.uptime() / 86400) || 1;
+
+  if (operations.length === 0) {
+    return res.json({
+      diasAtivo: uptimeDias,
+      totalAnalises: 0,
+      thresholdsAnalisados: 0,
+      thresholdMedio: 0,
+      thresholdMaximo: 0,
+      thresholdMinimo: 0,
+      primeiraAnalise: null,
+      ultimaAnalise: null,
+      message: 'Nenhuma operação encontrada ainda'
+    });
+  }
+  
+  // Calcular estatísticas de threshold
   const thresholdMedio = thresholds.length > 0 
     ? thresholds.reduce((a, b) => a + b, 0) / thresholds.length 
     : 0;
@@ -221,8 +226,8 @@ router.get('/ai-threshold-stats', isAuthenticated, isTradingAuthorized, asyncErr
     ? Math.min(...thresholds) 
     : 0;
   
-  // Calcular dias ativo
-  let diasAtivo = 0;
+  // Calcular dias ativo: da primeira operação até hoje
+  let diasAtivo = uptimeDias;
   let primeiraAnalise = null;
   let ultimaAnalise = null;
   
@@ -230,7 +235,8 @@ router.get('/ai-threshold-stats', isAuthenticated, isTradingAuthorized, asyncErr
     datas.sort((a, b) => a.getTime() - b.getTime());
     primeiraAnalise = datas[0].toISOString();
     ultimaAnalise = datas[datas.length - 1].toISOString();
-    diasAtivo = Math.ceil((datas[datas.length - 1].getTime() - datas[0].getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    // Dias desde a primeira operação até hoje
+    diasAtivo = Math.ceil((Date.now() - datas[0].getTime()) / (1000 * 60 * 60 * 24)) || 1;
   }
   
   res.json({
@@ -238,11 +244,11 @@ router.get('/ai-threshold-stats', isAuthenticated, isTradingAuthorized, asyncErr
     totalAnalises: operations.length,
     thresholdsAnalisados: thresholds.length,
     thresholdMedio: Number(thresholdMedio.toFixed(2)),
-    thresholdMaximo,
-    thresholdMinimo,
+    thresholdMaximo: Number(thresholdMaximo.toFixed(2)),
+    thresholdMinimo: Number(thresholdMinimo.toFixed(2)),
     primeiraAnalise,
     ultimaAnalise,
-    message: `Sistema ativo há ${diasAtivo} dia(s) com ${thresholds.length} análises de threshold`
+    message: `Sistema ativo há ${diasAtivo} dia(s) com ${operations.length} operações e ${thresholds.length} análises de threshold`
   });
 }));
 

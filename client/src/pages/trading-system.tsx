@@ -539,10 +539,12 @@ export default function TradingSystemPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold text-blue-600 dark:text-blue-400" data-testid="text-ai-threshold">
-                    {(aiThresholdStats as any)?.thresholdMedio ? `${(aiThresholdStats as any).thresholdMedio}%` : '--'}
+                    {(aiThresholdStats as any)?.thresholdMedio != null && (aiThresholdStats as any)?.thresholdMedio > 0
+                      ? `${(aiThresholdStats as any).thresholdMedio}%`
+                      : (aiThresholdStats as any)?.totalAnalises > 0 ? 'N/D' : '--'}
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    {(aiThresholdStats as any)?.thresholdsAnalisados || 0} análises registradas
+                    {(aiThresholdStats as any)?.totalAnalises || (aiThresholdStats as any)?.thresholdsAnalisados || 0} operações registradas
                   </p>
                 </CardContent>
               </Card>
@@ -569,7 +571,9 @@ export default function TradingSystemPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold text-green-600 dark:text-green-400" data-testid="text-ai-max">
-                    {(aiThresholdStats as any)?.thresholdMaximo ? `${(aiThresholdStats as any).thresholdMaximo}%` : '--'}
+                    {(aiThresholdStats as any)?.thresholdMaximo > 0
+                      ? `${(aiThresholdStats as any).thresholdMaximo}%`
+                      : '--'}
                   </div>
                   <p className="text-xs text-muted-foreground">
                     Pico de confiança registrado
@@ -584,7 +588,9 @@ export default function TradingSystemPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold text-orange-600 dark:text-orange-400" data-testid="text-ai-min">
-                    {(aiThresholdStats as any)?.thresholdMinimo ? `${(aiThresholdStats as any).thresholdMinimo}%` : '--'}
+                    {(aiThresholdStats as any)?.thresholdMinimo > 0
+                      ? `${(aiThresholdStats as any).thresholdMinimo}%`
+                      : '--'}
                   </div>
                   <p className="text-xs text-muted-foreground">
                     Menor confiança registrada
