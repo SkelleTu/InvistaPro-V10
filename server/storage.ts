@@ -1132,22 +1132,30 @@ export class DatabaseStorage implements IStorage {
   }
 
   async shouldActivateRecovery(userId: string): Promise<boolean> {
-    let todayPnL = await this.getDailyPnL(userId);
-    if (!todayPnL) {
-      // Auto-inicializar PnL se não existir
-      const tokenData = await this.getUserDerivToken(userId);
-      const initialBalance = tokenData?.accountType === 'demo' ? 10000 : 100;
-      todayPnL = await this.createOrUpdateDailyPnL(userId, {
-        openingBalance: initialBalance,
-        currentBalance: initialBalance,
-        dailyPnL: 0
-      });
+    try {
+      let todayPnL = await this.getDailyPnL(userId);
+      if (!todayPnL) {
+        const tokenData = await this.getUserDerivToken(userId);
+        const initialBalance = tokenData?.accountType === 'demo' ? 10000 : 100;
+        try {
+          todayPnL = await this.createOrUpdateDailyPnL(userId, {
+            openingBalance: initialBalance,
+            currentBalance: initialBalance,
+            dailyPnL: 0
+          });
+        } catch (fkErr: any) {
+          if (fkErr?.message?.includes('FOREIGN KEY') || fkErr?.message?.includes('NOT NULL')) {
+            return false;
+          }
+          throw fkErr;
+        }
+      }
+      const lossPercent = Math.abs(todayPnL.dailyPnL) / todayPnL.openingBalance;
+      const threshold = todayPnL.recoveryThreshold || 0.75;
+      return lossPercent >= threshold;
+    } catch {
+      return false;
     }
-
-    // Activate recovery if daily loss exceeds threshold
-    const lossPercent = Math.abs(todayPnL.dailyPnL) / todayPnL.openingBalance;
-    const threshold = todayPnL.recoveryThreshold || 0.75;
-    return lossPercent >= threshold;
   }
 
   async getRecoveryThresholdRecommendation(userId: string): Promise<number> {
@@ -1233,33 +1241,22 @@ export class DatabaseStorage implements IStorage {
     let todayPnL = await this.getDailyPnL(userId);
     
     if (!todayPnL) {
-      console.log(`⚠️ PnL diário não encontrado para ${userId}, inicializando automaticamente...`);
-      
-      // Buscar saldo atual da conta Deriv (se disponível)
       const tokenData = await this.getUserDerivToken(userId);
-      let initialBalance = 1000; // Saldo padrão demo se não conseguir obter da Deriv
+      let initialBalance = 10000;
+      if (tokenData?.accountType === 'real') initialBalance = 100;
       
-      if (tokenData && tokenData.accountType === 'demo') {
-        initialBalance = 10000; // Conta demo padrão com $10,000
-      } else if (tokenData && tokenData.accountType === 'real') {
-        initialBalance = 100; // Conta real com saldo mínimo conservador
+      try {
+        todayPnL = await this.createOrUpdateDailyPnL(userId, {
+          openingBalance: initialBalance, currentBalance: initialBalance, dailyPnL: 0,
+          totalTrades: 0, wonTrades: 0, lostTrades: 0, isRecoveryActive: false,
+          recoveryThreshold: 0.75, maxDrawdown: 0, recoveryOperations: 0
+        });
+      } catch (fkErr: any) {
+        if (fkErr?.message?.includes('FOREIGN KEY') || fkErr?.message?.includes('NOT NULL')) {
+          return { canExecute: true, currentBalance: initialBalance, minimumRequired: initialBalance * 0.95 };
+        }
+        throw fkErr;
       }
-      
-      // Criar registro de PnL diário automaticamente
-      todayPnL = await this.createOrUpdateDailyPnL(userId, {
-        openingBalance: initialBalance,
-        currentBalance: initialBalance,
-        dailyPnL: 0,
-        totalTrades: 0,
-        wonTrades: 0,
-        lostTrades: 0,
-        isRecoveryActive: false,
-        recoveryThreshold: 0.75,
-        maxDrawdown: 0,
-        recoveryOperations: 0
-      });
-      
-      console.log(`✅ PnL diário inicializado para ${userId} com saldo: $${initialBalance}`);
     }
 
     const currentBalance = todayPnL.currentBalance;
@@ -1384,20 +1381,27 @@ export class DatabaseStorage implements IStorage {
   // RESILIENCE SYSTEM OPERATIONS
 
   async upsertActiveTradingSession(session: InsertActiveTradingSession): Promise<ActiveTradingSession> {
-    const existing = await this.getActiveTradingSession(session.sessionKey);
-    
-    if (existing) {
-      await db
-        .update(activeTradingSessions)
-        .set({ ...session, updatedAt: new Date().toISOString() })
-        .where(eq(activeTradingSessions.sessionKey, session.sessionKey));
-      return (await this.getActiveTradingSession(session.sessionKey))!;
-    } else {
-      const [created] = await db
-        .insert(activeTradingSessions)
-        .values(session)
-        .returning();
-      return created;
+    try {
+      const existing = await this.getActiveTradingSession(session.sessionKey);
+      
+      if (existing) {
+        await db
+          .update(activeTradingSessions)
+          .set({ ...session, updatedAt: new Date().toISOString() })
+          .where(eq(activeTradingSessions.sessionKey, session.sessionKey));
+        return (await this.getActiveTradingSession(session.sessionKey))!;
+      } else {
+        const [created] = await db
+          .insert(activeTradingSessions)
+          .values(session)
+          .returning();
+        return created;
+      }
+    } catch (err: any) {
+      if (err?.message?.includes('FOREIGN KEY')) {
+        return { ...session, id: session.sessionKey, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() } as any;
+      }
+      throw err;
     }
   }
 

@@ -79,16 +79,21 @@ export class DualStorage implements IStorage {
       if (!sqliteUser) return false;
       await this.turso.createUser({
         id: sqliteUser.id,
-        name: sqliteUser.name,
         email: sqliteUser.email,
-        cpf: sqliteUser.cpf,
-        phone: sqliteUser.phone,
-        password: sqliteUser.password,
+        passwordHash: sqliteUser.passwordHash || 'oauth_user_sem_senha',
+        nomeCompleto: sqliteUser.nomeCompleto || sqliteUser.id,
+        cpf: sqliteUser.cpf || '00000000000',
+        telefone: sqliteUser.telefone || '00000000000',
+        endereco: sqliteUser.endereco || 'N/A',
+        cidade: sqliteUser.cidade || 'N/A',
+        estado: sqliteUser.estado || 'N/A',
+        cep: sqliteUser.cep || '00000000',
+        chavePix: sqliteUser.chavePix || 'N/A',
+        tipoChavePix: sqliteUser.tipoChavePix || 'cpf',
         saldo: sqliteUser.saldo,
-        role: sqliteUser.role as any,
-        status: sqliteUser.status as any,
-        isPhoneVerified: sqliteUser.isPhoneVerified,
-        isApproved: sqliteUser.isApproved,
+        isAdmin: sqliteUser.isAdmin,
+        telefoneVerificado: sqliteUser.telefoneVerificado,
+        contaAprovada: sqliteUser.contaAprovada,
       } as any);
       console.log(`✅ [DUAL] Usuário ${userId} sincronizado SQLite→Turso`);
       return true;

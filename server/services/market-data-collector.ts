@@ -17,6 +17,7 @@ export class MarketDataCollector extends EventEmitter {
   private derivAPI: DerivAPIService;
   private tickBuffers: Map<string, TickBuffer> = new Map();
   private saveInterval: NodeJS.Timeout | null = null;
+  private heartbeatInterval: NodeJS.Timeout | null = null;
   private isCollecting = false;
   private isDiscoveryComplete = false;
   
@@ -59,6 +60,17 @@ export class MarketDataCollector extends EventEmitter {
     this.saveInterval = setInterval(() => {
       this.saveBufferedData();
     }, this.SAVE_INTERVAL_MS);
+
+    // Heartbeat para ResilienceSupervisor (a cada 30s)
+    this.heartbeatInterval = setInterval(async () => {
+      try {
+        await storage.updateSystemHeartbeat('market_collector', 'healthy', {
+          isCollecting: this.isCollecting,
+          activeSymbols: this.tickBuffers.size,
+          timestamp: new Date().toISOString()
+        });
+      } catch {}
+    }, 30000);
   }
 
   /**
@@ -402,6 +414,10 @@ export class MarketDataCollector extends EventEmitter {
     if (this.saveInterval) {
       clearInterval(this.saveInterval);
       this.saveInterval = null;
+    }
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
     }
     
     await this.stopCollection();

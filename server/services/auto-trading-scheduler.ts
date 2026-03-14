@@ -1067,13 +1067,19 @@ export class AutoTradingScheduler {
 
         console.log(`✅ [${operationId}] Contrato comprado com sucesso: ${contract.contract_id}`);
 
+        // Sanitizar direção - deve ser sempre "up" ou "down" (nunca "neutral")
+        const safeDirection: "up" | "down" = 
+          (aiConsensus.finalDecision === 'up' || aiConsensus.finalDecision === 'down')
+            ? aiConsensus.finalDecision as "up" | "down"
+            : ((aiConsensus.upScore || 0) >= (aiConsensus.downScore || 0) ? 'up' : 'down');
+
         // Salvar operação no banco com informações de recuperação
         await storage.createTradeOperation({
           userId: config.userId,
           derivContractId: String(contract.contract_id),
           symbol: selectedSymbol,
           tradeType: 'digitdiff',
-          direction: aiConsensus.finalDecision as "up" | "down",
+          direction: safeDirection,
           amount: tradeParams.amount,
           duration: tradeParams.duration,
           status: 'pending',
@@ -2016,14 +2022,14 @@ export class AutoTradingScheduler {
       const idx = currentList.indexOf(symbol);
       if (idx >= 0) {
         currentList.splice(idx, 1);
-        const performance = this.assetPerformance.get(symbol);
-        console.log(`🔄 [DIVERSIFICAÇÃO] Cool-off de ${symbol} finalizado (${breathingRoom.toFixed(1)}min). Performance: ${performance?.wins}W/${performance?.losses}L`);
+        const perf = this.assetPerformance.get(symbol) || { wins: 0, losses: 0 };
+        console.log(`🔄 [DIVERSIFICAÇÃO] Cool-off de ${symbol} finalizado (${breathingRoom.toFixed(1)}min). Performance: ${perf.wins}W/${perf.losses}L`);
       }
     }, breathingRoom * 60 * 1000);
     
     this.recentAssets.set(userId, recentList);
-    const performance = this.assetPerformance.get(symbol);
-    console.log(`✅ [DIVERSIFICAÇÃO] ${symbol} rastreado (breathing: ${breathingRoom.toFixed(1)}min). Performance: ${performance?.wins}W/${performance?.losses}L`);
+    const perf = this.assetPerformance.get(symbol) || { wins: 0, losses: 0 };
+    console.log(`✅ [DIVERSIFICAÇÃO] ${symbol} rastreado (breathing: ${breathingRoom.toFixed(1)}min). Performance: ${perf.wins}W/${perf.losses}L`);
   }
   
   // 📊 RASTREAR PERFORMANCE DO ATIVO (para ajustar breathing room)
