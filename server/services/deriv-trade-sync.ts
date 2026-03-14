@@ -7,6 +7,7 @@
 import { dualStorage as storage } from '../storage-dual';
 import { derivAPI } from './deriv-api';
 import { errorTracker } from './error-tracker';
+import { realStatsTracker } from './real-stats-tracker';
 
 interface DerivTradeData {
   contractId: number;
@@ -200,6 +201,12 @@ export class DerivTradeSync {
             if (operation.status !== 'won' && operation.status !== 'lost') {
               result.updated++;
               console.log(`✅ [DERIV SYNC] [profit_table] ${operation.symbol} ${updates.status}: Profit=$${profit.toFixed(2)} | Buy=$${ptEntry.buy_price} | Sell=$${ptEntry.sell_price || 0}`);
+              // Registrar resultado REAL nas estatísticas
+              if (updates.status === 'won') {
+                realStatsTracker.recordWin(profit);
+              } else if (updates.status === 'lost') {
+                realStatsTracker.recordLoss(profit);
+              }
             }
 
             await storage.updateTradeOperation(operation.id, updates);
@@ -259,6 +266,13 @@ export class DerivTradeSync {
               result.updated++;
 
               console.log(`✅ [DERIV SYNC] ${operation.symbol} ${updates.status}: Profit=$${profit.toFixed(2)} | Buy=$${contractInfo.buy_price} | Sell=$${contractInfo.sell_price || 0} | Payout=$${contractInfo.payout || 0}`);
+
+              // Registrar resultado REAL nas estatísticas
+              if (updates.status === 'won') {
+                realStatsTracker.recordWin(profit);
+              } else if (updates.status === 'lost') {
+                realStatsTracker.recordLoss(profit);
+              }
             }
           } else if (contractInfo.status === 'open') {
             // Contrato ainda aberto - atualizar preço e época de entrada

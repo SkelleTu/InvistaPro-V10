@@ -1,5 +1,6 @@
 import { nanoid } from 'nanoid';
 import { AdvancedLearningSystem, type AdvancedLearningConfig, type MarketState, type AIDecision, type ModelPerformance } from './advanced-learning-system';
+import { realStatsTracker } from './real-stats-tracker';
 
 /**
  * SISTEMA NEURAL QUÂNTICO - MÁXIMA INOVAÇÃO PARA PROJETO PERDA ZERO
@@ -1072,27 +1073,35 @@ export class QuantumNeuralSystem {
 
   private updatePerformanceStats(prediction: string, confidence: number): void {
     this.totalTrades++;
-    
-    // Simular performance (em produção seria baseado em resultados reais)
-    const simulatedWin = confidence > 70;
-    
-    if (simulatedWin) {
-      this.winRate = (this.winRate * (this.totalTrades - 1) + 1) / this.totalTrades;
-      this.totalProfit += confidence / 100;
+
+    // Usar estatísticas REAIS do banco (não simular)
+    const realStats = realStatsTracker.getStats();
+    this.winRate = realStats.winRate / 100;
+    this.totalProfit = realStats.totalProfit;
+    this.sharpeRatio = realStats.totalTrades > 0
+      ? realStats.totalProfit / Math.sqrt(realStats.totalTrades)
+      : 0;
+    if (!isFinite(this.sharpeRatio)) this.sharpeRatio = 0;
+
+    if (realStats.totalTrades > 0) {
+      console.log(`📊 [PERFORMANCE REAL] Análises: ${this.totalTrades} | Trades reais: ${realStats.totalTrades} | WinRate: ${realStats.winRate.toFixed(1)}% | Lucro: $${realStats.totalProfit.toFixed(2)}`);
     } else {
-      this.winRate = (this.winRate * (this.totalTrades - 1)) / this.totalTrades;
-      this.totalProfit -= 0.5;
+      console.log(`📊 [PERFORMANCE] Análises: ${this.totalTrades} | Aguardando resultados reais da Deriv...`);
     }
-    
-    // Atualizar Sharpe Ratio simplificado com numeric safety
-    this.sharpeRatio = this.totalTrades > 0 ? this.totalProfit / Math.sqrt(this.totalTrades) : 0;
-    
-    // Verificar valores NaN e corrigir
-    if (!isFinite(this.sharpeRatio)) {
-      this.sharpeRatio = 0;
+  }
+
+  /**
+   * Registra resultado real de um trade (chamado pelo sync após resolução na Deriv)
+   */
+  recordRealTradeResult(won: boolean, profit: number): void {
+    if (won) {
+      realStatsTracker.recordWin(profit);
+    } else {
+      realStatsTracker.recordLoss(profit);
     }
-    
-    console.log(`📊 [PERFORMANCE] Trades: ${this.totalTrades}, Win Rate: ${(this.winRate * 100).toFixed(1)}%, Profit: ${this.totalProfit.toFixed(2)}, Sharpe: ${this.sharpeRatio.toFixed(2)}`);
+    const stats = realStatsTracker.getStats();
+    this.winRate = stats.winRate / 100;
+    this.totalProfit = stats.totalProfit;
   }
 
   private async optimizeHyperparameters(result: any): Promise<void> {

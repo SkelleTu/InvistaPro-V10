@@ -15,6 +15,7 @@ import { derivAPI } from "./services/deriv-api";
 import { createDatabaseBackup } from "./database-backup";
 import { storage } from "./storage";
 import { derivTradeSync } from "./services/deriv-trade-sync";
+import { realStatsTracker } from "./services/real-stats-tracker";
 import { runPostgresMigration } from "./migrate-postgres";
 
 const app = express();
@@ -256,6 +257,22 @@ app.use((req, res, next) => {
       console.log('🔄 Iniciando sincronização contínua com Deriv...');
       derivTradeSync.startAutoSync();
       console.log('✅ Sincronização de trades ATIVA - recebendo resultados em tempo real!');
+
+      // 📊 INICIALIZAR STATS REAIS DO BANCO
+      try {
+        const allUsers = await storage.getAllUsers();
+        let totalWon = 0, totalLost = 0, totalProfit = 0;
+        for (const user of allUsers) {
+          const ops = await storage.getUserTradeOperations(user.id, 10000);
+          const resolved = ops.filter((op: any) => op.status === 'won' || op.status === 'lost');
+          totalWon += resolved.filter((op: any) => op.status === 'won').length;
+          totalLost += resolved.filter((op: any) => op.status === 'lost').length;
+          totalProfit += resolved.reduce((sum: number, op: any) => sum + (op.profit || 0), 0);
+        }
+        realStatsTracker.initializeFromDB(totalWon, totalLost, totalProfit);
+      } catch (statsErr: any) {
+        console.log(`⚠️ [REAL STATS] Não foi possível inicializar do banco: ${statsErr?.message}`);
+      }
       
       // Enviar heartbeat inicial
       await storage.updateSystemHeartbeat('scheduler', 'healthy', {
