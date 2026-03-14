@@ -7,6 +7,7 @@ import { marketDataCollector } from './market-data-collector';
 import { dynamicThresholdTracker } from './dynamic-threshold-tracker';
 import { resilienceSupervisor } from './resilience-supervisor';
 import { derivTradeSync } from './deriv-trade-sync';
+import { digitFrequencyAnalyzer } from './digit-frequency-analyzer';
 
 export interface ActiveTradeSession {
   userId: string;
@@ -1333,14 +1334,37 @@ export class AutoTradingScheduler {
             epoch: Date.now() - (100 - index) * 1000
           }));
           
-          // Executar análise de IA
+          // Executar análise de IA (sentimento geral de mercado)
           const aiConsensus = await huggingFaceAI.analyzeMarketData(tickData, symbol, userId);
+
+          // 🎯 DIGIT EDGE: Score estatístico do analisador de frequência de dígitos
+          // Alimentar o analisador com o histórico de preços do ativo
+          const recentDigits = priceHistory.slice(-500).map((price: number) => {
+            const priceStr = price.toString();
+            const digitsOnly = priceStr.replace(/[^0-9]/g, '');
+            return digitsOnly.length > 0 ? parseInt(digitsOnly[digitsOnly.length - 1]) : -1;
+          }).filter((d: number) => d >= 0 && d <= 9);
+          
+          if (recentDigits.length >= 50) {
+            digitFrequencyAnalyzer.processHistoricalDigits(symbol, recentDigits);
+          }
+          
+          const digitEdgeScore = digitFrequencyAnalyzer.getDigitEdgeScore(symbol);
+          
+          // 🏆 SCORE COMBINADO: AI Consensus (60%) + Digit Edge (40%)
+          // As IAs determinam QUANDO e QUANTO. O edge estatístico determina QUAL dígito.
+          // Juntos, dão a melhor seleção de ativo E de barreira.
+          const combinedScore = (aiConsensus.consensusStrength * 0.6) + (digitEdgeScore * 0.4);
+          
+          const enrichedConsensus = { ...aiConsensus, consensusStrength: combinedScore };
           
           return {
             symbol,
-            consensus: aiConsensus.consensusStrength,
+            consensus: combinedScore,
+            aiRawScore: aiConsensus.consensusStrength,
+            digitEdge: digitEdgeScore,
             direction: aiConsensus.finalDecision,
-            aiConsensus
+            aiConsensus: enrichedConsensus
           };
         } catch (error) {
           console.log(`⚠️ [${operationId}] Erro ao analisar ${symbolData.symbol}: ${error}`);
@@ -1373,9 +1397,11 @@ export class AutoTradingScheduler {
       // Melhor símbolo
       const best = validResults[0];
       
-      console.log(`🏆 [${operationId}] TOP 5 Símbolos:`);
+      console.log(`🏆 [${operationId}] TOP 5 Símbolos (Score = IAs×0.6 + EdgeDigit×0.4):`);
       top5.forEach((r, i) => {
-        console.log(`   ${i + 1}. ${r!.symbol}: ${r!.direction.toUpperCase()} (${r!.consensus.toFixed(1)}%)`);
+        const aiScore = (r as any).aiRawScore?.toFixed(1) || '?';
+        const digitEdge = (r as any).digitEdge?.toFixed(1) || '?';
+        console.log(`   ${i + 1}. ${r!.symbol}: ${r!.direction.toUpperCase()} | Score=${r!.consensus.toFixed(1)}% | IAs=${aiScore}% | DigitEdge=${digitEdge}`);
       });
       
       return {
@@ -1427,21 +1453,37 @@ export class AutoTradingScheduler {
    * - Consenso baixo (<50%) → Stake menor (proteção)
    */
   private calculateDynamicStake(baseAmount: number, consensoStrength: number, volatility: number = 0.5): number {
-    // DIGITDIFF: dígitos sintéticos são RNG uniforme (cada dígito 0-9 tem 10% de chance).
-    // Aumentar stake com "confiança da IA" não melhora o resultado — só aumenta a exposição.
-    // Manter stake fixo em 1.0x; reduzir levemente apenas em volatilidade muito alta.
+    // 🧠 PAPEL DAS 5 IAs: Amplificar stake quando o mercado está favorável
+    // As IAs de sentimento (FinBERT, RoBERTa, etc.) detectam condições favoráveis do mercado.
+    // Consensus alto = mercado estável e favorável = aumentar stake para maximizar ganhos.
+    // Consensus baixo = mercado incerto = stake base ou reduzido = proteção da banca.
     
-    let multiplier = 1.0;
+    let aiMultiplier = 1.0;
     
-    // Apenas reduz stake em volatilidade extrema — nunca aumenta acima de 1.0
-    if (volatility > 0.8) {
-      multiplier = 0.8; // -20% em volatilidade muito alta
-    } else if (volatility > 0.6) {
-      multiplier = 0.9; // -10% em volatilidade moderada
+    if (consensoStrength >= 70) {
+      aiMultiplier = 1.3;   // Todas as 5 IAs concordam = +30% no stake
+      console.log(`🔥 [AI AMPLIFIER] Consensus FORTE (${consensoStrength}%) → stake ×1.3`);
+    } else if (consensoStrength >= 55) {
+      aiMultiplier = 1.15;  // Maioria concorda = +15% no stake
+      console.log(`✅ [AI AMPLIFIER] Consensus MODERADO (${consensoStrength}%) → stake ×1.15`);
+    } else if (consensoStrength >= 40) {
+      aiMultiplier = 1.0;   // Misto = stake base (neutro)
+      console.log(`➡️ [AI AMPLIFIER] Consensus NEUTRO (${consensoStrength}%) → stake ×1.0`);
+    } else {
+      aiMultiplier = 0.85;  // IAs pessimistas = -15% de cautela
+      console.log(`⚠️ [AI AMPLIFIER] Consensus FRACO (${consensoStrength}%) → stake ×0.85`);
     }
-    
-    const dynamicStake = Math.round(baseAmount * multiplier * 100) / 100;
-    console.log(`💰 [DYNAMIC STAKE] Base: $${baseAmount} × ${multiplier.toFixed(2)} (consenso: ${consensoStrength}%, vol: ${(volatility*100).toFixed(0)}%) = $${dynamicStake}`);
+
+    // Redução adicional apenas em volatilidade extrema (proteção de risco)
+    let volMultiplier = 1.0;
+    if (volatility > 0.8) {
+      volMultiplier = 0.9; // -10% em volatilidade muito alta
+      console.log(`⚡ [VOL GUARD] Volatilidade alta (${(volatility*100).toFixed(0)}%) → stake ×0.9`);
+    }
+
+    const finalMultiplier = aiMultiplier * volMultiplier;
+    const dynamicStake = Math.round(baseAmount * finalMultiplier * 100) / 100;
+    console.log(`💰 [DYNAMIC STAKE] Base: $${baseAmount} × ${finalMultiplier.toFixed(2)} (IAs: ×${aiMultiplier}, vol: ×${volMultiplier}) = $${dynamicStake}`);
     
     return dynamicStake;
   }
@@ -1547,19 +1589,27 @@ export class AutoTradingScheduler {
     
     console.log(`🔧 DEBUG getTradeParamsForMode: mode=${mode}, duration calculada=${duration}, amount=${amount}`);
 
-    // ✅ FIX: Barrier INTELIGENTE baseado em IA + padrão de dígitos
-    // Para DIGITDIFF: prever se o dígito vai MUDAR (direction='up' = mudará, direction='down' = estável)
-    // Mapear consenso e direção para barrier que faz sentido
-    let barrier = '5'; // Default neutro
+    // 🎯 DIGIT FREQUENCY ANALYZER: Selecionar barreira baseada em análise estatística real
+    // O dígito "mais frio" (menor frequência nos últimos 300 ticks) é a melhor barreira DIFFER,
+    // pois tem maior probabilidade de NÃO aparecer no próximo tick → win rate > 90% base.
+    let barrier = '5'; // Default neutro (fallback)
     
-    // DIGITDIFF barrier: para índices sintéticos (RNG uniforme), cada dígito 0-9
-    // aparece com exatamente 10% de probabilidade. Qualquer barrier tem a mesma
-    // chance de ganhar (90%). Usar barrier 5 como padrão neutro e variar levemente
-    // para distribuir as apostas uniformemente ao longo do tempo.
-    const neutralBarriers = [4, 5, 5, 5, 6]; // Concentrado em 5, com leve variação
-    barrier = neutralBarriers[Math.floor(Math.random() * neutralBarriers.length)].toString();
-    console.log(`📊 [DIGITDIFF] Barrier ${barrier} selecionado (neutro, dir: ${direction}, consenso: ${(consensoStrength||0)*100}%)`);
-
+    try {
+      const digitAnalysis = digitFrequencyAnalyzer.getBestBarrier(symbol);
+      
+      if (digitAnalysis.confidence >= 30) {
+        // Temos dados suficientes: usar dígito estatisticamente mais frio
+        barrier = digitAnalysis.barrier;
+        console.log(`🎯 [DIGIT ANALYZER] ${symbol}: barreira=${barrier} | edge=+${digitAnalysis.edge.toFixed(1)}% | winRate=${digitAnalysis.winRate.toFixed(1)}% | confiança=${digitAnalysis.confidence.toFixed(0)}%`);
+      } else {
+        // Dados insuficientes ainda: usar neutro enquanto acumula ticks
+        barrier = '5';
+        console.log(`⏳ [DIGIT ANALYZER] ${symbol}: dados insuficientes (${digitAnalysis.confidence.toFixed(0)}% confiança) → barreira neutra=5`);
+      }
+    } catch (e) {
+      barrier = '5';
+      console.log(`⚠️ [DIGIT ANALYZER] Erro ao analisar ${symbol}: ${e} → barreira neutra=5`);
+    }
 
     return { amount, duration, barrier };
   }

@@ -2,6 +2,7 @@ import { EventEmitter } from 'events';
 import { DerivAPIService, DerivTickData } from './deriv-api.js';
 import { storage } from '../storage.js';
 import { microscopicAnalyzer } from './microscopic-technical-analysis.js';
+import { digitFrequencyAnalyzer } from './digit-frequency-analyzer.js';
 
 interface TickBuffer {
   symbol: string;
@@ -150,6 +151,17 @@ export class MarketDataCollector extends EventEmitter {
       microscopicAnalyzer.addTick(symbol, tickData);
     } else {
       console.warn('⚠️ [FNACIA] microscopicAnalyzer não disponível:', microscopicAnalyzer);
+    }
+
+    // 🎯 DIGIT FREQUENCY ANALYZER: Alimentar com o último dígito do tick em tempo real
+    try {
+      const priceStr = (tickData as any).display_value || tickData.quote.toString();
+      const lastDigit = digitFrequencyAnalyzer.extractLastDigit(priceStr);
+      if (lastDigit !== null) {
+        digitFrequencyAnalyzer.processTickDigit(symbol, lastDigit);
+      }
+    } catch (e) {
+      // silencioso - não quebrar fluxo principal por causa do analisador
     }
 
   }
