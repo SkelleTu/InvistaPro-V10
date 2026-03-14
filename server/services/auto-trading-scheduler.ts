@@ -676,6 +676,18 @@ export class AutoTradingScheduler {
 
   private async executeAutomaticTrade(config: any, tokenData: any, operationId: string): Promise<{success: boolean, error?: string}> {
     try {
+      // 🔴 CAMADA 3 - CIRCUIT BREAKER: Verificar pausa obrigatória por perdas consecutivas
+      if (realStatsTracker.isCircuitBreakerActive()) {
+        const reqs = realStatsTracker.getRecoveryRequirements();
+        const remainingSec = Math.ceil(reqs.circuitBreakerRemainingMs / 1000);
+        const remainingMin = Math.ceil(remainingSec / 60);
+        console.log(`🔴 [${operationId}] CIRCUIT BREAKER ATIVO: ${reqs.consecutiveLosses} perdas consecutivas — pausa obrigatória (${remainingMin} min restantes)`);
+        return {
+          success: false,
+          error: `CIRCUIT BREAKER: ${reqs.consecutiveLosses} perdas consecutivas — aguardando ${remainingMin} min antes do próximo trade`
+        };
+      }
+
       // 🔥 NOVA LÓGICA: Analisar TODOS os símbolos disponíveis e escolher o melhor
       console.log(`🔍 [${operationId}] Iniciando análise de TODOS os símbolos disponíveis...`);
       
@@ -756,7 +768,27 @@ export class AutoTradingScheduler {
       // Registrar uso do ativo para diversificação
       this.trackAssetUsage(config.userId, selectedSymbol);
       const aiConsensusPreCalculated = bestSymbolResult.aiConsensus;
-      
+
+      // 🔁 CAMADA 1 - ANTI-REPETIÇÃO TOTAL: mesmo ativo jamais pode ser negociado duas vezes seguidas
+      if (realStatsTracker.isAssetRepeated(config.userId, selectedSymbol)) {
+        console.log(`🚫 [${operationId}] ANTI-REP: ${selectedSymbol} foi o ÚLTIMO ativo negociado — buscando alternativa obrigatória...`);
+        const topList = bestSymbolResult.top5Symbols || [];
+        let switched = false;
+        for (const alt of topList) {
+          const altClean = alt.split('(')[0].trim();
+          if (!realStatsTracker.isAssetRepeated(config.userId, altClean) && !this.isSymbolBlocked(altClean)) {
+            console.log(`🔄 [${operationId}] ANTI-REP: Alternativa selecionada → ${altClean}`);
+            selectedSymbol = altClean;
+            switched = true;
+            break;
+          }
+        }
+        if (!switched) {
+          console.log(`⏳ [${operationId}] ANTI-REP: Sem alternativa disponível — aguardando próximo ciclo para evitar repetição`);
+          return { success: false, error: `ANTI-REP: ${selectedSymbol} seria repetição do último trade — aguardando próximo ciclo` };
+        }
+      }
+
       console.log(`✅ [${operationId}] Melhor símbolo selecionado: ${selectedSymbol} (Consenso: ${aiConsensusPreCalculated.consensusStrength}%)`);
       console.log(`📊 [${operationId}] Analisados ${bestSymbolResult.totalAnalyzed} símbolos | TOP 5: ${bestSymbolResult.top5Symbols.join(', ')}`);
       
@@ -777,7 +809,7 @@ export class AutoTradingScheduler {
         if (realStatsTracker.isPostLossMode()) {
           const reqs = realStatsTracker.getRecoveryRequirements();
 
-          console.log(`🛡️ [${operationId}] RECOVERY MODE ATIVO — Saldo alvo: $${reqs.balanceToRecover.toFixed(2)} | Consenso mínimo: ${reqs.minConsensus}%`);
+          console.log(`🛡️ [${operationId}] RECOVERY MODE ATIVO — Streak: ${reqs.consecutiveLosses} perdas | Saldo alvo: $${reqs.balanceToRecover.toFixed(2)} | Consenso mínimo: ${reqs.minConsensus}%`);
 
           // 1️⃣ Bloquear ativo que causou a perda
           if (reqs.assetStillBlocked && realStatsTracker.isAssetBlocked(selectedSymbol)) {
@@ -1114,6 +1146,9 @@ export class AutoTradingScheduler {
           amount: tradeParams.amount,
           currency: 'USD'
         };
+
+        // 📌 CAMADA 1 - ANTI-REPETIÇÃO: registrar ativo ANTES de executar o contrato
+        realStatsTracker.setLastTradedAsset(config.userId, selectedSymbol);
 
         const contract = await derivAPI.buyDigitDifferContract(digitDifferContract);
         

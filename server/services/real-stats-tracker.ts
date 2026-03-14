@@ -2,16 +2,41 @@
  * REAL STATS TRACKER
  * Rastreia resultados reais de trades (won/lost) baseado em dados do banco.
  *
- * 🛡️ MODO RECUPERAÇÃO HIPER-SELETIVO
- * Após uma perda, o sistema CONTINUA operando mas com critérios muito mais
- * rígidos para garantir que o próximo trade tenha altíssima probabilidade de ganho:
- *   - Consenso mínimo de IA elevado para 85% (vs ~65% normal)
- *   - Ativo que causou a perda bloqueado por RECOVERY_ASSET_BLOCK_MS
- *   - Assim que saldo superar o pré-perda, volta ao modo normal
+ * 🛡️ MODO RECUPERAÇÃO HIPER-SELETIVO (Multi-Camada)
+ *
+ * CAMADA 1 - ANTI-REPETIÇÃO TOTAL:
+ *   O mesmo ativo NUNCA pode ser operado duas vezes seguidas.
+ *   Independente de consenso ou qualquer outro critério.
+ *
+ * CAMADA 2 - CONSENSO ESCALONADO POR PERDAS CONSECUTIVAS:
+ *   0 perdas consecutivas → consenso mínimo normal (~65%)
+ *   1 perda consecutiva  → consenso mínimo 85%
+ *   2 perdas consecutivas → consenso mínimo 90%
+ *   3+ perdas consecutivas → consenso mínimo 95%
+ *
+ * CAMADA 3 - CIRCUIT BREAKER:
+ *   2 perdas consecutivas → pausa obrigatória de 10 minutos antes do próximo trade
+ *   3+ perdas consecutivas → pausa obrigatória de 20 minutos
+ *   Assim que saldo superar o pré-perda, volta ao modo normal
+ *
+ * CAMADA 4 - BLOQUEIO DE ATIVO PERDEDOR:
+ *   Ativo que causou a perda bloqueado por 30 minutos.
  */
 
-const RECOVERY_MIN_CONSENSUS = 85;        // % mínimo de consenso de IA em modo recuperação
-const RECOVERY_ASSET_BLOCK_MS = 30 * 60 * 1000; // 30 minutos de bloqueio para o ativo perdedor
+const RECOVERY_ASSET_BLOCK_MS = 30 * 60 * 1000; // 30 min de bloqueio para o ativo perdedor
+
+// Consenso mínimo por nível de perdas consecutivas
+const RECOVERY_CONSENSUS_BY_STREAK: Record<number, number> = {
+  1: 85,  // 1 perda consecutiva → 85%
+  2: 90,  // 2 perdas consecutivas → 90%
+  3: 95,  // 3+ perdas consecutivas → 95%
+};
+
+// Pausa obrigatória entre trades por perdas consecutivas (em ms)
+const CIRCUIT_BREAKER_PAUSE_MS: Record<number, number> = {
+  2: 10 * 60 * 1000, // 2 perdas → 10 minutos
+  3: 20 * 60 * 1000, // 3+ perdas → 20 minutos
+};
 
 class RealStatsTracker {
   private wonTrades: number = 0;
@@ -19,7 +44,14 @@ class RealStatsTracker {
   private totalProfit: number = 0;
   private initialized: boolean = false;
 
-  // 🛡️ MODO RECUPERAÇÃO
+  // 🛡️ CAMADA 2 & 3 - Perdas consecutivas + Circuit Breaker
+  private consecutiveLosses: number = 0;
+  private circuitBreakerUntil: number = 0;   // timestamp — não operar antes disso
+
+  // 🛡️ CAMADA 1 - Anti-repetição por usuário
+  private lastTradedAssetByUser: Map<string, string> = new Map();
+
+  // 🛡️ CAMADA 2/3/4 - Modo recuperação pós-perda
   private postLossMode: boolean = false;
   private lastKnownBalance: number = 0;       // atualizado antes de cada trade
   private balanceToRecover: number = 0;       // saldo pré-perda — meta a superar
@@ -33,6 +65,13 @@ class RealStatsTracker {
 
   get totalTrades(): number {
     return this.wonTrades + this.lostTrades;
+  }
+
+  /** Consenso mínimo exigido com base na streak de perdas consecutivas */
+  get recoveryMinConsensus(): number {
+    if (this.consecutiveLosses <= 0) return 0;
+    const level = Math.min(this.consecutiveLosses, 3);
+    return RECOVERY_CONSENSUS_BY_STREAK[level] ?? 95;
   }
 
   initializeFromDB(wonTrades: number, lostTrades: number, totalProfit: number): void {
@@ -62,6 +101,45 @@ class RealStatsTracker {
     this.balanceToRecover = 0;
     this.blockedAsset = '';
     this.assetBlockedUntil = 0;
+    this.consecutiveLosses = 0;
+    this.circuitBreakerUntil = 0;
+  }
+
+  /**
+   * CAMADA 1 - Anti-Repetição Total
+   * Registra o ativo que acabou de ser operado para um usuário.
+   * Deve ser chamado IMEDIATAMENTE ANTES de executar o contrato.
+   */
+  setLastTradedAsset(userId: string, symbol: string): void {
+    this.lastTradedAssetByUser.set(userId, symbol.toUpperCase());
+    console.log(`📌 [ANTI-REP] Ativo registrado para ${userId}: ${symbol.toUpperCase()}`);
+  }
+
+  /**
+   * CAMADA 1 - Anti-Repetição Total
+   * Retorna true se o ativo é o mesmo do último trade deste usuário.
+   * Independente de qualquer outro critério — NUNCA pode repetir.
+   */
+  isAssetRepeated(userId: string, symbol: string): boolean {
+    const last = this.lastTradedAssetByUser.get(userId);
+    if (!last) return false;
+    return last === symbol.toUpperCase();
+  }
+
+  /**
+   * CAMADA 3 - Circuit Breaker
+   * Retorna true se o circuit breaker está ativo (pausa obrigatória).
+   */
+  isCircuitBreakerActive(): boolean {
+    return Date.now() < this.circuitBreakerUntil;
+  }
+
+  /**
+   * CAMADA 3 - Circuit Breaker
+   * Retorna ms restantes do circuit breaker (0 se inativo).
+   */
+  circuitBreakerRemainingMs(): number {
+    return Math.max(0, this.circuitBreakerUntil - Date.now());
   }
 
   /**
@@ -72,21 +150,27 @@ class RealStatsTracker {
   }
 
   /**
-   * Retorna os requisitos do modo de recuperação.
+   * Retorna os requisitos completos do modo de recuperação.
    */
   getRecoveryRequirements(): {
     minConsensus: number;
+    consecutiveLosses: number;
     blockedAsset: string;
     balanceToRecover: number;
     assetBlockedUntil: number;
     assetStillBlocked: boolean;
+    circuitBreakerActive: boolean;
+    circuitBreakerRemainingMs: number;
   } {
     return {
-      minConsensus: RECOVERY_MIN_CONSENSUS,
+      minConsensus: this.recoveryMinConsensus,
+      consecutiveLosses: this.consecutiveLosses,
       blockedAsset: this.blockedAsset,
       balanceToRecover: this.balanceToRecover,
       assetBlockedUntil: this.assetBlockedUntil,
       assetStillBlocked: this.blockedAsset !== '' && Date.now() < this.assetBlockedUntil,
+      circuitBreakerActive: this.isCircuitBreakerActive(),
+      circuitBreakerRemainingMs: this.circuitBreakerRemainingMs(),
     };
   }
 
@@ -105,7 +189,16 @@ class RealStatsTracker {
     this.totalProfit += profit;
     this.lastKnownBalance += Math.abs(profit);
 
+    // 🏆 Ganho zera a streak de perdas consecutivas
+    const hadStreak = this.consecutiveLosses;
+    this.consecutiveLosses = 0;
+    this.circuitBreakerUntil = 0;
+
     console.log(`🏆 [REAL STATS] Trade GANHO! WinRate: ${this.winRate.toFixed(1)}% (${this.wonTrades}W/${this.lostTrades}L) | +$${profit.toFixed(2)}`);
+
+    if (hadStreak > 0) {
+      console.log(`✅ [RECOVERY] Streak de perdas resetada (era ${hadStreak}) | Circuit Breaker desativado`);
+    }
 
     if (this.postLossMode) {
       if (this.lastKnownBalance > this.balanceToRecover) {
@@ -122,21 +215,39 @@ class RealStatsTracker {
     this.lostTrades++;
     this.totalProfit += loss; // loss é negativo
 
-    // 🛡️ ATIVAR MODO RECUPERAÇÃO HIPER-SELETIVO
-    const balanceBefore = this.lastKnownBalance;  // saldo ANTES desta perda
+    const balanceBefore = this.lastKnownBalance;
     this.lastKnownBalance = Math.max(0, this.lastKnownBalance + loss);
 
+    // 🛡️ CAMADA 2 - Incrementar streak de perdas consecutivas
+    this.consecutiveLosses++;
+
+    // 🛡️ CAMADA 3 - Ativar Circuit Breaker se streak >= 2
+    const streakLevel = Math.min(this.consecutiveLosses, 3);
+    const breakerPauseMs = CIRCUIT_BREAKER_PAUSE_MS[streakLevel] ?? 0;
+    if (breakerPauseMs > 0) {
+      this.circuitBreakerUntil = Date.now() + breakerPauseMs;
+      const pauseMin = Math.round(breakerPauseMs / 60000);
+      console.log(`🔴 [CIRCUIT BREAKER] ${this.consecutiveLosses} perdas consecutivas → PAUSA OBRIGATÓRIA de ${pauseMin} minutos`);
+      console.log(`   → Próximo trade permitido após: ${new Date(this.circuitBreakerUntil).toLocaleTimeString()}`);
+    }
+
+    // 🛡️ CAMADA 2/4 - Ativar/atualizar modo recuperação
     this.postLossMode = true;
-    this.balanceToRecover = balanceBefore;       // meta: superar o saldo pré-perda
+    this.balanceToRecover = balanceBefore;
     this.blockedAsset = symbol.toUpperCase();
     this.assetBlockedUntil = Date.now() + RECOVERY_ASSET_BLOCK_MS;
 
+    const minConsensus = this.recoveryMinConsensus;
+
     console.log(`❌ [REAL STATS] Trade PERDIDO. WinRate: ${this.winRate.toFixed(1)}% (${this.wonTrades}W/${this.lostTrades}L) | $${loss.toFixed(2)}`);
-    console.log(`🛡️ [RECOVERY] MODO RECUPERAÇÃO ATIVADO:`);
-    console.log(`   • Ativo bloqueado: ${symbol || 'N/A'} por 30 min`);
+    console.log(`🛡️ [RECOVERY] MODO RECUPERAÇÃO ATIVADO (streak: ${this.consecutiveLosses} perdas consecutivas):`);
+    console.log(`   • Ativo bloqueado (CAMADA 4): ${symbol || 'N/A'} por 30 min`);
     console.log(`   • Saldo alvo: $${balanceBefore.toFixed(2)} (precisa SUPERAR este valor)`);
-    console.log(`   • Consenso mínimo exigido: ${RECOVERY_MIN_CONSENSUS}% (vs normal ~65%)`);
-    console.log(`   • Sistema continua operando, mas APENAS em sinais excepcionais`);
+    console.log(`   • Consenso mínimo escalado (CAMADA 2): ${minConsensus}% (streak: ${this.consecutiveLosses})`);
+    console.log(`   • Anti-repetição (CAMADA 1): ativo anterior bloqueado para próximo ciclo`);
+    if (breakerPauseMs > 0) {
+      console.log(`   • Circuit Breaker (CAMADA 3): ${Math.round(breakerPauseMs / 60000)} min de pausa ativa`);
+    }
   }
 
   getStats() {
@@ -150,6 +261,10 @@ class RealStatsTracker {
       postLossMode: this.postLossMode,
       balanceToRecover: this.balanceToRecover,
       blockedAsset: this.blockedAsset,
+      consecutiveLosses: this.consecutiveLosses,
+      recoveryMinConsensus: this.recoveryMinConsensus,
+      circuitBreakerActive: this.isCircuitBreakerActive(),
+      circuitBreakerRemainingMs: this.circuitBreakerRemainingMs(),
     };
   }
 
@@ -158,9 +273,13 @@ class RealStatsTracker {
       console.log(`📊 [REAL STATS] Aguardando primeiros resultados reais...`);
     } else {
       const sharpe = this.totalTrades > 0 ? this.totalProfit / Math.sqrt(this.totalTrades) : 0;
-      const modeStr = this.postLossMode
-        ? ` | 🛡️ RECOVERY MODE (alvo: $${this.balanceToRecover.toFixed(2)}, mín.consenso: ${RECOVERY_MIN_CONSENSUS}%)`
-        : '';
+      let modeStr = '';
+      if (this.postLossMode) {
+        modeStr = ` | 🛡️ RECOVERY (streak:${this.consecutiveLosses}, consenso≥${this.recoveryMinConsensus}%, alvo:$${this.balanceToRecover.toFixed(2)})`;
+        if (this.isCircuitBreakerActive()) {
+          modeStr += ` | 🔴 CIRCUIT BREAKER (${Math.round(this.circuitBreakerRemainingMs() / 1000)}s restantes)`;
+        }
+      }
       console.log(`📊 [REAL STATS] Trades: ${this.totalTrades} | WinRate: ${this.winRate.toFixed(1)}% | Lucro: $${this.totalProfit.toFixed(2)} | Sharpe: ${sharpe.toFixed(2)}${modeStr}`);
     }
   }
