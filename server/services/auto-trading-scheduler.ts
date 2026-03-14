@@ -8,6 +8,7 @@ import { dynamicThresholdTracker } from './dynamic-threshold-tracker';
 import { resilienceSupervisor } from './resilience-supervisor';
 import { derivTradeSync } from './deriv-trade-sync';
 import { digitFrequencyAnalyzer } from './digit-frequency-analyzer';
+import { assetScorer, AssetPerformanceRecord } from './asset-scorer';
 
 export interface ActiveTradeSession {
   userId: string;
@@ -1337,8 +1338,7 @@ export class AutoTradingScheduler {
           // Executar análise de IA (sentimento geral de mercado)
           const aiConsensus = await huggingFaceAI.analyzeMarketData(tickData, symbol, userId);
 
-          // 🎯 DIGIT EDGE: Score estatístico do analisador de frequência de dígitos
-          // Alimentar o analisador com o histórico de preços do ativo
+          // 🎯 DIGIT FREQUENCY: Alimentar analisador com histórico do ativo
           const recentDigits = priceHistory.slice(-500).map((price: number) => {
             const priceStr = price.toString();
             const digitsOnly = priceStr.replace(/[^0-9]/g, '');
@@ -1348,23 +1348,79 @@ export class AutoTradingScheduler {
           if (recentDigits.length >= 50) {
             digitFrequencyAnalyzer.processHistoricalDigits(symbol, recentDigits);
           }
+
+          // 🏆 ASSET SCORER MULTIDIMENSIONAL — 6 dimensões operacionais
+          // Converte assetPerformance interno para o formato esperado pelo scorer
+          const internalPerf = this.assetPerformance.get(symbol);
+          const perfRecord: AssetPerformanceRecord | null = internalPerf ? {
+            wins: internalPerf.wins,
+            losses: internalPerf.losses,
+            lastTrades: internalPerf.lastTrades,
+            totalProfit: 0,
+            lastTradeTime: 0,
+            consecutiveLosses: internalPerf.lastTrades.length > 0
+              ? (() => {
+                  let streak = 0;
+                  for (let i = internalPerf.lastTrades.length - 1; i >= 0; i--) {
+                    if (!internalPerf.lastTrades[i]) streak++;
+                    else break;
+                  }
+                  return streak;
+                })()
+              : 0,
+            consecutiveWins: internalPerf.lastTrades.length > 0
+              ? (() => {
+                  let streak = 0;
+                  for (let i = internalPerf.lastTrades.length - 1; i >= 0; i--) {
+                    if (internalPerf.lastTrades[i]) streak++;
+                    else break;
+                  }
+                  return streak;
+                })()
+              : 0,
+            isBlacklisted: false,
+            volatilityHistory: []
+          } : null;
+
+          const scoreInput = {
+            symbol,
+            priceHistory,
+            tickCount: priceHistory.length,
+            dataAgeMs: dataAge,
+            aiConsensusScore: aiConsensus.consensusStrength,
+            aiAgreementStrength: aiConsensus.upScore !== undefined
+              ? Math.max(aiConsensus.upScore || 0, aiConsensus.downScore || 0, aiConsensus.neutralScore || 0)
+              : aiConsensus.consensusStrength,
+            performance: perfRecord,
+            isBlacklisted: false
+          };
+
+          const scoreResult = assetScorer.scoreAsset(scoreInput);
           
-          const digitEdgeScore = digitFrequencyAnalyzer.getDigitEdgeScore(symbol);
-          
-          // 🏆 SCORE COMBINADO: AI Consensus (60%) + Digit Edge (40%)
-          // As IAs determinam QUANDO e QUANTO. O edge estatístico determina QUAL dígito.
-          // Juntos, dão a melhor seleção de ativo E de barreira.
-          const combinedScore = (aiConsensus.consensusStrength * 0.6) + (digitEdgeScore * 0.4);
-          
-          const enrichedConsensus = { ...aiConsensus, consensusStrength: combinedScore };
+          // Log detalhado para debug (apenas para top candidates)
+          if (scoreResult.grade !== 'BLOCKED' && scoreResult.finalScore >= 50) {
+            console.log(assetScorer.formatScoreLog(scoreResult));
+          }
+
+          if (scoreResult.grade === 'BLOCKED') {
+            console.log(`🚫 [SCORER] ${symbol} bloqueado: ${scoreResult.blockedReason}`);
+            return null; // Ativo bloqueado — descartar
+          }
+
+          const enrichedConsensus = { ...aiConsensus, consensusStrength: scoreResult.finalScore };
           
           return {
             symbol,
-            consensus: combinedScore,
+            consensus: scoreResult.finalScore,
             aiRawScore: aiConsensus.consensusStrength,
-            digitEdge: digitEdgeScore,
+            digitEdge: scoreResult.digitEdge,
+            grade: scoreResult.grade,
+            stakeMultiplier: scoreResult.stakeMultiplier,
+            bestBarrier: scoreResult.bestBarrier,
+            expectedWinRate: scoreResult.expectedWinRate,
             direction: aiConsensus.finalDecision,
-            aiConsensus: enrichedConsensus
+            aiConsensus: enrichedConsensus,
+            scoreResult
           };
         } catch (error) {
           console.log(`⚠️ [${operationId}] Erro ao analisar ${symbolData.symbol}: ${error}`);
@@ -1397,11 +1453,15 @@ export class AutoTradingScheduler {
       // Melhor símbolo
       const best = validResults[0];
       
-      console.log(`🏆 [${operationId}] TOP 5 Símbolos (Score = IAs×0.6 + EdgeDigit×0.4):`);
+      console.log(`🏆 [${operationId}] TOP 5 Símbolos (Score Multidimensional — 6 dimensões):`);
       top5.forEach((r, i) => {
+        const grade = (r as any).grade || '?';
         const aiScore = (r as any).aiRawScore?.toFixed(1) || '?';
         const digitEdge = (r as any).digitEdge?.toFixed(1) || '?';
-        console.log(`   ${i + 1}. ${r!.symbol}: ${r!.direction.toUpperCase()} | Score=${r!.consensus.toFixed(1)}% | IAs=${aiScore}% | DigitEdge=${digitEdge}`);
+        const winRate = (r as any).expectedWinRate?.toFixed(1) || '?';
+        const stakeX = (r as any).stakeMultiplier?.toFixed(2) || '?';
+        const barrier = (r as any).bestBarrier || '?';
+        console.log(`   ${i + 1}. [${grade}] ${r!.symbol}: Score=${r!.consensus.toFixed(1)} | IA=${aiScore}% | Edge=${digitEdge}% | WR=${winRate}% | Barreira=${barrier} | Stake×${stakeX}`);
       });
       
       return {
