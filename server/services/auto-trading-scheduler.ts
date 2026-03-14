@@ -1604,36 +1604,68 @@ export class AutoTradingScheduler {
    */
   private calculateDynamicStake(baseAmount: number, consensoStrength: number, volatility: number = 0.5): number {
     // 🧠 PAPEL DAS 5 IAs: Amplificar stake quando o mercado está favorável
-    // As IAs de sentimento (FinBERT, RoBERTa, etc.) detectam condições favoráveis do mercado.
     // Consensus alto = mercado estável e favorável = aumentar stake para maximizar ganhos.
     // Consensus baixo = mercado incerto = stake base ou reduzido = proteção da banca.
+    //
+    // 🛡️ MODO ALMOFADA DE LUCRO (Cushion Mode):
+    //   Em momentos de consenso excepcional (≥90%), o stake é elevado estrategicamente
+    //   para que o lucro gerado pré-cubra N perdas futuras ao valor base.
+    //   Fórmula: lucro_cushion = stake × payout_ratio → deve cobrir N × stake_base
+    //   Payout típico Digit Differs = ~95% do stake
+    
+    const DIGIT_DIFFERS_PAYOUT_RATIO = 0.95; // payout médio por dólar de stake
     
     let aiMultiplier = 1.0;
-    
-    if (consensoStrength >= 70) {
-      aiMultiplier = 1.3;   // Todas as 5 IAs concordam = +30% no stake
+    let cushionCoverage = 0; // quantas perdas futuras este trade pré-cobre
+
+    if (consensoStrength >= 95) {
+      // 🚀 ULTRA CUSHION: consenso máximo — stake 3× base
+      // Lucro ≈ 3 × base × 0.95 ≈ 2.85 × base → cobre ~2 perdas futuras ao valor base
+      aiMultiplier = 3.0;
+      cushionCoverage = Math.floor((baseAmount * aiMultiplier * DIGIT_DIFFERS_PAYOUT_RATIO) / baseAmount);
+      console.log(`🚀🚀 [CUSHION ULTRA] Consensus ${consensoStrength}% ≥ 95% → stake ×3.0 | Lucro pré-cobre ~${cushionCoverage} perdas futuras`);
+    } else if (consensoStrength >= 90) {
+      // 💎 CUSHION MODE: consenso excepcional — stake 2.2× base
+      // Lucro ≈ 2.2 × base × 0.95 ≈ 2.09 × base → cobre ~2 perdas futuras ao valor base
+      aiMultiplier = 2.2;
+      cushionCoverage = Math.floor((baseAmount * aiMultiplier * DIGIT_DIFFERS_PAYOUT_RATIO) / baseAmount);
+      console.log(`💎 [CUSHION MODE] Consensus ${consensoStrength}% ≥ 90% → stake ×2.2 | Lucro pré-cobre ~${cushionCoverage} perda(s) futura(s)`);
+    } else if (consensoStrength >= 80) {
+      // 🔥 ELEVADO: consenso forte — stake 1.6× base
+      // Lucro ≈ 1.6 × base × 0.95 ≈ 1.52 × base → cobre ~1 perda futura ao valor base
+      aiMultiplier = 1.6;
+      cushionCoverage = Math.floor((baseAmount * aiMultiplier * DIGIT_DIFFERS_PAYOUT_RATIO) / baseAmount);
+      console.log(`🔥 [AI AMPLIFIER] Consensus FORTE+ (${consensoStrength}%) ≥ 80% → stake ×1.6 | Almofada: ~${cushionCoverage} perda(s)`);
+    } else if (consensoStrength >= 70) {
+      aiMultiplier = 1.3;
       console.log(`🔥 [AI AMPLIFIER] Consensus FORTE (${consensoStrength}%) → stake ×1.3`);
     } else if (consensoStrength >= 55) {
-      aiMultiplier = 1.15;  // Maioria concorda = +15% no stake
+      aiMultiplier = 1.15;
       console.log(`✅ [AI AMPLIFIER] Consensus MODERADO (${consensoStrength}%) → stake ×1.15`);
     } else if (consensoStrength >= 40) {
-      aiMultiplier = 1.0;   // Misto = stake base (neutro)
+      aiMultiplier = 1.0;
       console.log(`➡️ [AI AMPLIFIER] Consensus NEUTRO (${consensoStrength}%) → stake ×1.0`);
     } else {
-      aiMultiplier = 0.85;  // IAs pessimistas = -15% de cautela
+      aiMultiplier = 0.85;
       console.log(`⚠️ [AI AMPLIFIER] Consensus FRACO (${consensoStrength}%) → stake ×0.85`);
     }
 
     // Redução adicional apenas em volatilidade extrema (proteção de risco)
     let volMultiplier = 1.0;
     if (volatility > 0.8) {
-      volMultiplier = 0.9; // -10% em volatilidade muito alta
+      volMultiplier = 0.9;
       console.log(`⚡ [VOL GUARD] Volatilidade alta (${(volatility*100).toFixed(0)}%) → stake ×0.9`);
     }
 
     const finalMultiplier = aiMultiplier * volMultiplier;
     const dynamicStake = Math.round(baseAmount * finalMultiplier * 100) / 100;
-    console.log(`💰 [DYNAMIC STAKE] Base: $${baseAmount} × ${finalMultiplier.toFixed(2)} (IAs: ×${aiMultiplier}, vol: ×${volMultiplier}) = $${dynamicStake}`);
+
+    if (cushionCoverage > 0) {
+      const estimatedProfit = dynamicStake * DIGIT_DIFFERS_PAYOUT_RATIO;
+      console.log(`💰 [CUSHION STAKE] Base: $${baseAmount} × ${finalMultiplier.toFixed(2)} = $${dynamicStake} | Lucro estimado: +$${estimatedProfit.toFixed(2)} → pré-cobre ${cushionCoverage} perda(s) de $${baseAmount.toFixed(2)}`);
+    } else {
+      console.log(`💰 [DYNAMIC STAKE] Base: $${baseAmount} × ${finalMultiplier.toFixed(2)} (IAs: ×${aiMultiplier}, vol: ×${volMultiplier}) = $${dynamicStake}`);
+    }
     
     return dynamicStake;
   }
@@ -1705,7 +1737,14 @@ export class AutoTradingScheduler {
         if (consensoStrength !== undefined) {
           amount = this.calculateDynamicStake(amount, consensoStrength, volatility || 0.5);
         }
-        
+
+        // 🛡️ SAFETY CAP: nunca arriscar mais de 3% da banca por trade (protege em qualquer modo)
+        const maxSafeStake = Math.max(0.35, bankSize * 0.03);
+        if (amount > maxSafeStake) {
+          console.log(`🛡️ [SAFETY CAP] Stake $${amount.toFixed(2)} > 3% da banca ($${maxSafeStake.toFixed(2)}) → limitado a $${maxSafeStake.toFixed(2)}`);
+          amount = maxSafeStake;
+        }
+
         // Arredondar para 2 casas decimais
         amount = Math.round(amount * 100) / 100;
       } else {
