@@ -105,27 +105,37 @@ export class DerivTradeSync {
         return result;
       }
 
-      // Limpeza automática: expirar trades pendentes irrecuperáveis (> 5 min)
-      // Contratos DIGIT DIFFER expiram em ~10 ticks (< 30 segundos), então qualquer
-      // trade pendente com mais de 5 minutos nunca terá resultado da Deriv
-      try {
-        const expired = await storage.expireOldPendingTrades(5);
-        if (expired > 0) {
-          console.log(`🧹 [DERIV SYNC] ${expired} trades pendentes antigos expirados automaticamente`);
-        }
-      } catch (cleanupError: any) {
-        console.log(`⚠️ [DERIV SYNC] Erro na limpeza de trades antigos: ${cleanupError?.message}`);
-      }
-
-      // Buscar operações ativas/pendentes do usuário
+      // Buscar operações ativas/pendentes + expiradas recentes (últimas 2h) do usuário
+      // IMPORTANTE: buscar ANTES de expirar para capturar resultados reais da Deriv
       const operations = await storage.getUserTradeOperations(userId, 500);
       const pendingOps = operations.filter(op => 
         op.status === 'pending' || op.status === 'active'
       );
 
-      console.log(`📊 [DERIV SYNC] Encontradas ${pendingOps.length} operações pendentes`);
+      // Trades expiradas sem resultado confirmado (podem ter perdido — precisamos checar)
+      const now = Date.now();
+      const twoHoursAgo = now - 2 * 60 * 60 * 1000;
+      const expiredUnconfirmed = operations.filter(op =>
+        op.status === 'expired' &&
+        op.derivContractId &&
+        op.profit === null &&
+        op.createdAt &&
+        new Date(op.createdAt).getTime() > twoHoursAgo
+      );
 
-      if (pendingOps.length === 0) {
+      const opsToCheck = [...pendingOps, ...expiredUnconfirmed];
+      console.log(`📊 [DERIV SYNC] Encontradas ${pendingOps.length} operações pendentes + ${expiredUnconfirmed.length} expiradas sem resultado`);
+
+      if (opsToCheck.length === 0) {
+        // Limpeza automática só depois de verificar resultados
+        try {
+          const expired = await storage.expireOldPendingTrades(5);
+          if (expired > 0) {
+            console.log(`🧹 [DERIV SYNC] ${expired} trades pendentes antigos expirados automaticamente`);
+          }
+        } catch (cleanupError: any) {
+          console.log(`⚠️ [DERIV SYNC] Erro na limpeza de trades antigos: ${cleanupError?.message}`);
+        }
         return result;
       }
 
@@ -167,8 +177,8 @@ export class DerivTradeSync {
         console.log(`⚠️ [DERIV SYNC] Não foi possível carregar profit_table: ${ptError?.message}`);
       }
 
-      // Para cada operação pendente, buscar status da Deriv
-      for (const operation of pendingOps) {
+      // Para cada operação pendente + expiradas sem resultado, buscar status da Deriv
+      for (const operation of opsToCheck) {
         try {
           if (!operation.derivContractId) {
             console.log(`⚠️ [DERIV SYNC] Operação ${operation.id} sem contract ID`);
@@ -214,7 +224,13 @@ export class DerivTradeSync {
             continue;
           }
 
-          // PASSO 2: Tentar proposal_open_contract (contratos ainda abertos)
+          // PASSO 2: Tentar proposal_open_contract (somente para trades não expirados)
+          // Trades já marcados como expired não estão abertos — pular chamada ao vivo
+          if (operation.status === 'expired') {
+            console.log(`⚠️ [DERIV SYNC] Trade ${operation.derivContractId} expirado sem resultado na profit_table — sem dados`);
+            continue;
+          }
+
           const contractInfo = await derivAPI.getContractInfo(Number(operation.derivContractId));
           if (!contractInfo) {
             // Contrato não encontrado em nenhum lugar - pode ter expirado antes de ser registrado
@@ -295,6 +311,17 @@ export class DerivTradeSync {
           result.errors.push(msg);
           console.error(`❌ [DERIV SYNC] ${msg}`);
         }
+      }
+
+      // Limpeza automática: expirar trades pendentes irrecuperáveis (> 5 min)
+      // Feito DEPOIS do scan da profit_table para não perder resultados reais
+      try {
+        const expiredCount = await storage.expireOldPendingTrades(5);
+        if (expiredCount > 0) {
+          console.log(`🧹 [DERIV SYNC] ${expiredCount} trades pendentes antigos expirados automaticamente`);
+        }
+      } catch (cleanupError: any) {
+        console.log(`⚠️ [DERIV SYNC] Erro na limpeza de trades antigos: ${cleanupError?.message}`);
       }
 
       // Atualizar timestamp da última sincronização
