@@ -89,8 +89,58 @@ export class DualStorage implements IStorage {
   async updateDocumentoStatus(id: string, status: string, motivo?: string) { return this.primaryWrite(() => this.turso!.updateDocumentoStatus(id, status, motivo), () => this.sqlite.updateDocumentoStatus(id, status, motivo), 'updateDocumentoStatus'); }
 
   async createDerivToken(t: InsertDerivToken) { return this.primaryWrite(() => this.turso!.createDerivToken(t), () => this.sqlite.createDerivToken(t), 'createDerivToken'); }
-  async getUserDerivToken(userId: string) { return this.primaryRead(() => this.turso!.getUserDerivToken(userId), () => this.sqlite.getUserDerivToken(userId), 'getUserDerivToken'); }
-  async updateDerivToken(userId: string, token: string, accountType: string) { return this.primaryWrite(() => this.turso!.updateDerivToken(userId, token, accountType), () => this.sqlite.updateDerivToken(userId, token, accountType), 'updateDerivToken'); }
+
+  async getUserDerivToken(userId: string): Promise<DerivToken | undefined> {
+    if (!this.isDualMode || !this.turso) return await this.sqlite.getUserDerivToken(userId);
+    try {
+      const tursoResult = await this.turso.getUserDerivToken(userId);
+      if (tursoResult) return tursoResult;
+
+      // Turso returned nothing - check SQLite as fallback (data may not have synced)
+      const sqliteResult = await this.sqlite.getUserDerivToken(userId);
+      if (sqliteResult) {
+        console.log(`🔄 [DUAL] Token encontrado no SQLite mas não no Turso para userId=${userId} - sincronizando...`);
+        // Read-repair: sync the encrypted token from SQLite raw DB to Turso
+        try {
+          await this.turso.updateDerivToken(userId, sqliteResult.token, sqliteResult.accountType || 'demo');
+          console.log(`✅ [DUAL] Token sincronizado SQLite→Turso para userId=${userId}`);
+        } catch (syncErr: any) {
+          console.warn(`⚠️ [DUAL] Falha ao sincronizar token para Turso:`, syncErr.message);
+        }
+        return sqliteResult;
+      }
+      return undefined;
+    } catch (err: any) {
+      console.warn(`⚠️ [TURSO] getUserDerivToken falhou, fallback SQLite:`, err.message);
+      return await this.sqlite.getUserDerivToken(userId);
+    }
+  }
+
+  async updateDerivToken(userId: string, token: string, accountType: string) {
+    if (!this.isDualMode || !this.turso) return await this.sqlite.updateDerivToken(userId, token, accountType);
+    try {
+      const result = await this.turso.updateDerivToken(userId, token, accountType);
+      // Sync to SQLite in background
+      this.sqlite.updateDerivToken(userId, token, accountType).catch(err =>
+        console.warn(`⚠️ [DUAL] SQLite sync falhou em updateDerivToken:`, err.message)
+      );
+      return result;
+    } catch (err: any) {
+      console.error(`❌ [TURSO] Falha em updateDerivToken:`, err.message, '- fallback SQLite');
+      const result = await this.sqlite.updateDerivToken(userId, token, accountType);
+      // Try to async repair Turso after SQLite save
+      setTimeout(async () => {
+        try {
+          await this.turso!.updateDerivToken(userId, token, accountType);
+          console.log(`✅ [DUAL] Token reparado no Turso após fallback SQLite para userId=${userId}`);
+        } catch (repairErr: any) {
+          console.warn(`⚠️ [DUAL] Reparo assíncrono do Turso falhou:`, repairErr.message);
+        }
+      }, 2000);
+      return result;
+    }
+  }
+
   async deactivateDerivToken(userId: string) { return this.primaryWrite(() => this.turso!.deactivateDerivToken(userId), () => this.sqlite.deactivateDerivToken(userId), 'deactivateDerivToken'); }
 
   async createTradeConfig(c: InsertTradeConfiguration) { return this.primaryWrite(() => this.turso!.createTradeConfig(c), () => this.sqlite.createTradeConfig(c), 'createTradeConfig'); }
