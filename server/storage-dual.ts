@@ -70,6 +70,34 @@ export class DualStorage implements IStorage {
     }
   }
 
+  private async ensureUserInTurso(userId: string): Promise<boolean> {
+    if (!this.turso) return false;
+    try {
+      const existing = await this.turso.getUser(userId);
+      if (existing) return true;
+      const sqliteUser = await this.sqlite.getUser(userId);
+      if (!sqliteUser) return false;
+      await this.turso.createUser({
+        id: sqliteUser.id,
+        name: sqliteUser.name,
+        email: sqliteUser.email,
+        cpf: sqliteUser.cpf,
+        phone: sqliteUser.phone,
+        password: sqliteUser.password,
+        saldo: sqliteUser.saldo,
+        role: sqliteUser.role as any,
+        status: sqliteUser.status as any,
+        isPhoneVerified: sqliteUser.isPhoneVerified,
+        isApproved: sqliteUser.isApproved,
+      } as any);
+      console.log(`✅ [DUAL] Usuário ${userId} sincronizado SQLite→Turso`);
+      return true;
+    } catch (err: any) {
+      console.warn(`⚠️ [DUAL] Falha ao sincronizar usuário ${userId} para Turso:`, err.message);
+      return false;
+    }
+  }
+
   async getUser(id: string) { return this.primaryRead(() => this.turso!.getUser(id), () => this.sqlite.getUser(id), 'getUser'); }
   async getUserByEmail(email: string) { return this.primaryRead(() => this.turso!.getUserByEmail(email), () => this.sqlite.getUserByEmail(email), 'getUserByEmail'); }
   async getUserByCpf(cpf: string) { return this.primaryRead(() => this.turso!.getUserByCpf(cpf), () => this.sqlite.getUserByCpf(cpf), 'getUserByCpf'); }
@@ -100,13 +128,15 @@ export class DualStorage implements IStorage {
       const sqliteResult = await this.sqlite.getUserDerivToken(userId);
       if (sqliteResult) {
         console.log(`🔄 [DUAL] Token encontrado no SQLite mas não no Turso para userId=${userId} - sincronizando...`);
-        // Read-repair: sync the encrypted token from SQLite raw DB to Turso
-        try {
-          await this.turso.updateDerivToken(userId, sqliteResult.token, sqliteResult.accountType || 'demo');
+        // Read-repair: ensure user exists in Turso first (FK constraint), then sync token
+        this.ensureUserInTurso(userId).then(userSynced => {
+          if (!userSynced) return;
+          return this.turso!.updateDerivToken(userId, sqliteResult.token, sqliteResult.accountType || 'demo');
+        }).then(() => {
           console.log(`✅ [DUAL] Token sincronizado SQLite→Turso para userId=${userId}`);
-        } catch (syncErr: any) {
-          console.warn(`⚠️ [DUAL] Falha ao sincronizar token para Turso:`, syncErr.message);
-        }
+        }).catch((syncErr: any) => {
+          console.warn(`⚠️ [DUAL] Falha ao sincronizar token para Turso:`, syncErr?.message);
+        });
         return sqliteResult;
       }
       return undefined;
@@ -144,9 +174,73 @@ export class DualStorage implements IStorage {
   async deactivateDerivToken(userId: string) { return this.primaryWrite(() => this.turso!.deactivateDerivToken(userId), () => this.sqlite.deactivateDerivToken(userId), 'deactivateDerivToken'); }
 
   async createTradeConfig(c: InsertTradeConfiguration) { return this.primaryWrite(() => this.turso!.createTradeConfig(c), () => this.sqlite.createTradeConfig(c), 'createTradeConfig'); }
-  async getUserTradeConfig(userId: string) { return this.primaryRead(() => this.turso!.getUserTradeConfig(userId), () => this.sqlite.getUserTradeConfig(userId), 'getUserTradeConfig'); }
-  async getAllTradeConfigurations() { return this.primaryRead(() => this.turso!.getAllTradeConfigurations(), () => this.sqlite.getAllTradeConfigurations(), 'getAllTradeConfigurations'); }
-  async getActiveTradeConfigurations() { return this.primaryRead(() => this.turso!.getActiveTradeConfigurations(), () => this.sqlite.getActiveTradeConfigurations(), 'getActiveTradeConfigurations'); }
+
+  async getUserTradeConfig(userId: string): Promise<TradeConfiguration | undefined> {
+    if (!this.isDualMode || !this.turso) return await this.sqlite.getUserTradeConfig(userId);
+    try {
+      const tursoResult = await this.turso.getUserTradeConfig(userId);
+      if (tursoResult) return tursoResult;
+      const sqliteResult = await this.sqlite.getUserTradeConfig(userId);
+      if (sqliteResult) {
+        console.log(`🔄 [DUAL] TradeConfig encontrada no SQLite mas não no Turso para userId=${userId} - sincronizando...`);
+        this.ensureUserInTurso(userId).then(userSynced => {
+          if (!userSynced) return;
+          return this.turso!.updateTradeConfig(userId, sqliteResult.mode);
+        }).then(() => {
+          console.log(`✅ [DUAL] TradeConfig sincronizada SQLite→Turso para userId=${userId}`);
+        }).catch(e =>
+          console.warn(`⚠️ [DUAL] Falha ao sincronizar TradeConfig para Turso:`, e?.message)
+        );
+        return sqliteResult;
+      }
+      return undefined;
+    } catch (err: any) {
+      console.warn(`⚠️ [TURSO] getUserTradeConfig falhou, fallback SQLite:`, err.message);
+      return await this.sqlite.getUserTradeConfig(userId);
+    }
+  }
+
+  async getAllTradeConfigurations(): Promise<TradeConfiguration[]> {
+    if (!this.isDualMode || !this.turso) return await this.sqlite.getAllTradeConfigurations();
+    try {
+      const tursoResult = await this.turso.getAllTradeConfigurations();
+      if (tursoResult.length > 0) return tursoResult;
+      return await this.sqlite.getAllTradeConfigurations();
+    } catch (err: any) {
+      console.warn(`⚠️ [TURSO] getAllTradeConfigurations falhou, fallback SQLite:`, err.message);
+      return await this.sqlite.getAllTradeConfigurations();
+    }
+  }
+
+  async getActiveTradeConfigurations(): Promise<TradeConfiguration[]> {
+    if (!this.isDualMode || !this.turso) return await this.sqlite.getActiveTradeConfigurations();
+    try {
+      const tursoResult = await this.turso.getActiveTradeConfigurations();
+      if (tursoResult.length > 0) return tursoResult;
+      // Turso returned empty — check SQLite as fallback
+      const sqliteResult = await this.sqlite.getActiveTradeConfigurations();
+      if (sqliteResult.length > 0) {
+        console.log(`🔄 [DUAL] ${sqliteResult.length} config(s) ativa(s) encontrada(s) no SQLite mas não no Turso - sincronizando...`);
+        // Sync each config to Turso in background — ensure user exists first (FK constraint)
+        for (const config of sqliteResult) {
+          this.ensureUserInTurso(config.userId).then(userSynced => {
+            if (!userSynced) return;
+            return this.turso!.updateTradeConfig(config.userId, config.mode);
+          }).then(() => {
+            console.log(`✅ [DUAL] Config ${config.id} sincronizada SQLite→Turso`);
+          }).catch(e =>
+            console.warn(`⚠️ [DUAL] Falha ao sincronizar config ${config.id} para Turso:`, e?.message)
+          );
+        }
+        return sqliteResult;
+      }
+      return [];
+    } catch (err: any) {
+      console.warn(`⚠️ [TURSO] getActiveTradeConfigurations falhou, fallback SQLite:`, err.message);
+      return await this.sqlite.getActiveTradeConfigurations();
+    }
+  }
+
   async updateTradeConfig(userId: string, mode: string) { return this.primaryWrite(() => this.turso!.updateTradeConfig(userId, mode), () => this.sqlite.updateTradeConfig(userId, mode), 'updateTradeConfig'); }
   async deactivateAllTradeConfigs(userId: string) { return this.primaryWrite(() => this.turso!.deactivateAllTradeConfigs(userId), () => this.sqlite.deactivateAllTradeConfigs(userId), 'deactivateAllTradeConfigs'); }
   async reactivateTradeConfiguration(id: string) { return this.primaryWrite(() => this.turso!.reactivateTradeConfiguration(id), () => this.sqlite.reactivateTradeConfiguration(id), 'reactivateTradeConfiguration'); }

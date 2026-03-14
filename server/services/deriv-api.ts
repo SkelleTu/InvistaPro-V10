@@ -451,11 +451,19 @@ export class DerivAPIService extends EventEmitter {
     }
     
     if (this.ws) {
-      this.ws.removeAllListeners();
-      if (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) {
-        this.ws.close();
-      }
+      const ws = this.ws;
       this.ws = null;
+      ws.removeAllListeners();
+      ws.on('error', () => {});
+      try {
+        if (ws.readyState === WebSocket.CONNECTING) {
+          ws.terminate();
+        } else if (ws.readyState === WebSocket.OPEN) {
+          ws.close();
+        }
+      } catch (e) {
+        // ignore
+      }
     }
   }
 
@@ -1193,15 +1201,22 @@ export class DerivAPIService extends EventEmitter {
     this.stopHeartbeat();
     
     if (this.ws) {
-      this.ws.removeAllListeners();
-      if (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) {
-        try {
-          this.ws.close();
-        } catch (e) {
-          // ignore
-        }
-      }
+      const ws = this.ws;
       this.ws = null;
+      // Remove all listeners and add a no-op error handler to prevent
+      // uncaught 'error' events when closing a CONNECTING socket
+      ws.removeAllListeners();
+      ws.on('error', () => {});
+      try {
+        if (ws.readyState === WebSocket.CONNECTING) {
+          // terminate() forcefully destroys the socket without requiring open state
+          ws.terminate();
+        } else if (ws.readyState === WebSocket.OPEN) {
+          ws.close();
+        }
+      } catch (e) {
+        // ignore any remaining errors
+      }
     }
     
     console.log('🔌 Deriv desconectado');
@@ -1225,12 +1240,19 @@ export class DerivAPIService extends EventEmitter {
     
     // Cleanup da conexão atual
     if (this.ws) {
+      const ws = this.ws;
+      this.ws = null;
+      ws.removeAllListeners();
+      ws.on('error', () => {});
       try {
-        this.ws.close();
+        if (ws.readyState === WebSocket.CONNECTING) {
+          ws.terminate();
+        } else if (ws.readyState === WebSocket.OPEN) {
+          ws.close();
+        }
       } catch (error) {
         console.warn('⚠️ Erro ao fechar WebSocket:', error);
       }
-      this.ws = null;
     }
     
     // RECONEXÃO ILIMITADA com exponential backoff
