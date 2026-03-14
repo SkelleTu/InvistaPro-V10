@@ -21,12 +21,34 @@ const isTradingAuthorized = (req: any, res: any, next: any) => {
 
 // Obter status do scheduler
 router.get('/status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+  const userId = req.user.id;
   const stats = autoTradingScheduler.getSessionStats();
   const activeSessions = autoTradingScheduler.getActiveSessions();
   const schedulerStatus = autoTradingScheduler.getSchedulerStatus();
-  
+
+  // Verificar se o token Deriv está configurado para este usuário
+  const derivToken = await storage.getUserDerivToken(userId);
+  const derivTokenConfigured = !!derivToken && !!derivToken.isActive;
+
+  // Verificar se há configurações ativas no banco
+  const activeConfigs = await storage.getActiveTradeConfigurations();
+  const userActiveConfigs = activeConfigs.filter((c: any) => c.userId === userId);
+  const activeConfigsCount = userActiveConfigs.length;
+
+  // O sistema só está realmente operando se: scheduler rodando + token configurado + configurações ativas
+  const canExecuteTrades = schedulerStatus.isRunning && derivTokenConfigured && activeConfigsCount > 0;
+
+  // Bloqueios que impedem trading
+  const tradingBlockers: string[] = [];
+  if (!derivTokenConfigured) tradingBlockers.push('Token Deriv não configurado');
+  if (activeConfigsCount === 0) tradingBlockers.push('Nenhuma configuração de trading ativa');
+
   res.json({
     schedulerActive: schedulerStatus.isRunning,
+    canExecuteTrades,
+    derivTokenConfigured,
+    activeConfigsCount,
+    tradingBlockers,
     schedulerStatus,
     stats,
     activeSessions: activeSessions.map(session => ({

@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/useAuth";
@@ -28,7 +29,9 @@ import {
   Brain,
   CheckCircle2,
   Hash,
-  Infinity
+  Infinity,
+  AlertTriangle,
+  XCircle
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -325,34 +328,78 @@ export default function TradingSystemPage() {
 
           {/* Dashboard Tab */}
           <TabsContent value="dashboard" className="space-y-6">
+            {/* Alerta de bloqueios — exibido quando o sistema não pode executar trades */}
+            {(schedulerStatus as any)?.tradingBlockers?.length > 0 && (
+              <Alert variant="destructive" data-testid="alert-trading-blocked">
+                <XCircle className="h-4 w-4" />
+                <AlertTitle>Sistema não está executando operações reais</AlertTitle>
+                <AlertDescription>
+                  <ul className="mt-1 list-disc list-inside space-y-1">
+                    {((schedulerStatus as any).tradingBlockers as string[]).map((blocker: string, i: number) => (
+                      <li key={i}>{blocker}</li>
+                    ))}
+                  </ul>
+                  {!(schedulerStatus as any)?.derivTokenConfigured && (
+                    <p className="mt-2 font-medium">Acesse a aba <strong>Configurações</strong> para inserir seu token da Deriv.</p>
+                  )}
+                </AlertDescription>
+              </Alert>
+            )}
+
             {/* Card de Controle do Sistema */}
-            <Card className="border-2 border-primary/20 bg-primary/5">
+            <Card className={`border-2 ${(schedulerStatus as any)?.canExecuteTrades ? 'border-green-500/30 bg-green-500/5' : 'border-orange-400/30 bg-orange-400/5'}`}>
               <CardHeader>
                 <CardTitle className="flex items-center justify-between">
                   <div className="flex items-center space-x-2">
                     <Bot className="h-5 w-5" />
                     <span>Controle do Sistema de Trading</span>
                   </div>
-                  <Badge variant={(schedulerStatus as any)?.schedulerActive ? "default" : "secondary"} className="animate-pulse">
-                    <span className={`w-2 h-2 rounded-full inline-block mr-1 ${(schedulerStatus as any)?.schedulerActive ? 'bg-green-500' : 'bg-gray-500'}`}></span>
-                    {(schedulerStatus as any)?.schedulerActive ? 'Ativo' : 'Pausado'}
-                  </Badge>
+                  {(schedulerStatus as any)?.canExecuteTrades ? (
+                    <Badge variant="default" className="animate-pulse bg-green-600 hover:bg-green-700" data-testid="badge-system-status">
+                      <span className="w-2 h-2 rounded-full inline-block mr-1 bg-green-300"></span>
+                      Operando
+                    </Badge>
+                  ) : (schedulerStatus as any)?.schedulerActive ? (
+                    <Badge variant="outline" className="border-orange-400 text-orange-600" data-testid="badge-system-status">
+                      <AlertTriangle className="h-3 w-3 mr-1" />
+                      Incompleto
+                    </Badge>
+                  ) : (
+                    <Badge variant="secondary" data-testid="badge-system-status">
+                      <span className="w-2 h-2 rounded-full inline-block mr-1 bg-gray-400"></span>
+                      Pausado
+                    </Badge>
+                  )}
                 </CardTitle>
                 <CardDescription>
-                  {(schedulerStatus as any)?.schedulerActive 
-                    ? "O sistema está rodando e monitorando oportunidades de trading" 
+                  {(schedulerStatus as any)?.canExecuteTrades
+                    ? "Sistema totalmente configurado e executando operações na Deriv"
+                    : (schedulerStatus as any)?.schedulerActive
+                    ? "Processo em execução, mas sem condições de operar — verifique os alertas acima"
                     : "O sistema está pausado e não está executando operações"}
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex items-center justify-between">
                 <div className="flex items-center space-x-4">
                   <div>
-                    <p className="text-sm text-muted-foreground">Sessões Ativas</p>
+                    <p className="text-sm text-muted-foreground">Sessões em Memória</p>
                     <p className="text-2xl font-bold">{(schedulerStatus as any)?.stats?.totalSessions || 0}</p>
                   </div>
                   <div>
-                    <p className="text-sm text-muted-foreground">Operações Executadas</p>
+                    <p className="text-sm text-muted-foreground">Ops Executadas (Sessão)</p>
                     <p className="text-2xl font-bold">{(schedulerStatus as any)?.stats?.totalExecutedOperations || 0}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">Token Deriv</p>
+                    <p className="text-sm font-bold mt-1">
+                      {(schedulerStatus as any)?.derivTokenConfigured
+                        ? <span className="text-green-600">✓ Configurado</span>
+                        : <span className="text-red-500">✗ Ausente</span>}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">Configs Ativas</p>
+                    <p className="text-2xl font-bold">{(schedulerStatus as any)?.activeConfigsCount ?? 0}</p>
                   </div>
                 </div>
                 <div className="flex space-x-2">
