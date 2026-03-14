@@ -1,525 +1,171 @@
+/**
+ * DUAL DATABASE STORAGE - Turso (primário) + SQLite (fallback)
+ *
+ * Turso (libSQL cloud) é o banco principal - dados persistem 100% na nuvem.
+ * SQLite local é fallback caso Turso esteja indisponível.
+ */
+
 import { DatabaseStorage } from "./storage";
-import { PostgresStorage } from "./storage-postgres";
-import { isPostgresAvailable } from "./db-postgres";
+import { TursoStorage } from "./storage-turso";
+import { isTursoAvailable, initializeTursoDatabase } from "./db-turso";
 import type { IStorage } from "./storage";
 import type {
-  User,
-  InsertUser,
-  UpdateUser,
-  Movimento,
-  InsertMovimento,
-  Documento,
-  InsertDocumento,
-  DerivToken,
-  InsertDerivToken,
-  TradeConfiguration,
-  InsertTradeConfiguration,
-  TradeOperation,
-  InsertTradeOperation,
-  AiLog,
-  InsertAiLog,
-  MarketData,
-  InsertMarketData,
+  User, InsertUser, UpdateUser,
+  Movimento, InsertMovimento,
+  Documento, InsertDocumento,
+  DerivToken, InsertDerivToken,
+  TradeConfiguration, InsertTradeConfiguration,
+  TradeOperation, InsertTradeOperation,
+  AiLog, InsertAiLog,
+  MarketData, InsertMarketData,
+  DailyPnL, InsertDailyPnL,
+  AiRecoveryStrategy, InsertAiRecoveryStrategy,
+  ActiveTradingSession, InsertActiveTradingSession,
+  ActiveWebSocketSubscription, InsertActiveWebSocketSubscription,
+  SystemHealthHeartbeat, TradingControl,
 } from "@shared/schema";
 
-/**
- * DUAL DATABASE STORAGE - Sistema de Banco de Dados Gêmeo
- * 
- * Gerencia SQLite e PostgreSQL simultaneamente com:
- * - Sincronização bidirecional em tempo real
- * - Failover automático quando um banco falha
- * - Reconciliação automática de dados
- * - Estratégia: escrever em ambos, ler do principal com fallback
- * - Graceful degradation: se PostgreSQL não disponível, usa apenas SQLite
- */
 export class DualStorage implements IStorage {
   private sqlite: DatabaseStorage;
-  private postgres: PostgresStorage | null;
-  private primaryDB: 'sqlite' | 'postgres' = 'postgres';
+  private turso: TursoStorage | null;
   private isDualMode: boolean;
-  
+
   constructor() {
     this.sqlite = new DatabaseStorage();
-    
-    // Modo dual ativado - sincroniza SQLite com PostgreSQL (Neon)
-    const FORCE_SQLITE_ONLY = true;
-    
-    this.postgres = (isPostgresAvailable && !FORCE_SQLITE_ONLY) ? new PostgresStorage() : null;
-    this.isDualMode = isPostgresAvailable && !FORCE_SQLITE_ONLY;
-    
-    if (FORCE_SQLITE_ONLY) {
-      console.error('==========================================');
-      console.error('🔧 [BUG FIX] FORÇADO MODO SQLITE APENAS!!!');
-      console.error('==========================================');
-    } else if (this.isDualMode) {
-      console.log('🔄 Sistema Dual Database iniciado - SQLite + PostgreSQL em sincronização');
+    this.turso = isTursoAvailable ? new TursoStorage() : null;
+    this.isDualMode = isTursoAvailable;
+
+    if (this.isDualMode) {
+      console.log('🚀 [TURSO] Sistema Dual Database ATIVO - Turso (primário) + SQLite (fallback)');
+      console.log('🌐 [TURSO] Todos os dados serão persistidos no Turso cloud');
+      initializeTursoDatabase().then(ok => {
+        if (ok) console.log('✅ [TURSO] Tabelas inicializadas no Turso!');
+        else console.error('❌ [TURSO] Falha ao inicializar tabelas');
+      }).catch(err => console.error('❌ [TURSO] Erro na inicialização:', err.message));
     } else {
-      console.log('📀 Sistema Single Database - Usando apenas SQLite');
+      console.warn('⚠️ [TURSO] Não disponível - usando apenas SQLite local');
+      console.warn('   Configure TURSO_DATABASE_URL e TURSO_AUTH_TOKEN para ativar');
     }
   }
 
-  /**
-   * Executa operação em ambos os bancos simultaneamente
-   * Se um falhar, continua com o outro e registra o erro
-   * Se PostgreSQL não disponível, usa apenas SQLite
-   */
-  private async dualWrite<T>(
-    sqliteOp: () => Promise<T>,
-    postgresOp: () => Promise<T>,
-    operationName: string
-  ): Promise<T> {
-    // Se não está em modo dual, usar apenas SQLite
-    if (!this.isDualMode || !this.postgres) {
-      return await sqliteOp();
-    }
-
-    const results = await Promise.allSettled([
-      sqliteOp().catch(err => {
-        console.error(`❌ [DUAL-DB] SQLite falhou em ${operationName}:`, err.message);
-        throw err;
-      }),
-      postgresOp().catch(err => {
-        console.error(`❌ [DUAL-DB] PostgreSQL falhou em ${operationName}:`, err.message);
-        throw err;
-      })
-    ]);
-
-    const sqliteResult = results[0];
-    const postgresResult = results[1];
-
-    // Se ambos falharam, lançar erro
-    if (sqliteResult.status === 'rejected' && postgresResult.status === 'rejected') {
-      console.error(`🔥 [DUAL-DB] AMBOS BANCOS FALHARAM em ${operationName}`);
-      throw new Error(`Falha crítica: ambos os bancos falharam em ${operationName}`);
-    }
-
-    // Se PostgreSQL (primário) falhou, usar SQLite
-    if (postgresResult.status === 'rejected') {
-      console.warn(`⚠️ [DUAL-DB] PostgreSQL falhou, usando SQLite para ${operationName}`);
-      return sqliteResult.value;
-    }
-
-    // Se SQLite falhou, usar PostgreSQL
-    if (sqliteResult.status === 'rejected') {
-      console.warn(`⚠️ [DUAL-DB] SQLite falhou, usando PostgreSQL para ${operationName}`);
-      return postgresResult.value;
-    }
-
-    // Ambos sucederam - retornar do primário (PostgreSQL)
-    console.log(`✅ [DUAL-DB] Sincronização bem-sucedida: ${operationName}`);
-    return postgresResult.value;
-  }
-
-  /**
-   * Leitura com fallback automático
-   * Tenta ler do banco primário, se falhar usa o secundário
-   * Se PostgreSQL não disponível, usa apenas SQLite
-   */
-  private async dualRead<T>(
-    sqliteOp: () => Promise<T>,
-    postgresOp: () => Promise<T>,
-    operationName: string
-  ): Promise<T> {
-    // Se não está em modo dual, usar apenas SQLite
-    if (!this.isDualMode || !this.postgres) {
-      return await sqliteOp();
-    }
-
+  private async primaryWrite<T>(tursoOp: () => Promise<T>, sqliteOp: () => Promise<T>, op: string): Promise<T> {
+    if (!this.isDualMode || !this.turso) return await sqliteOp();
     try {
-      // Tentar do banco primário (PostgreSQL)
-      const result = await postgresOp();
+      const result = await tursoOp();
+      sqliteOp().catch(err => console.warn(`⚠️ [DUAL] SQLite sync falhou em ${op}:`, err.message));
       return result;
-    } catch (pgError) {
-      console.warn(`⚠️ [DUAL-DB] PostgreSQL falhou na leitura, usando SQLite para ${operationName}`);
-      try {
-        return await sqliteOp();
-      } catch (sqliteError) {
-        console.error(`🔥 [DUAL-DB] AMBOS BANCOS FALHARAM na leitura de ${operationName}`);
-        throw new Error(`Falha crítica: nenhum banco disponível para ${operationName}`);
-      }
+    } catch (err: any) {
+      console.error(`❌ [TURSO] Falha em ${op}:`, err.message, '- fallback SQLite');
+      return await sqliteOp();
     }
   }
 
-  // USER OPERATIONS
-  async getUser(id: string): Promise<User | undefined> {
-    return this.dualRead(
-      () => this.sqlite.getUser(id),
-      () => this.postgres!.getUser(id),
-      `getUser(${id})`
-    );
-  }
-
-  async getUserByEmail(email: string): Promise<User | undefined> {
-    return this.dualRead(
-      () => this.sqlite.getUserByEmail(email),
-      () => this.postgres!.getUserByEmail(email),
-      `getUserByEmail(${email})`
-    );
-  }
-
-  async getUserByCpf(cpf: string): Promise<User | undefined> {
-    return this.dualRead(
-      () => this.sqlite.getUserByCpf(cpf),
-      () => this.postgres!.getUserByCpf(cpf),
-      `getUserByCpf(${cpf})`
-    );
-  }
-
-  async getAllUsers(): Promise<User[]> {
-    return this.dualRead(
-      () => this.sqlite.getAllUsers(),
-      () => this.postgres!.getAllUsers(),
-      'getAllUsers'
-    );
-  }
-
-  async createUser(userData: InsertUser): Promise<User> {
-    return this.dualWrite(
-      () => this.sqlite.createUser(userData),
-      () => this.postgres!.createUser(userData),
-      'createUser'
-    );
-  }
-
-  async updateUser(id: string, data: UpdateUser): Promise<User> {
-    return this.dualWrite(
-      () => this.sqlite.updateUser(id, data),
-      () => this.postgres!.updateUser(id, data),
-      `updateUser(${id})`
-    );
-  }
-
-  async updateVerificationCode(userId: string, code: string, expiresAt: Date): Promise<void> {
-    await this.dualWrite(
-      () => this.sqlite.updateVerificationCode(userId, code, expiresAt),
-      () => this.postgres!.updateVerificationCode(userId, code, expiresAt),
-      `updateVerificationCode(${userId})`
-    );
-  }
-
-  async verifyPhone(userId: string): Promise<User> {
-    return this.dualWrite(
-      () => this.sqlite.verifyPhone(userId),
-      () => this.postgres!.verifyPhone(userId),
-      `verifyPhone(${userId})`
-    );
-  }
-
-  async approveAccount(userId: string, approvedBy: string): Promise<User> {
-    return this.dualWrite(
-      () => this.sqlite.approveAccount(userId, approvedBy),
-      () => this.postgres!.approveAccount(userId, approvedBy),
-      `approveAccount(${userId})`
-    );
-  }
-
-  async createMovimento(movimento: InsertMovimento): Promise<Movimento> {
-    return this.dualWrite(
-      () => this.sqlite.createMovimento(movimento),
-      () => this.postgres!.createMovimento(movimento),
-      'createMovimento'
-    );
-  }
-
-  async getUserMovimentos(userId: string, limit?: number): Promise<Movimento[]> {
-    return this.dualRead(
-      () => this.sqlite.getUserMovimentos(userId, limit),
-      () => this.postgres!.getUserMovimentos(userId, limit),
-      `getUserMovimentos(${userId})`
-    );
-  }
-
-  async calcularRendimento(saldo: number): Promise<number> {
-    return this.sqlite.calcularRendimento(saldo);
-  }
-
-  async createDocumento(documento: InsertDocumento): Promise<Documento> {
-    return this.dualWrite(
-      () => this.sqlite.createDocumento(documento),
-      () => this.postgres!.createDocumento(documento),
-      'createDocumento'
-    );
-  }
-
-  async getUserDocumentos(userId: string): Promise<Documento[]> {
-    return this.dualRead(
-      () => this.sqlite.getUserDocumentos(userId),
-      () => this.postgres!.getUserDocumentos(userId),
-      `getUserDocumentos(${userId})`
-    );
-  }
-
-  async updateDocumentoStatus(id: string, status: string, motivoRejeicao?: string): Promise<Documento> {
-    return this.dualWrite(
-      () => this.sqlite.updateDocumentoStatus(id, status, motivoRejeicao),
-      () => this.postgres!.updateDocumentoStatus(id, status, motivoRejeicao),
-      `updateDocumentoStatus(${id})`
-    );
-  }
-
-  async createDerivToken(token: InsertDerivToken): Promise<DerivToken> {
-    return this.dualWrite(
-      () => this.sqlite.createDerivToken(token),
-      () => this.postgres!.createDerivToken(token),
-      'createDerivToken'
-    );
-  }
-
-  async getUserDerivToken(userId: string): Promise<DerivToken | undefined> {
-    return this.dualRead(
-      () => this.sqlite.getUserDerivToken(userId),
-      () => this.postgres!.getUserDerivToken(userId),
-      `getUserDerivToken(${userId})`
-    );
-  }
-
-  async updateDerivToken(userId: string, token: string, accountType: string): Promise<DerivToken> {
-    return this.dualWrite(
-      () => this.sqlite.updateDerivToken(userId, token, accountType),
-      () => this.postgres!.updateDerivToken(userId, token, accountType),
-      `updateDerivToken(${userId})`
-    );
-  }
-
-  async deactivateDerivToken(userId: string): Promise<void> {
-    await this.dualWrite(
-      () => this.sqlite.deactivateDerivToken(userId),
-      () => this.postgres!.deactivateDerivToken(userId),
-      `deactivateDerivToken(${userId})`
-    );
-  }
-
-  async createTradeConfig(config: InsertTradeConfiguration): Promise<TradeConfiguration> {
-    return this.dualWrite(
-      () => this.sqlite.createTradeConfig(config),
-      () => this.postgres!.createTradeConfig(config),
-      'createTradeConfig'
-    );
-  }
-
-  async getUserTradeConfig(userId: string): Promise<TradeConfiguration | undefined> {
-    return this.dualRead(
-      () => this.sqlite.getUserTradeConfig(userId),
-      () => this.postgres!.getUserTradeConfig(userId),
-      `getUserTradeConfig(${userId})`
-    );
-  }
-
-  async getAllTradeConfigurations(): Promise<TradeConfiguration[]> {
-    return this.dualRead(
-      () => this.sqlite.getAllTradeConfigurations(),
-      () => this.postgres!.getAllTradeConfigurations(),
-      'getAllTradeConfigurations'
-    );
-  }
-
-  async updateTradeConfig(userId: string, mode: string): Promise<TradeConfiguration> {
-    return this.dualWrite(
-      () => this.sqlite.updateTradeConfig(userId, mode),
-      () => this.postgres!.updateTradeConfig(userId, mode),
-      `updateTradeConfig(${userId})`
-    );
-  }
-
-  async deactivateAllTradeConfigs(userId: string): Promise<void> {
-    await this.dualWrite(
-      () => this.sqlite.deactivateAllTradeConfigs(userId),
-      () => this.postgres!.deactivateAllTradeConfigs(userId),
-      `deactivateAllTradeConfigs(${userId})`
-    );
-  }
-
-  async reactivateTradeConfiguration(id: string): Promise<void> {
-    await this.dualWrite(
-      () => this.sqlite.reactivateTradeConfiguration(id),
-      () => this.postgres!.reactivateTradeConfiguration(id),
-      `reactivateTradeConfiguration(${id})`
-    );
-  }
-
-  async deactivateTradeConfiguration(id: string): Promise<void> {
-    await this.dualWrite(
-      () => this.sqlite.deactivateTradeConfiguration(id),
-      () => this.postgres!.deactivateTradeConfiguration(id),
-      `deactivateTradeConfiguration(${id})`
-    );
-  }
-
-  async createTradeOperation(operation: InsertTradeOperation): Promise<TradeOperation> {
-    return this.dualWrite(
-      () => this.sqlite.createTradeOperation(operation),
-      () => this.postgres!.createTradeOperation(operation),
-      'createTradeOperation'
-    );
-  }
-
-  async getUserTradeOperations(userId: string, limit?: number): Promise<TradeOperation[]> {
-    return this.dualRead(
-      () => this.sqlite.getUserTradeOperations(userId, limit),
-      () => this.postgres!.getUserTradeOperations(userId, limit),
-      `getUserTradeOperations(${userId})`
-    );
-  }
-
-  async updateTradeOperation(id: string, updates: Partial<TradeOperation>): Promise<TradeOperation> {
-    return this.dualWrite(
-      () => this.sqlite.updateTradeOperation(id, updates),
-      () => this.postgres!.updateTradeOperation(id, updates),
-      `updateTradeOperation(${id})`
-    );
-  }
-
-  async getActiveTradeOperations(userId: string): Promise<TradeOperation[]> {
-    return this.dualRead(
-      () => this.sqlite.getActiveTradeOperations(userId),
-      () => this.postgres!.getActiveTradeOperations(userId),
-      `getActiveTradeOperations(${userId})`
-    );
-  }
-
-  async createAiLog(log: InsertAiLog): Promise<AiLog> {
-    return this.dualWrite(
-      () => this.sqlite.createAiLog(log),
-      () => this.postgres!.createAiLog(log),
-      'createAiLog'
-    );
-  }
-
-  async getUserAiLogs(userId: string, limit?: number): Promise<AiLog[]> {
-    return this.dualRead(
-      () => this.sqlite.getUserAiLogs(userId, limit),
-      () => this.postgres!.getUserAiLogs(userId, limit),
-      `getUserAiLogs(${userId})`
-    );
-  }
-
-  async getLatestAiAnalysis(userId: string): Promise<AiLog[]> {
-    return this.dualRead(
-      () => this.sqlite.getLatestAiAnalysis(userId),
-      () => this.postgres!.getLatestAiAnalysis(userId),
-      `getLatestAiAnalysis(${userId})`
-    );
-  }
-
-  async upsertMarketData(data: InsertMarketData): Promise<MarketData> {
-    return this.dualWrite(
-      () => this.sqlite.upsertMarketData(data),
-      () => this.postgres!.upsertMarketData(data),
-      'upsertMarketData'
-    );
-  }
-
-  async getMarketData(symbol: string): Promise<MarketData | undefined> {
-    return this.dualRead(
-      () => this.sqlite.getMarketData(symbol),
-      () => this.postgres!.getMarketData(symbol),
-      `getMarketData(${symbol})`
-    );
-  }
-
-  async getAllMarketData(): Promise<MarketData[]> {
-    return this.dualRead(
-      () => this.sqlite.getAllMarketData(),
-      () => this.postgres!.getAllMarketData(),
-      'getAllMarketData'
-    );
-  }
-
-  async getTradingStats(userId: string): Promise<{ totalTrades: number; wonTrades: number; lostTrades: number; totalProfit: number; winRate: number }> {
-    return this.dualRead(
-      () => this.sqlite.getTradingStats(userId),
-      () => this.postgres!.getTradingStats(userId),
-      `getTradingStats(${userId})`
-    );
-  }
-
-  async getActiveTradesCount(userId: string): Promise<number> {
-    return this.dualRead(
-      () => this.sqlite.getActiveTradesCount(userId),
-      () => this.postgres!.getActiveTradesCount(userId),
-      `getActiveTradesCount(${userId})`
-    );
-  }
-
-  async getDailyLossCount(userId: string, date: string): Promise<number> {
-    return this.dualRead(
-      () => this.sqlite.getDailyLossCount(userId, date),
-      () => this.postgres!.getDailyLossCount(userId, date),
-      `getDailyLossCount(${userId})`
-    );
-  }
-
-  async saveActiveTradeForTracking(tradeData: any): Promise<void> {
-    await this.dualWrite(
-      () => this.sqlite.saveActiveTradeForTracking(tradeData),
-      () => this.postgres!.saveActiveTradeForTracking(tradeData),
-      'saveActiveTradeForTracking'
-    );
-  }
-
-  async createOrUpdateDailyPnL(userId: string, dailyData: Partial<any>): Promise<any> {
-    return this.dualWrite(
-      () => this.sqlite.createOrUpdateDailyPnL(userId, dailyData),
-      () => this.postgres!.createOrUpdateDailyPnL(userId, dailyData),
-      'createOrUpdateDailyPnL'
-    );
-  }
-
-  async getAllTradeConfigurations(): Promise<any[]> {
-    return this.dualRead(
-      () => this.sqlite.getAllTradeConfigurations(),
-      () => this.postgres!.getAllTradeConfigurations(),
-      'getAllTradeConfigurations'
-    );
-  }
-
-  async reactivateTradeConfiguration(id: string): Promise<void> {
-    await this.dualWrite(
-      () => this.sqlite.reactivateTradeConfiguration(id),
-      () => this.postgres!.reactivateTradeConfiguration(id),
-      'reactivateTradeConfiguration'
-    );
-  }
-
-  async deactivateTradeConfiguration(id: string): Promise<void> {
-    await this.dualWrite(
-      () => this.sqlite.deactivateTradeConfiguration(id),
-      () => this.postgres!.deactivateTradeConfiguration(id),
-      'deactivateTradeConfiguration'
-    );
-  }
-
-  /**
-   * Sistema de reconciliação - sincroniza dados entre os bancos
-   * Pode ser chamado periodicamente ou após detectar inconsistências
-   */
-  async reconcileData(): Promise<void> {
-    if (!this.isDualMode || !this.postgres) {
-      console.log('ℹ️ [DUAL-DB] Modo single database - reconciliação não necessária');
-      return;
-    }
-
-    console.log('🔄 [DUAL-DB] Iniciando reconciliação de dados...');
-    
+  private async primaryRead<T>(tursoOp: () => Promise<T>, sqliteOp: () => Promise<T>, op: string): Promise<T> {
+    if (!this.isDualMode || !this.turso) return await sqliteOp();
     try {
-      // Reconciliar usuários
-      const pgUsers = await this.postgres.getAllUsers();
-      const sqliteUsers = await this.sqlite.getAllUsers();
-      
-      console.log(`📊 [DUAL-DB] PostgreSQL: ${pgUsers.length} usuários, SQLite: ${sqliteUsers.length} usuários`);
-      
-      // Se PostgreSQL tem mais dados, sincronizar para SQLite
-      if (pgUsers.length > sqliteUsers.length) {
-        console.log('⬇️ [DUAL-DB] Sincronizando do PostgreSQL para SQLite...');
-        // Implementar sincronização se necessário
-      }
-      
-      console.log('✅ [DUAL-DB] Reconciliação concluída');
-    } catch (error) {
-      console.error('❌ [DUAL-DB] Erro na reconciliação:', error);
+      return await tursoOp();
+    } catch (err: any) {
+      console.warn(`⚠️ [TURSO] Leitura falhou em ${op}, fallback SQLite:`, err.message);
+      return await sqliteOp();
     }
   }
+
+  async getUser(id: string) { return this.primaryRead(() => this.turso!.getUser(id), () => this.sqlite.getUser(id), 'getUser'); }
+  async getUserByEmail(email: string) { return this.primaryRead(() => this.turso!.getUserByEmail(email), () => this.sqlite.getUserByEmail(email), 'getUserByEmail'); }
+  async getUserByCpf(cpf: string) { return this.primaryRead(() => this.turso!.getUserByCpf(cpf), () => this.sqlite.getUserByCpf(cpf), 'getUserByCpf'); }
+  async getAllUsers() { return this.primaryRead(() => this.turso!.getAllUsers(), () => this.sqlite.getAllUsers(), 'getAllUsers'); }
+  async createUser(user: InsertUser) { return this.primaryWrite(() => this.turso!.createUser(user), () => this.sqlite.createUser(user), 'createUser'); }
+  async updateUser(id: string, data: UpdateUser) { return this.primaryWrite(() => this.turso!.updateUser(id, data), () => this.sqlite.updateUser(id, data), 'updateUser'); }
+  async updateVerificationCode(userId: string, code: string, expiresAt: Date) { return this.primaryWrite(() => this.turso!.updateVerificationCode(userId, code, expiresAt), () => this.sqlite.updateVerificationCode(userId, code, expiresAt), 'updateVerificationCode'); }
+  async verifyPhone(userId: string) { return this.primaryWrite(() => this.turso!.verifyPhone(userId), () => this.sqlite.verifyPhone(userId), 'verifyPhone'); }
+  async approveAccount(userId: string, approvedBy: string) { return this.primaryWrite(() => this.turso!.approveAccount(userId, approvedBy), () => this.sqlite.approveAccount(userId, approvedBy), 'approveAccount'); }
+
+  async createMovimento(m: InsertMovimento) { return this.primaryWrite(() => this.turso!.createMovimento(m), () => this.sqlite.createMovimento(m), 'createMovimento'); }
+  async getUserMovimentos(userId: string, limit?: number) { return this.primaryRead(() => this.turso!.getUserMovimentos(userId, limit), () => this.sqlite.getUserMovimentos(userId, limit), 'getUserMovimentos'); }
+  async calcularRendimento(saldo: number) { return this.sqlite.calcularRendimento(saldo); }
+
+  async createDocumento(d: InsertDocumento) { return this.primaryWrite(() => this.turso!.createDocumento(d), () => this.sqlite.createDocumento(d), 'createDocumento'); }
+  async getUserDocumentos(userId: string) { return this.primaryRead(() => this.turso!.getUserDocumentos(userId), () => this.sqlite.getUserDocumentos(userId), 'getUserDocumentos'); }
+  async updateDocumentoStatus(id: string, status: string, motivo?: string) { return this.primaryWrite(() => this.turso!.updateDocumentoStatus(id, status, motivo), () => this.sqlite.updateDocumentoStatus(id, status, motivo), 'updateDocumentoStatus'); }
+
+  async createDerivToken(t: InsertDerivToken) { return this.primaryWrite(() => this.turso!.createDerivToken(t), () => this.sqlite.createDerivToken(t), 'createDerivToken'); }
+  async getUserDerivToken(userId: string) { return this.primaryRead(() => this.turso!.getUserDerivToken(userId), () => this.sqlite.getUserDerivToken(userId), 'getUserDerivToken'); }
+  async updateDerivToken(userId: string, token: string, accountType: string) { return this.primaryWrite(() => this.turso!.updateDerivToken(userId, token, accountType), () => this.sqlite.updateDerivToken(userId, token, accountType), 'updateDerivToken'); }
+  async deactivateDerivToken(userId: string) { return this.primaryWrite(() => this.turso!.deactivateDerivToken(userId), () => this.sqlite.deactivateDerivToken(userId), 'deactivateDerivToken'); }
+
+  async createTradeConfig(c: InsertTradeConfiguration) { return this.primaryWrite(() => this.turso!.createTradeConfig(c), () => this.sqlite.createTradeConfig(c), 'createTradeConfig'); }
+  async getUserTradeConfig(userId: string) { return this.primaryRead(() => this.turso!.getUserTradeConfig(userId), () => this.sqlite.getUserTradeConfig(userId), 'getUserTradeConfig'); }
+  async getAllTradeConfigurations() { return this.primaryRead(() => this.turso!.getAllTradeConfigurations(), () => this.sqlite.getAllTradeConfigurations(), 'getAllTradeConfigurations'); }
+  async updateTradeConfig(userId: string, mode: string) { return this.primaryWrite(() => this.turso!.updateTradeConfig(userId, mode), () => this.sqlite.updateTradeConfig(userId, mode), 'updateTradeConfig'); }
+  async deactivateAllTradeConfigs(userId: string) { return this.primaryWrite(() => this.turso!.deactivateAllTradeConfigs(userId), () => this.sqlite.deactivateAllTradeConfigs(userId), 'deactivateAllTradeConfigs'); }
+  async reactivateTradeConfiguration(id: string) { return this.primaryWrite(() => this.turso!.reactivateTradeConfiguration(id), () => this.sqlite.reactivateTradeConfiguration(id), 'reactivateTradeConfiguration'); }
+  async deactivateTradeConfiguration(id: string) { return this.primaryWrite(() => this.turso!.deactivateTradeConfiguration(id), () => this.sqlite.deactivateTradeConfiguration(id), 'deactivateTradeConfiguration'); }
+
+  async createTradeOperation(op: InsertTradeOperation) { return this.primaryWrite(() => this.turso!.createTradeOperation(op), () => this.sqlite.createTradeOperation(op), 'createTradeOperation'); }
+  async getUserTradeOperations(userId: string, limit?: number) { return this.primaryRead(() => this.turso!.getUserTradeOperations(userId, limit), () => this.sqlite.getUserTradeOperations(userId, limit), 'getUserTradeOperations'); }
+  async updateTradeOperation(id: string, updates: Partial<TradeOperation>) { return this.primaryWrite(() => this.turso!.updateTradeOperation(id, updates), () => this.sqlite.updateTradeOperation(id, updates), 'updateTradeOperation'); }
+  async getActiveTradeOperations(userId: string) { return this.primaryRead(() => this.turso!.getActiveTradeOperations(userId), () => this.sqlite.getActiveTradeOperations(userId), 'getActiveTradeOperations'); }
+
+  async createAiLog(log: InsertAiLog) { return this.primaryWrite(() => this.turso!.createAiLog(log), () => this.sqlite.createAiLog(log), 'createAiLog'); }
+  async getUserAiLogs(userId: string, limit?: number) { return this.primaryRead(() => this.turso!.getUserAiLogs(userId, limit), () => this.sqlite.getUserAiLogs(userId, limit), 'getUserAiLogs'); }
+  async getLatestAiAnalysis(userId: string) { return this.primaryRead(() => this.turso!.getLatestAiAnalysis(userId), () => this.sqlite.getLatestAiAnalysis(userId), 'getLatestAiAnalysis'); }
+
+  async upsertMarketData(data: InsertMarketData) { return this.primaryWrite(() => this.turso!.upsertMarketData(data), () => this.sqlite.upsertMarketData(data), 'upsertMarketData'); }
+  async getMarketData(symbol: string) { return this.primaryRead(() => this.turso!.getMarketData(symbol), () => this.sqlite.getMarketData(symbol), 'getMarketData'); }
+  async getAllMarketData() { return this.primaryRead(() => this.turso!.getAllMarketData(), () => this.sqlite.getAllMarketData(), 'getAllMarketData'); }
+
+  async getTradingStats(userId: string) { return this.primaryRead(() => this.turso!.getTradingStats(userId), () => this.sqlite.getTradingStats(userId), 'getTradingStats'); }
+  async getActiveTradesCount(userId: string) { return this.primaryRead(() => this.turso!.getActiveTradesCount(userId), () => this.sqlite.getActiveTradesCount(userId), 'getActiveTradesCount'); }
+  async getDailyLossCount(userId: string, date: string) { return this.primaryRead(() => this.turso!.getDailyLossCount(userId, date), () => this.sqlite.getDailyLossCount(userId, date), 'getDailyLossCount'); }
+  async saveActiveTradeForTracking(tradeData: any) { return this.primaryWrite(() => this.turso!.saveActiveTradeForTracking(tradeData), () => this.sqlite.saveActiveTradeForTracking(tradeData), 'saveActiveTradeForTracking'); }
+
+  async createOrUpdateDailyPnL(userId: string, data: Partial<InsertDailyPnL>) { return this.primaryWrite(() => this.turso!.createOrUpdateDailyPnL(userId, data), () => this.sqlite.createOrUpdateDailyPnL(userId, data), 'createOrUpdateDailyPnL'); }
+  async getDailyPnL(userId: string, date?: string) { return this.primaryRead(() => this.turso!.getDailyPnL(userId, date), () => this.sqlite.getDailyPnL(userId, date), 'getDailyPnL'); }
+  async getConservativeOperationsToday(userId: string) { return this.primaryRead(() => this.turso!.getConservativeOperationsToday(userId), () => this.sqlite.getConservativeOperationsToday(userId), 'getConservativeOperationsToday'); }
+  async incrementConservativeOperations(userId: string) { return this.primaryWrite(() => this.turso!.incrementConservativeOperations(userId), () => this.sqlite.incrementConservativeOperations(userId), 'incrementConservativeOperations'); }
+  async getRecentDailyPnL(userId: string, days?: number) { return this.primaryRead(() => this.turso!.getRecentDailyPnL(userId, days), () => this.sqlite.getRecentDailyPnL(userId, days), 'getRecentDailyPnL'); }
+
+  async createAiRecoveryStrategy(s: InsertAiRecoveryStrategy) { return this.primaryWrite(() => this.turso!.createAiRecoveryStrategy(s), () => this.sqlite.createAiRecoveryStrategy(s), 'createAiRecoveryStrategy'); }
+  async getUserRecoveryStrategies(userId: string) { return this.primaryRead(() => this.turso!.getUserRecoveryStrategies(userId), () => this.sqlite.getUserRecoveryStrategies(userId), 'getUserRecoveryStrategies'); }
+  async updateRecoveryStrategy(id: string, updates: Partial<AiRecoveryStrategy>) { return this.primaryWrite(() => this.turso!.updateRecoveryStrategy(id, updates), () => this.sqlite.updateRecoveryStrategy(id, updates), 'updateRecoveryStrategy'); }
+  async calculateRecoveryMultiplier(userId: string) { return this.primaryRead(() => this.turso!.calculateRecoveryMultiplier(userId), () => this.sqlite.calculateRecoveryMultiplier(userId), 'calculateRecoveryMultiplier'); }
+  async shouldActivateRecovery(userId: string) { return this.primaryRead(() => this.turso!.shouldActivateRecovery(userId), () => this.sqlite.shouldActivateRecovery(userId), 'shouldActivateRecovery'); }
+  async getRecoveryThresholdRecommendation(userId: string) { return this.primaryRead(() => this.turso!.getRecoveryThresholdRecommendation(userId), () => this.sqlite.getRecoveryThresholdRecommendation(userId), 'getRecoveryThresholdRecommendation'); }
+  async canExecuteTradeWithoutViolatingMinimum(userId: string, potentialLoss: number) { return this.primaryRead(() => this.turso!.canExecuteTradeWithoutViolatingMinimum(userId, potentialLoss), () => this.sqlite.canExecuteTradeWithoutViolatingMinimum(userId, potentialLoss), 'canExecuteTradeWithoutViolatingMinimum'); }
+  async getMinimumBalanceRequired(userId: string) { return this.primaryRead(() => this.turso!.getMinimumBalanceRequired(userId), () => this.sqlite.getMinimumBalanceRequired(userId), 'getMinimumBalanceRequired'); }
+  async getBalanceAnalysis(userId: string) { return this.primaryRead(() => this.turso!.getBalanceAnalysis(userId), () => this.sqlite.getBalanceAnalysis(userId), 'getBalanceAnalysis'); }
+
+  async upsertActiveTradingSession(session: InsertActiveTradingSession) { return this.primaryWrite(() => this.turso!.upsertActiveTradingSession(session), () => this.sqlite.upsertActiveTradingSession(session), 'upsertActiveTradingSession'); }
+  async getActiveTradingSession(sessionKey: string) { return this.primaryRead(() => this.turso!.getActiveTradingSession(sessionKey), () => this.sqlite.getActiveTradingSession(sessionKey), 'getActiveTradingSession'); }
+  async getAllActiveTradingSessions() { return this.primaryRead(() => this.turso!.getAllActiveTradingSessions(), () => this.sqlite.getAllActiveTradingSessions(), 'getAllActiveTradingSessions'); }
+  async updateActiveTradingSession(sessionKey: string, updates: Partial<ActiveTradingSession>) { return this.primaryWrite(() => this.turso!.updateActiveTradingSession(sessionKey, updates), () => this.sqlite.updateActiveTradingSession(sessionKey, updates), 'updateActiveTradingSession'); }
+  async deactivateActiveTradingSession(sessionKey: string) { return this.primaryWrite(() => this.turso!.deactivateActiveTradingSession(sessionKey), () => this.sqlite.deactivateActiveTradingSession(sessionKey), 'deactivateActiveTradingSession'); }
+  async clearInactiveTradingSessions() { return this.primaryWrite(() => this.turso!.clearInactiveTradingSessions(), () => this.sqlite.clearInactiveTradingSessions(), 'clearInactiveTradingSessions'); }
+
+  async saveWebSocketSubscription(sub: InsertActiveWebSocketSubscription) { return this.primaryWrite(() => this.turso!.saveWebSocketSubscription(sub), () => this.sqlite.saveWebSocketSubscription(sub), 'saveWebSocketSubscription'); }
+  async getActiveWebSocketSubscriptions() { return this.primaryRead(() => this.turso!.getActiveWebSocketSubscriptions(), () => this.sqlite.getActiveWebSocketSubscriptions(), 'getActiveWebSocketSubscriptions'); }
+  async deactivateWebSocketSubscription(subscriptionId: string) { return this.primaryWrite(() => this.turso!.deactivateWebSocketSubscription(subscriptionId), () => this.sqlite.deactivateWebSocketSubscription(subscriptionId), 'deactivateWebSocketSubscription'); }
+  async clearAllWebSocketSubscriptions() { return this.primaryWrite(() => this.turso!.clearAllWebSocketSubscriptions(), () => this.sqlite.clearAllWebSocketSubscriptions(), 'clearAllWebSocketSubscriptions'); }
+
+  async updateSystemHeartbeat(componentName: string, status: string, metadata?: any, lastError?: string) { return this.primaryWrite(() => this.turso!.updateSystemHeartbeat(componentName, status, metadata, lastError), () => this.sqlite.updateSystemHeartbeat(componentName, status, metadata, lastError), 'updateSystemHeartbeat'); }
+  async getSystemHeartbeat(componentName: string) { return this.primaryRead(() => this.turso!.getSystemHeartbeat(componentName), () => this.sqlite.getSystemHeartbeat(componentName), 'getSystemHeartbeat'); }
+  async getAllSystemHeartbeats() { return this.primaryRead(() => this.turso!.getAllSystemHeartbeats(), () => this.sqlite.getAllSystemHeartbeats(), 'getAllSystemHeartbeats'); }
+  async incrementHeartbeatError(componentName: string, error: string) { return this.primaryWrite(() => this.turso!.incrementHeartbeatError(componentName, error), () => this.sqlite.incrementHeartbeatError(componentName, error), 'incrementHeartbeatError'); }
+  async resetHeartbeatErrors(componentName: string) { return this.primaryWrite(() => this.turso!.resetHeartbeatErrors(componentName), () => this.sqlite.resetHeartbeatErrors(componentName), 'resetHeartbeatErrors'); }
+
+  async getTradingControlStatus() { return this.primaryRead(() => this.turso!.getTradingControlStatus(), () => this.sqlite.getTradingControlStatus(), 'getTradingControlStatus'); }
+  async pauseTrading(pausedBy: string, reason: string) { return this.primaryWrite(() => this.turso!.pauseTrading(pausedBy, reason), () => this.sqlite.pauseTrading(pausedBy, reason), 'pauseTrading'); }
+  async resumeTrading() { return this.primaryWrite(() => this.turso!.resumeTrading(), () => this.sqlite.resumeTrading(), 'resumeTrading'); }
+
+  async createAssetBlacklist(blacklist: any) { return this.primaryWrite(() => this.turso!.createAssetBlacklist(blacklist), () => this.sqlite.createAssetBlacklist(blacklist), 'createAssetBlacklist'); }
+  async getUserAssetBlacklists(userId: string) { return this.primaryRead(() => this.turso!.getUserAssetBlacklists(userId), () => this.sqlite.getUserAssetBlacklists(userId), 'getUserAssetBlacklists'); }
+  async deleteAssetBlacklist(id: string) { return this.primaryWrite(() => this.turso!.deleteAssetBlacklist(id), () => this.sqlite.deleteAssetBlacklist(id), 'deleteAssetBlacklist'); }
+  async isAssetBlocked(userId: string, assetName: string) { return this.primaryRead(() => this.turso!.isAssetBlocked(userId, assetName), () => this.sqlite.isAssetBlocked(userId, assetName), 'isAssetBlocked'); }
+
+  async getUserPauseConfig(userId: string) { return this.primaryRead(() => this.turso!.getUserPauseConfig(userId), () => this.sqlite.getUserPauseConfig(userId), 'getUserPauseConfig'); }
+  async createPauseConfig(config: any) { return this.primaryWrite(() => this.turso!.createPauseConfig(config), () => this.sqlite.createPauseConfig(config), 'createPauseConfig'); }
+  async updatePauseConfig(userId: string, config: any) { return this.primaryWrite(() => this.turso!.updatePauseConfig(userId, config), () => this.sqlite.updatePauseConfig(userId, config), 'updatePauseConfig'); }
+  async updatePausedNowStatus(userId: string, isPausedNow: boolean) { return this.primaryWrite(() => this.turso!.updatePausedNowStatus(userId, isPausedNow), () => this.sqlite.updatePausedNowStatus(userId, isPausedNow), 'updatePausedNowStatus'); }
 }
 
-// Exportar instância única do DualStorage
 export const dualStorage = new DualStorage();
