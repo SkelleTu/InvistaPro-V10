@@ -350,8 +350,8 @@ export class MicroscopicTechnicalAnalyzer extends EventEmitter {
   }
 
   private calculateFibonacci(prices: number[]): TechnicalIndicators['fibonacci'] {
-    const high = Math.max(...prices);
-    const low = Math.min(...prices);
+    const high = prices.reduce((a, b) => a > b ? a : b, prices[0]);
+    const low = prices.reduce((a, b) => a < b ? a : b, prices[0]);
     const diff = high - low;
 
     const levels = [
@@ -506,7 +506,9 @@ export class MicroscopicTechnicalAnalyzer extends EventEmitter {
 
   private analyzeSupportResistance(prices: number[]): MicroscopicAnalysis['supportResistance'] {
     const currentPrice = prices[prices.length - 1];
-    const sortedPrices = [...prices].sort((a, b) => a - b);
+    // Use only last 100 prices for S/R to avoid sorting 1000 elements every 100ms
+    const recentPrices = prices.length > 100 ? prices.slice(-100) : prices;
+    const sortedPrices = [...recentPrices].sort((a, b) => a - b);
     const priceRange = sortedPrices[sortedPrices.length - 1] - sortedPrices[0];
     
     // Encontrar níveis de suporte e resistência próximos
@@ -522,12 +524,13 @@ export class MicroscopicTechnicalAnalyzer extends EventEmitter {
       }
     }
 
-    // Calcular força dos níveis baseado na frequência
-    const supportCount = prices.filter(p => Math.abs(p - nearestSupport) / priceRange < 0.01).length;
-    const resistanceCount = prices.filter(p => Math.abs(p - nearestResistance) / priceRange < 0.01).length;
+    // Calcular força dos níveis baseado na frequência (usando recentPrices para performance)
+    const safePriceRange = priceRange === 0 ? 1 : priceRange;
+    const supportCount = recentPrices.filter(p => Math.abs(p - nearestSupport) / safePriceRange < 0.01).length;
+    const resistanceCount = recentPrices.filter(p => Math.abs(p - nearestResistance) / safePriceRange < 0.01).length;
 
-    const supportStrength = Math.min(100, (supportCount / prices.length) * 1000);
-    const resistanceStrength = Math.min(100, (resistanceCount / prices.length) * 1000);
+    const supportStrength = Math.min(100, (supportCount / recentPrices.length) * 1000);
+    const resistanceStrength = Math.min(100, (resistanceCount / recentPrices.length) * 1000);
 
     return {
       nearestSupport,

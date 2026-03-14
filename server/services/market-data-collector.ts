@@ -39,7 +39,7 @@ export class MarketDataCollector extends EventEmitter {
   
   // Configurações do "Fluxo Natural de Análises Cooperativas de Inteligência Artificial" - análise microscópica contínua
   private readonly BUFFER_SIZE = 500; // Manter últimos 500 ticks por símbolo
-  private readonly SAVE_INTERVAL_MS = 250; // Salvar a cada 250ms (otimizado)
+  private readonly SAVE_INTERVAL_MS = 5000; // Salvar a cada 5s (evita sobrecarga de BD)
   private readonly MAX_PRICE_HISTORY = 1000; // Histórico máximo por símbolo
   
   constructor() {
@@ -65,11 +65,6 @@ export class MarketDataCollector extends EventEmitter {
    * Configurar análise técnica microscópica em milissegundos
    */
   private setupMicroscopicAnalysis(): void {
-    // Escutar análises microscópicas do singleton
-    microscopicAnalyzer.on('analysis', (analysis) => {
-      console.log(`🔬 [MICROSCOPIC] ${analysis.symbol}: ${analysis.cooperativeSignal.technicalDirection} (${analysis.cooperativeSignal.confidence.toFixed(1)}%)`);
-    });
-    
     console.log('🔬 [FNACIA] Sistema microscópico integrado - análises técnicas em milissegundos via singleton');
   }
 
@@ -145,9 +140,6 @@ export class MarketDataCollector extends EventEmitter {
       console.warn('⚠️ [FNACIA] microscopicAnalyzer não disponível:', microscopicAnalyzer);
     }
 
-    // Log apenas amostral para não sobrecarregar
-    if (buffer.ticks.length % 10 === 0) {
-      console.log(`📊 [FNACIA] Ticks: ${symbol} @ ${tickData.quote} (${buffer.ticks.length})`);    }
   }
 
   /**
@@ -209,7 +201,7 @@ export class MarketDataCollector extends EventEmitter {
         isSimulated: false // Dados reais da Deriv
       });
 
-      console.log(`💾 [FNACIA] Dados salvos: ${symbol} (${buffer.ticks.length} ticks, ${priceHistory.length} histórico)`);
+      // Dados salvos silenciosamente para evitar log flood
 
       // Limpar buffer após salvar
       buffer.ticks = [];

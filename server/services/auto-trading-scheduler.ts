@@ -307,11 +307,7 @@ export class AutoTradingScheduler {
       console.log('✅ [INIT] Coleta de dados iniciada para todos os ativos DIGITDIFF descobertos');
       console.log('📊 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       
-      // Escutar processamento de ticks para análises contínuas
-      marketDataCollector.on('tick_processed', (data) => {
-        console.log(`🎯 [Análise natural continua de IA] Tick: ${data.symbol} @ ${data.tick.quote} (${data.bufferSize} buffer)`);
-        // IAs fazem análise instantânea a cada tick conforme sistema de Análise natural continua de IA
-      });
+      // Ticks processados silenciosamente - análise contínua sem log flood
       
     } catch (error) {
       console.error('❌ Erro ao inicializar coleta de dados:', error);
