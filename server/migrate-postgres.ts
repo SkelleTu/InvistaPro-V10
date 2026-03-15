@@ -138,6 +138,17 @@ async function migratePostgres() {
         updated_at TIMESTAMP DEFAULT NOW()
       );
     `);
+
+    // Migração: adicionar coluna selected_modalities se não existir (PostgreSQL)
+    try {
+      await pgDb.execute(sql`
+        ALTER TABLE trade_configurations ADD COLUMN IF NOT EXISTS selected_modalities TEXT DEFAULT 'digit_differs'
+      `);
+    } catch (e: any) {
+      if (!e.message?.includes('already exists')) {
+        console.error('Aviso ao adicionar selected_modalities no PG:', e.message);
+      }
+    }
     
     await pgDb.execute(sql`
       CREATE TABLE IF NOT EXISTS ai_logs (

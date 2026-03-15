@@ -247,6 +247,7 @@ export class DualStorage implements IStorage {
   }
 
   async updateTradeConfig(userId: string, mode: string) { return this.primaryWrite(() => this.turso!.updateTradeConfig(userId, mode), () => this.sqlite.updateTradeConfig(userId, mode), 'updateTradeConfig'); }
+  async updateSelectedModalities(userId: string, modalities: string[]) { return this.primaryWrite(() => this.turso!.updateSelectedModalities(userId, modalities), () => this.sqlite.updateSelectedModalities(userId, modalities), 'updateSelectedModalities'); }
   async deactivateAllTradeConfigs(userId: string) { return this.primaryWrite(() => this.turso!.deactivateAllTradeConfigs(userId), () => this.sqlite.deactivateAllTradeConfigs(userId), 'deactivateAllTradeConfigs'); }
   async reactivateTradeConfiguration(id: string) { return this.primaryWrite(() => this.turso!.reactivateTradeConfiguration(id), () => this.sqlite.reactivateTradeConfiguration(id), 'reactivateTradeConfiguration'); }
   async deactivateTradeConfiguration(id: string) { return this.primaryWrite(() => this.turso!.deactivateTradeConfiguration(id), () => this.sqlite.deactivateTradeConfiguration(id), 'deactivateTradeConfiguration'); }

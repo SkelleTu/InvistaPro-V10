@@ -550,6 +550,16 @@ export function initializeDatabase() {
       )
     `);
 
+    // Migração: adicionar selected_modalities se não existir
+    try {
+      sqlite.exec(`ALTER TABLE trade_configurations ADD COLUMN selected_modalities TEXT DEFAULT 'digit_differs'`);
+      console.log('✅ Coluna selected_modalities adicionada ao trade_configurations');
+    } catch (e: any) {
+      if (!e.message?.includes('duplicate column')) {
+        // Coluna já existe - ignorar
+      }
+    }
+
     console.log('✅ Banco de dados local inicializado com sucesso!');
     console.log('🛡️ Sistema de resiliência e auto-restart configurado!');
     console.log(`📍 Local do arquivo: ${dbPath}`);

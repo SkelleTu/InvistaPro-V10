@@ -1042,6 +1042,111 @@ export class DerivAPIService extends EventEmitter {
     });
   }
 
+  /**
+   * COMPRA GENÉRICA DE CONTRATO DIGIT
+   * Suporta: DIGITDIFF, DIGITMATCH, DIGITEVEN, DIGITODD, DIGITOVER, DIGITUNDER
+   */
+  async buyGenericDigitContract(params: {
+    contract_type: 'DIGITDIFF' | 'DIGITMATCH' | 'DIGITEVEN' | 'DIGITODD' | 'DIGITOVER' | 'DIGITUNDER';
+    symbol: string;
+    duration: number;
+    amount: number;
+    barrier?: string; // Obrigatório para DIGITDIFF, DIGITMATCH, DIGITOVER, DIGITUNDER
+    currency?: string;
+  }): Promise<DerivContractInfo | null> {
+    if (!this.isConnected) return null;
+
+    const BLOCKED = /\(1s\)/i;
+    if (BLOCKED.test(params.symbol)) {
+      console.error(`❌ Símbolo bloqueado: ${params.symbol}`);
+      return null;
+    }
+
+    const TIMEOUT_MS = 15000;
+    const currency = params.currency || 'USD';
+    const normalizedSymbol = params.symbol;
+    const reqProposalId = this.generateRequestId();
+
+    // DIGITEVEN e DIGITODD não precisam de barrier
+    const needsBarrier = ['DIGITDIFF', 'DIGITMATCH', 'DIGITOVER', 'DIGITUNDER'].includes(params.contract_type);
+
+    const proposalMsg: any = {
+      proposal: 1,
+      contract_type: params.contract_type,
+      symbol: normalizedSymbol,
+      duration: params.duration,
+      duration_unit: 't',
+      currency,
+      amount: params.amount,
+      basis: 'stake',
+      req_id: reqProposalId,
+    };
+
+    if (needsBarrier && params.barrier !== undefined) {
+      proposalMsg.barrier = params.barrier;
+    }
+
+    console.log(`📋 [DIGIT CONTRACT] ${params.contract_type} | ${normalizedSymbol} | ${params.duration}t | $${params.amount}${params.barrier !== undefined ? ' | Barrier:' + params.barrier : ''}`);
+
+    // STEP 1: Criar proposta
+    const proposal = await new Promise<{ id: string; ask_price: number } | null>((resolve) => {
+      const handler = (message: any) => {
+        if (message.req_id === reqProposalId) {
+          this.removeListener('message', handler);
+          clearTimeout(timer);
+          if (message.proposal) {
+            resolve({ id: message.proposal.id, ask_price: message.proposal.ask_price });
+          } else {
+            console.error(`❌ Proposta ${params.contract_type} falhou:`, message.error);
+            resolve(null);
+          }
+        }
+      };
+      const timer = setTimeout(() => {
+        this.removeListener('message', handler);
+        console.error(`⏱️ Timeout proposta ${params.contract_type}`);
+        resolve(null);
+      }, TIMEOUT_MS);
+      this.on('message', handler);
+      this.sendMessage(proposalMsg);
+    });
+
+    if (!proposal) return null;
+
+    // STEP 2: Comprar contrato
+    const reqBuyId = this.generateRequestId();
+    const contract = await new Promise<DerivContractInfo | null>((resolve) => {
+      const handler = (message: any) => {
+        if (message.req_id === reqBuyId) {
+          this.removeListener('message', handler);
+          clearTimeout(timer);
+          if (message.buy) {
+            console.log(`✅ Contrato ${params.contract_type} comprado: ${message.buy.contract_id}`);
+            resolve({
+              contract_id: message.buy.contract_id,
+              shortcode: message.buy.shortcode,
+              status: 'active',
+              entry_tick: 0,
+              buy_price: message.buy.buy_price,
+            });
+          } else {
+            console.error(`❌ Compra ${params.contract_type} falhou:`, message.error);
+            resolve(null);
+          }
+        }
+      };
+      const timer = setTimeout(() => {
+        this.removeListener('message', handler);
+        console.error(`⏱️ Timeout compra ${params.contract_type}`);
+        resolve(null);
+      }, TIMEOUT_MS);
+      this.on('message', handler);
+      this.sendMessage({ buy: proposal.id, price: proposal.ask_price, req_id: reqBuyId });
+    });
+
+    return contract;
+  }
+
   async getProfitTable(limit: number = 100): Promise<any[]> {
     if (!this.isConnected) return [];
 

@@ -245,6 +245,7 @@ export const tradeConfigurations = sqliteTable("trade_configurations", {
   operationsCount: integer("operations_count").notNull(),
   intervalType: text("interval_type").notNull(), // 'minutes', 'hours', 'days'  
   intervalValue: integer("interval_value").notNull(),
+  selectedModalities: text("selected_modalities").default('digit_differs'), // JSON array or comma-separated
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`),
 });

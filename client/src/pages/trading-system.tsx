@@ -403,6 +403,7 @@ export default function TradingSystemPage() {
     } catch {}
     return { digit_differs: true };
   });
+  const [modalitiesLoaded, setModalitiesLoaded] = useState(false);
   const [autoMode, setAutoMode] = useState<boolean>(() => {
     try { return localStorage.getItem("trade_auto_mode") === "true"; } catch { return false; }
   });
@@ -418,6 +419,23 @@ export default function TradingSystemPage() {
   const latestOps = useRef<any[]>([]);
   const latestAiThreshold = useRef<any>(null);
   const updateConfigRef = useRef<((mode: string) => void) | null>(null);
+
+  // Carregar modalidades do servidor ao inicializar
+  useEffect(() => {
+    if (modalitiesLoaded) return;
+    apiRequest("/api/trading/modalities").then(async (res) => {
+      try {
+        const data = await res.json();
+        if (data?.modalities && Array.isArray(data.modalities)) {
+          const map: Record<string, boolean> = {};
+          data.modalities.forEach((id: string) => { map[id] = true; });
+          setEnabledModalities(map);
+          localStorage.setItem("trade_modalities", JSON.stringify(map));
+        }
+      } catch {}
+      setModalitiesLoaded(true);
+    }).catch(() => { setModalitiesLoaded(true); });
+  }, [modalitiesLoaded]);
 
   useEffect(() => {
     if (!autoMode) return;
@@ -1268,25 +1286,36 @@ export default function TradingSystemPage() {
                     pink: "bg-pink-50 dark:bg-pink-900/20 border-pink-200 dark:border-pink-800 text-pink-800 dark:text-pink-200",
                     indigo: "bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800 text-indigo-800 dark:text-indigo-200",
                   };
+                  const AUTOMATED_MODALITIES = new Set([
+                    'digit_differs','digit_matches','digit_even','digit_odd','digit_over','digit_under',
+                    'rise','fall','higher','lower'
+                  ]);
+                  const saveModalities = (updated: Record<string, boolean>) => {
+                    localStorage.setItem("trade_modalities", JSON.stringify(updated));
+                    const active = Object.entries(updated).filter(([, v]) => v).map(([k]) => k);
+                    apiRequest("/api/trading/modalities", {
+                      method: "PUT",
+                      body: JSON.stringify({ modalities: active }),
+                    }).catch(() => {});
+                  };
                   const toggleModality = (id: string, newVal: boolean, name: string) => {
                     const updated = { ...enabledModalities, [id]: newVal };
                     setEnabledModalities(updated);
-                    localStorage.setItem("trade_modalities", JSON.stringify(updated));
-                    const active = Object.entries(updated).filter(([, v]) => v).map(([k]) => k);
-                    apiRequest("POST", "/api/trading/modalities", { modalities: active }).catch(() => {});
+                    saveModalities(updated);
+                    const isAutomated = AUTOMATED_MODALITIES.has(id);
                     toast({
                       title: newVal ? `${name} ativada` : `${name} desativada`,
-                      description: newVal ? "Sistema já operando com esta modalidade." : "Modalidade removida do sistema.",
-                      duration: 2000,
+                      description: newVal
+                        ? isAutomated ? "IA irá operar automaticamente com esta modalidade." : "Modalidade ativada para análise (automação em breve)."
+                        : "Modalidade removida do sistema.",
+                      duration: 2500,
                     });
                   };
                   const toggleCategory = (cat: TradeCategory, enable: boolean) => {
                     const updated = { ...enabledModalities };
                     cat.modalities.forEach(m => { updated[m.id] = enable; });
                     setEnabledModalities(updated);
-                    localStorage.setItem("trade_modalities", JSON.stringify(updated));
-                    const active = Object.entries(updated).filter(([, v]) => v).map(([k]) => k);
-                    apiRequest("POST", "/api/trading/modalities", { modalities: active }).catch(() => {});
+                    saveModalities(updated);
                     toast({
                       title: enable ? `${cat.name}: todos ativados` : `${cat.name}: todos desativados`,
                       description: enable ? `${cat.modalities.length} modalidade(s) ativada(s).` : "Categoria removida do sistema.",
@@ -1334,7 +1363,13 @@ export default function TradingSystemPage() {
                                       onClick={(e) => e.stopPropagation()}
                                     />
                                     <div className="min-w-0">
-                                      <p className="font-medium text-sm leading-tight">{modality.name}</p>
+                                      <div className="flex items-center gap-1.5 flex-wrap">
+                                        <p className="font-medium text-sm leading-tight">{modality.name}</p>
+                                        {AUTOMATED_MODALITIES.has(modality.id)
+                                          ? <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300">✓ Auto</span>
+                                          : <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300">Em breve</span>
+                                        }
+                                      </div>
                                       <p className="text-xs text-muted-foreground leading-snug mt-0.5">{modality.description}</p>
                                     </div>
                                   </div>

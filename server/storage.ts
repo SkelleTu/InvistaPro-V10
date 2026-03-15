@@ -167,6 +167,7 @@ export interface IStorage {
   getAllTradeConfigurations(): Promise<TradeConfiguration[]>;
   getActiveTradeConfigurations(): Promise<TradeConfiguration[]>;
   updateTradeConfig(userId: string, mode: string): Promise<TradeConfiguration>;
+  updateSelectedModalities(userId: string, modalities: string[]): Promise<void>;
   deactivateAllTradeConfigs(userId: string): Promise<void>;
   reactivateTradeConfiguration(id: string): Promise<void>;
   deactivateTradeConfiguration(id: string): Promise<void>;
@@ -586,6 +587,17 @@ export class DatabaseStorage implements IStorage {
       
       return newConfig;
     });
+  }
+
+  async updateSelectedModalities(userId: string, modalities: string[]): Promise<void> {
+    const modalitiesJson = JSON.stringify(modalities);
+    await db
+      .update(tradeConfigurations)
+      .set({
+        selectedModalities: modalitiesJson,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(and(eq(tradeConfigurations.userId, userId), eq(tradeConfigurations.isActive, true)));
   }
 
   async deactivateAllTradeConfigs(userId: string): Promise<void> {

@@ -395,6 +395,13 @@ export async function initializeTursoDatabase(): Promise<boolean> {
       await (tursoDb as any).run(sql);
     }
 
+    // Migração: adicionar selected_modalities se não existir
+    try {
+      await (tursoDb as any).run(`ALTER TABLE trade_configurations ADD COLUMN selected_modalities TEXT DEFAULT 'digit_differs'`);
+    } catch (e: any) {
+      // Coluna já existe - ignorar
+    }
+
     console.log('✅ Tabelas Turso inicializadas com sucesso!');
     return true;
   } catch (error) {

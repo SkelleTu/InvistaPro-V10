@@ -2351,6 +2351,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // =========================== MODALIDADES SELECIONADAS ===========================
+
+  app.get('/api/trading/modalities', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+    const userId = req.user.id;
+    const config = await dbStorage.getUserTradeConfig(userId);
+    if (!config) {
+      return res.json({ modalities: ['digit_differs'] });
+    }
+    let modalities: string[] = ['digit_differs'];
+    try {
+      if (config.selectedModalities) {
+        const parsed = JSON.parse(config.selectedModalities);
+        if (Array.isArray(parsed)) modalities = parsed;
+      }
+    } catch {}
+    res.json({ modalities });
+  }));
+
+  app.put('/api/trading/modalities', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+    const userId = req.user.id;
+    const { modalities } = req.body;
+    if (!Array.isArray(modalities)) {
+      return res.status(400).json({ message: 'modalities deve ser um array' });
+    }
+    const VALID = new Set([
+      'digit_differs','digit_matches','digit_even','digit_odd','digit_over','digit_under',
+      'rise','fall','higher','lower',
+      'ends_between','ends_outside','stays_between','goes_outside',
+      'touch','no_touch','multiplier_up','multiplier_down',
+      'accumulator','turbo_up','turbo_down','vanilla_call','vanilla_put',
+      'lookback_high_close','lookback_close_low','lookback_high_low'
+    ]);
+    const filtered = modalities.filter((m: string) => VALID.has(m));
+    const finalModalities = filtered.length > 0 ? filtered : ['digit_differs'];
+    await dbStorage.updateSelectedModalities(userId, finalModalities);
+    console.log(`📋 [MODALITIES] Usuário ${userId} atualizou modalidades: ${finalModalities.join(', ')}`);
+    res.json({ success: true, modalities: finalModalities });
+  }));
+
   // =========================== MARKET DATA & REAL-TIME ===========================
 
   app.get('/api/trading/market-data/:symbol', isAuthenticated, isTradingAuthorized, async (req, res) => {

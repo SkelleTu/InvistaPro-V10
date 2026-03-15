@@ -223,3 +223,30 @@ Trading automation system for variable income (Deriv DIGITDIFF contracts - desco
 - ✅ Dynamic diversification
 - ✅ Ultra-fast adaptive cool-off (0-30 sec)
 - ✅ Code ready for ALL Deriv DIGITDIFF assets (auto-discovers)
+- ✅ Multi-modality auto-trading: 10 modalities automated (6 Digits + 4 Rise/Fall)
+
+## Multi-Modality System (March 2026)
+
+### Automated Modalities (✓ Auto badge in UI)
+All 6 Digit types now fully connected to the auto-trading scheduler:
+- **DIGITDIFF** - Digit Differs (working since initial)
+- **DIGITMATCH** - Digit Matches (new)
+- **DIGITEVEN** - Last digit is even (no barrier needed)
+- **DIGITODD** - Last digit is odd (no barrier needed)
+- **DIGITOVER** - Digit over threshold (barrier=4 by default)
+- **DIGITUNDER** - Digit under threshold (barrier=5 by default)
+
+Plus Rise/Fall contracts:
+- **Rise / Higher** → CALL contract
+- **Fall / Lower** → PUT contract
+
+### Coming Soon modalities (Em breve badge in UI)
+In/Out, Touch/No Touch, Multipliers, Accumulators, Turbos, Vanillas, Lookbacks
+
+### Architecture
+- `buyGenericDigitContract()` in `deriv-api.ts` handles all 6 digit types
+- `buyCallPutContract()` in `deriv-api.ts` handles Rise/Fall (already existed)
+- Scheduler reads `selectedModalities` from DB, rotates through enabled ones by minute
+- New DB column: `trade_configurations.selected_modalities` (JSON array)
+- New API: `GET/PUT /api/trading/modalities` — persistent server-side storage
+- Frontend: loads from server on init, saves on toggle, shows Auto/Em-breve badge

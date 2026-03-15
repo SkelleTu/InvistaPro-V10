@@ -137,6 +137,7 @@ export const tradeConfigurations = pgTable("trade_configurations", {
   operationsCount: integer("operations_count").notNull(),
   intervalType: varchar("interval_type", { length: 20 }).notNull(),
   intervalValue: integer("interval_value").notNull(),
+  selectedModalities: text("selected_modalities").default('digit_differs'),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

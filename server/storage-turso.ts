@@ -335,6 +335,13 @@ export class TursoStorage implements IStorage {
     return newConfig;
   }
 
+  async updateSelectedModalities(userId: string, modalities: string[]): Promise<void> {
+    await getDb()
+      .update(tradeConfigurations)
+      .set({ selectedModalities: JSON.stringify(modalities), updatedAt: new Date().toISOString() })
+      .where(and(eq(tradeConfigurations.userId, userId), eq(tradeConfigurations.isActive, true)));
+  }
+
   async deactivateAllTradeConfigs(userId: string): Promise<void> {
     await getDb()
       .update(tradeConfigurations)

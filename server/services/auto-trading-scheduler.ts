@@ -1137,40 +1137,111 @@ export class AutoTradingScheduler {
           return { success: false, error: `BLOQUEIO DE SEGURANÇA ATIVADO: Símbolo ${selectedSymbol} contém "(1s)"` };
         }
         
-        const digitDifferContract = {
-          contract_type: 'DIGITDIFF' as const,
-          symbol: selectedSymbol,
-          duration: tradeParams.duration,
-          duration_unit: 't' as const,
-          barrier: tradeParams.barrier,
-          amount: tradeParams.amount,
-          currency: 'USD'
+        // ─── SELEÇÃO DE MODALIDADE ───────────────────────────────────────
+        // Ler modalidades ativas do banco, selecionar a mais adequada
+        let activeModalities: string[] = ['digit_differs'];
+        try {
+          const userConfig = await storage.getUserTradeConfig(config.userId);
+          if (userConfig?.selectedModalities) {
+            const parsed = JSON.parse(userConfig.selectedModalities);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              activeModalities = parsed;
+            }
+          }
+        } catch {}
+
+        // Escolher modalidade por rotação: pega baseado na hora atual para distribuir
+        const DIGIT_TYPES: Record<string, string> = {
+          'digit_differs': 'DIGITDIFF',
+          'digit_matches': 'DIGITMATCH',
+          'digit_even': 'DIGITEVEN',
+          'digit_odd': 'DIGITODD',
+          'digit_over': 'DIGITOVER',
+          'digit_under': 'DIGITUNDER',
         };
+        const RISFALL_TYPES: Set<string> = new Set(['rise', 'fall', 'higher', 'lower']);
 
-        // 📌 CAMADA 1 - ANTI-REPETIÇÃO: registrar ativo ANTES de executar o contrato
-        realStatsTracker.setLastTradedAsset(config.userId, selectedSymbol);
+        // Filtrar apenas modalidades suportadas (digits + rise/fall)
+        const supportedModalities = activeModalities.filter(m => DIGIT_TYPES[m] || RISFALL_TYPES.has(m));
+        const selectedModality = supportedModalities.length > 0
+          ? supportedModalities[Math.floor(Date.now() / 60000) % supportedModalities.length]
+          : 'digit_differs';
 
-        const contract = await derivAPI.buyDigitDifferContract(digitDifferContract);
-        
-        if (!contract) {
-          console.error(`❌ [${operationId}] Erro ao comprar contrato na Deriv para ${selectedSymbol}`);
-          return { success: false, error: 'Falha ao executar trade na Deriv' };
-        }
+        console.log(`🎯 [${operationId}] Modalidade selecionada: ${selectedModality} (ativas: ${activeModalities.join(', ')})`);
 
-        console.log(`✅ [${operationId}] Contrato comprado com sucesso: ${contract.contract_id}`);
+        // ─── EXECUÇÃO POR MODALIDADE ─────────────────────────────────────
+        let contract: any = null;
+        let resolvedTradeType = 'digitdiff';
 
-        // Sanitizar direção - deve ser sempre "up" ou "down" (nunca "neutral")
         const safeDirection: "up" | "down" = 
           (aiConsensus.finalDecision === 'up' || aiConsensus.finalDecision === 'down')
             ? aiConsensus.finalDecision as "up" | "down"
             : ((aiConsensus.upScore || 0) >= (aiConsensus.downScore || 0) ? 'up' : 'down');
+
+        // 📌 CAMADA 1 - ANTI-REPETIÇÃO: registrar ativo ANTES de executar o contrato
+        realStatsTracker.setLastTradedAsset(config.userId, selectedSymbol);
+
+        if (DIGIT_TYPES[selectedModality]) {
+          // ── Contratos de Dígitos (DIGITDIFF, DIGITMATCH, DIGITEVEN, DIGITODD, DIGITOVER, DIGITUNDER) ──
+          const contractType = DIGIT_TYPES[selectedModality] as 'DIGITDIFF' | 'DIGITMATCH' | 'DIGITEVEN' | 'DIGITODD' | 'DIGITOVER' | 'DIGITUNDER';
+          const needsBarrier = ['DIGITDIFF', 'DIGITMATCH', 'DIGITOVER', 'DIGITUNDER'].includes(contractType);
+          
+          // Para DIGITOVER usamos barrier 4 (dígito 5-9 = acima de 4)
+          // Para DIGITUNDER usamos barrier 5 (dígito 0-4 = abaixo de 5)
+          // Para DIGITMATCH/DIGITDIFF usamos o barrier do tradeParams
+          let barrier: string | undefined = tradeParams.barrier;
+          if (contractType === 'DIGITOVER') barrier = '4';
+          if (contractType === 'DIGITUNDER') barrier = '5';
+          if (!needsBarrier) barrier = undefined;
+
+          contract = await derivAPI.buyGenericDigitContract({
+            contract_type: contractType,
+            symbol: selectedSymbol,
+            duration: tradeParams.duration,
+            amount: tradeParams.amount,
+            barrier,
+            currency: 'USD',
+          });
+          resolvedTradeType = selectedModality.replace('_', '');
+
+        } else if (RISFALL_TYPES.has(selectedModality)) {
+          // ── Contratos Rise/Fall (CALL/PUT) ──
+          const callPutDirection: 'up' | 'down' = (selectedModality === 'rise' || selectedModality === 'higher') ? 'up' : 
+                                                    (selectedModality === 'fall' || selectedModality === 'lower') ? 'down' : 
+                                                    safeDirection;
+          // Rise/Fall usam duração em minutos — usar 1 minuto mínimo
+          const callPutDuration = Math.max(1, Math.floor(tradeParams.duration / 2));
+          contract = await derivAPI.buyCallPutContract(selectedSymbol, callPutDirection, callPutDuration, tradeParams.amount);
+          resolvedTradeType = selectedModality;
+
+        } else {
+          // Fallback: sempre executar DIGITDIFF
+          const fallbackContract = {
+            contract_type: 'DIGITDIFF' as const,
+            symbol: selectedSymbol,
+            duration: tradeParams.duration,
+            duration_unit: 't' as const,
+            barrier: tradeParams.barrier,
+            amount: tradeParams.amount,
+            currency: 'USD'
+          };
+          contract = await derivAPI.buyDigitDifferContract(fallbackContract);
+          resolvedTradeType = 'digitdiff';
+        }
+
+        if (!contract) {
+          console.error(`❌ [${operationId}] Erro ao comprar contrato [${selectedModality}] na Deriv para ${selectedSymbol}`);
+          return { success: false, error: `Falha ao executar trade [${selectedModality}] na Deriv` };
+        }
+
+        console.log(`✅ [${operationId}] Contrato [${selectedModality}] comprado com sucesso: ${contract.contract_id}`);
 
         // Salvar operação no banco com informações de recuperação
         await storage.createTradeOperation({
           userId: config.userId,
           derivContractId: String(contract.contract_id),
           symbol: selectedSymbol,
-          tradeType: 'digitdiff',
+          tradeType: resolvedTradeType,
           direction: safeDirection,
           amount: tradeParams.amount,
           duration: tradeParams.duration,
