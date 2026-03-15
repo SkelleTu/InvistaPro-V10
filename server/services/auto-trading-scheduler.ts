@@ -10,6 +10,7 @@ import { derivTradeSync } from './deriv-trade-sync';
 import { digitFrequencyAnalyzer } from './digit-frequency-analyzer';
 import { assetScorer, AssetPerformanceRecord } from './asset-scorer';
 import { realStatsTracker } from './real-stats-tracker';
+import { contractMonitor } from './contract-monitor';
 
 export interface ActiveTradeSession {
   userId: string;
@@ -1221,10 +1222,10 @@ export class AutoTradingScheduler {
         const HZ_FULL    = [...DIGIT_KEYS, ...RISFALL_KEYS, ...INOUT_KEYS, ...TOUCH_KEYS, ...MULT_KEYS, ...ACCU_KEYS];
         // 1HZ Indices básicos (15, 30, 90): sem multiplicadores/acumuladores
         const HZ_BASIC   = [...DIGIT_KEYS, ...RISFALL_KEYS, ...INOUT_KEYS, ...TOUCH_KEYS];
-        // Jump Indices (JD10..JD100): apenas dígitos, rise/fall, in/out, touch
-        const JUMP_OK    = [...DIGIT_KEYS, ...RISFALL_KEYS, ...INOUT_KEYS, ...TOUCH_KEYS];
-        // Range Break (RDBULL, RDBEAR): idem Jump
-        const RDB_OK     = [...DIGIT_KEYS, ...RISFALL_KEYS, ...INOUT_KEYS, ...TOUCH_KEYS];
+        // Jump Indices (JD10..JD100): apenas dígitos e rise/fall (Deriv não suporta INOUT/TOUCH nesses)
+        const JUMP_OK    = [...DIGIT_KEYS, ...RISFALL_KEYS];
+        // Range Break (RDBULL, RDBEAR): apenas dígitos e rise/fall
+        const RDB_OK     = [...DIGIT_KEYS, ...RISFALL_KEYS];
         // R_100 também suporta Turbos e Vanillas (maior liquidez)
         const VOL_100    = [...VOL_BASE, ...TURBO_KEYS, ...VANILLA_KEYS];
 
@@ -1302,32 +1303,58 @@ export class AutoTradingScheduler {
 
         } else if (IN_OUT_TYPES[selectedModality]) {
           // ── Contratos Dentro & Fora (EXPIRYRANGE, EXPIRYMISS, RANGE, UPORDOWN) ──
+          // EXPIRYRANGE/EXPIRYMISS: usam date_expiry + barriers absolutas
+          // RANGE/UPORDOWN: usam duration + barriers relativas
           const contractType = IN_OUT_TYPES[selectedModality];
           const currentPrice = await derivAPI.getCurrentPrice(selectedSymbol);
-          let highBarrier: string;
-          let lowBarrier: string;
 
-          if (currentPrice && currentPrice > 0) {
-            const offsetPct = (selectedModality === 'ends_outside' || selectedModality === 'goes_outside') ? 0.008 : 0.005;
-            const offset = parseFloat((currentPrice * offsetPct).toFixed(4));
-            highBarrier = '+' + offset;
-            lowBarrier = '-' + offset;
+          const isExpiry = (selectedModality === 'ends_between' || selectedModality === 'ends_outside');
+          const offsetPct = (selectedModality === 'ends_outside' || selectedModality === 'goes_outside') ? 0.008 : 0.005;
+
+          if (isExpiry && currentPrice && currentPrice > 0) {
+            // EXPIRYRANGE / EXPIRYMISS: barriers absolutas + date_expiry (15 min)
+            const offset = currentPrice * offsetPct;
+            const highBarrier = (currentPrice + offset).toFixed(4);
+            const lowBarrier  = (currentPrice - offset).toFixed(4);
+            const dateExpiry  = Math.floor(Date.now() / 1000) + 900; // 15 min
+
+            console.log(`📊 [${operationId}] ${contractType}: high=${highBarrier}, low=${lowBarrier}, expiry=15min | Symbol: ${selectedSymbol}`);
+            contract = await derivAPI.buyFlexibleContract({
+              contract_type: contractType,
+              symbol: selectedSymbol,
+              amount: tradeParams.amount,
+              high_barrier: highBarrier,
+              low_barrier: lowBarrier,
+              date_expiry: dateExpiry,
+            });
           } else {
-            highBarrier = '+0.5';
-            lowBarrier = '-0.5';
+            // RANGE / UPORDOWN: barriers relativas + duration
+            const offset = currentPrice && currentPrice > 0
+              ? parseFloat((currentPrice * offsetPct).toFixed(4))
+              : 0.5;
+            const highBarrier = '+' + offset;
+            const lowBarrier  = '-' + offset;
+
+            console.log(`📊 [${operationId}] ${contractType}: high=${highBarrier}, low=${lowBarrier}, 5m | Symbol: ${selectedSymbol}`);
+            contract = await derivAPI.buyFlexibleContract({
+              contract_type: contractType,
+              symbol: selectedSymbol,
+              amount: tradeParams.amount,
+              duration: 5,
+              duration_unit: 'm',
+              high_barrier: highBarrier,
+              low_barrier: lowBarrier,
+            });
           }
 
-          console.log(`📊 [${operationId}] ${contractType}: high=${highBarrier}, low=${lowBarrier} | Symbol: ${selectedSymbol}`);
-          contract = await derivAPI.buyFlexibleContract({
-            contract_type: contractType,
-            symbol: selectedSymbol,
-            amount: tradeParams.amount,
-            duration: 5,
-            duration_unit: 'm',
-            high_barrier: highBarrier,
-            low_barrier: lowBarrier,
-          });
-          resolvedTradeType = selectedModality;
+          if (!contract) {
+            console.warn(`⚠️ [${operationId}] ${contractType} rejeitado pela Deriv → fallback DIGITDIFF`);
+            const fallback = { contract_type: 'DIGITDIFF' as const, symbol: selectedSymbol, duration: tradeParams.duration, duration_unit: 't' as const, barrier: tradeParams.barrier, amount: tradeParams.amount, currency: 'USD' };
+            contract = await derivAPI.buyDigitDifferContract(fallback);
+            resolvedTradeType = 'digitdiff';
+          } else {
+            resolvedTradeType = selectedModality;
+          }
 
         } else if (TOUCH_TYPES[selectedModality]) {
           // ── Contratos Touch / No Touch (ONETOUCH, NOTOUCH) ──
@@ -1501,6 +1528,37 @@ export class AutoTradingScheduler {
         }
 
         console.log(`✅ [${operationId}] Contrato [${selectedModality}] comprado com sucesso: ${contract.contract_id}`);
+
+        // 🔭 MONITOR UNIVERSAL IA — acompanhar contrato tick a tick
+        try {
+          contractMonitor.setToken(tokenData.token);
+          const contractTypeForMonitor = (
+            DIGIT_TYPES[selectedModality] ||
+            (RISFALL_TYPES.has(selectedModality) ? (selectedModality === 'rise' || selectedModality === 'higher' ? 'CALL' : 'PUT') : undefined) ||
+            IN_OUT_TYPES[selectedModality] ||
+            TOUCH_TYPES[selectedModality] ||
+            MULTIPLIER_TYPES[selectedModality] ||
+            (selectedModality === 'accumulator' ? 'ACCU' : undefined) ||
+            TURBO_TYPES[selectedModality] ||
+            VANILLA_TYPES[selectedModality] ||
+            LOOKBACK_TYPES[selectedModality] ||
+            'DIGITDIFF'
+          );
+          await contractMonitor.startMonitoring({
+            contractId: contract.contract_id,
+            contractType: contractTypeForMonitor,
+            symbol: selectedSymbol,
+            buyPrice: contract.buy_price || tradeParams.amount,
+            amount: tradeParams.amount,
+            direction: safeDirection,
+            userId: config.userId,
+            openedAt: Date.now(),
+            barrier: tradeParams.barrier,
+          });
+          console.log(`🔭 [MONITOR] Iniciado para contrato ${contract.contract_id} (${contractTypeForMonitor}) em ${selectedSymbol}`);
+        } catch (monitorErr) {
+          console.warn(`⚠️ [MONITOR] Falha ao iniciar monitoramento (trade executado normalmente): ${monitorErr}`);
+        }
 
         // Salvar operação no banco com informações de recuperação
         await storage.createTradeOperation({

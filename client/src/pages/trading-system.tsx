@@ -42,7 +42,8 @@ import {
   Sparkles,
   RefreshCw,
   Gauge,
-  Trash2
+  Trash2,
+  Eye
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -635,6 +636,12 @@ export default function TradingSystemPage() {
     refetchInterval: 60000, // Atualiza a cada 1 minuto
   });
 
+  const { data: monitorData } = useQuery({
+    queryKey: ["/api/monitor/status"],
+    refetchInterval: 1000,
+    enabled: hasAccess,
+  });
+
   // Estatísticas históricas de threshold da IA em tempo real
   const { data: aiThresholdStats } = useQuery({
     queryKey: ["/api/auto-trading/ai-threshold-stats"],
@@ -856,12 +863,20 @@ export default function TradingSystemPage() {
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4">
+          <TabsList className="grid w-full grid-cols-6">
             <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
             <TabsTrigger value="config">Configurações</TabsTrigger>
             <TabsTrigger value="blocked">Bloqueio de Ativos</TabsTrigger>
             <TabsTrigger value="operations">Operações</TabsTrigger>
             <TabsTrigger value="ai-analysis">IA e Análises</TabsTrigger>
+            <TabsTrigger value="monitor" className="relative" data-testid="tab-monitor">
+              <span>Monitor IA</span>
+              {(monitorData as any)?.activeContracts > 0 && (
+                <span className="absolute -top-1 -right-1 bg-green-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center animate-pulse">
+                  {(monitorData as any).activeContracts}
+                </span>
+              )}
+            </TabsTrigger>
           </TabsList>
 
           {/* Dashboard Tab */}
@@ -1970,6 +1985,244 @@ export default function TradingSystemPage() {
                     </p>
                   </div>
                 )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Monitor IA Universal — Acompanhamento tick a tick de cada contrato */}
+          <TabsContent value="monitor" className="space-y-6">
+            <Card className="border-2 border-blue-500/30 bg-blue-500/5">
+              <CardHeader>
+                <CardTitle className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <Eye className="h-5 w-5 text-blue-500" />
+                    <span>Monitor Universal IA — 5 Modelos em Paralelo</span>
+                    <Badge variant="outline" className="animate-pulse border-blue-500 text-blue-600">
+                      <span className="w-2 h-2 bg-blue-500 rounded-full inline-block mr-1"></span>
+                      Tick a Tick
+                    </Badge>
+                  </div>
+                  <Badge
+                    data-testid="badge-monitor-active"
+                    className={(monitorData as any)?.activeContracts > 0 ? "bg-green-600" : "bg-gray-500"}
+                  >
+                    {(monitorData as any)?.activeContracts ?? 0} contrato(s) ativo(s)
+                  </Badge>
+                </CardTitle>
+                <CardDescription>
+                  Cada operação aberta é acompanhada milimetricamente pelos 5 modelos de IA — FinBERT, RoBERTa, XLM-RoBERTa, RoBERTa Trend Detector e DistilRoBERTa. O sistema sabe quando entrar, o que está acontecendo e quando é o momento ideal de sair.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {/* Painel de modelos ativos */}
+                <div className="grid grid-cols-5 gap-2 mb-6">
+                  {[
+                    { name: "FinBERT", desc: "Sentimento Financeiro", color: "blue" },
+                    { name: "RoBERTa", desc: "Analisador de Mercado", color: "purple" },
+                    { name: "XLM-RoBERTa", desc: "Multilingual", color: "indigo" },
+                    { name: "RoBERTa Trend", desc: "Detector de Tendência", color: "cyan" },
+                    { name: "DistilRoBERTa", desc: "Financeiro Rápido", color: "teal" },
+                  ].map((model) => (
+                    <div
+                      key={model.name}
+                      data-testid={`model-card-${model.name}`}
+                      className="p-3 border rounded-lg text-center bg-background hover:border-blue-400 transition-colors"
+                    >
+                      <Brain className="h-5 w-5 mx-auto mb-1 text-blue-500" />
+                      <p className="text-xs font-bold">{model.name}</p>
+                      <p className="text-[10px] text-muted-foreground">{model.desc}</p>
+                      <div className="mt-1 w-2 h-2 rounded-full bg-green-500 mx-auto animate-pulse" />
+                    </div>
+                  ))}
+                </div>
+
+                {(monitorData as any)?.contracts?.length > 0 ? (
+                  <div className="space-y-4">
+                    {(monitorData as any).contracts.map((contract: any) => {
+                      const profitColor = contract.profit > 0 ? "text-green-500" : contract.profit < 0 ? "text-red-500" : "text-muted-foreground";
+                      const ageMin = (contract.ageMs / 60000).toFixed(1);
+                      const profitPct = contract.profitPct?.toFixed(2) ?? "0.00";
+                      const profitSign = contract.profit >= 0 ? "+" : "";
+                      return (
+                        <div
+                          key={contract.contractId}
+                          data-testid={`monitor-contract-${contract.contractId}`}
+                          className="p-4 border-2 border-blue-500/20 rounded-xl space-y-3 bg-background"
+                        >
+                          {/* Cabeçalho do contrato */}
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center space-x-2">
+                              <Activity className="h-4 w-4 text-blue-500 animate-pulse" />
+                              <span className="font-bold text-sm" data-testid={`monitor-symbol-${contract.contractId}`}>
+                                {contract.symbol}
+                              </span>
+                              <Badge variant="outline" className="text-xs" data-testid={`monitor-type-${contract.contractId}`}>
+                                {contract.contractType}
+                              </Badge>
+                              {contract.direction && (
+                                <Badge
+                                  className={`text-xs ${contract.direction === 'up' ? 'bg-green-600' : 'bg-red-600'}`}
+                                  data-testid={`monitor-direction-${contract.contractId}`}
+                                >
+                                  {contract.direction === 'up' ? '▲ Alta' : '▼ Baixa'}
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="flex items-center space-x-2">
+                              <Clock className="h-3 w-3 text-muted-foreground" />
+                              <span className="text-xs text-muted-foreground">{ageMin}min</span>
+                              <Badge
+                                variant={contract.status === 'monitoring' ? 'default' : 'secondary'}
+                                className="text-xs"
+                                data-testid={`monitor-status-${contract.contractId}`}
+                              >
+                                {contract.status === 'monitoring' ? '🔭 Monitorando' : contract.status === 'closing' ? '⚡ Fechando' : '✅ Fechado'}
+                              </Badge>
+                            </div>
+                          </div>
+
+                          {/* Dados financeiros */}
+                          <div className="grid grid-cols-4 gap-3">
+                            <div className="bg-muted/50 rounded-lg p-2 text-center">
+                              <p className="text-[10px] text-muted-foreground">Entrada</p>
+                              <p className="text-sm font-bold" data-testid={`monitor-entry-${contract.contractId}`}>
+                                ${contract.buyPrice?.toFixed(2)}
+                              </p>
+                            </div>
+                            <div className="bg-muted/50 rounded-lg p-2 text-center">
+                              <p className="text-[10px] text-muted-foreground">Bid Atual</p>
+                              <p className="text-sm font-bold" data-testid={`monitor-bid-${contract.contractId}`}>
+                                ${contract.bidPrice?.toFixed(2) ?? "—"}
+                              </p>
+                            </div>
+                            <div className="bg-muted/50 rounded-lg p-2 text-center">
+                              <p className="text-[10px] text-muted-foreground">Lucro</p>
+                              <p className={`text-sm font-bold ${profitColor}`} data-testid={`monitor-profit-${contract.contractId}`}>
+                                {profitSign}${contract.profit?.toFixed(2) ?? "0.00"} ({profitSign}{profitPct}%)
+                              </p>
+                            </div>
+                            <div className="bg-muted/50 rounded-lg p-2 text-center">
+                              <p className="text-[10px] text-muted-foreground">Pico</p>
+                              <p className="text-sm font-bold text-green-500" data-testid={`monitor-peak-${contract.contractId}`}>
+                                +${contract.peakProfit?.toFixed(2) ?? "0.00"}
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Spot atual + barreira */}
+                          <div className="grid grid-cols-3 gap-2">
+                            <div className="flex items-center space-x-2">
+                              <Target className="h-3 w-3 text-muted-foreground" />
+                              <span className="text-xs text-muted-foreground">Spot entrada:</span>
+                              <span className="text-xs font-mono" data-testid={`monitor-entry-spot-${contract.contractId}`}>
+                                {contract.entrySpot?.toFixed(4) ?? "—"}
+                              </span>
+                            </div>
+                            <div className="flex items-center space-x-2">
+                              <Activity className="h-3 w-3 text-blue-500" />
+                              <span className="text-xs text-muted-foreground">Spot atual:</span>
+                              <span className="text-xs font-mono font-bold" data-testid={`monitor-spot-${contract.contractId}`}>
+                                {contract.currentSpot?.toFixed(4) ?? "—"}
+                              </span>
+                            </div>
+                            {contract.barrierDistance !== undefined && (
+                              <div className="flex items-center space-x-2">
+                                <AlertTriangle className={`h-3 w-3 ${contract.barrierDistance < 0.5 ? 'text-red-500' : 'text-yellow-500'}`} />
+                                <span className="text-xs text-muted-foreground">Barreira:</span>
+                                <span className={`text-xs font-bold ${contract.barrierDistance < 0.5 ? 'text-red-500' : 'text-yellow-500'}`}
+                                  data-testid={`monitor-barrier-${contract.contractId}`}>
+                                  {contract.barrierDistance?.toFixed(3)}%
+                                </span>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Progresso de ticks */}
+                          <div>
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-xs text-muted-foreground">Ticks monitorados</span>
+                              <span className="text-xs font-bold" data-testid={`monitor-ticks-${contract.contractId}`}>
+                                {contract.tickCount}
+                              </span>
+                            </div>
+                            <Progress
+                              value={Math.min(100, (contract.tickCount / 100) * 100)}
+                              className="h-1"
+                            />
+                          </div>
+
+                          {/* Venda permitida */}
+                          {contract.isValidToSell && (
+                            <div className="flex items-center space-x-2 text-xs text-green-500">
+                              <CheckCircle2 className="h-3 w-3" />
+                              <span>Venda antecipada disponível — IA decidindo momento ideal</span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-center py-12">
+                    <div className="relative inline-block mb-4">
+                      <Eye className="h-16 w-16 text-muted-foreground/30" />
+                      <div className="absolute bottom-0 right-0 w-5 h-5 bg-blue-500/20 rounded-full flex items-center justify-center">
+                        <Brain className="h-3 w-3 text-blue-500" />
+                      </div>
+                    </div>
+                    <p className="text-muted-foreground font-medium">Nenhum contrato sendo monitorado no momento</p>
+                    <p className="text-sm text-muted-foreground mt-2 max-w-sm mx-auto">
+                      Assim que uma operação for aberta pelo sistema, os 5 modelos de IA vão acompanhar cada tick em tempo real — decidindo automaticamente o melhor momento de saída.
+                    </p>
+                    <div className="mt-4 flex items-center justify-center space-x-2 text-xs text-muted-foreground">
+                      <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                      <span>Sistema aguardando próxima operação...</span>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Cards informativos das modalidades cobertas */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2">
+                  <Layers className="h-5 w-5" />
+                  <span>Modalidades com Cobertura Total do Monitor IA</span>
+                </CardTitle>
+                <CardDescription>
+                  Todas as modalidades disponíveis na Deriv são monitoradas com estratégias de saída específicas
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                  {[
+                    { type: "ACCU", label: "Accumulator", desc: "Trailing stop + alvo 40% + barreira crítica", icon: "📈" },
+                    { type: "MULTUP/DOWN", label: "Multiplier", desc: "Stop dinâmico + alvo 60% + corte de perda 40%", icon: "✖️" },
+                    { type: "CALL/PUT", label: "Rise / Fall", desc: "Venda antecipada no pico + sinal de reversão", icon: "⬆️⬇️" },
+                    { type: "TURBOS", label: "Turbo / Knock-out", desc: "Barreira próxima = fechamento emergencial", icon: "⚡" },
+                    { type: "VANILLA", label: "Vanilla Options", desc: "Moneyness + delta + expiração otimizada", icon: "🍦" },
+                    { type: "DIGITS", label: "Digit (6 tipos)", desc: "Auto-expira: monitoramento passivo do resultado", icon: "🔢" },
+                    { type: "INOUT", label: "Dentro & Fora", desc: "Barreira dupla + saída antecipada se lucrativo", icon: "↔️" },
+                    { type: "TOUCH", label: "Touch / No Touch", desc: "Barreira próxima + reversão confirmada", icon: "👆" },
+                    { type: "LOOKBACK", label: "Lookback (3 tipos)", desc: "Auto-expira: máximo/mínimo capturado automaticamente", icon: "🔍" },
+                  ].map((m) => (
+                    <div
+                      key={m.type}
+                      data-testid={`modality-coverage-${m.type}`}
+                      className="p-3 border rounded-lg hover:border-blue-400 transition-colors"
+                    >
+                      <div className="flex items-center space-x-2 mb-1">
+                        <span className="text-lg">{m.icon}</span>
+                        <div>
+                          <p className="text-xs font-bold">{m.label}</p>
+                          <Badge variant="outline" className="text-[10px]">{m.type}</Badge>
+                        </div>
+                      </div>
+                      <p className="text-[10px] text-muted-foreground">{m.desc}</p>
+                    </div>
+                  ))}
+                </div>
               </CardContent>
             </Card>
           </TabsContent>

@@ -20,6 +20,7 @@ import path from "path";
 import crypto from "crypto";
 import kycRoutes from "./routes/kyc";
 import adminRoutes from "./routes/admin";
+import monitorRoutes from "./routes/monitor-routes";
 import fetch from "node-fetch";
 import express from "express";
 import { keepAliveSystem } from "./services/keep-alive-system";
@@ -1755,6 +1756,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Auto Trading Routes
   const { autoTradingRoutes } = await import('./routes/auto-trading-routes');
   app.use('/api/auto-trading', autoTradingRoutes);
+
+  // Monitor Universal de Contratos IA
+  app.use('/api/monitor', monitorRoutes);
 
   // Marketing Email Routes
   app.post('/api/marketing/add-email', isAuthenticated, async (req, res) => {
