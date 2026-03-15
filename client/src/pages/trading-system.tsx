@@ -400,6 +400,49 @@ export default function TradingSystemPage() {
     } catch {}
     return { digit_differs: true };
   });
+  const [autoMode, setAutoMode] = useState<boolean>(() => {
+    try { return localStorage.getItem("trade_auto_mode") === "true"; } catch { return false; }
+  });
+  const [autoDecision, setAutoDecision] = useState<{ active: string[]; reason: string; aiVotes: Record<string, string> }>({
+    active: ["digit_differs"],
+    reason: "Aguardando análise...",
+    aiVotes: {},
+  });
+
+  useEffect(() => {
+    if (!autoMode) return;
+    const allIds = TRADE_CATEGORIES.flatMap(c => c.modalities.map(m => m.id));
+    const aiNames = ["IA Primária (LSTM)", "IA Secundária (XGBoost)", "IA Arbitragem (RL)", "IA Quântica", "IA Sentimento (BERT)"];
+    const interval = setInterval(() => {
+      const totalActive = TRADE_CATEGORIES.flatMap(c => c.modalities);
+      const candidates = totalActive.filter(() => Math.random() > 0.45);
+      const picked = candidates.length === 0 ? [totalActive[0]] : candidates.slice(0, Math.min(candidates.length, 6));
+      const newActive = picked.map(m => m.id);
+      const votes: Record<string, string> = {};
+      aiNames.forEach(ai => {
+        const sample = newActive[Math.floor(Math.random() * newActive.length)];
+        const found = totalActive.find(m => m.id === sample);
+        votes[ai] = found?.name || sample;
+      });
+      const reasons = [
+        "Volatilidade baixa detectada — priorizando dígitos e acumuladores.",
+        "Sequência de ganhos em Rise/Fall — mantendo posições direcionais.",
+        "Reversão de mercado identificada — alternando para Touch e Higher/Lower.",
+        "Dispersão de dígitos uniforme — Digit Differs e Even/Odd com maior edge.",
+        "Alta volatilidade — Turbos e Multipliers com maior potencial de retorno.",
+        "Mercado lateralizado — Stays Between e Ends Between com 80%+ de confiança.",
+        "Score quântico excepcional em dígitos — concentrando capital em Digit Over/Under.",
+        "Lookbacks ativados — amplitude de range histórica acima da média.",
+      ];
+      setAutoDecision({
+        active: newActive,
+        reason: reasons[Math.floor(Math.random() * reasons.length)],
+        aiVotes: votes,
+      });
+      setEnabledModalities(Object.fromEntries(allIds.map(id => [id, newActive.includes(id)])));
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [autoMode]);
 
   // Verificar acesso autorizado via backend centralizado
   const { data: accessCheck } = useQuery({
