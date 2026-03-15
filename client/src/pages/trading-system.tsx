@@ -439,8 +439,6 @@ export default function TradingSystemPage() {
 
   useEffect(() => {
     if (!autoMode) return;
-    const allIds = TRADE_CATEGORIES.flatMap(c => c.modalities.map(m => m.id));
-    const totalActive = TRADE_CATEGORIES.flatMap(c => c.modalities);
 
     const AI_NAMES = [
       "IA Primária (LSTM)",
@@ -461,45 +459,46 @@ export default function TradingSystemPage() {
       const recentLosses = ops?.slice(0, 10).filter((o: any) => o.result === 'loss').length ?? 0;
       const consensus = aiThresh?.currentThreshold ?? 0.7;
 
-      let chosenMode = "test_sem_limites";
+      // ── Calcular sugestão de modo para exibição (NÃO aplica — respeita escolha do usuário) ──
+      let suggestedMode = "test_sem_limites";
       let reason = "";
       const votes: Record<string, string> = {};
 
       if (winRate >= 0.75 && recentLosses <= 1) {
-        chosenMode = "test_sem_limites";
-        reason = `Taxa de vitória excepcional (${(winRate * 100).toFixed(0)}%) — IAs maximizando operações sem limites para capitalizar o momento de alta performance.`;
+        suggestedMode = "test_sem_limites";
+        reason = `Taxa de vitória excepcional (${(winRate * 100).toFixed(0)}%) — operando na frequência configurada para capitalizar o momento.`;
         votes[AI_NAMES[0]] = "Sem Limites ✅";
         votes[AI_NAMES[1]] = "Sem Limites ✅";
         votes[AI_NAMES[2]] = "Sem Limites ✅";
         votes[AI_NAMES[3]] = "Sem Limites ✅";
         votes[AI_NAMES[4]] = "Sem Limites ✅";
       } else if (winRate >= 0.60 && recentLosses <= 3) {
-        chosenMode = "test_4_1min";
-        reason = `Win rate sólida (${(winRate * 100).toFixed(0)}%) e baixas perdas recentes — acelerando ritmo para 4 ops/min com monitoramento contínuo.`;
+        suggestedMode = "test_4_1min";
+        reason = `Win rate sólida (${(winRate * 100).toFixed(0)}%) — IAs monitorando ritmo na frequência configurada.`;
         votes[AI_NAMES[0]] = "4 ops/min ✅";
         votes[AI_NAMES[1]] = "4 ops/min ✅";
         votes[AI_NAMES[2]] = "Sem Limites 🟡";
         votes[AI_NAMES[3]] = "4 ops/min ✅";
         votes[AI_NAMES[4]] = "4 ops/min ✅";
       } else if (winRate >= 0.50 && recentLosses <= 5) {
-        chosenMode = "test_3_2min";
-        reason = `Performance moderada (${(winRate * 100).toFixed(0)}%) — IAs adotando ritmo médio para equilibrar risco e retorno em tempo real.`;
+        suggestedMode = "test_3_2min";
+        reason = `Performance moderada (${(winRate * 100).toFixed(0)}%) — IAs analisando cada oportunidade na frequência configurada.`;
         votes[AI_NAMES[0]] = "3 ops/2min 🟡";
         votes[AI_NAMES[1]] = "3 ops/2min 🟡";
         votes[AI_NAMES[2]] = "3 ops/2min 🟡";
         votes[AI_NAMES[3]] = "Produção 3-4 🟠";
         votes[AI_NAMES[4]] = "3 ops/2min 🟡";
       } else if (winRate >= 0.40 || recentLosses > 5) {
-        chosenMode = "production_3-4_24h";
-        reason = `Perdas detectadas (${recentLosses} nas últimas 10) — sistema entrando em modo conservador. IAs protegendo capital até reversão.`;
+        suggestedMode = "production_3-4_24h";
+        reason = `Perdas detectadas (${recentLosses} nas últimas 10) — IAs em alerta. Frequência configurada mantida.`;
         votes[AI_NAMES[0]] = "Conservador 🛡️";
         votes[AI_NAMES[1]] = "Conservador 🛡️";
         votes[AI_NAMES[2]] = "3 ops/2min 🟠";
         votes[AI_NAMES[3]] = "Conservador 🛡️";
         votes[AI_NAMES[4]] = "Conservador 🛡️";
       } else {
-        chosenMode = "production_2_24h";
-        reason = `Alta sequência de perdas (win rate ${(winRate * 100).toFixed(0)}%) — ativando modo ultra-conservador. 2 operações por dia para proteger capital.`;
+        suggestedMode = "production_2_24h";
+        reason = `Alta sequência de perdas (win rate ${(winRate * 100).toFixed(0)}%) — IAs em modo de vigilância máxima.`;
         votes[AI_NAMES[0]] = "Ultra-conservador 🔴";
         votes[AI_NAMES[1]] = "Ultra-conservador 🔴";
         votes[AI_NAMES[2]] = "Ultra-conservador 🔴";
@@ -508,27 +507,21 @@ export default function TradingSystemPage() {
       }
 
       if (consensus < 0.5) {
-        chosenMode = "production_3-4_24h";
-        reason = `Consenso de IAs baixo (${(consensus * 100).toFixed(0)}%) — sistema recuando para modo conservador até alinhamento das análises.`;
+        suggestedMode = "production_3-4_24h";
+        reason = `Consenso de IAs baixo (${(consensus * 100).toFixed(0)}%) — aguardando alinhamento das análises antes de operar.`;
       }
 
-      const candidates = totalActive.filter(() => Math.random() > 0.45);
-      const picked = candidates.length === 0 ? [totalActive[0]] : candidates.slice(0, Math.min(candidates.length, 6));
-      const newActive = picked.map(m => m.id);
-
-      setAutoDecision({
-        active: newActive,
+      // ── Atualizar painel de análise (exibição apenas — NÃO muda frequência configurada) ──
+      setAutoDecision(prev => ({
+        ...prev,
         reason,
         aiVotes: votes,
-        mode: chosenMode,
+        mode: suggestedMode,
         metrics: { winRate, recentLosses, totalOps, consensus },
-      });
-      setEnabledModalities(Object.fromEntries(allIds.map(id => [id, newActive.includes(id)])));
+      }));
 
-      if (updateConfigRef.current) {
-        updateConfigRef.current(chosenMode);
-      }
-    }, 1000);
+      // ── NÃO chamar updateConfigRef — a frequência configurada pelo usuário é preservada ──
+    }, 2000);
     return () => clearInterval(interval);
   }, [autoMode]);
 
@@ -1206,10 +1199,16 @@ export default function TradingSystemPage() {
                         </Badge>
                       </div>
 
-                      {/* Modo atual escolhido pelas IAs */}
-                      <div className="rounded-lg bg-violet-100 dark:bg-violet-900/50 p-3 border border-violet-200 dark:border-violet-700">
-                        <p className="text-xs text-violet-600 dark:text-violet-400 uppercase tracking-wider mb-1">Frequência ativa agora</p>
-                        <p className="font-bold text-violet-900 dark:text-violet-100 text-sm">{getOperationModeLabel(autoDecision.mode)}</p>
+                      {/* Frequência configurada pelo usuário (respeitada sempre) */}
+                      <div className="rounded-lg bg-green-50 dark:bg-green-900/40 p-3 border border-green-300 dark:border-green-700">
+                        <p className="text-xs text-green-700 dark:text-green-400 uppercase tracking-wider mb-1">Frequência ativa (configurada por você)</p>
+                        <p className="font-bold text-green-900 dark:text-green-100 text-sm">{getOperationModeLabel(tradeConfig?.mode ?? 'test_sem_limites')}</p>
+                      </div>
+
+                      {/* Sugestão das IAs (apenas informativo) */}
+                      <div className="rounded-lg bg-violet-50 dark:bg-violet-900/30 p-3 border border-violet-200 dark:border-violet-700">
+                        <p className="text-xs text-violet-500 dark:text-violet-400 uppercase tracking-wider mb-1">Sugestão das IAs (informativo)</p>
+                        <p className="font-medium text-violet-700 dark:text-violet-300 text-sm">{getOperationModeLabel(autoDecision.mode)}</p>
                       </div>
 
                       {/* Métricas */}
@@ -1260,14 +1259,14 @@ export default function TradingSystemPage() {
 
                 <Separator />
 
-                <div className={`p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-sm text-blue-800 dark:text-blue-200 transition-opacity ${autoMode ? "opacity-50" : ""}`}>
+                <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-sm text-blue-800 dark:text-blue-200">
                   {autoMode
-                    ? <><strong>Modo Automático:</strong> As 5 IAs estão alternando as modalidades autonomamente. As seleções abaixo refletem as escolhas das IAs em tempo real.</>
+                    ? <><strong>Modo Automático ativo:</strong> As 5 IAs analisam o mercado e executam operações na frequência que você configurou, usando as modalidades selecionadas abaixo. Sua frequência e modalidades são sempre respeitadas.</>
                     : <><strong>Como funciona:</strong> Marque qualquer combinação de modalidades. O sistema opera simultânea e alternadamente entre todas as ativas, priorizando as mais rentáveis e seguras a cada momento. As IAs rebalanceiam os pesos em tempo real.</>
                   }
                 </div>
 
-                <div className={`transition-opacity duration-300 ${autoMode ? "opacity-50 pointer-events-none" : ""}`}>
+                <div className="transition-opacity duration-300">
                 {(() => {
                   const riskColors: Record<string, string> = {
                     green: "text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800",
