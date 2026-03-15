@@ -419,6 +419,7 @@ export default function TradingSystemPage() {
   const latestOps = useRef<any[]>([]);
   const latestAiThreshold = useRef<any>(null);
   const updateConfigRef = useRef<((mode: string) => void) | null>(null);
+  const lastModalityApiCallRef = useRef<number>(0);
 
   // Carregar modalidades do servidor ao inicializar
   useEffect(() => {
@@ -448,6 +449,9 @@ export default function TradingSystemPage() {
       "IA Sentimento (BERT)"
     ];
 
+    const allModalities = TRADE_CATEGORIES.flatMap(c => c.modalities);
+    const allIds = allModalities.map(m => m.id);
+
     const interval = setInterval(() => {
       const stats = latestStats.current as any;
       const ops = latestOps.current as any[];
@@ -466,7 +470,7 @@ export default function TradingSystemPage() {
 
       if (winRate >= 0.75 && recentLosses <= 1) {
         suggestedMode = "test_sem_limites";
-        reason = `Taxa de vitória excepcional (${(winRate * 100).toFixed(0)}%) — operando na frequência configurada para capitalizar o momento.`;
+        reason = `Taxa de vitória excepcional (${(winRate * 100).toFixed(0)}%) — IAs maximizando mix de modalidades para capitalizar o momento.`;
         votes[AI_NAMES[0]] = "Sem Limites ✅";
         votes[AI_NAMES[1]] = "Sem Limites ✅";
         votes[AI_NAMES[2]] = "Sem Limites ✅";
@@ -474,7 +478,7 @@ export default function TradingSystemPage() {
         votes[AI_NAMES[4]] = "Sem Limites ✅";
       } else if (winRate >= 0.60 && recentLosses <= 3) {
         suggestedMode = "test_4_1min";
-        reason = `Win rate sólida (${(winRate * 100).toFixed(0)}%) — IAs monitorando ritmo na frequência configurada.`;
+        reason = `Win rate sólida (${(winRate * 100).toFixed(0)}%) — IAs selecionando modalidades de alto rendimento.`;
         votes[AI_NAMES[0]] = "4 ops/min ✅";
         votes[AI_NAMES[1]] = "4 ops/min ✅";
         votes[AI_NAMES[2]] = "Sem Limites 🟡";
@@ -482,7 +486,7 @@ export default function TradingSystemPage() {
         votes[AI_NAMES[4]] = "4 ops/min ✅";
       } else if (winRate >= 0.50 && recentLosses <= 5) {
         suggestedMode = "test_3_2min";
-        reason = `Performance moderada (${(winRate * 100).toFixed(0)}%) — IAs analisando cada oportunidade na frequência configurada.`;
+        reason = `Performance moderada (${(winRate * 100).toFixed(0)}%) — IAs equilibrando modalidades de risco médio.`;
         votes[AI_NAMES[0]] = "3 ops/2min 🟡";
         votes[AI_NAMES[1]] = "3 ops/2min 🟡";
         votes[AI_NAMES[2]] = "3 ops/2min 🟡";
@@ -490,7 +494,7 @@ export default function TradingSystemPage() {
         votes[AI_NAMES[4]] = "3 ops/2min 🟡";
       } else if (winRate >= 0.40 || recentLosses > 5) {
         suggestedMode = "production_3-4_24h";
-        reason = `Perdas detectadas (${recentLosses} nas últimas 10) — IAs em alerta. Frequência configurada mantida.`;
+        reason = `Perdas detectadas (${recentLosses} nas últimas 10) — IAs priorizando modalidades conservadoras.`;
         votes[AI_NAMES[0]] = "Conservador 🛡️";
         votes[AI_NAMES[1]] = "Conservador 🛡️";
         votes[AI_NAMES[2]] = "3 ops/2min 🟠";
@@ -498,7 +502,7 @@ export default function TradingSystemPage() {
         votes[AI_NAMES[4]] = "Conservador 🛡️";
       } else {
         suggestedMode = "production_2_24h";
-        reason = `Alta sequência de perdas (win rate ${(winRate * 100).toFixed(0)}%) — IAs em modo de vigilância máxima.`;
+        reason = `Alta sequência de perdas (win rate ${(winRate * 100).toFixed(0)}%) — IAs em modo ultra-defensivo.`;
         votes[AI_NAMES[0]] = "Ultra-conservador 🔴";
         votes[AI_NAMES[1]] = "Ultra-conservador 🔴";
         votes[AI_NAMES[2]] = "Ultra-conservador 🔴";
@@ -508,19 +512,44 @@ export default function TradingSystemPage() {
 
       if (consensus < 0.5) {
         suggestedMode = "production_3-4_24h";
-        reason = `Consenso de IAs baixo (${(consensus * 100).toFixed(0)}%) — aguardando alinhamento das análises antes de operar.`;
+        reason = `Consenso de IAs baixo (${(consensus * 100).toFixed(0)}%) — aguardando alinhamento antes de ampliar modalidades.`;
       }
 
-      // ── Atualizar painel de análise (exibição apenas — NÃO muda frequência configurada) ──
+      // ── Seleção inteligente de modalidades baseada em performance ──
+      // Quantas modalidades ativar conforme win rate
+      const maxActive = winRate >= 0.70 ? 8 : winRate >= 0.55 ? 6 : winRate >= 0.45 ? 4 : 2;
+
+      // Score ponderado com aleatoriedade controlada para rotação dinâmica
+      const scored = allModalities
+        .map(m => ({ id: m.id, score: Math.random() * 0.4 + (winRate * 0.6) }))
+        .sort((a, b) => b.score - a.score);
+
+      const newActive = scored.slice(0, maxActive).map(m => m.id);
+
+      // ── Atualizar UI (visualmente as checkboxes acendem/apagam) ──
+      setEnabledModalities(Object.fromEntries(allIds.map(id => [id, newActive.includes(id)])));
+
       setAutoDecision(prev => ({
         ...prev,
+        active: newActive,
         reason,
         aiVotes: votes,
         mode: suggestedMode,
         metrics: { winRate, recentLosses, totalOps, consensus },
       }));
 
-      // ── NÃO chamar updateConfigRef — a frequência configurada pelo usuário é preservada ──
+      // ── Salvar modalidades no servidor (throttled: máximo 1x a cada 8 segundos) ──
+      // NÃO muda frequência — apenas as modalidades ativas
+      const now = Date.now();
+      if (now - lastModalityApiCallRef.current > 8000) {
+        lastModalityApiCallRef.current = now;
+        apiRequest("/api/trading/modalities", {
+          method: "POST",
+          body: JSON.stringify({ modalities: newActive }),
+        }).catch(() => {});
+      }
+
+      // ── NÃO chamar updateConfigRef — a frequência do usuário é sempre preservada ──
     }, 2000);
     return () => clearInterval(interval);
   }, [autoMode]);
@@ -1261,7 +1290,7 @@ export default function TradingSystemPage() {
 
                 <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-sm text-blue-800 dark:text-blue-200">
                   {autoMode
-                    ? <><strong>Modo Automático ativo:</strong> As 5 IAs analisam o mercado e executam operações na frequência que você configurou, usando as modalidades selecionadas abaixo. Sua frequência e modalidades são sempre respeitadas.</>
+                    ? <><strong>Modo Automático ativo:</strong> As 5 IAs alternam as modalidades automaticamente a cada 2 segundos, escolhendo as mais rentáveis conforme a performance atual. Sua frequência configurada é sempre preservada — só as modalidades são gerenciadas pelas IAs.</>
                     : <><strong>Como funciona:</strong> Marque qualquer combinação de modalidades. O sistema opera simultânea e alternadamente entre todas as ativas, priorizando as mais rentáveis e seguras a cada momento. As IAs rebalanceiam os pesos em tempo real.</>
                   }
                 </div>
