@@ -55,6 +55,14 @@ import {
   BarChart2,
   Equal,
   Loader2,
+  Shuffle,
+  Divide,
+  Percent,
+  Binary,
+  Crosshair,
+  Radio,
+  ScanLine,
+  Sigma,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -418,234 +426,101 @@ const TRADE_CATEGORIES: TradeCategory[] = [
 
 // ─── HELPERS PARA CARD DE OPERAÇÕES ──────────────────────────────────────────
 
+// ── mapeamento central: contractType/tradeType → metadados visuais
+const CONTRACT_MAP: Record<string, { label: string; sublabel: (b: any) => string; Icon: any; iconBg: string; detail: string }> = {
+  // Digit Differs — Shuffle: embaralha dígitos, claramente "diferente"
+  DIGITDIFF:    { label: 'Digit Differs', sublabel: b => b != null ? `Dígito ≠ ${b}` : 'Dígito diferente', Icon: Shuffle,       iconBg: 'bg-blue-500',    detail: 'Último dígito ≠ alvo' },
+  digit_differs:{ label: 'Digit Differs', sublabel: b => b != null ? `Dígito ≠ ${b}` : 'Dígito diferente', Icon: Shuffle,       iconBg: 'bg-blue-500',    detail: 'Último dígito ≠ alvo' },
+  // Digit Matches — Equal: sinal de igual
+  DIGITMATCH:   { label: 'Digit Matches', sublabel: b => b != null ? `Dígito = ${b}` : 'Dígito igual',     Icon: Equal,         iconBg: 'bg-indigo-500',  detail: 'Último dígito = alvo' },
+  digit_matches:{ label: 'Digit Matches', sublabel: b => b != null ? `Dígito = ${b}` : 'Dígito igual',     Icon: Equal,         iconBg: 'bg-indigo-500',  detail: 'Último dígito = alvo' },
+  // Digit Even — Divide: símbolo de divisão → par/divisível
+  DIGITEVEN:    { label: 'Digit Par',     sublabel: _ => 'Último dígito par',                               Icon: Divide,        iconBg: 'bg-teal-500',    detail: 'Dígito par (0,2,4,6,8)' },
+  digit_even:   { label: 'Digit Par',     sublabel: _ => 'Último dígito par',                               Icon: Divide,        iconBg: 'bg-teal-500',    detail: 'Dígito par (0,2,4,6,8)' },
+  // Digit Odd — Percent: símbolo de porcentagem/frações → ímpar/irregular
+  DIGITODD:     { label: 'Digit Ímpar',   sublabel: _ => 'Último dígito ímpar',                             Icon: Percent,       iconBg: 'bg-purple-500',  detail: 'Dígito ímpar (1,3,5,7,9)' },
+  digit_odd:    { label: 'Digit Ímpar',   sublabel: _ => 'Último dígito ímpar',                             Icon: Percent,       iconBg: 'bg-purple-500',  detail: 'Dígito ímpar (1,3,5,7,9)' },
+  // Digit Over — ChevronUp: acima do alvo
+  DIGITOVER:    { label: 'Digit Acima',   sublabel: b => b != null ? `Dígito > ${b}` : 'Dígito acima',     Icon: ChevronUp,     iconBg: 'bg-emerald-500', detail: 'Último dígito > alvo' },
+  digit_over:   { label: 'Digit Acima',   sublabel: b => b != null ? `Dígito > ${b}` : 'Dígito acima',     Icon: ChevronUp,     iconBg: 'bg-emerald-500', detail: 'Último dígito > alvo' },
+  // Digit Under — ChevronDown: abaixo do alvo
+  DIGITUNDER:   { label: 'Digit Abaixo',  sublabel: b => b != null ? `Dígito < ${b}` : 'Dígito abaixo',   Icon: ChevronDown,   iconBg: 'bg-orange-500',  detail: 'Último dígito < alvo' },
+  digit_under:  { label: 'Digit Abaixo',  sublabel: b => b != null ? `Dígito < ${b}` : 'Dígito abaixo',   Icon: ChevronDown,   iconBg: 'bg-orange-500',  detail: 'Último dígito < alvo' },
+  // Accumulator — Layers: camadas acumulando lucro tick a tick
+  ACCU:         { label: 'Acumulador',    sublabel: _ => 'Lucro acumula por tick',                          Icon: Layers,        iconBg: 'bg-cyan-500',    detail: 'Cresce 2% por tick' },
+  accumulator:  { label: 'Acumulador',    sublabel: _ => 'Lucro acumula por tick',                          Icon: Layers,        iconBg: 'bg-cyan-500',    detail: 'Cresce 2% por tick' },
+  // Rise/Call — TrendingUp: preço sobe
+  CALL:         { label: 'Alta (Rise)',   sublabel: _ => 'Preço fecha acima',                               Icon: TrendingUp,    iconBg: 'bg-green-500',   detail: 'Contrato de alta' },
+  rise:         { label: 'Alta (Rise)',   sublabel: _ => 'Preço fecha acima',                               Icon: TrendingUp,    iconBg: 'bg-green-500',   detail: 'Contrato de alta' },
+  higher:       { label: 'Alta (Rise)',   sublabel: _ => 'Preço fecha acima',                               Icon: TrendingUp,    iconBg: 'bg-green-500',   detail: 'Contrato de alta' },
+  // Fall/Put — TrendingDown: preço cai
+  PUT:          { label: 'Queda (Fall)', sublabel: _ => 'Preço fecha abaixo',                               Icon: TrendingDown,  iconBg: 'bg-red-500',     detail: 'Contrato de baixa' },
+  fall:         { label: 'Queda (Fall)', sublabel: _ => 'Preço fecha abaixo',                               Icon: TrendingDown,  iconBg: 'bg-red-500',     detail: 'Contrato de baixa' },
+  lower:        { label: 'Queda (Fall)', sublabel: _ => 'Preço fecha abaixo',                               Icon: TrendingDown,  iconBg: 'bg-red-500',     detail: 'Contrato de baixa' },
+  // Multiplier Up — ArrowUpRight: diagonal amplia o lucro na alta
+  MULTUP:        { label: 'Multiplicador ×↑', sublabel: _ => 'Lucro alavancado na alta',                   Icon: ArrowUpRight,  iconBg: 'bg-green-600',   detail: 'Stop loss + Take profit automático' },
+  multiplier_up: { label: 'Multiplicador ×↑', sublabel: _ => 'Lucro alavancado na alta',                   Icon: ArrowUpRight,  iconBg: 'bg-green-600',   detail: 'Stop loss + Take profit automático' },
+  // Multiplier Down — ArrowDownRight: diagonal amplia o lucro na queda
+  MULTDOWN:      { label: 'Multiplicador ×↓', sublabel: _ => 'Lucro alavancado na queda',                  Icon: ArrowDownRight,iconBg: 'bg-red-600',     detail: 'Stop loss + Take profit automático' },
+  multiplier_down:{ label: 'Multiplicador ×↓',sublabel: _ => 'Lucro alavancado na queda',                  Icon: ArrowDownRight,iconBg: 'bg-red-600',     detail: 'Stop loss + Take profit automático' },
+  // Touch — Crosshair: mira exata num nível de preço
+  ONETOUCH:     { label: 'Touch',         sublabel: _ => 'Toca a barreira',                                 Icon: Crosshair,     iconBg: 'bg-amber-500',   detail: 'Ganha ao tocar a barreira' },
+  touch:        { label: 'Touch',         sublabel: _ => 'Toca a barreira',                                 Icon: Crosshair,     iconBg: 'bg-amber-500',   detail: 'Ganha ao tocar a barreira' },
+  // No Touch — Radio: ondas sem contato com a barreira
+  NOTOUCH:      { label: 'No Touch',      sublabel: _ => 'Não toca a barreira',                             Icon: Radio,         iconBg: 'bg-gray-500',    detail: 'Ganha sem tocar a barreira' },
+  no_touch:     { label: 'No Touch',      sublabel: _ => 'Não toca a barreira',                             Icon: Radio,         iconBg: 'bg-gray-500',    detail: 'Ganha sem tocar a barreira' },
+  // Turbo Up — Zap alta: corrente elétrica upward
+  TURBOSLONG:   { label: 'Turbo ↑',      sublabel: _ => 'Knockout de alta',                                 Icon: Zap,           iconBg: 'bg-yellow-500',  detail: 'Alta com barreira knockout' },
+  turbo_up:     { label: 'Turbo ↑',      sublabel: _ => 'Knockout de alta',                                 Icon: Zap,           iconBg: 'bg-yellow-500',  detail: 'Alta com barreira knockout' },
+  // Turbo Down — Zap queda: mesma energia, direção oposta (cor diferente)
+  TURBOSSHORT:  { label: 'Turbo ↓',      sublabel: _ => 'Knockout de baixa',                                Icon: Zap,           iconBg: 'bg-orange-600',  detail: 'Queda com barreira knockout' },
+  turbo_down:   { label: 'Turbo ↓',      sublabel: _ => 'Knockout de baixa',                                Icon: Zap,           iconBg: 'bg-orange-600',  detail: 'Queda com barreira knockout' },
+  // Vanilla Call — BarChart2: gráfico de opções de compra
+  VANILLALONGCALL: { label: 'Vanilla Call', sublabel: _ => 'Opção de compra',                              Icon: BarChart2,     iconBg: 'bg-blue-600',    detail: 'Opção financeira de alta' },
+  vanilla_call:    { label: 'Vanilla Call', sublabel: _ => 'Opção de compra',                              Icon: BarChart2,     iconBg: 'bg-blue-600',    detail: 'Opção financeira de alta' },
+  // Vanilla Put — BarChart3: gráfico invertido (put)
+  VANILLALONGPUT:  { label: 'Vanilla Put',  sublabel: _ => 'Opção de venda',                               Icon: BarChart3,     iconBg: 'bg-pink-600',    detail: 'Opção financeira de baixa' },
+  vanilla_put:     { label: 'Vanilla Put',  sublabel: _ => 'Opção de venda',                               Icon: BarChart3,     iconBg: 'bg-pink-600',    detail: 'Opção financeira de baixa' },
+  // Lookbacks — Maximize2: expande pra capturar máximo/mínimo do período
+  LBFLOATPUT:       { label: 'Lookback H-C', sublabel: _ => 'Máximo − Fechamento',                         Icon: Maximize2,     iconBg: 'bg-violet-500',  detail: 'Paga (Máximo − Fechamento)' },
+  lookback_high_close:{ label: 'Lookback H-C',sublabel: _ => 'Máximo − Fechamento',                        Icon: Maximize2,     iconBg: 'bg-violet-500',  detail: 'Paga (Máximo − Fechamento)' },
+  LBFLOATCALL:      { label: 'Lookback C-L', sublabel: _ => 'Fechamento − Mínimo',                         Icon: Maximize2,     iconBg: 'bg-violet-600',  detail: 'Paga (Fechamento − Mínimo)' },
+  lookback_close_low:{ label: 'Lookback C-L',sublabel: _ => 'Fechamento − Mínimo',                         Icon: Maximize2,     iconBg: 'bg-violet-600',  detail: 'Paga (Fechamento − Mínimo)' },
+  LBHIGHLOW:        { label: 'Lookback H-L', sublabel: _ => 'Máximo − Mínimo',                             Icon: Maximize2,     iconBg: 'bg-violet-700',  detail: 'Paga (Máximo − Mínimo)' },
+  lookback_high_low:{ label: 'Lookback H-L', sublabel: _ => 'Máximo − Mínimo',                             Icon: Maximize2,     iconBg: 'bg-violet-700',  detail: 'Paga (Máximo − Mínimo)' },
+  // In/Out — ScanLine: varredura dentro/fora de uma faixa
+  EXPIRYRANGE:  { label: 'Termina Entre', sublabel: _ => 'Dentro do range',                                 Icon: ScanLine,      iconBg: 'bg-sky-500',     detail: 'Termina entre as barreiras' },
+  ends_between: { label: 'Termina Entre', sublabel: _ => 'Dentro do range',                                 Icon: ScanLine,      iconBg: 'bg-sky-500',     detail: 'Termina entre as barreiras' },
+  EXPIRYMISS:   { label: 'Termina Fora',  sublabel: _ => 'Fora do range',                                   Icon: ScanLine,      iconBg: 'bg-sky-600',     detail: 'Termina fora das barreiras' },
+  ends_outside: { label: 'Termina Fora',  sublabel: _ => 'Fora do range',                                   Icon: ScanLine,      iconBg: 'bg-sky-600',     detail: 'Termina fora das barreiras' },
+  RANGE:        { label: 'Fica Entre',    sublabel: _ => 'Permanece no range',                               Icon: ScanLine,      iconBg: 'bg-cyan-600',    detail: 'Permanece entre as barreiras' },
+  stays_between:{ label: 'Fica Entre',    sublabel: _ => 'Permanece no range',                               Icon: ScanLine,      iconBg: 'bg-cyan-600',    detail: 'Permanece entre as barreiras' },
+  UPORDOWN:     { label: 'Sai do Range',  sublabel: _ => 'Ultrapassa barreira',                              Icon: ScanLine,      iconBg: 'bg-cyan-700',    detail: 'Sai do intervalo de barreiras' },
+  goes_outside: { label: 'Sai do Range',  sublabel: _ => 'Ultrapassa barreira',                              Icon: ScanLine,      iconBg: 'bg-cyan-700',    detail: 'Sai do intervalo de barreiras' },
+};
+
 function getContractInfo(op: any): {
   label: string;
   sublabel: string;
-  icon: React.ReactNode;
+  Icon: any;
   iconBg: string;
   detail: string;
 } {
-  const ct = (op.contractType || op.tradeType || '').toUpperCase();
+  const ct = (op.contractType || '').toUpperCase();
   const tt = (op.tradeType || '').toLowerCase();
   const dir = (op.direction || 'up').toLowerCase();
   const barrier = op.barrier;
 
-  // ── Digit Differs
-  if (ct === 'DIGITDIFF' || tt === 'digitdiff' || tt === 'digit_differs') {
-    return {
-      label: 'Digit Differs',
-      sublabel: barrier != null ? `Dígito ≠ ${barrier}` : 'Dígito diferente',
-      icon: <span className="text-base font-bold">≠</span>,
-      iconBg: 'bg-blue-500',
-      detail: barrier != null ? `Dígito alvo ≠ ${barrier}` : 'Dígito diferente',
-    };
+  const entry = CONTRACT_MAP[ct] || CONTRACT_MAP[tt];
+  if (entry) {
+    return { label: entry.label, sublabel: entry.sublabel(barrier), Icon: entry.Icon, iconBg: entry.iconBg, detail: entry.detail };
   }
-  // ── Digit Matches
-  if (ct === 'DIGITMATCH' || tt === 'digitmatch' || tt === 'digit_matches') {
-    return {
-      label: 'Digit Matches',
-      sublabel: barrier != null ? `Dígito = ${barrier}` : 'Dígito igual',
-      icon: <Equal className="h-4 w-4" />,
-      iconBg: 'bg-indigo-500',
-      detail: barrier != null ? `Dígito alvo = ${barrier}` : 'Dígito igual',
-    };
-  }
-  // ── Digit Even
-  if (ct === 'DIGITEVEN' || tt === 'digiteven' || tt === 'digit_even') {
-    return {
-      label: 'Digit Par',
-      sublabel: 'Último dígito par',
-      icon: <span className="text-base font-bold">2</span>,
-      iconBg: 'bg-teal-500',
-      detail: 'Último dígito par (0,2,4,6,8)',
-    };
-  }
-  // ── Digit Odd
-  if (ct === 'DIGITODD' || tt === 'digitodd' || tt === 'digit_odd') {
-    return {
-      label: 'Digit Ímpar',
-      sublabel: 'Último dígito ímpar',
-      icon: <span className="text-base font-bold">3</span>,
-      iconBg: 'bg-purple-500',
-      detail: 'Último dígito ímpar (1,3,5,7,9)',
-    };
-  }
-  // ── Digit Over
-  if (ct === 'DIGITOVER' || tt === 'digitover' || tt === 'digit_over') {
-    return {
-      label: 'Digit Acima',
-      sublabel: barrier != null ? `Dígito > ${barrier}` : 'Dígito acima',
-      icon: <><Hash className="h-3 w-3" /><ChevronUp className="h-3 w-3" /></>,
-      iconBg: 'bg-emerald-500',
-      detail: barrier != null ? `Último dígito > ${barrier}` : 'Dígito acima',
-    };
-  }
-  // ── Digit Under
-  if (ct === 'DIGITUNDER' || tt === 'digitunder' || tt === 'digit_under') {
-    return {
-      label: 'Digit Abaixo',
-      sublabel: barrier != null ? `Dígito < ${barrier}` : 'Dígito abaixo',
-      icon: <><Hash className="h-3 w-3" /><ChevronDown className="h-3 w-3" /></>,
-      iconBg: 'bg-orange-500',
-      detail: barrier != null ? `Último dígito < ${barrier}` : 'Dígito abaixo',
-    };
-  }
-  // ── Accumulator
-  if (ct === 'ACCU' || tt === 'accumulator') {
-    return {
-      label: 'Acumulador',
-      sublabel: 'Lucro acumula por tick',
-      icon: <TrendingUp className="h-4 w-4" />,
-      iconBg: 'bg-cyan-500',
-      detail: 'Crescimento 2% por tick',
-    };
-  }
-  // ── Rise / Call
-  if (ct === 'CALL' || tt === 'rise' || tt === 'higher') {
-    return {
-      label: 'Alta (Rise)',
-      sublabel: 'Preço sobe',
-      icon: <ArrowUp className="h-4 w-4" />,
-      iconBg: 'bg-green-500',
-      detail: dir === 'up' ? 'Contrato de alta' : 'Contrato de alta',
-    };
-  }
-  // ── Fall / Put
-  if (ct === 'PUT' || tt === 'fall' || tt === 'lower') {
-    return {
-      label: 'Queda (Fall)',
-      sublabel: 'Preço cai',
-      icon: <ArrowDown className="h-4 w-4" />,
-      iconBg: 'bg-red-500',
-      detail: 'Contrato de baixa',
-    };
-  }
-  // ── Multiplier Up
-  if (ct === 'MULTUP' || tt === 'multiplier_up') {
-    return {
-      label: 'Multiplicador ↑',
-      sublabel: 'Lucro multiplicado na alta',
-      icon: <ArrowUpRight className="h-4 w-4" />,
-      iconBg: 'bg-green-600',
-      detail: 'Stop loss + Take profit automático',
-    };
-  }
-  // ── Multiplier Down
-  if (ct === 'MULTDOWN' || tt === 'multiplier_down') {
-    return {
-      label: 'Multiplicador ↓',
-      sublabel: 'Lucro multiplicado na queda',
-      icon: <ArrowDownRight className="h-4 w-4" />,
-      iconBg: 'bg-red-600',
-      detail: 'Stop loss + Take profit automático',
-    };
-  }
-  // ── Touch
-  if (ct === 'ONETOUCH' || tt === 'touch') {
-    return {
-      label: 'Touch',
-      sublabel: 'Toca a barreira',
-      icon: <Target className="h-4 w-4" />,
-      iconBg: 'bg-amber-500',
-      detail: 'Ganha se tocar a barreira',
-    };
-  }
-  // ── No Touch
-  if (ct === 'NOTOUCH' || tt === 'no_touch') {
-    return {
-      label: 'No Touch',
-      sublabel: 'Não toca a barreira',
-      icon: <Target className="h-4 w-4" />,
-      iconBg: 'bg-gray-500',
-      detail: 'Ganha sem tocar a barreira',
-    };
-  }
-  // ── Turbo Up
-  if (ct === 'TURBOSLONG' || tt === 'turbo_up') {
-    return {
-      label: 'Turbo ↑',
-      sublabel: 'Knockout de alta',
-      icon: <Zap className="h-4 w-4" />,
-      iconBg: 'bg-yellow-500',
-      detail: 'Alta com barreira knockout',
-    };
-  }
-  // ── Turbo Down
-  if (ct === 'TURBOSSHORT' || tt === 'turbo_down') {
-    return {
-      label: 'Turbo ↓',
-      sublabel: 'Knockout de baixa',
-      icon: <Zap className="h-4 w-4" />,
-      iconBg: 'bg-orange-600',
-      detail: 'Queda com barreira knockout',
-    };
-  }
-  // ── Vanilla Call
-  if (ct === 'VANILLALONGCALL' || tt === 'vanilla_call') {
-    return {
-      label: 'Vanilla Call',
-      sublabel: 'Opção de compra',
-      icon: <BarChart2 className="h-4 w-4" />,
-      iconBg: 'bg-blue-600',
-      detail: 'Opção financeira de alta',
-    };
-  }
-  // ── Vanilla Put
-  if (ct === 'VANILLALONGPUT' || tt === 'vanilla_put') {
-    return {
-      label: 'Vanilla Put',
-      sublabel: 'Opção de venda',
-      icon: <BarChart2 className="h-4 w-4" />,
-      iconBg: 'bg-pink-600',
-      detail: 'Opção financeira de baixa',
-    };
-  }
-  // ── Lookbacks
-  if (ct === 'LBFLOATPUT' || tt === 'lookback_high_close') {
-    return {
-      label: 'Lookback H-C',
-      sublabel: 'Máx − Fechamento',
-      icon: <Maximize2 className="h-4 w-4" />,
-      iconBg: 'bg-violet-500',
-      detail: 'Paga (Máximo − Fechamento)',
-    };
-  }
-  if (ct === 'LBFLOATCALL' || tt === 'lookback_close_low') {
-    return {
-      label: 'Lookback C-L',
-      sublabel: 'Fechamento − Mín',
-      icon: <Maximize2 className="h-4 w-4" />,
-      iconBg: 'bg-violet-600',
-      detail: 'Paga (Fechamento − Mínimo)',
-    };
-  }
-  if (ct === 'LBHIGHLOW' || tt === 'lookback_high_low') {
-    return {
-      label: 'Lookback H-L',
-      sublabel: 'Máximo − Mínimo',
-      icon: <Maximize2 className="h-4 w-4" />,
-      iconBg: 'bg-violet-700',
-      detail: 'Paga (Máximo − Mínimo)',
-    };
-  }
-  // ── In/Out
-  if (ct === 'EXPIRYRANGE' || tt === 'ends_between') {
-    return { label: 'Termina Entre', sublabel: 'Dentro do range', icon: <ArrowUpDown className="h-4 w-4" />, iconBg: 'bg-sky-500', detail: 'Termina dentro das barreiras' };
-  }
-  if (ct === 'EXPIRYMISS' || tt === 'ends_outside') {
-    return { label: 'Termina Fora', sublabel: 'Fora do range', icon: <ArrowUpDown className="h-4 w-4" />, iconBg: 'bg-sky-600', detail: 'Termina fora das barreiras' };
-  }
-  if (ct === 'RANGE' || tt === 'stays_between') {
-    return { label: 'Fica Entre', sublabel: 'Permanece no range', icon: <ArrowUpDown className="h-4 w-4" />, iconBg: 'bg-cyan-600', detail: 'Permanece entre as barreiras' };
-  }
-  if (ct === 'UPORDOWN' || tt === 'goes_outside') {
-    return { label: 'Sai do Range', sublabel: 'Ultrapassa barreira', icon: <ArrowUpDown className="h-4 w-4" />, iconBg: 'bg-cyan-700', detail: 'Sai do intervalo de barreiras' };
-  }
-  // ── Fallback
+
+  // fallback baseado na direção
   return {
     label: ct || tt || 'Trade',
     sublabel: dir === 'up' ? 'Alta' : 'Baixa',
-    icon: dir === 'up' ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />,
+    Icon: dir === 'up' ? TrendingUp : TrendingDown,
     iconBg: dir === 'up' ? 'bg-green-500' : 'bg-red-500',
     detail: '',
   };
@@ -691,7 +566,7 @@ function OperationCard({ operation, compact = false }: { operation: any; compact
     >
       {/* Ícone do contrato */}
       <div className={`flex-shrink-0 w-10 h-10 rounded-xl ${info.iconBg} flex items-center justify-center text-white shadow-sm`}>
-        {info.icon}
+        <info.Icon className="h-5 w-5" />
       </div>
 
       {/* Info principal */}
