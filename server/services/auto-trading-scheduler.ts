@@ -2082,6 +2082,335 @@ export class AutoTradingScheduler {
    * - Win rate médio (40-60%) → Ticks normais
    * - Win rate baixo (<40%) → Ticks menores (sair rápido)
    */
+  // ─── CAMADA DE INTELIGÊNCIA ESTRATÉGICA ──────────────────────────────────────
+  // Analisa condições de mercado em tempo real e toma decisões como um trader humano.
+  // Cada parâmetro de contrato é calculado com base em dados reais, não fixo/hardcoded.
+
+  /**
+   * Analisa o estado atual do mercado usando o histórico de preços.
+   * Retorna volatilidade normalizada, tendência e distribuição de dígitos.
+   */
+  private analyzeMarketConditions(priceHistory: number[], symbol: string): {
+    volatility: number;         // 0-1: 0=estável, 1=extremamente volátil
+    volatilityPct: number;      // em % (ex: 0.3 = 0.3% de desvio médio)
+    trend: 'strong_up' | 'strong_down' | 'weak_up' | 'weak_down' | 'sideways';
+    trendStrength: number;      // 0-1
+    momentum: number;           // -1 a +1 (negativo=queda, positivo=alta)
+    digitEvenBias: number;      // 0-1 (>0.5 = mais pares nos últimos 100 ticks)
+    digitHighBias: number;      // 0-1 (>0.5 = mais dígitos >= 5)
+    reasoning: string[];        // log do raciocínio
+  } {
+    const reasoning: string[] = [];
+    const recent = priceHistory.slice(-100);
+    if (recent.length < 10) {
+      return { volatility: 0.5, volatilityPct: 0.3, trend: 'sideways', trendStrength: 0, momentum: 0, digitEvenBias: 0.5, digitHighBias: 0.5, reasoning: ['dados insuficientes'] };
+    }
+
+    // Calcular retornos tick a tick
+    const returns: number[] = [];
+    for (let i = 1; i < recent.length; i++) {
+      if (recent[i - 1] !== 0) returns.push((recent[i] - recent[i - 1]) / recent[i - 1]);
+    }
+
+    // Volatilidade = desvio padrão dos retornos
+    const meanReturn = returns.reduce((s, r) => s + r, 0) / returns.length;
+    const variance = returns.reduce((s, r) => s + Math.pow(r - meanReturn, 2), 0) / returns.length;
+    const stdDev = Math.sqrt(variance);
+    const volatilityPct = stdDev * 100; // em %
+
+    // Normalizar: <0.1% = baixo, 0.3% = médio, >0.7% = alto
+    const volatility = Math.min(1, volatilityPct / 0.7);
+    reasoning.push(`Volatilidade: ${volatilityPct.toFixed(3)}% (σ normalizado: ${volatility.toFixed(2)})`);
+
+    // Tendência: comparar média dos últimos 10 ticks vs 30 ticks anteriores
+    const last10 = recent.slice(-10);
+    const prev30 = recent.slice(-40, -10);
+    const avgLast10 = last10.reduce((s, p) => s + p, 0) / last10.length;
+    const avgPrev30 = prev30.length > 0 ? prev30.reduce((s, p) => s + p, 0) / prev30.length : avgLast10;
+    const priceDelta = avgPrev30 !== 0 ? (avgLast10 - avgPrev30) / avgPrev30 : 0;
+    const momentum = Math.max(-1, Math.min(1, priceDelta * 500)); // amplificado
+
+    let trend: 'strong_up' | 'strong_down' | 'weak_up' | 'weak_down' | 'sideways';
+    let trendStrength: number;
+    const absDelta = Math.abs(priceDelta) * 10000; // em bps
+
+    if (absDelta > 5) {
+      trend = priceDelta > 0 ? 'strong_up' : 'strong_down';
+      trendStrength = Math.min(1, absDelta / 20);
+    } else if (absDelta > 2) {
+      trend = priceDelta > 0 ? 'weak_up' : 'weak_down';
+      trendStrength = absDelta / 10;
+    } else {
+      trend = 'sideways';
+      trendStrength = 0;
+    }
+    reasoning.push(`Tendência: ${trend} | Força: ${(trendStrength * 100).toFixed(0)}% | Delta: ${(priceDelta * 10000).toFixed(1)}bps`);
+
+    // Distribuição de dígitos finais
+    const state = (digitFrequencyAnalyzer as any).states?.get(symbol);
+    let digitEvenBias = 0.5;
+    let digitHighBias = 0.5;
+    if (state && state.recentDigits && state.recentDigits.length >= 20) {
+      const recent100 = state.recentDigits.slice(-100);
+      const evenCount = recent100.filter((d: number) => d % 2 === 0).length;
+      const highCount = recent100.filter((d: number) => d >= 5).length;
+      digitEvenBias = evenCount / recent100.length;
+      digitHighBias = highCount / recent100.length;
+      reasoning.push(`Dígitos: ${(digitEvenBias * 100).toFixed(0)}% pares | ${(digitHighBias * 100).toFixed(0)}% altos (≥5)`);
+    }
+
+    return { volatility, volatilityPct, trend, trendStrength, momentum, digitEvenBias, digitHighBias, reasoning };
+  }
+
+  /**
+   * Escolhe a taxa de crescimento do Accumulator com base na volatilidade.
+   * Lógica: mercado volátil → crescimento menor (menos KO risk), mercado calmo → crescimento maior.
+   * Taxa disponíveis Deriv: 1%, 2%, 3%, 4%, 5%
+   */
+  private selectAccumulatorGrowthRate(volatility: number, consensusStrength: number): { rate: number; reason: string } {
+    if (volatility > 0.75) {
+      return { rate: 0.01, reason: `volatilidade ALTA (${(volatility * 100).toFixed(0)}%) → 1% para minimizar KO` };
+    } else if (volatility > 0.55) {
+      return { rate: 0.02, reason: `volatilidade MÉDIA-ALTA (${(volatility * 100).toFixed(0)}%) → 2% conservador` };
+    } else if (volatility > 0.35) {
+      // Consenso forte → 3%, consenso fraco → 2%
+      const rate = consensusStrength > 70 ? 0.03 : 0.02;
+      return { rate, reason: `volatilidade MÉDIA (${(volatility * 100).toFixed(0)}%) + consenso ${consensusStrength.toFixed(0)}% → ${(rate * 100).toFixed(0)}%` };
+    } else if (volatility > 0.18) {
+      const rate = consensusStrength > 75 ? 0.04 : 0.03;
+      return { rate, reason: `volatilidade BAIXA-MÉDIA (${(volatility * 100).toFixed(0)}%) + consenso ${consensusStrength.toFixed(0)}% → ${(rate * 100).toFixed(0)}%` };
+    } else {
+      // Mercado muito calmo + consenso forte → máxima taxa
+      const rate = consensusStrength > 72 ? 0.05 : 0.04;
+      return { rate, reason: `volatilidade BAIXA (${(volatility * 100).toFixed(0)}%) + consenso ${consensusStrength.toFixed(0)}% → ${(rate * 100).toFixed(0)}% (máximo ganho/tick)` };
+    }
+  }
+
+  /**
+   * Escolhe o multiplicador para contratos Multiplier.
+   * Lógica: confiança alta + mercado calmo = multiplicador maior = mais lucro.
+   * Deriv aceita: 10, 20, 30, 40, 50, 100, 150, 200, 250, 300, 400, 500
+   */
+  private selectMultiplier(consensusStrength: number, volatility: number): { mult: number; reason: string } {
+    if (volatility > 0.7) {
+      return { mult: 10, reason: `volatilidade ALTA (${(volatility * 100).toFixed(0)}%) → 10x para proteger capital` };
+    } else if (volatility > 0.45) {
+      const m = consensusStrength > 78 ? 20 : 10;
+      return { mult: m, reason: `volatilidade MÉDIA (${(volatility * 100).toFixed(0)}%) + consenso ${consensusStrength.toFixed(0)}% → ${m}x` };
+    } else if (volatility > 0.25) {
+      const m = consensusStrength > 80 ? 50 : (consensusStrength > 72 ? 20 : 10);
+      return { mult: m, reason: `volatilidade BAIXA-MÉDIA (${(volatility * 100).toFixed(0)}%) + consenso ${consensusStrength.toFixed(0)}% → ${m}x` };
+    } else {
+      const m = consensusStrength > 82 ? 100 : (consensusStrength > 76 ? 50 : (consensusStrength > 68 ? 20 : 10));
+      return { mult: m, reason: `volatilidade BAIXA (${(volatility * 100).toFixed(0)}%) + consenso ${consensusStrength.toFixed(0)}% → ${m}x (máximo lucro)` };
+    }
+  }
+
+  /**
+   * Escolhe duração para contratos Rise/Fall baseado na força da tendência.
+   * Tendência forte → duração curta (captura movimento imediato).
+   * Tendência fraca → duração maior (dá tempo para o movimento se confirmar).
+   * Retorna {duration, unit} compatível com a API Deriv.
+   */
+  private selectRiseFallDuration(trendStrength: number, trend: string): { duration: number; unit: string; reason: string } {
+    const isDirectional = trend !== 'sideways';
+    if (trend === 'strong_up' || trend === 'strong_down') {
+      // Tendência forte: 5 ticks — captura o movimento agora
+      return { duration: 5, unit: 't', reason: `tendência ${trend} forte (${(trendStrength * 100).toFixed(0)}%) → 5 ticks para capturar momentum` };
+    } else if (isDirectional && trendStrength > 0.3) {
+      // Tendência moderada: 1 minuto — dá tempo de desenvolver
+      return { duration: 1, unit: 'm', reason: `tendência ${trend} moderada (${(trendStrength * 100).toFixed(0)}%) → 1 min` };
+    } else if (isDirectional) {
+      // Tendência fraca: 2-3 minutos
+      return { duration: 2, unit: 'm', reason: `tendência ${trend} fraca (${(trendStrength * 100).toFixed(0)}%) → 2 min` };
+    } else {
+      // Sideways: evitar e usar 5 ticks como neutro
+      return { duration: 5, unit: 't', reason: `mercado lateral (${(trendStrength * 100).toFixed(0)}%) → 5 ticks neutro` };
+    }
+  }
+
+  /**
+   * Seleciona a barreira inteligente para DIGITOVER/DIGITUNDER baseado na frequência real.
+   * DIGITOVER X: apostamos que dígito final > X → queremos X mais BAIXO (menos dígitos acima)
+   *    → Analisa os dígitos mais quentes (frequentes): se dígitos altos estão quentes, usar threshold alto
+   *    → Ex: 7,8,9 são quentes (70%+ das vezes) → barrier=5 → ~70% chance de > 5
+   * DIGITUNDER X: apostamos que dígito final < X → queremos X mais ALTO
+   *    → Se dígitos baixos estão quentes → barrier=6 → ~alta chance de < 6
+   */
+  private selectDigitBarrierForOverUnder(symbol: string, type: 'over' | 'under'): { barrier: string; winRateEst: number; reason: string } {
+    try {
+      const state = (digitFrequencyAnalyzer as any).states?.get(symbol);
+      if (!state || state.recentDigits.length < 30) {
+        const def = type === 'over' ? '4' : '5';
+        return { barrier: def, winRateEst: 50, reason: `dados insuficientes → barreira padrão ${def}` };
+      }
+      const recent = state.recentDigits.slice(-100);
+      const counts = new Array(10).fill(0);
+      for (const d of recent) counts[d]++;
+      const total = recent.length;
+
+      if (type === 'over') {
+        // DIGITOVER X: dígito final > X. Queremos maximizar P(d > X).
+        // Calcular para cada X de 0 a 8 qual % dos últimos ticks tem dígito > X
+        let bestBarrier = 4;
+        let bestWinRate = 0;
+        for (let x = 0; x <= 8; x++) {
+          const aboveX = recent.filter((d: number) => d > x).length;
+          const wr = aboveX / total;
+          if (wr > bestWinRate && wr > 0.52) { // só se > 52% (melhor que neutro)
+            bestWinRate = wr;
+            bestBarrier = x;
+          }
+        }
+        // Verificar: se não encontrou nenhum bom, usar 4 (chance natural ~50%)
+        if (bestWinRate < 0.52) {
+          bestBarrier = 4;
+          bestWinRate = recent.filter((d: number) => d > 4).length / total;
+        }
+        return {
+          barrier: String(bestBarrier),
+          winRateEst: Math.round(bestWinRate * 100),
+          reason: `OVER ${bestBarrier}: ${(bestWinRate * 100).toFixed(1)}% dos últimos ${total} ticks tiveram dígito > ${bestBarrier}`
+        };
+      } else {
+        // DIGITUNDER X: dígito final < X. Queremos maximizar P(d < X).
+        let bestBarrier = 5;
+        let bestWinRate = 0;
+        for (let x = 1; x <= 9; x++) {
+          const belowX = recent.filter((d: number) => d < x).length;
+          const wr = belowX / total;
+          if (wr > bestWinRate && wr > 0.52) {
+            bestWinRate = wr;
+            bestBarrier = x;
+          }
+        }
+        if (bestWinRate < 0.52) {
+          bestBarrier = 5;
+          bestWinRate = recent.filter((d: number) => d < 5).length / total;
+        }
+        return {
+          barrier: String(bestBarrier),
+          winRateEst: Math.round(bestWinRate * 100),
+          reason: `UNDER ${bestBarrier}: ${(bestWinRate * 100).toFixed(1)}% dos últimos ${total} ticks tiveram dígito < ${bestBarrier}`
+        };
+      }
+    } catch {
+      const def = type === 'over' ? '4' : '5';
+      return { barrier: def, winRateEst: 50, reason: `erro na análise → barreira padrão ${def}` };
+    }
+  }
+
+  /**
+   * Seleção inteligente de modalidade quando múltiplas estão ativas.
+   * Em vez de pura rotação, analisa o que o mercado favorece agora.
+   * Retorna a modalidade com maior edge atual baseado na análise de mercado.
+   */
+  private selectModalityByMarketFit(
+    compatibleModalities: string[],
+    marketAnalysis: ReturnType<typeof AutoTradingScheduler.prototype.analyzeMarketConditions>,
+    digitAnalysis: any,
+    operationId: string
+  ): string {
+    if (compatibleModalities.length === 1) return compatibleModalities[0];
+
+    const scores: { modality: string; score: number; reason: string }[] = [];
+
+    for (const m of compatibleModalities) {
+      let score = 50; // base neutra
+      let reason = '';
+
+      if (m.startsWith('digit_')) {
+        const barrierData = digitFrequencyAnalyzer.getBestBarrier(m === 'digit_differs' ? digitAnalysis?.symbol || 'R_50' : '');
+        // Digits são bons quando há desvio estatístico claro
+        if (digitAnalysis && digitAnalysis.confidence > 60) {
+          score = 60 + digitAnalysis.confidence * 0.3;
+          reason = `edge estatístico ${digitAnalysis.edge?.toFixed(1)}%`;
+        } else {
+          score = 45;
+          reason = 'dados insuficientes';
+        }
+        // Digit even/odd tem vantagem quando há viés claro de par/ímpar
+        if (m === 'digit_even') {
+          const bias = Math.abs(marketAnalysis.digitEvenBias - 0.5);
+          if (marketAnalysis.digitEvenBias > 0.55) { score = 65 + bias * 80; reason = `${(marketAnalysis.digitEvenBias * 100).toFixed(0)}% pares (viés favorável)`; }
+          else { score -= 10; }
+        }
+        if (m === 'digit_odd') {
+          if (marketAnalysis.digitEvenBias < 0.45) { score = 65 + (0.5 - marketAnalysis.digitEvenBias) * 80; reason = `${((1 - marketAnalysis.digitEvenBias) * 100).toFixed(0)}% ímpares (viés favorável)`; }
+          else { score -= 10; }
+        }
+        if (m === 'digit_over' || m === 'digit_under') {
+          const highBias = Math.abs(marketAnalysis.digitHighBias - 0.5);
+          if ((m === 'digit_over' && marketAnalysis.digitHighBias > 0.54) ||
+              (m === 'digit_under' && marketAnalysis.digitHighBias < 0.46)) {
+            score = 62 + highBias * 80;
+            reason = `viés de ${m === 'digit_over' ? 'dígitos altos' : 'dígitos baixos'} detectado`;
+          } else { score -= 5; }
+        }
+
+      } else if (m === 'accumulator') {
+        // Accumulators são melhores em mercados laterais/baixa volatilidade (crescem sem knock-out)
+        score = 55 + (1 - marketAnalysis.volatility) * 30;
+        reason = `volatilidade ${(marketAnalysis.volatility * 100).toFixed(0)}% → ${marketAnalysis.volatility < 0.4 ? 'IDEAL para ACCU' : 'volatilidade alta penaliza ACCU'}`;
+
+      } else if (m === 'rise' || m === 'fall') {
+        // Rise/Fall são melhores com tendência clara
+        const favored = (m === 'rise' && (marketAnalysis.trend === 'strong_up' || marketAnalysis.trend === 'weak_up'))
+                     || (m === 'fall' && (marketAnalysis.trend === 'strong_down' || marketAnalysis.trend === 'weak_down'));
+        score = favored ? 70 + marketAnalysis.trendStrength * 20 : 35;
+        reason = favored ? `tendência ${marketAnalysis.trend} favorece ${m}` : `tendência oposta penaliza ${m}`;
+
+      } else if (m.startsWith('multiplier_')) {
+        // Multipliers são bons com tendência forte + baixa volatilidade
+        const isUp = m === 'multiplier_up';
+        const favored = (isUp && marketAnalysis.momentum > 0.2) || (!isUp && marketAnalysis.momentum < -0.2);
+        score = favored
+          ? 55 + marketAnalysis.trendStrength * 25 + (1 - marketAnalysis.volatility) * 15
+          : 30;
+        reason = favored ? `momentum ${marketAnalysis.momentum.toFixed(2)} favorece ${m}` : `momentum contrário penaliza ${m}`;
+
+      } else if (m.startsWith('lookback_')) {
+        // Lookbacks são melhores com ALTA volatilidade (captura maior range)
+        score = 40 + marketAnalysis.volatility * 45;
+        reason = `volatilidade ${(marketAnalysis.volatility * 100).toFixed(0)}% → ${marketAnalysis.volatility > 0.5 ? 'IDEAL para lookback' : 'baixa volatilidade limita ganho'}`;
+
+      } else if (m === 'touch' || m === 'no_touch') {
+        // Touch é melhor com tendência forte; no_touch com mercado lateral
+        if (m === 'touch') {
+          score = 40 + marketAnalysis.trendStrength * 40;
+          reason = `força de tendência ${(marketAnalysis.trendStrength * 100).toFixed(0)}%`;
+        } else {
+          score = 55 + (1 - marketAnalysis.trendStrength) * 25;
+          reason = `mercado ${marketAnalysis.trend} → ${marketAnalysis.trend === 'sideways' ? 'IDEAL para no_touch' : 'barreira ameaçada'}`;
+        }
+      } else {
+        score = 50;
+        reason = 'neutro';
+      }
+
+      scores.push({ modality: m, score, reason });
+    }
+
+    // Ordenar por score e selecionar com probabilidade ponderada (não sempre o melhor)
+    // → Evita repetição excessiva da mesma modalidade mas favorece a melhor
+    scores.sort((a, b) => b.score - a.score);
+    const top = scores.slice(0, Math.min(3, scores.length));
+
+    // Seleção ponderada entre os 3 melhores
+    const totalWeight = top.reduce((s, t) => s + t.score, 0);
+    let rand = Math.random() * totalWeight;
+    let selected = top[0];
+    for (const t of top) {
+      rand -= t.score;
+      if (rand <= 0) { selected = t; break; }
+    }
+
+    const logLines = scores.slice(0, 5).map(s => `${s.modality}=${s.score.toFixed(0)}(${s.reason})`).join(' | ');
+    console.log(`🧠 [${operationId}] Seleção inteligente de modalidade → ${selected.modality} (score ${selected.score.toFixed(0)})`);
+    console.log(`📊 [${operationId}] Ranking: ${logLines}`);
+    return selected.modality;
+  }
+
   private calculateDynamicTicks(symbol: string, baseTicks: number = 10): number {
     const performance = this.assetPerformance.get(symbol);
     if (!performance) return baseTicks;
