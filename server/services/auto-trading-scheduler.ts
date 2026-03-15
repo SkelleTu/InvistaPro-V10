@@ -1461,15 +1461,15 @@ export class AutoTradingScheduler {
 
         } else if (LOOKBACK_TYPES[selectedModality]) {
           // ── Contratos Lookback (LBFLOATPUT, LBFLOATCALL, LBHIGHLOW) ──
+          // Lookback usa "amount" como multiplicador e NÃO aceita o campo "basis"
           const contractType = LOOKBACK_TYPES[selectedModality];
-          console.log(`📊 [${operationId}] ${contractType}: multiplier basis | Symbol: ${selectedSymbol}`);
+          console.log(`📊 [${operationId}] ${contractType}: multiplier=${tradeParams.amount} | Symbol: ${selectedSymbol}`);
           contract = await derivAPI.buyFlexibleContract({
             contract_type: contractType,
             symbol: selectedSymbol,
-            amount: tradeParams.amount,
+            amount: Math.max(1, Math.round(tradeParams.amount)), // multiplier deve ser inteiro >= 1
             duration: 5,
             duration_unit: 'm',
-            basis: 'multiplier',
           });
           if (!contract) {
             console.warn(`⚠️ [${operationId}] Lookback rejeitado pela Deriv (conta demo?) → fallback DIGITDIFF`);

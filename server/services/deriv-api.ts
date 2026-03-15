@@ -1213,8 +1213,12 @@ export class DerivAPIService extends EventEmitter {
 
     const TIMEOUT_MS = 20000;
     const currency = params.currency || 'USD';
-    const basis = params.basis || 'stake';
     const reqProposalId = this.generateRequestId();
+
+    // Contratos Lookback (LBFLOATPUT, LBFLOATCALL, LBHIGHLOW) NÃO usam o campo "basis"
+    const LOOKBACK_TYPES = new Set(['LBFLOATPUT', 'LBFLOATCALL', 'LBHIGHLOW']);
+    const isLookback = LOOKBACK_TYPES.has(params.contract_type);
+    const basis = params.basis || 'stake';
 
     const proposalMsg: any = {
       proposal: 1,
@@ -1222,9 +1226,13 @@ export class DerivAPIService extends EventEmitter {
       symbol: params.symbol,
       currency,
       amount: params.amount,
-      basis,
       req_id: reqProposalId,
     };
+
+    // Inserir "basis" apenas para contratos que o suportam
+    if (!isLookback) {
+      proposalMsg.basis = basis;
+    }
 
     if (params.duration !== undefined) {
       proposalMsg.duration = params.duration;

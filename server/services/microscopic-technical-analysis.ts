@@ -220,7 +220,8 @@ export class MicroscopicTechnicalAnalyzer extends EventEmitter {
       graphPatterns,
       volumeAnalysis,
       supportResistance,
-      digitAnalysis
+      digitAnalysis,
+      latestTick.quote
     );
 
     return {
@@ -580,12 +581,13 @@ export class MicroscopicTechnicalAnalyzer extends EventEmitter {
     patterns: GraphPattern[],
     volume: MicroscopicAnalysis['volumeAnalysis'],
     sr: MicroscopicAnalysis['supportResistance'],
-    digits: MicroscopicAnalysis['digitAnalysis']
+    digits: MicroscopicAnalysis['digitAnalysis'],
+    currentPrice: number
   ): MicroscopicAnalysis['cooperativeSignal'] {
     
     let upSignals = 0;
     let downSignals = 0;
-    let activeSignalsWeight = 0; // 🔥 CORRIGIDO: Peso apenas dos sinais ativos
+    let activeSignalsWeight = 0;
 
     // 1. Price Action (peso 25)
     if (priceAction.trend === 'up' && priceAction.strength > 30) {
@@ -623,14 +625,15 @@ export class MicroscopicTechnicalAnalyzer extends EventEmitter {
       activeSignalsWeight += 10;
     }
 
-    // 5. Bollinger Bands (peso 15)
-    const currentPrice = 1; // Placeholder
-    if (currentPrice < indicators.bollinger.lower) {
-      upSignals += 15;
-      activeSignalsWeight += 15;
-    } else if (currentPrice > indicators.bollinger.upper) {
-      downSignals += 15;
-      activeSignalsWeight += 15;
+    // 5. Bollinger Bands (peso 15) - usando preço real do ativo
+    if (currentPrice > 0 && indicators.bollinger.lower > 0 && indicators.bollinger.upper > 0) {
+      if (currentPrice < indicators.bollinger.lower) {
+        upSignals += 15;
+        activeSignalsWeight += 15;
+      } else if (currentPrice > indicators.bollinger.upper) {
+        downSignals += 15;
+        activeSignalsWeight += 15;
+      }
     }
 
     // 6. Digit Analysis (peso 15)
@@ -642,20 +645,44 @@ export class MicroscopicTechnicalAnalyzer extends EventEmitter {
       activeSignalsWeight += 15;
     }
 
+    // 7. Graph Patterns (peso 10) - padrões gráficos reais detectados
+    for (const pattern of patterns) {
+      if (pattern.direction === 'bullish' && pattern.reliability > 0.6) {
+        upSignals += 10 * pattern.reliability;
+        activeSignalsWeight += 10;
+      } else if (pattern.direction === 'bearish' && pattern.reliability > 0.6) {
+        downSignals += 10 * pattern.reliability;
+        activeSignalsWeight += 10;
+      }
+    }
+
+    // 8. Suporte/Resistência (peso 10)
+    if (currentPrice > 0 && sr.nearestSupport > 0 && sr.nearestResistance > 0) {
+      const distToSupport = Math.abs(currentPrice - sr.nearestSupport) / currentPrice;
+      const distToResistance = Math.abs(currentPrice - sr.nearestResistance) / currentPrice;
+      if (distToSupport < distToResistance && distToSupport < 0.005) {
+        upSignals += 10;
+        activeSignalsWeight += 10;
+      } else if (distToResistance < distToSupport && distToResistance < 0.005) {
+        downSignals += 10;
+        activeSignalsWeight += 10;
+      }
+    }
+
     const netSignal = upSignals - downSignals;
     
-    // 🔥 CORRIGIDO: Calcular confiança baseado APENAS nos sinais ativos
-    // Se activeSignalsWeight = 0, usar valor padrão baixo
     const confidence = activeSignalsWeight > 0 
-      ? Math.min(95, (Math.abs(netSignal) / activeSignalsWeight * 100) * 1.1) // Amplificador 1.1x
+      ? Math.min(90, (Math.abs(netSignal) / activeSignalsWeight * 100))
       : 0;
     
     let technicalDirection: 'up' | 'down' | 'neutral' = 'neutral';
     if (netSignal > 10) technicalDirection = 'up';
     else if (netSignal < -10) technicalDirection = 'down';
 
-    // Simulação de acordo com IA (será integrado depois)
-    const agreementWithAI = Math.random() * 0.4 + 0.6; // 60-100% acordo
+    // Acordo com IA baseado na força do sinal (sinal forte = mais alinhado)
+    const agreementWithAI = activeSignalsWeight > 0
+      ? Math.min(1, 0.5 + (Math.abs(netSignal) / (activeSignalsWeight * 2)))
+      : 0.5;
 
     return {
       technicalDirection,
