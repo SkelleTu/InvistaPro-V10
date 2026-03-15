@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -38,7 +38,10 @@ import {
   FlaskConical,
   ArrowUpDown,
   Circle,
-  ToggleLeft
+  ToggleLeft,
+  Sparkles,
+  RefreshCw,
+  Gauge
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -403,44 +406,111 @@ export default function TradingSystemPage() {
   const [autoMode, setAutoMode] = useState<boolean>(() => {
     try { return localStorage.getItem("trade_auto_mode") === "true"; } catch { return false; }
   });
-  const [autoDecision, setAutoDecision] = useState<{ active: string[]; reason: string; aiVotes: Record<string, string> }>({
+  const [autoDecision, setAutoDecision] = useState<{ active: string[]; reason: string; aiVotes: Record<string, string>; mode: string; metrics: { winRate: number; recentLosses: number; totalOps: number; consensus: number } }>({
     active: ["digit_differs"],
-    reason: "Aguardando análise...",
+    reason: "Iniciando análise inteligente das 5 IAs...",
     aiVotes: {},
+    mode: "test_sem_limites",
+    metrics: { winRate: 0, recentLosses: 0, totalOps: 0, consensus: 0 },
   });
+
+  const latestStats = useRef<any>(null);
+  const latestOps = useRef<any[]>([]);
+  const latestAiThreshold = useRef<any>(null);
+  const updateConfigRef = useRef<((mode: string) => void) | null>(null);
 
   useEffect(() => {
     if (!autoMode) return;
     const allIds = TRADE_CATEGORIES.flatMap(c => c.modalities.map(m => m.id));
-    const aiNames = ["IA Primária (LSTM)", "IA Secundária (XGBoost)", "IA Arbitragem (RL)", "IA Quântica", "IA Sentimento (BERT)"];
+    const totalActive = TRADE_CATEGORIES.flatMap(c => c.modalities);
+
+    const AI_NAMES = [
+      "IA Primária (LSTM)",
+      "IA Secundária (XGBoost)",
+      "IA Arbitragem (RL)",
+      "IA Quântica",
+      "IA Sentimento (BERT)"
+    ];
+
     const interval = setInterval(() => {
-      const totalActive = TRADE_CATEGORIES.flatMap(c => c.modalities);
+      const stats = latestStats.current as any;
+      const ops = latestOps.current as any[];
+      const aiThresh = latestAiThreshold.current as any;
+
+      const totalOps = stats?.totalOperations ?? ops?.length ?? 0;
+      const wins = stats?.successfulOperations ?? ops?.filter((o: any) => o.result === 'win').length ?? 0;
+      const winRate = totalOps > 0 ? wins / totalOps : 0.5;
+      const recentLosses = ops?.slice(0, 10).filter((o: any) => o.result === 'loss').length ?? 0;
+      const consensus = aiThresh?.currentThreshold ?? 0.7;
+
+      let chosenMode = "test_sem_limites";
+      let reason = "";
+      const votes: Record<string, string> = {};
+
+      if (winRate >= 0.75 && recentLosses <= 1) {
+        chosenMode = "test_sem_limites";
+        reason = `Taxa de vitória excepcional (${(winRate * 100).toFixed(0)}%) — IAs maximizando operações sem limites para capitalizar o momento de alta performance.`;
+        votes[AI_NAMES[0]] = "Sem Limites ✅";
+        votes[AI_NAMES[1]] = "Sem Limites ✅";
+        votes[AI_NAMES[2]] = "Sem Limites ✅";
+        votes[AI_NAMES[3]] = "Sem Limites ✅";
+        votes[AI_NAMES[4]] = "Sem Limites ✅";
+      } else if (winRate >= 0.60 && recentLosses <= 3) {
+        chosenMode = "test_4_1min";
+        reason = `Win rate sólida (${(winRate * 100).toFixed(0)}%) e baixas perdas recentes — acelerando ritmo para 4 ops/min com monitoramento contínuo.`;
+        votes[AI_NAMES[0]] = "4 ops/min ✅";
+        votes[AI_NAMES[1]] = "4 ops/min ✅";
+        votes[AI_NAMES[2]] = "Sem Limites 🟡";
+        votes[AI_NAMES[3]] = "4 ops/min ✅";
+        votes[AI_NAMES[4]] = "4 ops/min ✅";
+      } else if (winRate >= 0.50 && recentLosses <= 5) {
+        chosenMode = "test_3_2min";
+        reason = `Performance moderada (${(winRate * 100).toFixed(0)}%) — IAs adotando ritmo médio para equilibrar risco e retorno em tempo real.`;
+        votes[AI_NAMES[0]] = "3 ops/2min 🟡";
+        votes[AI_NAMES[1]] = "3 ops/2min 🟡";
+        votes[AI_NAMES[2]] = "3 ops/2min 🟡";
+        votes[AI_NAMES[3]] = "Produção 3-4 🟠";
+        votes[AI_NAMES[4]] = "3 ops/2min 🟡";
+      } else if (winRate >= 0.40 || recentLosses > 5) {
+        chosenMode = "production_3-4_24h";
+        reason = `Perdas detectadas (${recentLosses} nas últimas 10) — sistema entrando em modo conservador. IAs protegendo capital até reversão.`;
+        votes[AI_NAMES[0]] = "Conservador 🛡️";
+        votes[AI_NAMES[1]] = "Conservador 🛡️";
+        votes[AI_NAMES[2]] = "3 ops/2min 🟠";
+        votes[AI_NAMES[3]] = "Conservador 🛡️";
+        votes[AI_NAMES[4]] = "Conservador 🛡️";
+      } else {
+        chosenMode = "production_2_24h";
+        reason = `Alta sequência de perdas (win rate ${(winRate * 100).toFixed(0)}%) — ativando modo ultra-conservador. 2 operações por dia para proteger capital.`;
+        votes[AI_NAMES[0]] = "Ultra-conservador 🔴";
+        votes[AI_NAMES[1]] = "Ultra-conservador 🔴";
+        votes[AI_NAMES[2]] = "Ultra-conservador 🔴";
+        votes[AI_NAMES[3]] = "Ultra-conservador 🔴";
+        votes[AI_NAMES[4]] = "Ultra-conservador 🔴";
+      }
+
+      if (consensus < 0.5) {
+        chosenMode = "production_3-4_24h";
+        reason = `Consenso de IAs baixo (${(consensus * 100).toFixed(0)}%) — sistema recuando para modo conservador até alinhamento das análises.`;
+      }
+
       const candidates = totalActive.filter(() => Math.random() > 0.45);
       const picked = candidates.length === 0 ? [totalActive[0]] : candidates.slice(0, Math.min(candidates.length, 6));
       const newActive = picked.map(m => m.id);
-      const votes: Record<string, string> = {};
-      aiNames.forEach(ai => {
-        const sample = newActive[Math.floor(Math.random() * newActive.length)];
-        const found = totalActive.find(m => m.id === sample);
-        votes[ai] = found?.name || sample;
-      });
-      const reasons = [
-        "Volatilidade baixa detectada — priorizando dígitos e acumuladores.",
-        "Sequência de ganhos em Rise/Fall — mantendo posições direcionais.",
-        "Reversão de mercado identificada — alternando para Touch e Higher/Lower.",
-        "Dispersão de dígitos uniforme — Digit Differs e Even/Odd com maior edge.",
-        "Alta volatilidade — Turbos e Multipliers com maior potencial de retorno.",
-        "Mercado lateralizado — Stays Between e Ends Between com 80%+ de confiança.",
-        "Score quântico excepcional em dígitos — concentrando capital em Digit Over/Under.",
-        "Lookbacks ativados — amplitude de range histórica acima da média.",
-      ];
+
       setAutoDecision({
         active: newActive,
-        reason: reasons[Math.floor(Math.random() * reasons.length)],
+        reason,
         aiVotes: votes,
+        mode: chosenMode,
+        metrics: { winRate, recentLosses, totalOps, consensus },
       });
       setEnabledModalities(Object.fromEntries(allIds.map(id => [id, newActive.includes(id)])));
-    }, 3000);
+
+      if (updateConfigRef.current) {
+        updateConfigRef.current(chosenMode);
+      }
+    }, 1000);
     return () => clearInterval(interval);
   }, [autoMode]);
 
@@ -517,6 +587,10 @@ export default function TradingSystemPage() {
     refetchInterval: 3000, // Atualização a cada 3 segundos
   });
 
+  useEffect(() => { latestStats.current = tradeStats; }, [tradeStats]);
+  useEffect(() => { latestOps.current = recentOperations as any[]; }, [recentOperations]);
+  useEffect(() => { latestAiThreshold.current = aiThresholdStats; }, [aiThresholdStats]);
+
   // Query para buscar ativos disponíveis e bloqueados
   const { data: availableAssets } = useQuery({
     queryKey: ["/api/trading/assets", "digit_diff"],
@@ -589,6 +663,14 @@ export default function TradingSystemPage() {
     }
   });
 
+  useEffect(() => {
+    updateConfigRef.current = (mode: string) => {
+      if (!updateConfigMutation.isPending) {
+        updateConfigMutation.mutate(mode);
+      }
+    };
+  }, [updateConfigMutation.isPending]);
+
   const controlSchedulerMutation = useMutation({
     mutationFn: async (action: 'pause' | 'resume') => {
       const response = await apiRequest(`/api/auto-trading/scheduler/${action}`, {
@@ -650,6 +732,7 @@ export default function TradingSystemPage() {
 
   const getOperationModeLabel = (mode: string) => {
     const modes: Record<string, string> = {
+      'auto_inteligente': '⚡ AUTOMÁTICO — 5 IAs decidindo em tempo real',
       'production_3-4_24h': '3-4 operações a cada 24h (Produção)',
       'production_2_24h': '2 operações a cada 24h (Produção)',
       'test_4_1min': '4 operações a cada 1 minuto (Teste)',
@@ -1402,8 +1485,114 @@ export default function TradingSystemPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
+
+                {/* ⚡ MODO AUTOMÁTICO */}
                 <div className="space-y-3">
-                  <h4 className="font-medium">Modos de Produção</h4>
+                  <Button
+                    variant={autoMode ? "default" : "outline"}
+                    onClick={() => {
+                      const next = !autoMode;
+                      setAutoMode(next);
+                      try { localStorage.setItem("trade_auto_mode", String(next)); } catch {}
+                      if (!next) {
+                        toast({ title: "Modo Automático desativado", description: "Selecione um modo manualmente abaixo." });
+                      } else {
+                        toast({ title: "⚡ Modo Automático ativado!", description: "5 IAs agora controlam o sistema em tempo real — avaliando cada segundo." });
+                      }
+                    }}
+                    className={`w-full justify-start font-bold text-base py-6 transition-all ${
+                      autoMode
+                        ? "bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white shadow-lg shadow-violet-500/30 border-0 animate-pulse"
+                        : "border-2 border-violet-400 text-violet-700 dark:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-950"
+                    }`}
+                    data-testid="button-mode-auto"
+                  >
+                    <Sparkles className="h-5 w-5 mr-3 flex-shrink-0" />
+                    <div className="text-left">
+                      <div>AUTOMÁTICO — 5 IAs em Tempo Real</div>
+                      <div className={`text-xs font-normal mt-0.5 ${autoMode ? "text-violet-200" : "text-violet-500"}`}>
+                        O sistema decide e alterna autonomamente a cada segundo
+                      </div>
+                    </div>
+                    {autoMode && (
+                      <Badge className="ml-auto bg-white/20 text-white border-0 animate-pulse">
+                        ATIVO
+                      </Badge>
+                    )}
+                  </Button>
+
+                  {/* Painel live das 5 IAs — visível só quando AUTOMÁTICO está ativo */}
+                  {autoMode && (
+                    <div className="rounded-xl border-2 border-violet-300 dark:border-violet-700 bg-violet-50 dark:bg-violet-950/40 p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-bold text-violet-800 dark:text-violet-200 flex items-center gap-2">
+                          <RefreshCw className="h-4 w-4 animate-spin" />
+                          Central de Comando — Análise em Tempo Real
+                        </p>
+                        <Badge className="bg-violet-600 text-white text-xs">
+                          {new Date().toLocaleTimeString('pt-BR')}
+                        </Badge>
+                      </div>
+
+                      {/* Modo atual escolhido pelas IAs */}
+                      <div className="rounded-lg bg-violet-100 dark:bg-violet-900/50 p-3 border border-violet-200 dark:border-violet-700">
+                        <p className="text-xs text-violet-600 dark:text-violet-400 uppercase tracking-wider mb-1">Modo ativo agora</p>
+                        <p className="font-bold text-violet-900 dark:text-violet-100 text-sm">{getOperationModeLabel(autoDecision.mode)}</p>
+                      </div>
+
+                      {/* Métricas que as IAs usam */}
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="rounded-lg bg-white dark:bg-gray-900/50 p-2 border border-violet-200 dark:border-violet-800">
+                          <p className="text-xs text-muted-foreground">Taxa de Vitória</p>
+                          <p className={`font-bold text-sm ${autoDecision.metrics.winRate >= 0.6 ? "text-green-600" : autoDecision.metrics.winRate >= 0.45 ? "text-yellow-600" : "text-red-600"}`}>
+                            {(autoDecision.metrics.winRate * 100).toFixed(1)}%
+                          </p>
+                        </div>
+                        <div className="rounded-lg bg-white dark:bg-gray-900/50 p-2 border border-violet-200 dark:border-violet-800">
+                          <p className="text-xs text-muted-foreground">Perdas Recentes (10)</p>
+                          <p className={`font-bold text-sm ${autoDecision.metrics.recentLosses <= 2 ? "text-green-600" : autoDecision.metrics.recentLosses <= 5 ? "text-yellow-600" : "text-red-600"}`}>
+                            {autoDecision.metrics.recentLosses}
+                          </p>
+                        </div>
+                        <div className="rounded-lg bg-white dark:bg-gray-900/50 p-2 border border-violet-200 dark:border-violet-800">
+                          <p className="text-xs text-muted-foreground">Total de Ops</p>
+                          <p className="font-bold text-sm text-violet-700 dark:text-violet-300">{autoDecision.metrics.totalOps}</p>
+                        </div>
+                        <div className="rounded-lg bg-white dark:bg-gray-900/50 p-2 border border-violet-200 dark:border-violet-800">
+                          <p className="text-xs text-muted-foreground">Consenso IA</p>
+                          <p className={`font-bold text-sm ${autoDecision.metrics.consensus >= 0.7 ? "text-green-600" : "text-yellow-600"}`}>
+                            {(autoDecision.metrics.consensus * 100).toFixed(0)}%
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Votos das 5 IAs */}
+                      <div className="space-y-1.5">
+                        <p className="text-xs font-semibold text-violet-700 dark:text-violet-300 uppercase tracking-wider">Votação das 5 IAs</p>
+                        {Object.entries(autoDecision.aiVotes).map(([ai, vote]) => (
+                          <div key={ai} className="flex items-center justify-between rounded-md bg-white dark:bg-gray-900/50 px-3 py-1.5 border border-violet-100 dark:border-violet-800">
+                            <span className="text-xs text-muted-foreground">{ai}</span>
+                            <span className="text-xs font-semibold text-violet-800 dark:text-violet-200">{vote}</span>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Decisão / Razão */}
+                      <div className="rounded-lg bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-200 dark:border-indigo-700 p-3">
+                        <p className="text-xs font-semibold text-indigo-700 dark:text-indigo-300 mb-1">Decisão das IAs:</p>
+                        <p className="text-xs text-indigo-800 dark:text-indigo-200 leading-relaxed">{autoDecision.reason}</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <Separator />
+
+                <div className={`space-y-3 transition-opacity ${autoMode ? "opacity-40 pointer-events-none" : ""}`}>
+                  <h4 className="font-medium flex items-center gap-2">
+                    Modos de Produção
+                    {autoMode && <Badge variant="outline" className="text-xs">Gerenciado automaticamente</Badge>}
+                  </h4>
                   <div className="grid gap-2">
                     <Button
                       variant={tradeConfig?.mode === 'production_3-4_24h' ? "default" : "outline"}
@@ -1430,7 +1619,7 @@ export default function TradingSystemPage() {
 
                 <Separator />
 
-                <div className="space-y-3">
+                <div className={`space-y-3 transition-opacity ${autoMode ? "opacity-40 pointer-events-none" : ""}`}>
                   <h4 className="font-medium">Modos de Teste</h4>
                   <div className="grid gap-2">
                     <Button
