@@ -11,6 +11,7 @@ import { digitFrequencyAnalyzer } from './digit-frequency-analyzer';
 import { assetScorer, AssetPerformanceRecord } from './asset-scorer';
 import { realStatsTracker } from './real-stats-tracker';
 import { contractMonitor } from './contract-monitor';
+import { persistentLearningEngine } from './persistent-learning-engine';
 
 export interface ActiveTradeSession {
   userId: string;
@@ -101,6 +102,26 @@ export class AutoTradingScheduler {
     
     // Iniciar heartbeat para ResilienceSupervisor
     this.startSupervisorHeartbeat();
+
+    // 🧠 MOTOR DE APRENDIZADO PERSISTENTE: escutar resultados de contratos
+    persistentLearningEngine.initialize().catch(e =>
+      console.error('❌ [LEARNING] Falha na inicialização do motor de aprendizado:', e)
+    );
+    contractMonitor.on('contract_closed', async (data: any) => {
+      try {
+        await persistentLearningEngine.processTradeResult({
+          contractId: String(data.contractId),
+          symbol: data.symbol,
+          status: data.status,
+          profit: data.finalProfit || 0,
+          buyPrice: data.buyPrice || 0,
+          contractType: data.contractType || 'digitdiff',
+        });
+      } catch (err) {
+        console.error('❌ [LEARNING] Erro ao processar resultado de contrato:', err);
+      }
+    });
+    console.log('🧠 [LEARNING] Motor de aprendizado persistente conectado ao monitor de contratos');
   }
 
   private startSupervisorHeartbeat(): void {
@@ -1558,6 +1579,67 @@ export class AutoTradingScheduler {
             barrier: tradeParams.barrier,
           });
           console.log(`🔭 [MONITOR] Iniciado para contrato ${contract.contract_id} (${contractTypeForMonitor}) em ${selectedSymbol}`);
+
+          // 🧠 REGISTRAR CONTEXTO DE APRENDIZADO: captura o que cada modelo previu
+          try {
+            const pricesArr: number[] = priceHistory.slice(-30);
+            const lastPrice = pricesArr[pricesArr.length - 1] || 0;
+            const prevPrice = pricesArr[pricesArr.length - 2] || lastPrice;
+            const volatility = pricesArr.length > 5
+              ? Math.sqrt(pricesArr.slice(-10).reduce((sum: number, p: number, i: number, arr: number[]) => {
+                  if (i === 0) return 0;
+                  return sum + Math.pow((p - arr[i-1]) / (arr[i-1] || 1), 2);
+                }, 0) / Math.min(10, pricesArr.length)) : 0.01;
+
+            persistentLearningEngine.registerTradeContext({
+              contractId: String(contract.contract_id),
+              symbol: selectedSymbol,
+              tradeType: contractTypeForMonitor,
+              modelPredictions: {
+                advanced_learning: aiConsensus.finalDecision || 'neutral',
+                quantum_neural: aiConsensus.quantumPrediction || aiConsensus.finalDecision || 'neutral',
+                microscopic_technical: aiConsensus.microscopicPrediction || aiConsensus.finalDecision || 'neutral',
+                huggingface_ai: aiConsensus.huggingFacePrediction || aiConsensus.finalDecision || 'neutral',
+                digit_frequency: aiConsensus.digitFrequencySignal || 'neutral',
+                asset_scorer: aiConsensus.assetGrade >= 'B' ? aiConsensus.finalDecision : 'neutral',
+                market_regime: aiConsensus.marketRegime === 'trending' ? aiConsensus.finalDecision : 'neutral',
+                momentum_indicator: (lastPrice - prevPrice) > 0 ? 'up' : 'down',
+                volatility_filter: volatility < 0.02 ? aiConsensus.finalDecision : 'neutral',
+                pattern_recognition: aiConsensus.patternSignal || aiConsensus.finalDecision || 'neutral',
+              },
+              modelConfidences: {
+                advanced_learning: (aiConsensus.consensusStrength || 50) / 100,
+                quantum_neural: (aiConsensus.quantumConfidence || aiConsensus.consensusStrength || 50) / 100,
+                microscopic_technical: (aiConsensus.microscopicConfidence || 50) / 100,
+                huggingface_ai: (aiConsensus.huggingFaceConfidence || 50) / 100,
+                digit_frequency: (aiConsensus.digitEdge || 50) / 100,
+                asset_scorer: aiConsensus.assetGrade === 'S' ? 0.9 : aiConsensus.assetGrade === 'A' ? 0.75 : 0.5,
+                market_regime: aiConsensus.marketRegime === 'trending' ? 0.7 : 0.4,
+                momentum_indicator: Math.abs((lastPrice - prevPrice) / (prevPrice || 1)) * 50,
+                volatility_filter: volatility < 0.01 ? 0.8 : volatility < 0.02 ? 0.6 : 0.3,
+                pattern_recognition: (aiConsensus.patternConfidence || 50) / 100,
+              },
+              marketContext: {
+                price: lastPrice,
+                volatility,
+                momentum: (lastPrice - prevPrice) / (prevPrice || 1),
+                regime: aiConsensus.marketRegime || 'unknown',
+                timestamp: Date.now(),
+              },
+              technicalIndicators: {
+                rsi: aiConsensus.rsi || 50,
+                macd: aiConsensus.macd || 0,
+                bb_position: aiConsensus.bbPosition || 0.5,
+                consensus_strength: aiConsensus.consensusStrength || 50,
+                up_score: aiConsensus.upScore || 0,
+                down_score: aiConsensus.downScore || 0,
+              },
+              overallConfidence: (aiConsensus.consensusStrength || 50) / 100,
+              finalDecision: aiConsensus.finalDecision || 'neutral',
+            });
+          } catch (learningErr) {
+            console.warn('⚠️ [LEARNING] Falha ao registrar contexto (não bloqueia trade):', learningErr);
+          }
         } catch (monitorErr) {
           console.warn(`⚠️ [MONITOR] Falha ao iniciar monitoramento (trade executado normalmente): ${monitorErr}`);
         }

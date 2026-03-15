@@ -758,3 +758,76 @@ export type PauseConfiguration = typeof pauseConfiguration.$inferSelect;
 export type InsertPauseConfiguration = z.infer<typeof insertPauseConfigurationSchema>;
 export type UpdatePauseConfiguration = z.infer<typeof updatePauseConfigurationSchema>;
 
+// ============================================================
+// SISTEMA DE APRENDIZADO PERSISTENTE REAL
+// Registra cada trade e o que cada modelo previu vs o resultado
+// Isso permite ajuste real de pesos ao longo do tempo
+// ============================================================
+
+export const learningRecords = sqliteTable('learning_records', {
+  id: text('id').primaryKey().default(sql`(hex(randomblob(16)))`),
+  contractId: text('contract_id').notNull(),
+  symbol: text('symbol').notNull(),
+  tradeType: text('trade_type').notNull(),
+  // O que cada modelo previu antes da operação (JSON: { modelName: 'up'|'down'|'neutral', ... })
+  modelPredictions: text('model_predictions', { mode: 'json' }).notNull(),
+  // Pesos que cada modelo tinha NO MOMENTO da operação
+  modelWeightsSnapshot: text('model_weights_snapshot', { mode: 'json' }).notNull(),
+  // Dados de mercado usados (preço, volatilidade, momentum, regime)
+  marketContext: text('market_context', { mode: 'json' }).notNull(),
+  // Indicadores técnicos no momento (RSI, MACD, BB, etc)
+  technicalIndicators: text('technical_indicators', { mode: 'json' }).notNull(),
+  // Resultado real da operação
+  outcome: text('outcome', { enum: ['won', 'lost', 'sold'] }).notNull(),
+  profit: real('profit').notNull(),
+  buyPrice: real('buy_price').notNull(),
+  // Recompensa calculada (-1 a +1)
+  reward: real('reward').notNull(),
+  // Novos pesos após aprendizado (JSON: { modelName: newWeight })
+  updatedWeights: text('updated_weights', { mode: 'json' }).notNull(),
+  // Qual modelo teve a maior influência na decisão
+  dominantModel: text('dominant_model'),
+  // Confiança geral no momento da operação
+  confidenceAtEntry: real('confidence_at_entry'),
+  // Acurácia acumulada de cada modelo até este momento (snapshot)
+  cumulativeAccuracy: text('cumulative_accuracy', { mode: 'json' }).notNull(),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+});
+
+// Tabela de estado persistente dos modelos (pesos, acurácia, etc)
+export const modelLearningState = sqliteTable('model_learning_state', {
+  id: text('id').primaryKey().default(sql`(hex(randomblob(16)))`),
+  modelName: text('model_name').notNull(),
+  symbol: text('symbol').notNull(),
+  // Peso atual do modelo para este ativo (0.0 a 2.0, default 1.0)
+  weight: real('weight').notNull().default(1.0),
+  // Acurácia acumulada (0.0 a 1.0)
+  accuracy: real('accuracy').notNull().default(0.5),
+  // Total de trades que este modelo participou
+  totalTrades: integer('total_trades').notNull().default(0),
+  // Total de trades que este modelo acertou (previsão correta)
+  correctPredictions: integer('correct_predictions').notNull().default(0),
+  // Lucro total gerado quando este modelo foi dominante
+  totalProfit: real('total_profit').notNull().default(0),
+  // Taxa de aprendizado atual (adaptativa)
+  learningRate: real('learning_rate').notNull().default(0.1),
+  // Momentum do gradiente (para evitar oscilações)
+  gradientMomentum: real('gradient_momentum').notNull().default(0.0),
+  // Última vez que foi atualizado
+  lastUpdated: text('last_updated').notNull(),
+  // Trend: está melhorando ou piorando? (últimas 10 operações)
+  recentTrend: real('recent_trend').notNull().default(0.0),
+  // Últimas 20 predições (1=certo, 0=errado) para cálculo de trend
+  recentHistory: text('recent_history', { mode: 'json' }).notNull().default('[]'),
+  createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const insertLearningRecordSchema = createInsertSchema(learningRecords).omit({ id: true, createdAt: true });
+export const insertModelLearningStateSchema = createInsertSchema(modelLearningState).omit({ id: true, createdAt: true, updatedAt: true });
+
+export type LearningRecord = typeof learningRecords.$inferSelect;
+export type InsertLearningRecord = z.infer<typeof insertLearningRecordSchema>;
+export type ModelLearningState = typeof modelLearningState.$inferSelect;
+export type InsertModelLearningState = z.infer<typeof insertModelLearningStateSchema>;
+

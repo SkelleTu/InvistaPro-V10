@@ -550,6 +550,49 @@ export function initializeDatabase() {
       )
     `);
 
+    // SISTEMA DE APRENDIZADO PERSISTENTE REAL
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS learning_records (
+        id TEXT PRIMARY KEY DEFAULT (hex(randomblob(16))),
+        contract_id TEXT NOT NULL,
+        symbol TEXT NOT NULL,
+        trade_type TEXT NOT NULL,
+        model_predictions TEXT NOT NULL,
+        model_weights_snapshot TEXT NOT NULL,
+        market_context TEXT NOT NULL,
+        technical_indicators TEXT NOT NULL,
+        outcome TEXT NOT NULL,
+        profit REAL NOT NULL,
+        buy_price REAL NOT NULL,
+        reward REAL NOT NULL,
+        updated_weights TEXT NOT NULL,
+        dominant_model TEXT,
+        confidence_at_entry REAL,
+        cumulative_accuracy TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS model_learning_state (
+        id TEXT PRIMARY KEY DEFAULT (hex(randomblob(16))),
+        model_name TEXT NOT NULL,
+        symbol TEXT NOT NULL,
+        weight REAL NOT NULL DEFAULT 1.0,
+        accuracy REAL NOT NULL DEFAULT 0.5,
+        total_trades INTEGER NOT NULL DEFAULT 0,
+        correct_predictions INTEGER NOT NULL DEFAULT 0,
+        total_profit REAL NOT NULL DEFAULT 0,
+        learning_rate REAL NOT NULL DEFAULT 0.1,
+        gradient_momentum REAL NOT NULL DEFAULT 0.0,
+        last_updated TEXT NOT NULL,
+        recent_trend REAL NOT NULL DEFAULT 0.0,
+        recent_history TEXT NOT NULL DEFAULT '[]',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     // Migração: adicionar selected_modalities se não existir
     try {
       sqlite.exec(`ALTER TABLE trade_configurations ADD COLUMN selected_modalities TEXT DEFAULT 'digit_differs'`);

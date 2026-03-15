@@ -21,6 +21,7 @@ import crypto from "crypto";
 import kycRoutes from "./routes/kyc";
 import adminRoutes from "./routes/admin";
 import monitorRoutes from "./routes/monitor-routes";
+import learningRoutes from "./routes/learning-routes";
 import fetch from "node-fetch";
 import express from "express";
 import { keepAliveSystem } from "./services/keep-alive-system";
@@ -1759,6 +1760,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Monitor Universal de Contratos IA
   app.use('/api/monitor', monitorRoutes);
+
+  // Motor de Aprendizado Persistente Real
+  app.use('/api/learning', learningRoutes);
 
   // Marketing Email Routes
   app.post('/api/marketing/add-email', isAuthenticated, async (req, res) => {

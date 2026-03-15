@@ -13,6 +13,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import Header from "@/components/dashboard/header";
 import DerivTokenSettings from "@/components/deriv-token-settings";
+import LearningDashboard from "@/components/learning-dashboard";
 import TradingConfigPanel from "@/components/trading-config-panel";
 import { 
   TrendingUp, 
@@ -863,12 +864,15 @@ export default function TradingSystemPage() {
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-6">
+          <TabsList className="grid w-full grid-cols-7">
             <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
             <TabsTrigger value="config">Configurações</TabsTrigger>
-            <TabsTrigger value="blocked">Bloqueio de Ativos</TabsTrigger>
+            <TabsTrigger value="blocked">Bloqueio</TabsTrigger>
             <TabsTrigger value="operations">Operações</TabsTrigger>
             <TabsTrigger value="ai-analysis">IA e Análises</TabsTrigger>
+            <TabsTrigger value="learning" data-testid="tab-learning" className="relative">
+              <span>🧠 Aprendizado</span>
+            </TabsTrigger>
             <TabsTrigger value="monitor" className="relative" data-testid="tab-monitor">
               <span>Monitor IA</span>
               {(monitorData as any)?.activeContracts > 0 && (
@@ -1987,6 +1991,19 @@ export default function TradingSystemPage() {
                 )}
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* Painel de Aprendizado Persistente Real */}
+          <TabsContent value="learning" className="space-y-6">
+            <div className="flex items-center gap-3 mb-2">
+              <div>
+                <h2 className="text-lg font-semibold">Motor de Aprendizado Persistente</h2>
+                <p className="text-sm text-muted-foreground">
+                  As IAs aprendem com cada operação — pesos atualizados em tempo real e salvos no banco
+                </p>
+              </div>
+            </div>
+            <LearningDashboard />
           </TabsContent>
 
           {/* Monitor IA Universal — Acompanhamento tick a tick de cada contrato */}

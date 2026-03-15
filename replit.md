@@ -250,3 +250,28 @@ In/Out, Touch/No Touch, Multipliers, Accumulators, Turbos, Vanillas, Lookbacks
 - New DB column: `trade_configurations.selected_modalities` (JSON array)
 - New API: `GET/PUT /api/trading/modalities` — persistent server-side storage
 - Frontend: loads from server on init, saves on toggle, shows Auto/Em-breve badge
+
+
+### Persistent Adaptive Learning Engine
+Real online learning system where AI model weights genuinely update after each trade.
+
+**Algorithm:** Online Gradient Descent with EMA Momentum (β=0.9)
+- Weights update after every trade win/loss using contract_closed events
+- Learning rate adapts: decays with more trades, boosts if accuracy < 35%
+- Weights clamped to [0.05–3.0] range
+- All state persists in DB (survives restarts)
+
+**10 Tracked Models:**
+advanced_learning, quantum_neural, microscopic_technical, huggingface_ai,
+digit_frequency, asset_scorer, market_regime, momentum_indicator,
+volatility_filter, pattern_recognition
+
+**Files:**
+- `server/services/persistent-learning-engine.ts` — core engine
+- `server/routes/learning-routes.ts` — GET /stats, GET /weights/:symbol, POST /reset
+- `client/src/components/learning-dashboard.tsx` — "🧠 Aprendizado" tab
+- DB tables: `learningRecords`, `modelLearningState`
+
+**Integration:** `auto-trading-scheduler.ts` registers trade context before each trade,
+listens to contract_closed events to trigger weight updates. Pre-trade context uses
+the already-computed priceHistory array (fixed from broken getRecentTicks call).
