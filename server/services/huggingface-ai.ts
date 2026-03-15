@@ -215,7 +215,7 @@ export class HuggingFaceAIService {
 
     // SEMPRE usar IAs reais - conforme comando: "Evite sistemas simulados porque atrapalha o desenvolvimento"
     console.log(`🧠 SISTEMA 100% REAL - Iniciando análise cooperativa com capacidades neurais MÁXIMAS`);
-    console.log(`🔥 Todas as IAs funcionando de maneira cooperativa para DIGIT DIFFERS`);
+    console.log(`🔥 Todas as IAs funcionando de maneira cooperativa para análise multi-modalidade`);
     console.log(`🎯 OBJETIVO: Todas devem ter as mesmas conclusões para as operações`);
     
     // 🔥 SISTEMA DE RECUPERAÇÃO - Verificar se precisa de cooperação intensificada

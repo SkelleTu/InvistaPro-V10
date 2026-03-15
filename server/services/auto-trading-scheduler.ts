@@ -1080,11 +1080,20 @@ export class AutoTradingScheduler {
         }
         
         // ─── SELEÇÃO DE MODALIDADE ───────────────────────────────────────
-        // TRAVADO EM digit_differs: única modalidade com vantagem matemática real
-        // nos índices sintéticos da Deriv (análise de frequência de dígitos).
-        // Configurações manuais do usuário são ignoradas no modo automático.
-        const activeModalities: string[] = ['digit_differs'];
-        console.log(`🔒 [${operationId}] Modalidade AUTO travada: digit_differs (edge matemático real via análise de dígitos)`);
+        // Ler modalidades configuradas pelo usuário no banco de dados.
+        let activeModalities: string[] = ['digit_differs'];
+        if (config.selectedModalities) {
+          try {
+            const parsed = JSON.parse(config.selectedModalities);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              activeModalities = parsed;
+            }
+          } catch {
+            const split = config.selectedModalities.split(',').map((s: string) => s.trim()).filter(Boolean);
+            if (split.length > 0) activeModalities = split;
+          }
+        }
+        console.log(`🎯 [${operationId}] Modalidades ativas do usuário: ${activeModalities.join(', ')}`);
 
         // Escolher modalidade por rotação: pega baseado na hora atual para distribuir
         const DIGIT_TYPES: Record<string, string> = {
@@ -1190,7 +1199,11 @@ export class AutoTradingScheduler {
           console.log(`🔄 [${operationId}] Compatibilidade: ${dropped.join(', ')} não disponível em ${selectedSymbol} → usando: ${compatibleModalities.join(', ')}`);
         }
 
-        const selectedModality = compatibleModalities[Math.floor(Date.now() / 60000) % compatibleModalities.length];
+        // Selecionar modalidade por rotação baseada no timestamp em segundos + hash do operationId
+        // Isso garante variedade real entre trades consecutivos, não apenas a cada minuto
+        const opHash = operationId.split('').reduce((acc: number, c: string) => acc + c.charCodeAt(0), 0);
+        const rotationIndex = (Math.floor(Date.now() / 1000) + opHash) % compatibleModalities.length;
+        const selectedModality = compatibleModalities[rotationIndex];
 
         console.log(`🎯 [${operationId}] Modalidade selecionada: ${selectedModality} ✅ compatível com ${selectedSymbol} (pool: ${compatibleModalities.join(', ')})`);
 
