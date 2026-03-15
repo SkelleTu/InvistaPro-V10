@@ -1136,10 +1136,117 @@ export default function TradingSystemPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-5">
-                <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-sm text-blue-800 dark:text-blue-200">
-                  <strong>Como funciona:</strong> Marque qualquer combinação de modalidades. O sistema opera simultânea e alternadamente entre todas as ativas, priorizando as mais rentáveis e seguras a cada momento. As IAs rebalanceiam os pesos em tempo real.
+
+                {/* ⚡ MODO AUTOMÁTICO */}
+                <div className="space-y-3">
+                  <Button
+                    variant={autoMode ? "default" : "outline"}
+                    onClick={() => {
+                      const next = !autoMode;
+                      setAutoMode(next);
+                      try { localStorage.setItem("trade_auto_mode", String(next)); } catch {}
+                      if (!next) {
+                        toast({ title: "Modo Automático desativado", description: "Selecione as modalidades manualmente abaixo." });
+                      } else {
+                        toast({ title: "⚡ Modo Automático ativado!", description: "5 IAs agora controlam as modalidades em tempo real — decidindo a cada segundo." });
+                      }
+                    }}
+                    className={`w-full justify-start font-bold text-base py-6 transition-all ${
+                      autoMode
+                        ? "bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white shadow-lg shadow-violet-500/30 border-0"
+                        : "border-2 border-violet-400 text-violet-700 dark:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-950"
+                    }`}
+                    data-testid="button-mode-auto"
+                  >
+                    <Sparkles className="h-5 w-5 mr-3 flex-shrink-0" />
+                    <div className="text-left">
+                      <div>AUTOMÁTICO — 5 IAs em Tempo Real</div>
+                      <div className={`text-xs font-normal mt-0.5 ${autoMode ? "text-violet-200" : "text-violet-500"}`}>
+                        O sistema decide e alterna modalidades autonomamente a cada segundo
+                      </div>
+                    </div>
+                    {autoMode && (
+                      <Badge className="ml-auto bg-white/20 text-white border-0 animate-pulse">
+                        ATIVO
+                      </Badge>
+                    )}
+                  </Button>
+
+                  {/* Painel live das 5 IAs */}
+                  {autoMode && (
+                    <div className="rounded-xl border-2 border-violet-300 dark:border-violet-700 bg-violet-50 dark:bg-violet-950/40 p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-bold text-violet-800 dark:text-violet-200 flex items-center gap-2">
+                          <RefreshCw className="h-4 w-4 animate-spin" />
+                          Central de Comando — Análise em Tempo Real
+                        </p>
+                        <Badge className="bg-violet-600 text-white text-xs">
+                          {new Date().toLocaleTimeString('pt-BR')}
+                        </Badge>
+                      </div>
+
+                      {/* Modo atual escolhido pelas IAs */}
+                      <div className="rounded-lg bg-violet-100 dark:bg-violet-900/50 p-3 border border-violet-200 dark:border-violet-700">
+                        <p className="text-xs text-violet-600 dark:text-violet-400 uppercase tracking-wider mb-1">Frequência ativa agora</p>
+                        <p className="font-bold text-violet-900 dark:text-violet-100 text-sm">{getOperationModeLabel(autoDecision.mode)}</p>
+                      </div>
+
+                      {/* Métricas */}
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="rounded-lg bg-white dark:bg-gray-900/50 p-2 border border-violet-200 dark:border-violet-800">
+                          <p className="text-xs text-muted-foreground">Taxa de Vitória</p>
+                          <p className={`font-bold text-sm ${autoDecision.metrics.winRate >= 0.6 ? "text-green-600" : autoDecision.metrics.winRate >= 0.45 ? "text-yellow-600" : "text-red-600"}`}>
+                            {(autoDecision.metrics.winRate * 100).toFixed(1)}%
+                          </p>
+                        </div>
+                        <div className="rounded-lg bg-white dark:bg-gray-900/50 p-2 border border-violet-200 dark:border-violet-800">
+                          <p className="text-xs text-muted-foreground">Perdas Recentes (10)</p>
+                          <p className={`font-bold text-sm ${autoDecision.metrics.recentLosses <= 2 ? "text-green-600" : autoDecision.metrics.recentLosses <= 5 ? "text-yellow-600" : "text-red-600"}`}>
+                            {autoDecision.metrics.recentLosses}
+                          </p>
+                        </div>
+                        <div className="rounded-lg bg-white dark:bg-gray-900/50 p-2 border border-violet-200 dark:border-violet-800">
+                          <p className="text-xs text-muted-foreground">Total de Ops</p>
+                          <p className="font-bold text-sm text-violet-700 dark:text-violet-300">{autoDecision.metrics.totalOps}</p>
+                        </div>
+                        <div className="rounded-lg bg-white dark:bg-gray-900/50 p-2 border border-violet-200 dark:border-violet-800">
+                          <p className="text-xs text-muted-foreground">Consenso IA</p>
+                          <p className={`font-bold text-sm ${autoDecision.metrics.consensus >= 0.7 ? "text-green-600" : "text-yellow-600"}`}>
+                            {(autoDecision.metrics.consensus * 100).toFixed(0)}%
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Votos das 5 IAs */}
+                      <div className="space-y-1.5">
+                        <p className="text-xs font-semibold text-violet-700 dark:text-violet-300 uppercase tracking-wider">Votação das 5 IAs</p>
+                        {Object.entries(autoDecision.aiVotes).map(([ai, vote]) => (
+                          <div key={ai} className="flex items-center justify-between rounded-md bg-white dark:bg-gray-900/50 px-3 py-1.5 border border-violet-100 dark:border-violet-800">
+                            <span className="text-xs text-muted-foreground">{ai}</span>
+                            <span className="text-xs font-semibold text-violet-800 dark:text-violet-200">{vote}</span>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Razão da decisão */}
+                      <div className="rounded-lg bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-200 dark:border-indigo-700 p-3">
+                        <p className="text-xs font-semibold text-indigo-700 dark:text-indigo-300 mb-1">Decisão das IAs:</p>
+                        <p className="text-xs text-indigo-800 dark:text-indigo-200 leading-relaxed">{autoDecision.reason}</p>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
+                <Separator />
+
+                <div className={`p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-sm text-blue-800 dark:text-blue-200 transition-opacity ${autoMode ? "opacity-50" : ""}`}>
+                  {autoMode
+                    ? <><strong>Modo Automático:</strong> As 5 IAs estão alternando as modalidades autonomamente. As seleções abaixo refletem as escolhas das IAs em tempo real.</>
+                    : <><strong>Como funciona:</strong> Marque qualquer combinação de modalidades. O sistema opera simultânea e alternadamente entre todas as ativas, priorizando as mais rentáveis e seguras a cada momento. As IAs rebalanceiam os pesos em tempo real.</>
+                  }
+                </div>
+
+                <div className={`transition-opacity duration-300 ${autoMode ? "opacity-50 pointer-events-none" : ""}`}>
                 {(() => {
                   const riskColors: Record<string, string> = {
                     green: "text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800",
@@ -1249,6 +1356,7 @@ export default function TradingSystemPage() {
                     );
                   });
                 })()}
+                </div>
 
                 <Separator />
 
@@ -1486,113 +1594,8 @@ export default function TradingSystemPage() {
               </CardHeader>
               <CardContent className="space-y-4">
 
-                {/* ⚡ MODO AUTOMÁTICO */}
                 <div className="space-y-3">
-                  <Button
-                    variant={autoMode ? "default" : "outline"}
-                    onClick={() => {
-                      const next = !autoMode;
-                      setAutoMode(next);
-                      try { localStorage.setItem("trade_auto_mode", String(next)); } catch {}
-                      if (!next) {
-                        toast({ title: "Modo Automático desativado", description: "Selecione um modo manualmente abaixo." });
-                      } else {
-                        toast({ title: "⚡ Modo Automático ativado!", description: "5 IAs agora controlam o sistema em tempo real — avaliando cada segundo." });
-                      }
-                    }}
-                    className={`w-full justify-start font-bold text-base py-6 transition-all ${
-                      autoMode
-                        ? "bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white shadow-lg shadow-violet-500/30 border-0 animate-pulse"
-                        : "border-2 border-violet-400 text-violet-700 dark:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-950"
-                    }`}
-                    data-testid="button-mode-auto"
-                  >
-                    <Sparkles className="h-5 w-5 mr-3 flex-shrink-0" />
-                    <div className="text-left">
-                      <div>AUTOMÁTICO — 5 IAs em Tempo Real</div>
-                      <div className={`text-xs font-normal mt-0.5 ${autoMode ? "text-violet-200" : "text-violet-500"}`}>
-                        O sistema decide e alterna autonomamente a cada segundo
-                      </div>
-                    </div>
-                    {autoMode && (
-                      <Badge className="ml-auto bg-white/20 text-white border-0 animate-pulse">
-                        ATIVO
-                      </Badge>
-                    )}
-                  </Button>
-
-                  {/* Painel live das 5 IAs — visível só quando AUTOMÁTICO está ativo */}
-                  {autoMode && (
-                    <div className="rounded-xl border-2 border-violet-300 dark:border-violet-700 bg-violet-50 dark:bg-violet-950/40 p-4 space-y-3">
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm font-bold text-violet-800 dark:text-violet-200 flex items-center gap-2">
-                          <RefreshCw className="h-4 w-4 animate-spin" />
-                          Central de Comando — Análise em Tempo Real
-                        </p>
-                        <Badge className="bg-violet-600 text-white text-xs">
-                          {new Date().toLocaleTimeString('pt-BR')}
-                        </Badge>
-                      </div>
-
-                      {/* Modo atual escolhido pelas IAs */}
-                      <div className="rounded-lg bg-violet-100 dark:bg-violet-900/50 p-3 border border-violet-200 dark:border-violet-700">
-                        <p className="text-xs text-violet-600 dark:text-violet-400 uppercase tracking-wider mb-1">Modo ativo agora</p>
-                        <p className="font-bold text-violet-900 dark:text-violet-100 text-sm">{getOperationModeLabel(autoDecision.mode)}</p>
-                      </div>
-
-                      {/* Métricas que as IAs usam */}
-                      <div className="grid grid-cols-2 gap-2">
-                        <div className="rounded-lg bg-white dark:bg-gray-900/50 p-2 border border-violet-200 dark:border-violet-800">
-                          <p className="text-xs text-muted-foreground">Taxa de Vitória</p>
-                          <p className={`font-bold text-sm ${autoDecision.metrics.winRate >= 0.6 ? "text-green-600" : autoDecision.metrics.winRate >= 0.45 ? "text-yellow-600" : "text-red-600"}`}>
-                            {(autoDecision.metrics.winRate * 100).toFixed(1)}%
-                          </p>
-                        </div>
-                        <div className="rounded-lg bg-white dark:bg-gray-900/50 p-2 border border-violet-200 dark:border-violet-800">
-                          <p className="text-xs text-muted-foreground">Perdas Recentes (10)</p>
-                          <p className={`font-bold text-sm ${autoDecision.metrics.recentLosses <= 2 ? "text-green-600" : autoDecision.metrics.recentLosses <= 5 ? "text-yellow-600" : "text-red-600"}`}>
-                            {autoDecision.metrics.recentLosses}
-                          </p>
-                        </div>
-                        <div className="rounded-lg bg-white dark:bg-gray-900/50 p-2 border border-violet-200 dark:border-violet-800">
-                          <p className="text-xs text-muted-foreground">Total de Ops</p>
-                          <p className="font-bold text-sm text-violet-700 dark:text-violet-300">{autoDecision.metrics.totalOps}</p>
-                        </div>
-                        <div className="rounded-lg bg-white dark:bg-gray-900/50 p-2 border border-violet-200 dark:border-violet-800">
-                          <p className="text-xs text-muted-foreground">Consenso IA</p>
-                          <p className={`font-bold text-sm ${autoDecision.metrics.consensus >= 0.7 ? "text-green-600" : "text-yellow-600"}`}>
-                            {(autoDecision.metrics.consensus * 100).toFixed(0)}%
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* Votos das 5 IAs */}
-                      <div className="space-y-1.5">
-                        <p className="text-xs font-semibold text-violet-700 dark:text-violet-300 uppercase tracking-wider">Votação das 5 IAs</p>
-                        {Object.entries(autoDecision.aiVotes).map(([ai, vote]) => (
-                          <div key={ai} className="flex items-center justify-between rounded-md bg-white dark:bg-gray-900/50 px-3 py-1.5 border border-violet-100 dark:border-violet-800">
-                            <span className="text-xs text-muted-foreground">{ai}</span>
-                            <span className="text-xs font-semibold text-violet-800 dark:text-violet-200">{vote}</span>
-                          </div>
-                        ))}
-                      </div>
-
-                      {/* Decisão / Razão */}
-                      <div className="rounded-lg bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-200 dark:border-indigo-700 p-3">
-                        <p className="text-xs font-semibold text-indigo-700 dark:text-indigo-300 mb-1">Decisão das IAs:</p>
-                        <p className="text-xs text-indigo-800 dark:text-indigo-200 leading-relaxed">{autoDecision.reason}</p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <Separator />
-
-                <div className={`space-y-3 transition-opacity ${autoMode ? "opacity-40 pointer-events-none" : ""}`}>
-                  <h4 className="font-medium flex items-center gap-2">
-                    Modos de Produção
-                    {autoMode && <Badge variant="outline" className="text-xs">Gerenciado automaticamente</Badge>}
-                  </h4>
+                  <h4 className="font-medium">Modos de Produção</h4>
                   <div className="grid gap-2">
                     <Button
                       variant={tradeConfig?.mode === 'production_3-4_24h' ? "default" : "outline"}
@@ -1619,7 +1622,7 @@ export default function TradingSystemPage() {
 
                 <Separator />
 
-                <div className={`space-y-3 transition-opacity ${autoMode ? "opacity-40 pointer-events-none" : ""}`}>
+                <div className="space-y-3">
                   <h4 className="font-medium">Modos de Teste</h4>
                   <div className="grid gap-2">
                     <Button
