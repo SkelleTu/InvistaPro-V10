@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { autoTradingScheduler } from '../services/auto-trading-scheduler';
-import { storage } from '../storage';
+import { dualStorage as storage } from '../storage-dual';
 import { isAuthenticated } from '../auth';
 import { asyncErrorHandler } from '../middleware/error-handler';
 import { isAuthorizedEmail } from '../config/access';

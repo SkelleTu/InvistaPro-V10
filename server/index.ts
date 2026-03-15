@@ -13,7 +13,7 @@ import { autoTradingScheduler } from "./services/auto-trading-scheduler";
 import { resilienceSupervisor } from "./services/resilience-supervisor";
 import { derivAPI } from "./services/deriv-api";
 import { createDatabaseBackup } from "./database-backup";
-import { storage } from "./storage";
+import { dualStorage as storage } from "./storage-dual";
 import { derivTradeSync } from "./services/deriv-trade-sync";
 import { realStatsTracker } from "./services/real-stats-tracker";
 import { runPostgresMigration } from "./migrate-postgres";
