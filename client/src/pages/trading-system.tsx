@@ -6,6 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/useAuth";
@@ -31,7 +32,13 @@ import {
   Hash,
   Infinity,
   AlertTriangle,
-  XCircle
+  XCircle,
+  Cpu,
+  Layers,
+  FlaskConical,
+  ArrowUpDown,
+  Circle,
+  ToggleLeft
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -80,10 +87,90 @@ interface AILog {
   createdAt: string;
 }
 
+const TRADE_MODALITIES = [
+  {
+    id: "digit_differs",
+    name: "Digit Differs",
+    description: "Ganha se o último dígito for diferente do previsto",
+    aiStrategy: "Análise estatística de frequência de dígitos + modelo preditivo LSTM. Identifica padrões de repetição e evita dígitos com alta probabilidade de repetição.",
+    icon: "hash",
+    risk: "Baixo",
+    riskColor: "green",
+    enabled: true,
+  },
+  {
+    id: "digit_matches",
+    name: "Digit Matches",
+    description: "Ganha se o último dígito for igual ao previsto",
+    aiStrategy: "Redes neurais convolucionais para detecção de padrões de convergência. Algoritmo de reforço seleciona dígitos com maior probabilidade de ocorrência.",
+    icon: "target",
+    risk: "Médio",
+    riskColor: "yellow",
+    enabled: false,
+  },
+  {
+    id: "rise_fall",
+    name: "Rise / Fall",
+    description: "Previsão de alta ou baixa do preço ao final do contrato",
+    aiStrategy: "Análise técnica multi-timeframe com RSI, MACD e Bollinger Bands. IA de séries temporais (Transformer) prevê direção do movimento com janela de 50 ticks.",
+    icon: "trending",
+    risk: "Médio",
+    riskColor: "yellow",
+    enabled: false,
+  },
+  {
+    id: "higher_lower",
+    name: "Higher / Lower",
+    description: "Previsão se o preço será maior ou menor que o preço atual",
+    aiStrategy: "Modelo de regressão XGBoost treinado em dados históricos de volatilidade. Combina com análise de suporte/resistência em tempo real.",
+    icon: "arrows",
+    risk: "Médio",
+    riskColor: "yellow",
+    enabled: false,
+  },
+  {
+    id: "touch_no_touch",
+    name: "Touch / No Touch",
+    description: "Previsão se o preço vai ou não tocar uma barreira",
+    aiStrategy: "Modelo de simulação Monte Carlo com deep learning para calcular probabilidade de toque. Ajusta barreiras dinamicamente conforme ATR do ativo.",
+    icon: "circle",
+    risk: "Alto",
+    riskColor: "orange",
+    enabled: false,
+  },
+  {
+    id: "even_odd",
+    name: "Even / Odd",
+    description: "Previsão se o último dígito será par ou ímpar",
+    aiStrategy: "Análise de distribuição estatística + cadeia de Markov para identificar tendências de paridade. Algoritmo adaptatilvo ajusta probabilidades a cada 10 trades.",
+    icon: "layers",
+    risk: "Baixo",
+    riskColor: "green",
+    enabled: false,
+  },
+  {
+    id: "over_under",
+    name: "Over / Under",
+    description: "Previsão se o último dígito será maior ou menor que um valor",
+    aiStrategy: "Modelo bayesiano atualiza probabilidades em tempo real por dígito-alvo. IA seleciona automaticamente o threshold com maior edge estatístico.",
+    icon: "zap",
+    risk: "Baixo",
+    riskColor: "green",
+    enabled: false,
+  },
+];
+
 export default function TradingSystemPage() {
   const { user } = useAuth();
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState("dashboard");
+  const [enabledModalities, setEnabledModalities] = useState<Record<string, boolean>>(() => {
+    try {
+      const stored = localStorage.getItem("trade_modalities");
+      if (stored) return JSON.parse(stored);
+    } catch {}
+    return { digit_differs: true };
+  });
 
   // Verificar acesso autorizado via backend centralizado
   const { data: accessCheck } = useQuery({
@@ -445,7 +532,7 @@ export default function TradingSystemPage() {
             </Card>
 
             {/* Cards de estatísticas - Linha 1 */}
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
               <Card data-testid="card-balance">
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                   <CardTitle className="text-sm font-medium">Saldo Atual</CardTitle>
@@ -509,25 +596,6 @@ export default function TradingSystemPage() {
                 </CardContent>
               </Card>
 
-              <Card data-testid="card-profit">
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Lucro Total</CardTitle>
-                  <TrendingUp className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold" data-testid="text-profit">
-                    {tradeStats?.totalProfit ? formatCurrency(tradeStats.totalProfit) : '$0.00'}
-                  </div>
-                  {tradeStats?.totalProfit != null && formatBRL(tradeStats.totalProfit) && (
-                    <p className={`text-sm font-medium ${tradeStats.totalProfit >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`} data-testid="text-profit-brl">
-                      {formatBRL(tradeStats.totalProfit)}
-                    </p>
-                  )}
-                  <p className="text-xs text-muted-foreground">
-                    Resultado acumulado
-                  </p>
-                </CardContent>
-              </Card>
             </div>
 
             {/* Cards de IA - Linha 2 */}
@@ -699,6 +767,139 @@ export default function TradingSystemPage() {
               <DerivTokenSettings />
               <TradingConfigPanel />
             </div>
+
+            {/* Modalidades de Trade */}
+            <Card className="border-blue-200 dark:border-blue-900">
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2 text-blue-800 dark:text-blue-200">
+                  <Layers className="h-5 w-5" />
+                  <span>Modalidades de Trade</span>
+                  <Badge className="bg-blue-500 text-white ml-2">{Object.values(enabledModalities).filter(Boolean).length} ativa{Object.values(enabledModalities).filter(Boolean).length !== 1 ? 's' : ''}</Badge>
+                </CardTitle>
+                <CardDescription>
+                  Selecione quais modalidades o sistema deve operar. As IAs adaptam suas estratégias automaticamente em tempo real conforme as seleções abaixo.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-sm text-blue-800 dark:text-blue-200">
+                  <strong>Como funciona:</strong> O sistema opera de forma simultânea e alternada entre as modalidades ativas, priorizando automaticamente as mais rentáveis e menos arriscadas em cada momento. As IAs cooperativas monitoram o desempenho em tempo real e rebalanceiam o peso de cada modalidade.
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  {TRADE_MODALITIES.map((modality) => {
+                    const isEnabled = enabledModalities[modality.id] ?? false;
+                    const riskColors: Record<string, string> = {
+                      green: "text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800",
+                      yellow: "text-yellow-600 dark:text-yellow-400 bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800",
+                      orange: "text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800",
+                    };
+                    return (
+                      <div
+                        key={modality.id}
+                        className={`p-4 border-2 rounded-lg transition-all cursor-pointer ${isEnabled ? 'border-blue-400 dark:border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-border bg-background'}`}
+                        onClick={() => {
+                          const updated = { ...enabledModalities, [modality.id]: !isEnabled };
+                          setEnabledModalities(updated);
+                          localStorage.setItem("trade_modalities", JSON.stringify(updated));
+                          const active = Object.entries(updated).filter(([, v]) => v).map(([k]) => k);
+                          apiRequest("POST", "/api/trading/modalities", { modalities: active }).catch(() => {});
+                          toast({
+                            title: !isEnabled ? `${modality.name} ativada` : `${modality.name} desativada`,
+                            description: !isEnabled ? "O sistema já está operando com esta modalidade." : "Modalidade removida do sistema.",
+                            duration: 2500,
+                          });
+                        }}
+                        data-testid={`modality-card-${modality.id}`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-3 flex-1 min-w-0">
+                            <Checkbox
+                              checked={isEnabled}
+                              onCheckedChange={(checked) => {
+                                const updated = { ...enabledModalities, [modality.id]: !!checked };
+                                setEnabledModalities(updated);
+                                localStorage.setItem("trade_modalities", JSON.stringify(updated));
+                                const active = Object.entries(updated).filter(([, v]) => v).map(([k]) => k);
+                                apiRequest("POST", "/api/trading/modalities", { modalities: active }).catch(() => {});
+                                toast({
+                                  title: checked ? `${modality.name} ativada` : `${modality.name} desativada`,
+                                  description: checked ? "O sistema já está operando com esta modalidade." : "Modalidade removida do sistema.",
+                                  duration: 2500,
+                                });
+                              }}
+                              data-testid={`checkbox-modality-${modality.id}`}
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                            <div className="min-w-0">
+                              <p className="font-semibold text-sm">{modality.name}</p>
+                              <p className="text-xs text-muted-foreground leading-snug">{modality.description}</p>
+                            </div>
+                          </div>
+                          <Badge variant="outline" className={`text-xs shrink-0 ${riskColors[modality.riskColor]}`}>
+                            {modality.risk}
+                          </Badge>
+                        </div>
+                        {isEnabled && (
+                          <div className="mt-3 pt-3 border-t border-blue-200 dark:border-blue-700">
+                            <div className="flex items-center gap-1 mb-1">
+                              <Brain className="h-3 w-3 text-blue-500" />
+                              <span className="text-xs font-medium text-blue-600 dark:text-blue-400">Estratégia de IA:</span>
+                            </div>
+                            <p className="text-xs text-muted-foreground leading-relaxed">{modality.aiStrategy}</p>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <Separator />
+
+                {/* Painel de IAs e Estratégias */}
+                <div className="space-y-3">
+                  <h4 className="font-semibold flex items-center gap-2">
+                    <Cpu className="h-4 w-4 text-purple-500" />
+                    <span>Motor de IAs e Estratégias</span>
+                    <Badge variant="outline" className="text-purple-600 dark:text-purple-400 border-purple-300 dark:border-purple-700 text-xs">Máxima Potência</Badge>
+                  </h4>
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <div className="p-3 border rounded-lg bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800 space-y-1">
+                      <div className="flex items-center gap-2">
+                        <Bot className="h-4 w-4 text-purple-500" />
+                        <span className="text-sm font-medium">IA Primária</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">LSTM + Transformer (Série Temporal)</p>
+                      <p className="text-xs text-purple-600 dark:text-purple-400">Análise preditiva de movimentos</p>
+                    </div>
+                    <div className="p-3 border rounded-lg bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800 space-y-1">
+                      <div className="flex items-center gap-2">
+                        <FlaskConical className="h-4 w-4 text-indigo-500" />
+                        <span className="text-sm font-medium">IA Secundária</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">XGBoost + Redes Bayesianas</p>
+                      <p className="text-xs text-indigo-600 dark:text-indigo-400">Validação e gestão de risco</p>
+                    </div>
+                    <div className="p-3 border rounded-lg bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800 space-y-1">
+                      <div className="flex items-center gap-2">
+                        <Brain className="h-4 w-4 text-emerald-500" />
+                        <span className="text-sm font-medium">IA Arbitragem</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">Reinforcement Learning (RL)</p>
+                      <p className="text-xs text-emerald-600 dark:text-emerald-400">Otimização de portfólio em tempo real</p>
+                    </div>
+                  </div>
+                  <div className="p-3 bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-900/20 dark:to-blue-900/20 border border-purple-200 dark:border-purple-800 rounded-lg">
+                    <p className="text-sm font-medium text-purple-800 dark:text-purple-200 mb-1">Como as IAs cooperam:</p>
+                    <ul className="text-xs text-muted-foreground space-y-1 list-disc list-inside">
+                      <li>A IA Primária analisa padrões e emite sinais para cada modalidade ativa</li>
+                      <li>A IA Secundária valida cada sinal e bloqueia operações de alto risco</li>
+                      <li>A IA de Arbitragem distribui capital entre modalidades conforme rentabilidade</li>
+                      <li>O sistema alterna automaticamente entre modalidades para maximizar ganhos e minimizar perdas consecutivas</li>
+                      <li>Threshold de confiança mínimo: 70% — abaixo disso a operação é cancelada</li>
+                    </ul>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
             
             {/* Diagnóstico e Correção Automática */}
             <Card className="border-yellow-200 dark:border-yellow-900">
