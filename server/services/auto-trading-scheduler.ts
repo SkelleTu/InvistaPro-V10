@@ -1313,45 +1313,47 @@ export class AutoTradingScheduler {
 
           if (isExpiry && currentPrice && currentPrice > 0) {
             // EXPIRYRANGE / EXPIRYMISS: barriers absolutas + date_expiry (15 min)
+            // Deriv API: barrier = upper, barrier2 = lower (máximo 2 casas decimais)
             const offset = currentPrice * offsetPct;
-            const highBarrier = (currentPrice + offset).toFixed(4);
-            const lowBarrier  = (currentPrice - offset).toFixed(4);
+            const upperBarrier = (currentPrice + offset).toFixed(2);
+            const lowerBarrier  = (currentPrice - offset).toFixed(2);
             const dateExpiry  = Math.floor(Date.now() / 1000) + 900; // 15 min
 
-            console.log(`📊 [${operationId}] ${contractType}: high=${highBarrier}, low=${lowBarrier}, expiry=15min | Symbol: ${selectedSymbol}`);
+            console.log(`📊 [${operationId}] ${contractType}: barrier=${upperBarrier}, barrier2=${lowerBarrier}, expiry=15min | Symbol: ${selectedSymbol}`);
             contract = await derivAPI.buyFlexibleContract({
               contract_type: contractType,
               symbol: selectedSymbol,
               amount: tradeParams.amount,
-              high_barrier: highBarrier,
-              low_barrier: lowBarrier,
+              barrier: upperBarrier,
+              barrier2: lowerBarrier,
               date_expiry: dateExpiry,
             });
           } else {
             // RANGE / UPORDOWN: barriers relativas + duration
+            // Deriv API: barrier = upper (+offset), barrier2 = lower (-offset)
             const offset = currentPrice && currentPrice > 0
-              ? parseFloat((currentPrice * offsetPct).toFixed(4))
+              ? parseFloat((currentPrice * offsetPct).toFixed(2))
               : 0.5;
-            const highBarrier = '+' + offset;
-            const lowBarrier  = '-' + offset;
+            const upperBarrier = '+' + offset;
+            const lowerBarrier  = '-' + offset;
 
-            console.log(`📊 [${operationId}] ${contractType}: high=${highBarrier}, low=${lowBarrier}, 5m | Symbol: ${selectedSymbol}`);
+            console.log(`📊 [${operationId}] ${contractType}: barrier=${upperBarrier}, barrier2=${lowerBarrier}, 5m | Symbol: ${selectedSymbol}`);
             contract = await derivAPI.buyFlexibleContract({
               contract_type: contractType,
               symbol: selectedSymbol,
               amount: tradeParams.amount,
               duration: 5,
               duration_unit: 'm',
-              high_barrier: highBarrier,
-              low_barrier: lowBarrier,
+              barrier: upperBarrier,
+              barrier2: lowerBarrier,
             });
           }
 
           if (!contract) {
-            console.warn(`⚠️ [${operationId}] ${contractType} rejeitado pela Deriv → fallback DIGITDIFF`);
-            const fallback = { contract_type: 'DIGITDIFF' as const, symbol: selectedSymbol, duration: tradeParams.duration, duration_unit: 't' as const, barrier: tradeParams.barrier, amount: tradeParams.amount, currency: 'USD' };
-            contract = await derivAPI.buyDigitDifferContract(fallback);
-            resolvedTradeType = 'digitdiff';
+            // Não usar DIGITDIFF como fallback — pode causar timeout quando WS cai
+            // Deixar o ciclo seguinte escolher outra modalidade
+            console.warn(`⚠️ [${operationId}] ${contractType} rejeitado pela Deriv — aguardando próximo ciclo`);
+            resolvedTradeType = selectedModality;
           } else {
             resolvedTradeType = selectedModality;
           }

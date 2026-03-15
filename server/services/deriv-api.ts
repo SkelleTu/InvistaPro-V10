@@ -1196,8 +1196,7 @@ export class DerivAPIService extends EventEmitter {
     duration?: number;
     duration_unit?: string;
     barrier?: string;
-    high_barrier?: string;
-    low_barrier?: string;
+    barrier2?: string;
     multiplier?: number;
     growth_rate?: number;
     date_expiry?: number;
@@ -1225,12 +1224,15 @@ export class DerivAPIService extends EventEmitter {
       contract_type: params.contract_type,
       symbol: params.symbol,
       currency,
-      amount: params.amount,
       req_id: reqProposalId,
     };
 
-    // Inserir "basis" apenas para contratos que o suportam
-    if (!isLookback) {
+    // Lookback: usa "multiplier" (inteiro ≥ 1) em vez de "amount" + "basis"
+    // Outros contratos: usa "amount" + "basis"
+    if (isLookback) {
+      proposalMsg.multiplier = Math.max(1, Math.round(params.amount));
+    } else {
+      proposalMsg.amount = params.amount;
       proposalMsg.basis = basis;
     }
 
@@ -1239,8 +1241,7 @@ export class DerivAPIService extends EventEmitter {
       proposalMsg.duration_unit = params.duration_unit || 'm';
     }
     if (params.barrier !== undefined) proposalMsg.barrier = params.barrier;
-    if (params.high_barrier !== undefined) proposalMsg.high_barrier = params.high_barrier;
-    if (params.low_barrier !== undefined) proposalMsg.low_barrier = params.low_barrier;
+    if (params.barrier2 !== undefined) proposalMsg.barrier2 = params.barrier2;
     if (params.multiplier !== undefined) proposalMsg.multiplier = params.multiplier;
     if (params.growth_rate !== undefined) proposalMsg.growth_rate = params.growth_rate;
     if (params.date_expiry !== undefined) proposalMsg.date_expiry = params.date_expiry;

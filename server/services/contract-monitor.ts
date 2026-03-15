@@ -479,6 +479,7 @@ class UniversalContractMonitor extends EventEmitter {
   // ── Processamento de updates do contrato ─────────────────
 
   private async processContractUpdate(contract: any): Promise<void> {
+    if (!contract || !contract.contract_id) return;
     const contractId = contract.contract_id;
     const state = this.monitored.get(contractId);
     if (!state) return;
