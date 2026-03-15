@@ -971,7 +971,7 @@ export default function TradingSystemPage() {
                   <div>
                     <p className="text-sm font-medium text-muted-foreground">Zona de Reset</p>
                     <p className="text-xs text-muted-foreground mt-0.5">
-                      Apaga todo o histórico operacional para começar do zero. Credenciais e conta não são afetadas.
+                      Apaga histórico de trades, logs e sessões para começar do zero. Memória das IAs e credenciais são preservadas.
                     </p>
                   </div>
                   <AlertDialog>
@@ -999,10 +999,10 @@ export default function TradingSystemPage() {
                           <li>Todo o histórico de operações</li>
                           <li>Logs de análise das IAs</li>
                           <li>Estatísticas de PnL diário</li>
-                          <li>Memória de aprendizado das IAs</li>
                           <li>Sessões e conexões ativas</li>
                           <li>Ativos bloqueados</li>
                         </ul>
+                        <p className="text-green-700 dark:text-green-400 font-medium">A memória de aprendizado das IAs será preservada.</p>
                         <p className="font-medium">Suas credenciais, token Deriv e conta de usuário <span className="text-green-600 dark:text-green-400">não serão afetados</span>.</p>
                       </div>
                       <AlertDialogFooter>

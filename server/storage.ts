@@ -1749,35 +1749,9 @@ export class DatabaseStorage implements IStorage {
       rowsDeleted += wsSubs.length;
     } catch {}
 
-    // Memória de IA global — limpar para começar do zero
-    try {
-      await db.run(sql`DELETE FROM episodic_memory`);
-      tablesCleared.push('episodic_memory');
-    } catch {}
-    try {
-      await db.run(sql`DELETE FROM dynamic_weights`);
-      tablesCleared.push('dynamic_weights');
-    } catch {}
-    try {
-      await db.run(sql`DELETE FROM emergent_patterns`);
-      tablesCleared.push('emergent_patterns');
-    } catch {}
-    try {
-      await db.run(sql`DELETE FROM strategy_evolution`);
-      tablesCleared.push('strategy_evolution');
-    } catch {}
-    try {
-      await db.run(sql`DELETE FROM meta_learning`);
-      tablesCleared.push('meta_learning');
-    } catch {}
-    try {
-      await db.run(sql`DELETE FROM experiment_tracking`);
-      tablesCleared.push('experiment_tracking');
-    } catch {}
-    try {
-      await db.run(sql`DELETE FROM performance_analytics`);
-      tablesCleared.push('performance_analytics');
-    } catch {}
+    // Nota: memória de aprendizado das IAs (episodic_memory, dynamic_weights,
+    // emergent_patterns, strategy_evolution, meta_learning, experiment_tracking,
+    // performance_analytics) é preservada — representa conhecimento acumulado valioso.
 
     return { tablesCleared, rowsDeleted };
   }
