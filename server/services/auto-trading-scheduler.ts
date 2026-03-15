@@ -1160,9 +1160,48 @@ export class AutoTradingScheduler {
           'digit_under': 'DIGITUNDER',
         };
         const RISFALL_TYPES: Set<string> = new Set(['rise', 'fall', 'higher', 'lower']);
+        const IN_OUT_TYPES: Record<string, string> = {
+          'ends_between': 'EXPIRYRANGE',
+          'ends_outside': 'EXPIRYMISS',
+          'stays_between': 'RANGE',
+          'goes_outside': 'UPORDOWN',
+        };
+        const TOUCH_TYPES: Record<string, string> = {
+          'touch': 'ONETOUCH',
+          'no_touch': 'NOTOUCH',
+        };
+        const MULTIPLIER_TYPES: Record<string, string> = {
+          'multiplier_up': 'MULTUP',
+          'multiplier_down': 'MULTDOWN',
+        };
+        const TURBO_TYPES: Record<string, string> = {
+          'turbo_up': 'TURBOSLONG',
+          'turbo_down': 'TURBOSSHORT',
+        };
+        const VANILLA_TYPES: Record<string, string> = {
+          'vanilla_call': 'VANILLALONGCALL',
+          'vanilla_put': 'VANILLALONGPUT',
+        };
+        const LOOKBACK_TYPES: Record<string, string> = {
+          'lookback_high_close': 'LBFLOATPUT',
+          'lookback_close_low': 'LBFLOATCALL',
+          'lookback_high_low': 'LBHIGHLOW',
+        };
 
-        // Filtrar apenas modalidades suportadas (digits + rise/fall)
-        const supportedModalities = activeModalities.filter(m => DIGIT_TYPES[m] || RISFALL_TYPES.has(m));
+        const ALL_SUPPORTED = new Set([
+          ...Object.keys(DIGIT_TYPES),
+          ...RISFALL_TYPES,
+          ...Object.keys(IN_OUT_TYPES),
+          ...Object.keys(TOUCH_TYPES),
+          ...Object.keys(MULTIPLIER_TYPES),
+          'accumulator',
+          ...Object.keys(TURBO_TYPES),
+          ...Object.keys(VANILLA_TYPES),
+          ...Object.keys(LOOKBACK_TYPES),
+        ]);
+
+        // Filtrar apenas modalidades suportadas
+        const supportedModalities = activeModalities.filter(m => ALL_SUPPORTED.has(m));
         const selectedModality = supportedModalities.length > 0
           ? supportedModalities[Math.floor(Date.now() / 60000) % supportedModalities.length]
           : 'digit_differs';
@@ -1186,9 +1225,6 @@ export class AutoTradingScheduler {
           const contractType = DIGIT_TYPES[selectedModality] as 'DIGITDIFF' | 'DIGITMATCH' | 'DIGITEVEN' | 'DIGITODD' | 'DIGITOVER' | 'DIGITUNDER';
           const needsBarrier = ['DIGITDIFF', 'DIGITMATCH', 'DIGITOVER', 'DIGITUNDER'].includes(contractType);
           
-          // Para DIGITOVER usamos barrier 4 (dígito 5-9 = acima de 4)
-          // Para DIGITUNDER usamos barrier 5 (dígito 0-4 = abaixo de 5)
-          // Para DIGITMATCH/DIGITDIFF usamos o barrier do tradeParams
           let barrier: string | undefined = tradeParams.barrier;
           if (contractType === 'DIGITOVER') barrier = '4';
           if (contractType === 'DIGITUNDER') barrier = '5';
@@ -1209,9 +1245,153 @@ export class AutoTradingScheduler {
           const callPutDirection: 'up' | 'down' = (selectedModality === 'rise' || selectedModality === 'higher') ? 'up' : 
                                                     (selectedModality === 'fall' || selectedModality === 'lower') ? 'down' : 
                                                     safeDirection;
-          // Rise/Fall usam duração em minutos — usar 1 minuto mínimo
           const callPutDuration = Math.max(1, Math.floor(tradeParams.duration / 2));
           contract = await derivAPI.buyCallPutContract(selectedSymbol, callPutDirection, callPutDuration, tradeParams.amount);
+          resolvedTradeType = selectedModality;
+
+        } else if (IN_OUT_TYPES[selectedModality]) {
+          // ── Contratos Dentro & Fora (EXPIRYRANGE, EXPIRYMISS, RANGE, UPORDOWN) ──
+          const contractType = IN_OUT_TYPES[selectedModality];
+          const currentPrice = await derivAPI.getCurrentPrice(selectedSymbol);
+          let highBarrier: string;
+          let lowBarrier: string;
+
+          if (currentPrice && currentPrice > 0) {
+            const offsetPct = (selectedModality === 'ends_outside' || selectedModality === 'goes_outside') ? 0.008 : 0.005;
+            const offset = parseFloat((currentPrice * offsetPct).toFixed(4));
+            highBarrier = '+' + offset;
+            lowBarrier = '-' + offset;
+          } else {
+            highBarrier = '+0.5';
+            lowBarrier = '-0.5';
+          }
+
+          console.log(`📊 [${operationId}] ${contractType}: high=${highBarrier}, low=${lowBarrier} | Symbol: ${selectedSymbol}`);
+          contract = await derivAPI.buyFlexibleContract({
+            contract_type: contractType,
+            symbol: selectedSymbol,
+            amount: tradeParams.amount,
+            duration: 5,
+            duration_unit: 'm',
+            high_barrier: highBarrier,
+            low_barrier: lowBarrier,
+          });
+          resolvedTradeType = selectedModality;
+
+        } else if (TOUCH_TYPES[selectedModality]) {
+          // ── Contratos Touch / No Touch (ONETOUCH, NOTOUCH) ──
+          const contractType = TOUCH_TYPES[selectedModality];
+          const currentPrice = await derivAPI.getCurrentPrice(selectedSymbol);
+          let barrier: string;
+
+          if (currentPrice && currentPrice > 0) {
+            const offsetPct = selectedModality === 'no_touch' ? 0.015 : 0.004;
+            const offset = parseFloat((currentPrice * offsetPct).toFixed(4));
+            barrier = (safeDirection === 'up' ? '+' : '-') + offset;
+          } else {
+            barrier = safeDirection === 'up' ? '+0.5' : '-0.5';
+          }
+
+          console.log(`📊 [${operationId}] ${contractType}: barrier=${barrier} | Symbol: ${selectedSymbol}`);
+          contract = await derivAPI.buyFlexibleContract({
+            contract_type: contractType,
+            symbol: selectedSymbol,
+            amount: tradeParams.amount,
+            duration: 5,
+            duration_unit: 'm',
+            barrier,
+          });
+          resolvedTradeType = selectedModality;
+
+        } else if (MULTIPLIER_TYPES[selectedModality]) {
+          // ── Contratos Multiplicadores (MULTUP, MULTDOWN) ──
+          const contractType = MULTIPLIER_TYPES[selectedModality];
+          console.log(`📊 [${operationId}] ${contractType}: multiplier=10x | Symbol: ${selectedSymbol}`);
+          contract = await derivAPI.buyFlexibleContract({
+            contract_type: contractType,
+            symbol: selectedSymbol,
+            amount: tradeParams.amount,
+            multiplier: 10,
+          });
+          resolvedTradeType = selectedModality;
+
+        } else if (selectedModality === 'accumulator') {
+          // ── Contratos Acumuladores (ACCU) ──
+          console.log(`📊 [${operationId}] ACCU: growth_rate=2% | Symbol: ${selectedSymbol}`);
+          contract = await derivAPI.buyFlexibleContract({
+            contract_type: 'ACCU',
+            symbol: selectedSymbol,
+            amount: tradeParams.amount,
+            growth_rate: 0.02,
+          });
+          resolvedTradeType = 'accumulator';
+
+        } else if (TURBO_TYPES[selectedModality]) {
+          // ── Contratos Turbos/Knockouts (TURBOSLONG, TURBOSSHORT) ──
+          const contractType = TURBO_TYPES[selectedModality];
+          const currentPrice = await derivAPI.getCurrentPrice(selectedSymbol);
+          let barrier: string;
+
+          if (currentPrice && currentPrice > 0) {
+            const knockoutOffset = currentPrice * 0.015;
+            if (selectedModality === 'turbo_up') {
+              barrier = (currentPrice - knockoutOffset).toFixed(4);
+            } else {
+              barrier = (currentPrice + knockoutOffset).toFixed(4);
+            }
+          } else {
+            barrier = '0';
+          }
+
+          const dateExpiry = Math.floor(Date.now() / 1000) + 900;
+          console.log(`📊 [${operationId}] ${contractType}: barrier=${barrier}, expiry=15min | Symbol: ${selectedSymbol}`);
+          contract = await derivAPI.buyFlexibleContract({
+            contract_type: contractType,
+            symbol: selectedSymbol,
+            amount: tradeParams.amount,
+            barrier,
+            date_expiry: dateExpiry,
+          });
+          resolvedTradeType = selectedModality;
+
+        } else if (VANILLA_TYPES[selectedModality]) {
+          // ── Contratos Vanilla Options (VANILLALONGCALL, VANILLALONGPUT) ──
+          const contractType = VANILLA_TYPES[selectedModality];
+          const currentPrice = await derivAPI.getCurrentPrice(selectedSymbol);
+          let strike: string;
+
+          if (currentPrice && currentPrice > 0) {
+            const strikeOffset = currentPrice * 0.005;
+            strike = selectedModality === 'vanilla_call'
+              ? (currentPrice + strikeOffset).toFixed(4)
+              : (currentPrice - strikeOffset).toFixed(4);
+          } else {
+            strike = '0';
+          }
+
+          const dateExpiry = Math.floor(Date.now() / 1000) + 900;
+          console.log(`📊 [${operationId}] ${contractType}: strike=${strike}, expiry=15min | Symbol: ${selectedSymbol}`);
+          contract = await derivAPI.buyFlexibleContract({
+            contract_type: contractType,
+            symbol: selectedSymbol,
+            amount: tradeParams.amount,
+            barrier: strike,
+            date_expiry: dateExpiry,
+          });
+          resolvedTradeType = selectedModality;
+
+        } else if (LOOKBACK_TYPES[selectedModality]) {
+          // ── Contratos Lookback (LBFLOATPUT, LBFLOATCALL, LBHIGHLOW) ──
+          const contractType = LOOKBACK_TYPES[selectedModality];
+          console.log(`📊 [${operationId}] ${contractType}: multiplier basis | Symbol: ${selectedSymbol}`);
+          contract = await derivAPI.buyFlexibleContract({
+            contract_type: contractType,
+            symbol: selectedSymbol,
+            amount: tradeParams.amount,
+            duration: 5,
+            duration_unit: 'm',
+            basis: 'multiplier',
+          });
           resolvedTradeType = selectedModality;
 
         } else {

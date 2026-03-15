@@ -1147,6 +1147,155 @@ export class DerivAPIService extends EventEmitter {
     return contract;
   }
 
+  /**
+   * Obtém o preço atual de um símbolo via histórico de ticks (request único, sem subscrição)
+   */
+  async getCurrentPrice(symbol: string): Promise<number | null> {
+    if (!this.isConnected) return null;
+    return new Promise((resolve) => {
+      const reqId = this.generateRequestId();
+      const timer = setTimeout(() => {
+        this.removeListener('message', handler);
+        resolve(null);
+      }, 8000);
+      const handler = (message: any) => {
+        if (message.req_id === reqId) {
+          clearTimeout(timer);
+          this.removeListener('message', handler);
+          if (message.history?.prices?.length > 0) {
+            resolve(parseFloat(message.history.prices[message.history.prices.length - 1]));
+          } else if (message.tick?.quote) {
+            resolve(parseFloat(message.tick.quote));
+          } else {
+            resolve(null);
+          }
+        }
+      };
+      this.on('message', handler);
+      this.sendMessage({
+        ticks_history: symbol,
+        count: 1,
+        end: 'latest',
+        style: 'ticks',
+        req_id: reqId,
+      });
+    });
+  }
+
+  /**
+   * COMPRA GENÉRICA FLEXÍVEL — suporta todos os tipos de contrato Deriv:
+   * ONETOUCH, NOTOUCH, EXPIRYRANGE, EXPIRYMISS, RANGE, UPORDOWN,
+   * MULTUP, MULTDOWN, ACCU, TURBOSLONG, TURBOSSHORT,
+   * VANILLALONGCALL, VANILLALONGPUT, LBFLOATPUT, LBFLOATCALL, LBHIGHLOW
+   */
+  async buyFlexibleContract(params: {
+    contract_type: string;
+    symbol: string;
+    amount: number;
+    currency?: string;
+    duration?: number;
+    duration_unit?: string;
+    barrier?: string;
+    high_barrier?: string;
+    low_barrier?: string;
+    multiplier?: number;
+    growth_rate?: number;
+    date_expiry?: number;
+    basis?: string;
+  }): Promise<DerivContractInfo | null> {
+    if (!this.isConnected) return null;
+
+    const BLOCKED = /\(1s\)/i;
+    if (BLOCKED.test(params.symbol)) {
+      console.error(`❌ Símbolo bloqueado: ${params.symbol}`);
+      return null;
+    }
+
+    const TIMEOUT_MS = 20000;
+    const currency = params.currency || 'USD';
+    const basis = params.basis || 'stake';
+    const reqProposalId = this.generateRequestId();
+
+    const proposalMsg: any = {
+      proposal: 1,
+      contract_type: params.contract_type,
+      symbol: params.symbol,
+      currency,
+      amount: params.amount,
+      basis,
+      req_id: reqProposalId,
+    };
+
+    if (params.duration !== undefined) {
+      proposalMsg.duration = params.duration;
+      proposalMsg.duration_unit = params.duration_unit || 'm';
+    }
+    if (params.barrier !== undefined) proposalMsg.barrier = params.barrier;
+    if (params.high_barrier !== undefined) proposalMsg.high_barrier = params.high_barrier;
+    if (params.low_barrier !== undefined) proposalMsg.low_barrier = params.low_barrier;
+    if (params.multiplier !== undefined) proposalMsg.multiplier = params.multiplier;
+    if (params.growth_rate !== undefined) proposalMsg.growth_rate = params.growth_rate;
+    if (params.date_expiry !== undefined) proposalMsg.date_expiry = params.date_expiry;
+
+    console.log(`📋 [FLEX CONTRACT] ${params.contract_type} | ${params.symbol} | $${params.amount}`);
+
+    const proposal = await new Promise<{ id: string; ask_price: number } | null>((resolve) => {
+      const handler = (message: any) => {
+        if (message.req_id === reqProposalId) {
+          this.removeListener('message', handler);
+          clearTimeout(timer);
+          if (message.proposal) {
+            resolve({ id: message.proposal.id, ask_price: message.proposal.ask_price });
+          } else {
+            console.error(`❌ Proposta ${params.contract_type} falhou:`, message.error?.message || message.error);
+            resolve(null);
+          }
+        }
+      };
+      const timer = setTimeout(() => {
+        this.removeListener('message', handler);
+        console.error(`⏱️ Timeout proposta ${params.contract_type}`);
+        resolve(null);
+      }, TIMEOUT_MS);
+      this.on('message', handler);
+      this.sendMessage(proposalMsg);
+    });
+
+    if (!proposal) return null;
+
+    const reqBuyId = this.generateRequestId();
+    const contract = await new Promise<DerivContractInfo | null>((resolve) => {
+      const handler = (message: any) => {
+        if (message.req_id === reqBuyId) {
+          this.removeListener('message', handler);
+          clearTimeout(timer);
+          if (message.buy) {
+            console.log(`✅ Contrato ${params.contract_type} comprado: ${message.buy.contract_id}`);
+            resolve({
+              contract_id: message.buy.contract_id,
+              shortcode: message.buy.shortcode || '',
+              status: 'active',
+              entry_tick: 0,
+              buy_price: message.buy.buy_price,
+            });
+          } else {
+            console.error(`❌ Compra ${params.contract_type} falhou:`, message.error?.message || message.error);
+            resolve(null);
+          }
+        }
+      };
+      const timer = setTimeout(() => {
+        this.removeListener('message', handler);
+        console.error(`⏱️ Timeout compra ${params.contract_type}`);
+        resolve(null);
+      }, TIMEOUT_MS);
+      this.on('message', handler);
+      this.sendMessage({ buy: proposal.id, price: proposal.ask_price, req_id: reqBuyId });
+    });
+
+    return contract;
+  }
+
   async getProfitTable(limit: number = 100): Promise<any[]> {
     if (!this.isConnected) return [];
 
