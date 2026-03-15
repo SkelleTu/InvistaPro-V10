@@ -1200,13 +1200,64 @@ export class AutoTradingScheduler {
           ...Object.keys(LOOKBACK_TYPES),
         ]);
 
-        // Filtrar apenas modalidades suportadas
-        const supportedModalities = activeModalities.filter(m => ALL_SUPPORTED.has(m));
-        const selectedModality = supportedModalities.length > 0
-          ? supportedModalities[Math.floor(Date.now() / 60000) % supportedModalities.length]
-          : 'digit_differs';
+        // ─── MATRIZ DE COMPATIBILIDADE SÍMBOLO × MODALIDADE ──────────────
+        // Define quais modalidades são suportadas por cada grupo de símbolo.
+        // Baseado na documentação oficial da Deriv para índices sintéticos.
+        const DIGIT_KEYS   = Object.keys(DIGIT_TYPES);
+        const RISFALL_KEYS = ['rise', 'fall', 'higher', 'lower'];
+        const INOUT_KEYS   = Object.keys(IN_OUT_TYPES);
+        const TOUCH_KEYS   = Object.keys(TOUCH_TYPES);
+        const MULT_KEYS    = Object.keys(MULTIPLIER_TYPES);
+        const ACCU_KEYS    = ['accumulator'];
+        const TURBO_KEYS   = Object.keys(TURBO_TYPES);
+        const VANILLA_KEYS = Object.keys(VANILLA_TYPES);
+        const LB_KEYS      = Object.keys(LOOKBACK_TYPES);
 
-        console.log(`🎯 [${operationId}] Modalidade selecionada: ${selectedModality} (ativas: ${activeModalities.join(', ')})`);
+        // Volatility Indices (R_10, R_25, R_50, R_75, R_100):
+        //   suportam tudo exceto Turbos e Vanillas (disponíveis apenas em conta real/forex)
+        const VOL_BASE   = [...DIGIT_KEYS, ...RISFALL_KEYS, ...INOUT_KEYS, ...TOUCH_KEYS, ...MULT_KEYS, ...ACCU_KEYS, ...LB_KEYS];
+        // 1HZ Indices com suporte completo (10, 25, 50, 75, 100):
+        //   suportam dígitos, rise/fall, in/out, touch, multiplicadores, acumuladores
+        const HZ_FULL    = [...DIGIT_KEYS, ...RISFALL_KEYS, ...INOUT_KEYS, ...TOUCH_KEYS, ...MULT_KEYS, ...ACCU_KEYS];
+        // 1HZ Indices básicos (15, 30, 90): sem multiplicadores/acumuladores
+        const HZ_BASIC   = [...DIGIT_KEYS, ...RISFALL_KEYS, ...INOUT_KEYS, ...TOUCH_KEYS];
+        // Jump Indices (JD10..JD100): apenas dígitos, rise/fall, in/out, touch
+        const JUMP_OK    = [...DIGIT_KEYS, ...RISFALL_KEYS, ...INOUT_KEYS, ...TOUCH_KEYS];
+        // Range Break (RDBULL, RDBEAR): idem Jump
+        const RDB_OK     = [...DIGIT_KEYS, ...RISFALL_KEYS, ...INOUT_KEYS, ...TOUCH_KEYS];
+        // R_100 também suporta Turbos e Vanillas (maior liquidez)
+        const VOL_100    = [...VOL_BASE, ...TURBO_KEYS, ...VANILLA_KEYS];
+
+        const SYMBOL_COMPAT: Record<string, string[]> = {
+          'R_10': VOL_BASE,   'R_25': VOL_BASE,   'R_50': VOL_BASE,
+          'R_75': VOL_BASE,   'R_100': VOL_100,
+          '1HZ10V': HZ_FULL,  '1HZ25V': HZ_FULL,  '1HZ50V': HZ_FULL,
+          '1HZ75V': HZ_FULL,  '1HZ100V': HZ_FULL,
+          '1HZ15V': HZ_BASIC, '1HZ30V': HZ_BASIC, '1HZ90V': HZ_BASIC,
+          'JD10': JUMP_OK,    'JD25': JUMP_OK,    'JD50': JUMP_OK,
+          'JD75': JUMP_OK,    'JD100': JUMP_OK,
+          'RDBULL': RDB_OK,   'RDBEAR': RDB_OK,
+        };
+
+        // Determinar modalidades compatíveis com o símbolo selecionado
+        const symbolCompatible = new Set<string>(SYMBOL_COMPAT[selectedSymbol] ?? [...DIGIT_KEYS, ...RISFALL_KEYS]);
+
+        // Filtrar modalidades: suportadas pela plataforma E compatíveis com o símbolo
+        const supportedModalities = activeModalities.filter(m => ALL_SUPPORTED.has(m) && symbolCompatible.has(m));
+
+        // Se nenhuma ativa for compatível, usar dígitos como fallback universal
+        const finalModalities = supportedModalities.length > 0 ? supportedModalities : DIGIT_KEYS.filter(k => activeModalities.includes(k));
+        const compatibleModalities = finalModalities.length > 0 ? finalModalities : ['digit_differs'];
+
+        if (supportedModalities.length < activeModalities.filter(m => ALL_SUPPORTED.has(m)).length) {
+          const dropped = activeModalities.filter(m => ALL_SUPPORTED.has(m) && !symbolCompatible.has(m));
+          console.log(`🔄 [${operationId}] Compatibilidade: ${dropped.join(', ')} não disponível em ${selectedSymbol} → usando: ${compatibleModalities.join(', ')}`);
+        }
+
+        const selectedModality = compatibleModalities[Math.floor(Date.now() / 60000) % compatibleModalities.length];
+
+        console.log(`🎯 [${operationId}] Modalidade selecionada: ${selectedModality} ✅ compatível com ${selectedSymbol} (pool: ${compatibleModalities.join(', ')})`);
+
 
         // ─── EXECUÇÃO POR MODALIDADE ─────────────────────────────────────
         let contract: any = null;
