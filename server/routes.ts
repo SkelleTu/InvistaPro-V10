@@ -2661,6 +2661,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         profit: op.profit,
         createdAt: op.createdAt,
         completedAt: op.completedAt,
+        tradeType: op.tradeType || op.trade_type || null,
+        contractType: op.contractType || op.contract_type || null,
+        barrier: op.barrier || null,
         aiConsensus: op.aiConsensus ? JSON.parse(op.aiConsensus) : null
       }));
 

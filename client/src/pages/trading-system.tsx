@@ -44,7 +44,17 @@ import {
   RefreshCw,
   Gauge,
   Trash2,
-  Eye
+  Eye,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpRight,
+  ArrowDownRight,
+  ChevronUp,
+  ChevronDown,
+  Maximize2,
+  BarChart2,
+  Equal,
+  Loader2,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -405,6 +415,326 @@ const TRADE_CATEGORIES: TradeCategory[] = [
     ],
   },
 ];
+
+// ─── HELPERS PARA CARD DE OPERAÇÕES ──────────────────────────────────────────
+
+function getContractInfo(op: any): {
+  label: string;
+  sublabel: string;
+  icon: React.ReactNode;
+  iconBg: string;
+  detail: string;
+} {
+  const ct = (op.contractType || op.tradeType || '').toUpperCase();
+  const tt = (op.tradeType || '').toLowerCase();
+  const dir = (op.direction || 'up').toLowerCase();
+  const barrier = op.barrier;
+
+  // ── Digit Differs
+  if (ct === 'DIGITDIFF' || tt === 'digitdiff' || tt === 'digit_differs') {
+    return {
+      label: 'Digit Differs',
+      sublabel: barrier != null ? `Dígito ≠ ${barrier}` : 'Dígito diferente',
+      icon: <span className="text-base font-bold">≠</span>,
+      iconBg: 'bg-blue-500',
+      detail: barrier != null ? `Dígito alvo ≠ ${barrier}` : 'Dígito diferente',
+    };
+  }
+  // ── Digit Matches
+  if (ct === 'DIGITMATCH' || tt === 'digitmatch' || tt === 'digit_matches') {
+    return {
+      label: 'Digit Matches',
+      sublabel: barrier != null ? `Dígito = ${barrier}` : 'Dígito igual',
+      icon: <Equal className="h-4 w-4" />,
+      iconBg: 'bg-indigo-500',
+      detail: barrier != null ? `Dígito alvo = ${barrier}` : 'Dígito igual',
+    };
+  }
+  // ── Digit Even
+  if (ct === 'DIGITEVEN' || tt === 'digiteven' || tt === 'digit_even') {
+    return {
+      label: 'Digit Par',
+      sublabel: 'Último dígito par',
+      icon: <span className="text-base font-bold">2</span>,
+      iconBg: 'bg-teal-500',
+      detail: 'Último dígito par (0,2,4,6,8)',
+    };
+  }
+  // ── Digit Odd
+  if (ct === 'DIGITODD' || tt === 'digitodd' || tt === 'digit_odd') {
+    return {
+      label: 'Digit Ímpar',
+      sublabel: 'Último dígito ímpar',
+      icon: <span className="text-base font-bold">3</span>,
+      iconBg: 'bg-purple-500',
+      detail: 'Último dígito ímpar (1,3,5,7,9)',
+    };
+  }
+  // ── Digit Over
+  if (ct === 'DIGITOVER' || tt === 'digitover' || tt === 'digit_over') {
+    return {
+      label: 'Digit Acima',
+      sublabel: barrier != null ? `Dígito > ${barrier}` : 'Dígito acima',
+      icon: <><Hash className="h-3 w-3" /><ChevronUp className="h-3 w-3" /></>,
+      iconBg: 'bg-emerald-500',
+      detail: barrier != null ? `Último dígito > ${barrier}` : 'Dígito acima',
+    };
+  }
+  // ── Digit Under
+  if (ct === 'DIGITUNDER' || tt === 'digitunder' || tt === 'digit_under') {
+    return {
+      label: 'Digit Abaixo',
+      sublabel: barrier != null ? `Dígito < ${barrier}` : 'Dígito abaixo',
+      icon: <><Hash className="h-3 w-3" /><ChevronDown className="h-3 w-3" /></>,
+      iconBg: 'bg-orange-500',
+      detail: barrier != null ? `Último dígito < ${barrier}` : 'Dígito abaixo',
+    };
+  }
+  // ── Accumulator
+  if (ct === 'ACCU' || tt === 'accumulator') {
+    return {
+      label: 'Acumulador',
+      sublabel: 'Lucro acumula por tick',
+      icon: <TrendingUp className="h-4 w-4" />,
+      iconBg: 'bg-cyan-500',
+      detail: 'Crescimento 2% por tick',
+    };
+  }
+  // ── Rise / Call
+  if (ct === 'CALL' || tt === 'rise' || tt === 'higher') {
+    return {
+      label: 'Alta (Rise)',
+      sublabel: 'Preço sobe',
+      icon: <ArrowUp className="h-4 w-4" />,
+      iconBg: 'bg-green-500',
+      detail: dir === 'up' ? 'Contrato de alta' : 'Contrato de alta',
+    };
+  }
+  // ── Fall / Put
+  if (ct === 'PUT' || tt === 'fall' || tt === 'lower') {
+    return {
+      label: 'Queda (Fall)',
+      sublabel: 'Preço cai',
+      icon: <ArrowDown className="h-4 w-4" />,
+      iconBg: 'bg-red-500',
+      detail: 'Contrato de baixa',
+    };
+  }
+  // ── Multiplier Up
+  if (ct === 'MULTUP' || tt === 'multiplier_up') {
+    return {
+      label: 'Multiplicador ↑',
+      sublabel: 'Lucro multiplicado na alta',
+      icon: <ArrowUpRight className="h-4 w-4" />,
+      iconBg: 'bg-green-600',
+      detail: 'Stop loss + Take profit automático',
+    };
+  }
+  // ── Multiplier Down
+  if (ct === 'MULTDOWN' || tt === 'multiplier_down') {
+    return {
+      label: 'Multiplicador ↓',
+      sublabel: 'Lucro multiplicado na queda',
+      icon: <ArrowDownRight className="h-4 w-4" />,
+      iconBg: 'bg-red-600',
+      detail: 'Stop loss + Take profit automático',
+    };
+  }
+  // ── Touch
+  if (ct === 'ONETOUCH' || tt === 'touch') {
+    return {
+      label: 'Touch',
+      sublabel: 'Toca a barreira',
+      icon: <Target className="h-4 w-4" />,
+      iconBg: 'bg-amber-500',
+      detail: 'Ganha se tocar a barreira',
+    };
+  }
+  // ── No Touch
+  if (ct === 'NOTOUCH' || tt === 'no_touch') {
+    return {
+      label: 'No Touch',
+      sublabel: 'Não toca a barreira',
+      icon: <Target className="h-4 w-4" />,
+      iconBg: 'bg-gray-500',
+      detail: 'Ganha sem tocar a barreira',
+    };
+  }
+  // ── Turbo Up
+  if (ct === 'TURBOSLONG' || tt === 'turbo_up') {
+    return {
+      label: 'Turbo ↑',
+      sublabel: 'Knockout de alta',
+      icon: <Zap className="h-4 w-4" />,
+      iconBg: 'bg-yellow-500',
+      detail: 'Alta com barreira knockout',
+    };
+  }
+  // ── Turbo Down
+  if (ct === 'TURBOSSHORT' || tt === 'turbo_down') {
+    return {
+      label: 'Turbo ↓',
+      sublabel: 'Knockout de baixa',
+      icon: <Zap className="h-4 w-4" />,
+      iconBg: 'bg-orange-600',
+      detail: 'Queda com barreira knockout',
+    };
+  }
+  // ── Vanilla Call
+  if (ct === 'VANILLALONGCALL' || tt === 'vanilla_call') {
+    return {
+      label: 'Vanilla Call',
+      sublabel: 'Opção de compra',
+      icon: <BarChart2 className="h-4 w-4" />,
+      iconBg: 'bg-blue-600',
+      detail: 'Opção financeira de alta',
+    };
+  }
+  // ── Vanilla Put
+  if (ct === 'VANILLALONGPUT' || tt === 'vanilla_put') {
+    return {
+      label: 'Vanilla Put',
+      sublabel: 'Opção de venda',
+      icon: <BarChart2 className="h-4 w-4" />,
+      iconBg: 'bg-pink-600',
+      detail: 'Opção financeira de baixa',
+    };
+  }
+  // ── Lookbacks
+  if (ct === 'LBFLOATPUT' || tt === 'lookback_high_close') {
+    return {
+      label: 'Lookback H-C',
+      sublabel: 'Máx − Fechamento',
+      icon: <Maximize2 className="h-4 w-4" />,
+      iconBg: 'bg-violet-500',
+      detail: 'Paga (Máximo − Fechamento)',
+    };
+  }
+  if (ct === 'LBFLOATCALL' || tt === 'lookback_close_low') {
+    return {
+      label: 'Lookback C-L',
+      sublabel: 'Fechamento − Mín',
+      icon: <Maximize2 className="h-4 w-4" />,
+      iconBg: 'bg-violet-600',
+      detail: 'Paga (Fechamento − Mínimo)',
+    };
+  }
+  if (ct === 'LBHIGHLOW' || tt === 'lookback_high_low') {
+    return {
+      label: 'Lookback H-L',
+      sublabel: 'Máximo − Mínimo',
+      icon: <Maximize2 className="h-4 w-4" />,
+      iconBg: 'bg-violet-700',
+      detail: 'Paga (Máximo − Mínimo)',
+    };
+  }
+  // ── In/Out
+  if (ct === 'EXPIRYRANGE' || tt === 'ends_between') {
+    return { label: 'Termina Entre', sublabel: 'Dentro do range', icon: <ArrowUpDown className="h-4 w-4" />, iconBg: 'bg-sky-500', detail: 'Termina dentro das barreiras' };
+  }
+  if (ct === 'EXPIRYMISS' || tt === 'ends_outside') {
+    return { label: 'Termina Fora', sublabel: 'Fora do range', icon: <ArrowUpDown className="h-4 w-4" />, iconBg: 'bg-sky-600', detail: 'Termina fora das barreiras' };
+  }
+  if (ct === 'RANGE' || tt === 'stays_between') {
+    return { label: 'Fica Entre', sublabel: 'Permanece no range', icon: <ArrowUpDown className="h-4 w-4" />, iconBg: 'bg-cyan-600', detail: 'Permanece entre as barreiras' };
+  }
+  if (ct === 'UPORDOWN' || tt === 'goes_outside') {
+    return { label: 'Sai do Range', sublabel: 'Ultrapassa barreira', icon: <ArrowUpDown className="h-4 w-4" />, iconBg: 'bg-cyan-700', detail: 'Sai do intervalo de barreiras' };
+  }
+  // ── Fallback
+  return {
+    label: ct || tt || 'Trade',
+    sublabel: dir === 'up' ? 'Alta' : 'Baixa',
+    icon: dir === 'up' ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />,
+    iconBg: dir === 'up' ? 'bg-green-500' : 'bg-red-500',
+    detail: '',
+  };
+}
+
+function getAssetLabel(symbol: string): string {
+  const MAP: Record<string, string> = {
+    'R_10': 'Vol. 10', 'R_25': 'Vol. 25', 'R_50': 'Vol. 50', 'R_75': 'Vol. 75', 'R_100': 'Vol. 100',
+    '1HZ10V': '1s Vol. 10', '1HZ25V': '1s Vol. 25', '1HZ50V': '1s Vol. 50',
+    '1HZ75V': '1s Vol. 75', '1HZ100V': '1s Vol. 100',
+    '1HZ15V': '1s Vol. 15', '1HZ30V': '1s Vol. 30', '1HZ90V': '1s Vol. 90',
+    'JD10': 'Jump 10', 'JD25': 'Jump 25', 'JD50': 'Jump 50', 'JD75': 'Jump 75', 'JD100': 'Jump 100',
+    'RDBULL': 'Range Break Bull', 'RDBEAR': 'Range Break Bear',
+  };
+  return MAP[symbol] || symbol;
+}
+
+function OperationCard({ operation, compact = false }: { operation: any; compact?: boolean }) {
+  const info = getContractInfo(operation);
+  const isWon = operation.status === 'won';
+  const isLost = operation.status === 'lost';
+  const isPending = operation.status === 'pending' || operation.status === 'open';
+  const profit = typeof operation.profit === 'number' ? operation.profit : null;
+  const amount = typeof operation.amount === 'number' ? operation.amount : parseFloat(operation.amount || '0');
+
+  const statusBadge = () => {
+    if (isWon) return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300">✓ Ganhou</span>;
+    if (isLost) return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300">✗ Perdeu</span>;
+    return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 animate-pulse"><Loader2 className="h-2.5 w-2.5 animate-spin" /> Aberto</span>;
+  };
+
+  const time = new Date(operation.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const date = new Date(operation.createdAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+
+  return (
+    <div
+      className={`flex items-center gap-3 p-3 border rounded-lg transition-all hover:shadow-sm ${
+        isWon ? 'border-emerald-200 dark:border-emerald-800 bg-emerald-50/30 dark:bg-emerald-900/10' :
+        isLost ? 'border-red-200 dark:border-red-800 bg-red-50/30 dark:bg-red-900/10' :
+        'border-amber-200 dark:border-amber-800 bg-amber-50/20 dark:bg-amber-900/10'
+      }`}
+      data-testid={`operation-${operation.id}`}
+    >
+      {/* Ícone do contrato */}
+      <div className={`flex-shrink-0 w-10 h-10 rounded-xl ${info.iconBg} flex items-center justify-center text-white shadow-sm`}>
+        {info.icon}
+      </div>
+
+      {/* Info principal */}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="font-semibold text-sm leading-tight" data-testid={`operation-symbol-${operation.id}`}>
+            {operation.symbol}
+          </span>
+          <span className="text-xs text-muted-foreground font-medium">
+            {getAssetLabel(operation.symbol)}
+          </span>
+          {statusBadge()}
+        </div>
+        <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+          <span className="text-xs font-medium text-foreground/80">{info.label}</span>
+          <span className="text-xs text-muted-foreground">·</span>
+          <span className="text-xs text-muted-foreground">{info.sublabel}</span>
+        </div>
+        {!compact && (
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <Clock className="h-2.5 w-2.5 text-muted-foreground" />
+            <span className="text-xs text-muted-foreground">{date} {time}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Valor e P&L */}
+      <div className="flex-shrink-0 text-right">
+        <div className="text-sm font-semibold text-foreground">${amount.toFixed(2)}</div>
+        {profit !== null ? (
+          <div className={`text-sm font-bold ${profit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`} data-testid={`operation-profit-${operation.id}`}>
+            {profit >= 0 ? '+' : ''}${profit.toFixed(2)}
+          </div>
+        ) : isPending ? (
+          <div className="text-xs text-amber-500 dark:text-amber-400 font-medium">em aberto</div>
+        ) : null}
+        {compact && (
+          <div className="text-[10px] text-muted-foreground mt-0.5">{time}</div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export default function TradingSystemPage() {
   const { user } = useAuth();
@@ -1221,44 +1551,9 @@ export default function TradingSystemPage() {
               </CardHeader>
               <CardContent>
                 {recentOperations.length > 0 ? (
-                  <div className="space-y-4">
+                  <div className="space-y-2">
                     {recentOperations.slice(0, 5).map((operation: any) => (
-                      <div key={operation.id} className="flex items-center justify-between p-3 border rounded transition-all hover:border-primary" data-testid={`operation-${operation.id}`}>
-                        <div className="flex items-center space-x-3">
-                          {operation.direction === 'up' ? (
-                            <TrendingUp className="h-4 w-4 text-green-500" />
-                          ) : (
-                            <TrendingDown className="h-4 w-4 text-red-500" />
-                          )}
-                          <div>
-                            <p className="font-medium" data-testid={`operation-symbol-${operation.id}`}>{operation.symbol}</p>
-                            <p className="text-sm text-muted-foreground">
-                              {formatCurrency(operation.amount)} • {operation.direction.toUpperCase()}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <Badge variant={
-                            operation.status === 'won' ? 'default' : 
-                            operation.status === 'lost' ? 'destructive' : 
-                            'secondary'
-                          } data-testid={`operation-status-${operation.id}`}>
-                            {operation.status}
-                          </Badge>
-                          {operation.profit && (
-                            <div>
-                              <p className={`text-sm ${operation.profit >= 0 ? 'text-green-600' : 'text-red-600'}`} data-testid={`operation-profit-${operation.id}`}>
-                                {operation.profit >= 0 ? '+' : ''}{formatCurrency(operation.profit)}
-                              </p>
-                              {formatBRL(operation.profit) && (
-                                <p className={`text-xs ${operation.profit >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                                  {operation.profit >= 0 ? '+' : ''}{formatBRL(operation.profit)}
-                                </p>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
+                      <OperationCard key={operation.id} operation={operation} compact />
                     ))}
                   </div>
                 ) : (
@@ -1876,56 +2171,14 @@ export default function TradingSystemPage() {
                   </Badge>
                 </CardTitle>
                 <CardDescription>
-                  Atualização automática a cada 1 segundo - Todas as operações do sistema
+                  Atualização automática a cada 1 segundo — Ativo · Modalidade · Tipo · Resultado
                 </CardDescription>
               </CardHeader>
               <CardContent>
                 {recentOperations.length > 0 ? (
-                  <div className="space-y-4">
+                  <div className="space-y-2">
                     {recentOperations.map((operation: any) => (
-                      <div key={operation.id} className="flex items-center justify-between p-4 border rounded-lg transition-all hover:border-primary" data-testid={`history-operation-${operation.id}`}>
-                        <div className="flex items-center space-x-4">
-                          {operation.direction === 'up' ? (
-                            <TrendingUp className="h-5 w-5 text-green-500" />
-                          ) : (
-                            <TrendingDown className="h-5 w-5 text-red-500" />
-                          )}
-                          <div>
-                            <p className="font-medium" data-testid={`history-symbol-${operation.id}`}>{operation.symbol}</p>
-                            <p className="text-sm text-muted-foreground" data-testid={`history-time-${operation.id}`}>
-                              {new Date(operation.createdAt).toLocaleString('pt-BR')}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="text-center">
-                          <p className="font-medium" data-testid={`history-amount-${operation.id}`}>{formatCurrency(operation.amount)}</p>
-                          {formatBRL(operation.amount) && (
-                            <p className="text-xs text-muted-foreground">{formatBRL(operation.amount)}</p>
-                          )}
-                          <p className="text-sm text-muted-foreground">{operation.direction.toUpperCase()}</p>
-                        </div>
-                        <div className="text-right">
-                          <Badge variant={
-                            operation.status === 'won' ? 'default' : 
-                            operation.status === 'lost' ? 'destructive' : 
-                            'secondary'
-                          } data-testid={`history-status-${operation.id}`}>
-                            {operation.status}
-                          </Badge>
-                          {operation.profit !== undefined && (
-                            <div>
-                              <p className={`text-sm font-medium ${operation.profit >= 0 ? 'text-green-600' : 'text-red-600'}`} data-testid={`history-profit-${operation.id}`}>
-                                {operation.profit >= 0 ? '+' : ''}{formatCurrency(operation.profit)}
-                              </p>
-                              {formatBRL(operation.profit) && (
-                                <p className={`text-xs ${operation.profit >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                                  {operation.profit >= 0 ? '+' : ''}{formatBRL(operation.profit)}
-                                </p>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
+                      <OperationCard key={operation.id} operation={operation} />
                     ))}
                   </div>
                 ) : (
