@@ -424,6 +424,16 @@ export class MarketDataCollector extends EventEmitter {
   }
 
   /**
+   * Retorna os últimos N ticks armazenados no buffer para um símbolo
+   * Usado pelo contract-monitor para análise de saída com o Motor Supremo
+   */
+  getBufferedTicks(symbol: string, limit: number = 100): DerivTickData[] {
+    const buffer = this.tickBuffers.get(symbol);
+    if (!buffer || buffer.ticks.length === 0) return [];
+    return buffer.ticks.slice(-Math.min(limit, buffer.ticks.length));
+  }
+
+  /**
    * Destruir o coletor
    */
   async destroy(): Promise<void> {

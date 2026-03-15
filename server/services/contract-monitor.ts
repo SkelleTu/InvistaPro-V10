@@ -691,7 +691,7 @@ class UniversalContractMonitor extends EventEmitter {
   }
 
   private resubscribeAll(): void {
-    for (const [contractId, state] of this.monitored.entries()) {
+    for (const [contractId, state] of Array.from(this.monitored.entries())) {
       if (state.status === 'monitoring') {
         this.subscribeToContract(contractId);
       }
@@ -1068,7 +1068,7 @@ class UniversalContractMonitor extends EventEmitter {
 
   private getRecentPrices(symbol: string): number[] {
     try {
-      const ticks = marketDataCollector.getRecentTicks(symbol, 30);
+      const ticks = marketDataCollector.getBufferedTicks(symbol, 100);
       return ticks.map((t: any) => t.quote || t.price || 0).filter((p: number) => p > 0);
     } catch (_) {
       return [];
