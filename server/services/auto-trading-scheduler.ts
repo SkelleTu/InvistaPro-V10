@@ -1688,10 +1688,10 @@ export class AutoTradingScheduler {
     let ticksAdjustment = baseTicks;
     
     if (winRate > 0.60) {
-      ticksAdjustment = Math.min(15, baseTicks + 5); // Máx 15 ticks (+50%)
+      ticksAdjustment = Math.min(10, baseTicks + 2); // Máx 10 ticks (limite Deriv DIGITDIFF)
       console.log(`📈 [DYNAMIC TICKS] Alto win rate (${(winRate*100).toFixed(0)}%) → ${ticksAdjustment} ticks`);
     } else if (winRate < 0.40) {
-      ticksAdjustment = Math.max(5, baseTicks - 3); // Mín 5 ticks
+      ticksAdjustment = Math.max(3, baseTicks - 3); // Mín 3 ticks
       console.log(`📉 [DYNAMIC TICKS] Baixo win rate (${(winRate*100).toFixed(0)}%) → ${ticksAdjustment} ticks`);
     }
     
@@ -1758,23 +1758,22 @@ export class AutoTradingScheduler {
     // Agora o amount vem do cálculo de banca, não do modo
     const modeParams = mode.split('_');
     
-    // OTIMIZAÇÃO: Para digit differs, aumentar duration mínima para 10 ticks
-    // Isto distribui melhor o fechamento de trades e evita congestão
+    // DERIV LIMIT: DIGITDIFF aceita apenas 1-10 ticks de duração
+    // Manter dentro do limite obrigatório da API
     if (modeParams.length >= 3) {
       const timeParam = modeParams[2];
       if (timeParam.includes('min')) {
-        // Para modos rápidos (minutos), usar duração distribuída (10-15 ticks)
-        duration = Math.min(parseInt(timeParam) || 10, 15);
-        duration = Math.max(duration, 10); // ⚡ MÍNIMO: 10 ticks para distribuição
+        // Para modos rápidos (minutos), usar 5-10 ticks
+        duration = Math.min(parseInt(timeParam) || 5, 10);
+        duration = Math.max(duration, 5); // MÍNIMO: 5 ticks
       } else if (timeParam.includes('h')) {
-        // Para modos lentos (horas), usar duração maior para distribuir
-        const hours = parseInt(timeParam) || 1;
-        duration = hours <= 2 ? 10 : (hours <= 6 ? 12 : 15); // ⚡ Aumentado range
+        // Para modos lentos (horas), usar 8-10 ticks (ainda dentro do limite)
+        duration = 10; // Máximo permitido pela Deriv para DIGITDIFF
       }
     }
     
-    // ⚡ OTIMIZAÇÃO: Garantir duração entre 10-15 para distribuir fechamento
-    duration = Math.min(Math.max(duration, 10), 15);
+    // OBRIGATÓRIO: Garantir duração entre 5-10 ticks (limite Deriv DIGITDIFF: 1-10)
+    duration = Math.min(Math.max(duration, 5), 10);
     
     console.log(`🔧 DEBUG getTradeParamsForMode: mode=${mode}, duration calculada=${duration}, amount=${amount}`);
 
