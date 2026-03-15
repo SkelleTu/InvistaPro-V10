@@ -544,7 +544,7 @@ export default function TradingSystemPage() {
       if (now - lastModalityApiCallRef.current > 8000) {
         lastModalityApiCallRef.current = now;
         apiRequest("/api/trading/modalities", {
-          method: "POST",
+          method: "PUT",
           body: JSON.stringify({ modalities: newActive }),
         }).catch(() => {});
       }

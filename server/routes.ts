@@ -2369,7 +2369,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json({ modalities });
   }));
 
-  app.put('/api/trading/modalities', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+  const handleUpdateModalities = asyncErrorHandler(async (req: any, res: any) => {
     const userId = req.user.id;
     const { modalities } = req.body;
     if (!Array.isArray(modalities)) {
@@ -2388,7 +2388,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     await dbStorage.updateSelectedModalities(userId, finalModalities);
     console.log(`📋 [MODALITIES] Usuário ${userId} atualizou modalidades: ${finalModalities.join(', ')}`);
     res.json({ success: true, modalities: finalModalities });
-  }));
+  });
+
+  app.put('/api/trading/modalities', isAuthenticated, isTradingAuthorized, handleUpdateModalities);
+  app.post('/api/trading/modalities', isAuthenticated, isTradingAuthorized, handleUpdateModalities);
 
   // =========================== MARKET DATA & REAL-TIME ===========================
 
