@@ -18,6 +18,7 @@
 import { EventEmitter } from 'events';
 import WebSocket from 'ws';
 import { marketDataCollector } from './market-data-collector';
+import { supremeAnalyzer, SupremeAnalysis, MarketRegime } from './supreme-market-analyzer';
 
 // ─────────────────────────── Tipos ───────────────────────────
 
@@ -196,69 +197,295 @@ function getThresholds(contractType: string): ExitThresholds {
   }
 }
 
-// ─────────────────── Análise técnica rápida (sem IA externa) ───────────────
+// ─────────── Sinal de Saída Supremo — 10 Dimensões Simultâneas ────────────
 
-function computeQuickSignal(
+interface SupremeExitSignal {
+  reversalDetected: boolean;
+  strength: number;           // 0-100
+  trend: 'up' | 'down' | 'neutral';
+  urgency: 'low' | 'medium' | 'high' | 'emergency';
+  holdSignal: boolean;        // motor diz AGUARDAR, não fechar
+  exitReason: string;
+  regime: MarketRegime | 'unknown';
+  hurst: number;
+  convergence: number;
+}
+
+function computeSupremeExitSignal(
+  symbol: string,
   recentPrices: number[],
-  direction: 'up' | 'down' | 'neutral'
-): { reversalDetected: boolean; strength: number; trend: 'up' | 'down' | 'neutral' } {
-  if (recentPrices.length < 8) return { reversalDetected: false, strength: 0, trend: 'neutral' };
+  direction: 'up' | 'down' | 'neutral',
+  currentProfitPct: number,
+): SupremeExitSignal {
+  const DEFAULT: SupremeExitSignal = {
+    reversalDetected: false, strength: 0, trend: 'neutral',
+    urgency: 'low', holdSignal: false, exitReason: '',
+    regime: 'unknown', hurst: 0.5, convergence: 50,
+  };
 
-  const prices = recentPrices.slice(-20);
-  const n = prices.length;
-
-  // EMA rápida (5) vs lenta (15)
-  function ema(data: number[], period: number): number {
+  // ── Fallback local simples se o Motor Supremo ainda não tem dados ──────────
+  const calcEma = (data: number[], period: number): number => {
     const k = 2 / (period + 1);
     let e = data[0];
     for (let i = 1; i < data.length; i++) e = data[i] * k + e * (1 - k);
     return e;
+  };
+
+  const sa: SupremeAnalysis | null = supremeAnalyzer.getLatestAnalysis(symbol);
+  if (!sa) {
+    // Usar lógica local básica como fallback
+    if (recentPrices.length < 8) return DEFAULT;
+    const prices = recentPrices.slice(-20);
+    const n = prices.length;
+    const emaFast = calcEma(prices, Math.min(5, n));
+    const emaSlow = calcEma(prices, Math.min(15, n));
+    const trend: 'up' | 'down' | 'neutral' = emaFast > emaSlow * 1.0001 ? 'up' : emaFast < emaSlow * 0.9999 ? 'down' : 'neutral';
+    let gains = 0, losses = 0;
+    for (let i = Math.max(1, n - 7); i < n; i++) {
+      const d = prices[i] - prices[i - 1];
+      if (d > 0) gains += d; else losses -= d;
+    }
+    const rsi = 100 - 100 / (1 + (losses === 0 ? 100 : gains / losses));
+    const m3 = (prices[n - 1] - prices[Math.max(0, n - 4)]) / prices[Math.max(0, n - 4)];
+    let strength = 0;
+    let reversalDetected = false;
+    if (direction === 'up') {
+      strength = ((rsi > 65 ? (rsi - 65) / 35 : 0) * 30 + (m3 < -0.001 ? Math.min(1, Math.abs(m3) / 0.01) : 0) * 40 + (trend === 'down' ? 0.8 : 0) * 30);
+      reversalDetected = strength > 50 && trend === 'down';
+    } else if (direction === 'down') {
+      strength = ((rsi < 35 ? (35 - rsi) / 35 : 0) * 30 + (m3 > 0.001 ? Math.min(1, m3 / 0.01) : 0) * 40 + (trend === 'up' ? 0.8 : 0) * 30);
+      reversalDetected = strength > 50 && trend === 'up';
+    }
+    return { ...DEFAULT, reversalDetected, strength, trend };
   }
 
-  const emaFast = ema(prices, Math.min(5, n));
-  const emaSlow = ema(prices, Math.min(15, n));
+  // ══════════════════════════════════════════════════════════════
+  //  MOTOR SUPREMO ATIVO — 10 DIMENSÕES ANALISANDO O CONTRATO
+  // ══════════════════════════════════════════════════════════════
 
-  // RSI rápido
-  let gains = 0, losses = 0;
-  const rsiWindow = Math.min(7, n - 1);
-  for (let i = n - rsiWindow; i < n; i++) {
-    const d = prices[i] - prices[i - 1];
-    if (d > 0) gains += d; else losses -= d;
+  const { statistics, multiTimeframe, microstructure, spectral, regime, regimeConfidence, opportunityDirection } = sa;
+  const { hurstExponent, shannonEntropy, autocorrelation, zScoreVolatility, skewness, kurtosis } = statistics;
+  const { convergence, dominantTrend, tf1s, tf5s, tf30s } = multiTimeframe;
+  const { reversalProbability, tickClusterDirection, tickClusterStreak } = microstructure;
+
+  // Determinar se os timeframes convergem CONTRA ou A FAVOR do contrato
+  const tfsAgainst = [tf1s, tf5s, tf30s].filter(tf =>
+    (direction === 'up' && tf.trend === 'down') ||
+    (direction === 'down' && tf.trend === 'up')
+  ).length;
+  const tfsInFavor = [tf1s, tf5s, tf30s].filter(tf =>
+    (direction === 'up' && tf.trend === 'up') ||
+    (direction === 'down' && tf.trend === 'down')
+  ).length;
+
+  // Cluster de ticks opondo ao contrato
+  const clusterOpposing = tickClusterStreak >= 4 && (
+    (direction === 'up' && tickClusterDirection === 'down') ||
+    (direction === 'down' && tickClusterDirection === 'up')
+  );
+
+  // Score de reversão supremo — ponderação das 10 dimensões
+  let reversalScore = 0;
+
+  // 1. Hurst: <0.4 = mean-reverting (reversão iminente) | >0.6 = tendência (segurar)
+  if (hurstExponent < 0.35) reversalScore += 25;      // mercado muito mean-reverting
+  else if (hurstExponent < 0.45) reversalScore += 12;
+  else if (hurstExponent > 0.65) reversalScore -= 20; // tendência forte → aguardar
+
+  // 2. Autocorrelação: negativa = reversão, positiva = continuação
+  if (autocorrelation < -0.4) reversalScore += 20;
+  else if (autocorrelation < -0.2) reversalScore += 10;
+  else if (autocorrelation > 0.4) reversalScore -= 15; // continuação → aguardar
+
+  // 3. Reversão micro-estrutural
+  if (reversalProbability > 75) reversalScore += 25;
+  else if (reversalProbability > 55) reversalScore += 12;
+  else if (reversalProbability < 25) reversalScore -= 10;
+
+  // 4. Cluster de ticks opondo
+  if (clusterOpposing) reversalScore += 20;
+
+  // 5. Multi-timeframe convergência CONTRA o contrato
+  if (tfsAgainst >= 3) reversalScore += 30;
+  else if (tfsAgainst === 2) reversalScore += 15;
+  if (tfsInFavor >= 3) reversalScore -= 20; // forte convergência a favor → aguardar
+
+  // 6. Regime de mercado
+  if (regime === 'chaotic') reversalScore += 15;       // caótico → defensivo
+  if (regime === 'ranging') reversalScore += 10;       // ranging → vai reverter
+  if (regime === 'strong_trend') reversalScore -= 15;  // tendência forte → aguardar
+  if (regime === 'calm') reversalScore -= 5;
+
+  // 7. Volatilidade anômala (z-score alto = movimento brusco)
+  if (zScoreVolatility > 2.5) reversalScore += 15;
+  else if (zScoreVolatility > 1.5) reversalScore += 8;
+
+  // 8. Entropia alta = caos, difícil prever → defensivo
+  if (shannonEntropy > 0.75) reversalScore += 10;
+  else if (shannonEntropy < 0.3) reversalScore -= 5;  // previsível → confiar na posição
+
+  // 9. Kurtosis alta = caudas pesadas = movimento brusco iminente
+  if (kurtosis > 5) reversalScore += 10;
+
+  // 10. Ciclo espectral: se estamos em pico/trough adverso
+  if (spectral.dominantCycle) {
+    const phase = spectral.dominantCycle.phase;
+    if ((direction === 'up' && phase === 'peak') ||
+        (direction === 'down' && phase === 'trough')) {
+      reversalScore += 15 * spectral.cyclePower / 100;
+    }
+    if ((direction === 'up' && phase === 'rising') ||
+        (direction === 'down' && phase === 'falling')) {
+      reversalScore -= 10 * spectral.cyclePower / 100;
+    }
   }
-  const rs = losses === 0 ? 100 : gains / losses;
-  const rsi = 100 - 100 / (1 + rs);
 
-  // Momentum curto (últimos 3 ticks)
-  const momentum3 = prices[n - 1] - prices[n - 4 < 0 ? 0 : n - 4];
-  const momentum3Pct = momentum3 / prices[n - 4 < 0 ? 0 : n - 4];
+  // Normalizar 0-100
+  reversalScore = Math.max(0, Math.min(100, reversalScore));
 
-  // Determinar tendência atual
-  let trend: 'up' | 'down' | 'neutral';
-  if (emaFast > emaSlow * 1.0001) trend = 'up';
-  else if (emaFast < emaSlow * 0.9999) trend = 'down';
-  else trend = 'neutral';
+  // Determinar tendência dominante atual
+  const trend: 'up' | 'down' | 'neutral' = dominantTrend === 'sideways' ? 'neutral' : dominantTrend;
 
-  // Reversão detectada se tendência oposta ao direction
-  let reversalDetected = false;
-  let strength = 0;
+  // Decisão de HOLD: manter o contrato aberto
+  const holdSignal = (
+    (hurstExponent > 0.62 && tfsInFavor >= 2 && regime === 'strong_trend') ||
+    (autocorrelation > 0.35 && reversalProbability < 30) ||
+    (tfsInFavor >= 3 && reversalProbability < 40)
+  );
 
-  if (direction === 'up') {
-    // Procurando sinais de queda (reversão adversa)
-    const bearRSI = rsi > 65 ? (rsi - 65) / 35 : 0;
-    const bearMomentum = momentum3Pct < -0.001 ? Math.min(1, Math.abs(momentum3Pct) / 0.01) : 0;
-    const bearEMA = trend === 'down' ? 0.8 : 0;
-    strength = (bearRSI * 30 + bearMomentum * 40 + bearEMA * 30);
-    reversalDetected = strength > 50 && trend === 'down';
-  } else if (direction === 'down') {
-    // Procurando sinais de alta (reversão adversa)
-    const bullRSI = rsi < 35 ? (35 - rsi) / 35 : 0;
-    const bullMomentum = momentum3Pct > 0.001 ? Math.min(1, momentum3Pct / 0.01) : 0;
-    const bullEMA = trend === 'up' ? 0.8 : 0;
-    strength = (bullRSI * 30 + bullMomentum * 40 + bullEMA * 30);
-    reversalDetected = strength > 50 && trend === 'up';
+  // Reversão detectada
+  const reversalDetected = reversalScore >= 50 && !holdSignal;
+
+  // Urgência baseada no score + regime
+  let urgency: SupremeExitSignal['urgency'] = 'low';
+  if (reversalScore >= 80 || (regime === 'chaotic' && tfsAgainst >= 2)) urgency = 'emergency';
+  else if (reversalScore >= 65) urgency = 'high';
+  else if (reversalScore >= 50) urgency = 'medium';
+
+  // Motivo legível
+  let exitReason = '';
+  if (reversalDetected) {
+    const reasons: string[] = [];
+    if (hurstExponent < 0.4) reasons.push(`Hurst=${hurstExponent.toFixed(2)} mean-reverting`);
+    if (autocorrelation < -0.3) reasons.push(`autocorr=${autocorrelation.toFixed(2)} reversão serial`);
+    if (reversalProbability > 55) reasons.push(`prob.reversão=${reversalProbability.toFixed(0)}%`);
+    if (clusterOpposing) reasons.push(`cluster ${tickClusterStreak} ticks opostos`);
+    if (tfsAgainst >= 2) reasons.push(`${tfsAgainst}/3 timeframes contra`);
+    if (regime === 'chaotic') reasons.push(`regime=caótico`);
+    if (regime === 'ranging') reasons.push(`regime=ranging`);
+    exitReason = `🧠 SUPREMO: ${reasons.join(' | ')} [score=${reversalScore.toFixed(0)}]`;
   }
 
-  return { reversalDetected, strength, trend };
+  const holdReason = holdSignal
+    ? ` [HOLD: H=${hurstExponent.toFixed(2)} tf_favor=${tfsInFavor}/3]`
+    : '';
+
+  return {
+    reversalDetected,
+    strength: reversalScore,
+    trend,
+    urgency,
+    holdSignal,
+    exitReason: exitReason + holdReason,
+    regime,
+    hurst: hurstExponent,
+    convergence,
+  };
+}
+
+// ── Limiares Adaptativos pelo Motor Supremo ──────────────────
+
+function getAdaptiveThresholds(base: ExitThresholds, symbol: string, currentProfitPct: number): ExitThresholds {
+  const sa: SupremeAnalysis | null = supremeAnalyzer.getLatestAnalysis(symbol);
+  if (!sa) return base;
+
+  const { hurstExponent, shannonEntropy, zScoreVolatility, autocorrelation } = sa.statistics;
+  const { regime } = sa;
+
+  let profitTargetPct   = base.profitTargetPct;
+  let trailingStopPct   = base.trailingStopPct;
+  let barrierDangerPct  = base.barrierDangerPct;
+  let maxDurationMin    = base.maxDurationMin;
+  let earlyLossExitPct  = base.earlyLossExitPct;
+  let aiReversalStrength = base.aiReversalStrength;
+
+  // ── Regime de mercado ────────────────────────────────────────
+  if (regime === 'strong_trend') {
+    // Tendência forte → aguardar mais lucro, trailing mais solto
+    profitTargetPct   *= 1.4;    // +40% alvo
+    trailingStopPct   *= 1.25;   // trailing mais solto (deixar respirar)
+    maxDurationMin    *= 1.3;    // mais tempo
+    aiReversalStrength *= 1.1;   // exigir sinal mais forte para fechar
+  } else if (regime === 'weak_trend') {
+    profitTargetPct   *= 1.1;
+    trailingStopPct   *= 1.05;
+  } else if (regime === 'ranging') {
+    // Mercado oscilando → realizar lucro mais cedo
+    profitTargetPct   *= 0.75;   // -25% alvo (sair mais cedo)
+    trailingStopPct   *= 0.80;   // trailing mais apertado
+    maxDurationMin    *= 0.8;
+    aiReversalStrength *= 0.9;
+  } else if (regime === 'chaotic') {
+    // Caótico → modo defensivo extremo
+    profitTargetPct   *= 0.6;
+    trailingStopPct   *= 0.65;
+    maxDurationMin    *= 0.6;
+    earlyLossExitPct  *= 0.7;
+    aiReversalStrength *= 0.8;
+  } else if (regime === 'calm') {
+    // Calmo → segurar, baixo risco
+    profitTargetPct   *= 1.15;
+    trailingStopPct   *= 1.1;
+  }
+
+  // ── Hurst Exponent ──────────────────────────────────────────
+  if (hurstExponent < 0.40) {
+    // Mean-reverting: sair mais rápido
+    profitTargetPct  *= 0.85;
+    trailingStopPct  *= 0.80;
+  } else if (hurstExponent > 0.65) {
+    // Tendência forte: segurar mais
+    profitTargetPct  *= 1.2;
+    trailingStopPct  *= 1.15;
+  }
+
+  // ── Entropia de Shannon ─────────────────────────────────────
+  if (shannonEntropy > 0.75) {
+    // Alta entropia = caos = apertar proteções
+    trailingStopPct  *= 0.85;
+    aiReversalStrength *= 0.9;
+  } else if (shannonEntropy < 0.30) {
+    // Baixa entropia = previsível = confiar na posição
+    trailingStopPct  *= 1.1;
+  }
+
+  // ── Volatilidade Anômala ────────────────────────────────────
+  if (zScoreVolatility > 2.0) {
+    // Spike de volatilidade → apertar tudo
+    trailingStopPct  *= 0.80;
+    maxDurationMin   *= 0.85;
+  }
+
+  // ── Autocorrelação ──────────────────────────────────────────
+  if (autocorrelation < -0.35) {
+    // Reversão serial confirmada → ser mais rápido a fechar
+    profitTargetPct  *= 0.9;
+    trailingStopPct  *= 0.85;
+    aiReversalStrength *= 0.9;
+  } else if (autocorrelation > 0.35) {
+    // Continuação → aguardar mais
+    profitTargetPct  *= 1.1;
+  }
+
+  return {
+    ...base,
+    profitTargetPct:   Math.max(8,  Math.min(150, profitTargetPct)),
+    trailingStopPct:   Math.max(5,  Math.min(50,  trailingStopPct)),
+    barrierDangerPct,
+    maxDurationMin:    Math.max(3,  Math.min(90,  maxDurationMin)),
+    earlyLossExitPct:  Math.max(10, Math.min(80,  earlyLossExitPct)),
+    aiReversalStrength: Math.max(40, Math.min(90, aiReversalStrength)),
+  };
 }
 
 // ─────────────────── Classe principal ───────────────────
@@ -558,9 +785,11 @@ class UniversalContractMonitor extends EventEmitter {
     if (state.status !== 'monitoring') return;
     if (!state.isValidToSell) return;
 
-    // Executar análise de saída
-    const thresholds = getThresholds(state.input.contractType);
-    if (state.tickCount < thresholds.minTicksBeforeSell) return;
+    // Executar análise de saída com limiares adaptativos do Motor Supremo
+    const baseThresholds = getThresholds(state.input.contractType);
+    if (state.tickCount < baseThresholds.minTicksBeforeSell) return;
+
+    const thresholds = getAdaptiveThresholds(baseThresholds, state.input.symbol, state.profitPct);
 
     const decision = this.shouldSell(state, thresholds, contract);
 
@@ -576,135 +805,166 @@ class UniversalContractMonitor extends EventEmitter {
     const ct = state.input.contractType.toUpperCase();
     const dir = state.input.direction || 'neutral';
     const ageMin = (Date.now() - state.input.openedAt) / 60000;
+    const symbol = state.input.symbol;
 
-    // ── 1. TEMPO MÁXIMO ──────────────────────────────────
+    // ── 1. TEMPO MÁXIMO (adaptativo pelo Motor Supremo) ─────────
     if (ageMin >= thresholds.maxDurationMin) {
       return {
         shouldSell: true,
-        reason: `Tempo máximo atingido (${ageMin.toFixed(1)}min / ${thresholds.maxDurationMin}min)`,
+        reason: `Tempo máximo atingido (${ageMin.toFixed(1)}min / ${thresholds.maxDurationMin.toFixed(1)}min)`,
         urgency: 'high',
       };
     }
 
-    // ── 2. ANÁLISE TÉCNICA RÁPIDA ────────────────────────
-    const recentPrices = this.getRecentPrices(state.input.symbol);
-    const signal = computeQuickSignal(recentPrices, dir);
-    if (signal.reversalDetected) {
-      state.aiSignalBuffer.push({ ts: Date.now(), direction: signal.trend, strength: signal.strength });
-      // Manter apenas últimos 10 sinais
+    // ══════════════════════════════════════════════════════════════
+    //  2. MOTOR SUPREMO — 10 DIMENSÕES DE MERCADO EM TEMPO REAL
+    // ══════════════════════════════════════════════════════════════
+    const recentPrices = this.getRecentPrices(symbol);
+    const supreme = computeSupremeExitSignal(symbol, recentPrices, dir, state.profitPct);
+
+    // Alimentar buffer de sinais (compatível com lógica existente)
+    if (supreme.reversalDetected) {
+      state.aiSignalBuffer.push({ ts: Date.now(), direction: supreme.trend, strength: supreme.strength });
       if (state.aiSignalBuffer.length > 10) state.aiSignalBuffer.shift();
     }
 
-    // Sinal de reversão confirmado (2 sinais consecutivos)
-    const recentReversals = state.aiSignalBuffer.filter(s => Date.now() - s.ts < 15000 && s.strength > thresholds.aiReversalStrength);
+    // Confirmação dupla: 2 sinais supremos no buffer nos últimos 12s
+    const recentReversals = state.aiSignalBuffer.filter(
+      s => Date.now() - s.ts < 12000 && s.strength > thresholds.aiReversalStrength
+    );
     const confirmedReversal = recentReversals.length >= 2;
 
-    // ── 3. ESTRATÉGIAS POR MODALIDADE ────────────────────
+    // Log periódico do estado do Motor Supremo (a cada 10 ticks)
+    if (state.tickCount % 10 === 0 && supreme.regime !== 'unknown') {
+      console.log(
+        `🧠 [SUPREMO-MONITOR] ${ct} ${state.input.contractId} | ${symbol}` +
+        ` | regime=${supreme.regime} | H=${supreme.hurst.toFixed(2)}` +
+        ` | conv=${supreme.convergence.toFixed(0)}%` +
+        ` | revScore=${supreme.strength.toFixed(0)}` +
+        ` | HOLD=${supreme.holdSignal}` +
+        ` | lucro=${state.profitPct.toFixed(1)}%` +
+        ` | alvo=${thresholds.profitTargetPct.toFixed(0)}% trailing=${thresholds.trailingStopPct.toFixed(0)}%`
+      );
+    }
 
-    // ── ACCUMULATOR ──────────────────────────────────────
+    // ── HOLD SUPREMO: Motor Supremo diz para AGUARDAR ────────────
+    // (só bloqueia se o lucro estiver crescendo, para não segurar numa perda)
+    const supremeHold = supreme.holdSignal && state.profitPct > 0;
+
+    // ── 3. EMERGÊNCIA SUPREMA: sinal urgente → fechar imediatamente ──
+    if (supreme.urgency === 'emergency' && supreme.reversalDetected && !supremeHold && state.profitPct > 0) {
+      return {
+        shouldSell: true,
+        reason: `🚨 EMERGÊNCIA SUPREMA: ${supreme.exitReason}`,
+        urgency: 'emergency',
+      };
+    }
+
+    // ── 4. ESTRATÉGIAS POR MODALIDADE ────────────────────────────
+
+    // ── ACCUMULATOR ──────────────────────────────────────────────
     if (ct === 'ACCU') {
-      // Alvo de lucro
+      // Alvo de lucro (adaptativo pelo supremo)
       if (state.profitPct >= thresholds.profitTargetPct) {
-        return { shouldSell: true, reason: `ACCU: alvo de lucro ${state.profitPct.toFixed(1)}% ≥ ${thresholds.profitTargetPct}%`, urgency: 'high' };
+        return { shouldSell: true, reason: `ACCU: alvo ${state.profitPct.toFixed(1)}% ≥ ${thresholds.profitTargetPct.toFixed(0)}% (regime=${supreme.regime})`, urgency: 'high' };
       }
-      // Trailing stop: cai X% do pico
+      // Trailing stop dinâmico
       if (state.peakProfit > 0 && state.profit < state.peakProfit * (1 - thresholds.trailingStopPct / 100)) {
-        const drawdown = ((state.peakProfit - state.profit) / state.peakProfit * 100).toFixed(1);
-        return { shouldSell: true, reason: `ACCU: trailing stop ativado (queda de ${drawdown}% do pico $${state.peakProfit.toFixed(2)})`, urgency: 'high' };
+        if (supremeHold) {
+          console.log(`⏸️ [SUPREMO-HOLD] Trailing ativado mas H=${supreme.hurst.toFixed(2)} tendência forte → aguardando`);
+        } else {
+          const drawdown = ((state.peakProfit - state.profit) / state.peakProfit * 100).toFixed(1);
+          return { shouldSell: true, reason: `ACCU: trailing ${drawdown}% do pico (regime=${supreme.regime} H=${supreme.hurst.toFixed(2)})`, urgency: 'high' };
+        }
       }
-      // Barreira PRÓXIMA — emergência
+      // Barreira CRÍTICA — SEMPRE fecha, sem override do supremo
       if (state.barrierDistance !== undefined && state.barrierDistance < thresholds.barrierDangerPct) {
         return { shouldSell: true, reason: `ACCU: BARREIRA CRÍTICA a ${state.barrierDistance.toFixed(3)}% do spot!`, urgency: 'emergency' };
       }
-      // Barreira moderadamente próxima + reversão
-      if (state.barrierDistance !== undefined && state.barrierDistance < thresholds.barrierDangerPct * 2.5 && confirmedReversal) {
-        return { shouldSell: true, reason: `ACCU: barreira próxima (${state.barrierDistance.toFixed(3)}%) + reversão confirmada`, urgency: 'high' };
+      // Barreira moderada + sinal supremo de reversão
+      if (state.barrierDistance !== undefined && state.barrierDistance < thresholds.barrierDangerPct * 2.5 && (confirmedReversal || supreme.urgency === 'high')) {
+        return { shouldSell: true, reason: `ACCU: barreira ${state.barrierDistance.toFixed(3)}% + ${supreme.exitReason || 'reversão confirmada'}`, urgency: 'high' };
       }
-      // Reversão forte com qualquer lucro
-      if (confirmedReversal && state.profitPct > 5) {
-        return { shouldSell: true, reason: `ACCU: reversão forte confirmada com lucro de ${state.profitPct.toFixed(1)}%`, urgency: 'medium' };
+      // Sinal supremo de reversão com lucro
+      if (!supremeHold && (confirmedReversal || supreme.urgency === 'high') && state.profitPct > 5) {
+        return { shouldSell: true, reason: `ACCU: ${supreme.exitReason || 'reversão suprema confirmada'} | lucro=${state.profitPct.toFixed(1)}%`, urgency: supreme.urgency };
       }
     }
 
-    // ── MULTIPLIER ───────────────────────────────────────
+    // ── MULTIPLIER ────────────────────────────────────────────────
     if (ct === 'MULTUP' || ct === 'MULTDOWN') {
-      // Alvo de lucro
       if (state.profitPct >= thresholds.profitTargetPct) {
-        return { shouldSell: true, reason: `MULT: alvo ${state.profitPct.toFixed(1)}% atingido`, urgency: 'high' };
+        return { shouldSell: true, reason: `MULT: alvo ${state.profitPct.toFixed(1)}% (regime=${supreme.regime})`, urgency: 'high' };
       }
-      // Stop de perda (multiplier pode ir negativo)
       if (state.profitPct <= -thresholds.earlyLossExitPct) {
-        return { shouldSell: true, reason: `MULT: corte de perda ${state.profitPct.toFixed(1)}% < -${thresholds.earlyLossExitPct}%`, urgency: 'emergency' };
+        return { shouldSell: true, reason: `MULT: corte de perda ${state.profitPct.toFixed(1)}%`, urgency: 'emergency' };
       }
-      // Trailing
       if (state.peakProfit > state.input.buyPrice * 0.2 && state.profit < state.peakProfit * (1 - thresholds.trailingStopPct / 100)) {
-        return { shouldSell: true, reason: `MULT: trailing stop (pico $${state.peakProfit.toFixed(2)} → atual $${state.profit.toFixed(2)})`, urgency: 'high' };
+        if (!supremeHold) {
+          return { shouldSell: true, reason: `MULT: trailing (pico $${state.peakProfit.toFixed(2)} → $${state.profit.toFixed(2)}) | regime=${supreme.regime}`, urgency: 'high' };
+        }
       }
-      if (confirmedReversal && state.profitPct > 10) {
-        return { shouldSell: true, reason: `MULT: reversão confirmada com lucro ${state.profitPct.toFixed(1)}%`, urgency: 'medium' };
+      if (!supremeHold && (confirmedReversal || supreme.urgency === 'high') && state.profitPct > 10) {
+        return { shouldSell: true, reason: `MULT: ${supreme.exitReason || 'reversão suprema'} | lucro=${state.profitPct.toFixed(1)}%`, urgency: supreme.urgency };
       }
     }
 
-    // ── TURBOS ──────────────────────────────────────────
+    // ── TURBOS ────────────────────────────────────────────────────
     if (ct === 'TURBOSLONG' || ct === 'TURBOSSHORT') {
       if (state.barrierDistance !== undefined && state.barrierDistance < thresholds.barrierDangerPct) {
         return { shouldSell: true, reason: `TURBO: barreira PERIGOSA a ${state.barrierDistance.toFixed(3)}%`, urgency: 'emergency' };
       }
       if (state.profitPct >= thresholds.profitTargetPct) {
-        return { shouldSell: true, reason: `TURBO: alvo ${state.profitPct.toFixed(1)}% atingido`, urgency: 'high' };
+        return { shouldSell: true, reason: `TURBO: alvo ${state.profitPct.toFixed(1)}% (regime=${supreme.regime})`, urgency: 'high' };
       }
       if (state.profitPct <= -thresholds.earlyLossExitPct) {
         return { shouldSell: true, reason: `TURBO: corte de perda ${state.profitPct.toFixed(1)}%`, urgency: 'high' };
       }
-      if (state.barrierDistance !== undefined && state.barrierDistance < thresholds.barrierDangerPct * 2 && confirmedReversal) {
-        return { shouldSell: true, reason: `TURBO: barreira próxima + reversão`, urgency: 'high' };
+      if (state.barrierDistance !== undefined && state.barrierDistance < thresholds.barrierDangerPct * 2 && (confirmedReversal || supreme.urgency !== 'low')) {
+        return { shouldSell: true, reason: `TURBO: barreira próxima + ${supreme.exitReason || 'sinal supremo'}`, urgency: 'high' };
       }
     }
 
-    // ── VANILLA ──────────────────────────────────────────
+    // ── VANILLA ───────────────────────────────────────────────────
     if (ct === 'VANILLACALL' || ct === 'VANILLAPUT') {
       if (state.profitPct >= thresholds.profitTargetPct) {
-        return { shouldSell: true, reason: `VANILLA: alvo ${state.profitPct.toFixed(1)}% atingido`, urgency: 'high' };
+        return { shouldSell: true, reason: `VANILLA: alvo ${state.profitPct.toFixed(1)}% (regime=${supreme.regime})`, urgency: 'high' };
       }
       if (state.profitPct <= -thresholds.earlyLossExitPct) {
         return { shouldSell: true, reason: `VANILLA: corte de perda ${state.profitPct.toFixed(1)}%`, urgency: 'high' };
       }
-      if (confirmedReversal && state.profitPct > 15) {
-        return { shouldSell: true, reason: `VANILLA: reversão com lucro ${state.profitPct.toFixed(1)}%`, urgency: 'medium' };
+      if (!supremeHold && (confirmedReversal || supreme.urgency === 'high') && state.profitPct > 15) {
+        return { shouldSell: true, reason: `VANILLA: ${supreme.exitReason || 'reversão suprema'} | lucro=${state.profitPct.toFixed(1)}%`, urgency: supreme.urgency };
       }
     }
 
-    // ── CALL/PUT/RISE/FALL ───────────────────────────────
+    // ── CALL/PUT/RISE/FALL ────────────────────────────────────────
     if (['CALL', 'PUT', 'RISE', 'FALL', 'CALLE', 'PUTE'].includes(ct)) {
-      // Bid price como % do payout estimado
       const payout = parseFloat(raw.payout) || state.input.buyPrice * 1.8;
       const bidPct = (state.bidPrice / payout) * 100;
 
       if (bidPct >= thresholds.profitTargetPct) {
-        return { shouldSell: true, reason: `CALL/PUT: bid ${bidPct.toFixed(1)}% do payout — objetivo atingido`, urgency: 'high' };
+        return { shouldSell: true, reason: `CALL/PUT: bid ${bidPct.toFixed(1)}% do payout (regime=${supreme.regime})`, urgency: 'high' };
       }
-      // Corte de perda quando bid cai muito
       const bidDecline = (1 - state.bidPrice / state.input.buyPrice) * 100;
       if (bidDecline >= thresholds.earlyLossExitPct) {
         return { shouldSell: true, reason: `CALL/PUT: bid caiu ${bidDecline.toFixed(1)}% — saída preventiva`, urgency: 'medium' };
       }
-      // Trailing quando lucrativo + reversão
-      if (state.profitPct > 15 && confirmedReversal) {
-        return { shouldSell: true, reason: `CALL/PUT: reversão com bid lucrativo ${state.profitPct.toFixed(1)}%`, urgency: 'medium' };
+      if (!supremeHold && state.profitPct > 15 && (confirmedReversal || supreme.urgency !== 'low')) {
+        return { shouldSell: true, reason: `CALL/PUT: ${supreme.exitReason || 'reversão suprema'} | lucro=${state.profitPct.toFixed(1)}%`, urgency: supreme.urgency };
       }
-      // Trailing stop do pico
-      if (state.peakBidPrice > state.input.buyPrice * 1.3 && state.bidPrice < state.peakBidPrice * (1 - thresholds.trailingStopPct / 100)) {
-        return { shouldSell: true, reason: `CALL/PUT: trailing stop bid (pico $${state.peakBidPrice.toFixed(2)} → $${state.bidPrice.toFixed(2)})`, urgency: 'high' };
+      if (!supremeHold && state.peakBidPrice > state.input.buyPrice * 1.3 && state.bidPrice < state.peakBidPrice * (1 - thresholds.trailingStopPct / 100)) {
+        return { shouldSell: true, reason: `CALL/PUT: trailing bid (pico $${state.peakBidPrice.toFixed(2)} → $${state.bidPrice.toFixed(2)}) regime=${supreme.regime}`, urgency: 'high' };
       }
     }
 
-    // ── ONETOUCH/NOTOUCH/RANGE ───────────────────────────
+    // ── ONETOUCH/NOTOUCH/RANGE ────────────────────────────────────
     if (['ONETOUCH', 'NOTOUCH', 'RANGE', 'EXPIRYRANGE', 'UPORDOWN'].includes(ct)) {
       if (state.profitPct >= thresholds.profitTargetPct) {
-        return { shouldSell: true, reason: `BARRIER: lucro ${state.profitPct.toFixed(1)}% — realizando`, urgency: 'high' };
+        return { shouldSell: true, reason: `BARRIER: lucro ${state.profitPct.toFixed(1)}% realizado (regime=${supreme.regime})`, urgency: 'high' };
       }
-      if (confirmedReversal && state.profitPct > 20) {
-        return { shouldSell: true, reason: `BARRIER: reversão com lucro ${state.profitPct.toFixed(1)}%`, urgency: 'medium' };
+      if (!supremeHold && (confirmedReversal || supreme.urgency !== 'low') && state.profitPct > 20) {
+        return { shouldSell: true, reason: `BARRIER: ${supreme.exitReason || 'reversão suprema'} | lucro=${state.profitPct.toFixed(1)}%`, urgency: supreme.urgency };
       }
     }
 
