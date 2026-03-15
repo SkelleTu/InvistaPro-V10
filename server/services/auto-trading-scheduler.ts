@@ -12,6 +12,7 @@ import { assetScorer, AssetPerformanceRecord } from './asset-scorer';
 import { realStatsTracker } from './real-stats-tracker';
 import { contractMonitor } from './contract-monitor';
 import { persistentLearningEngine } from './persistent-learning-engine';
+import { supremeAnalyzer, SupremeAnalysis } from './supreme-market-analyzer';
 
 export interface ActiveTradeSession {
   userId: string;
@@ -102,6 +103,10 @@ export class AutoTradingScheduler {
     
     // Iniciar heartbeat para ResilienceSupervisor
     this.startSupervisorHeartbeat();
+
+    // 🧠 MOTOR SUPREMO DE ANÁLISE: iniciar análise de mercado em 10 dimensões
+    supremeAnalyzer.start();
+    console.log('🧠 [SUPREME] Motor de Análise Suprema ativado — 10 dimensões simultâneas');
 
     // 🧠 MOTOR DE APRENDIZADO PERSISTENTE: escutar resultados de contratos
     persistentLearningEngine.initialize().catch(e =>
@@ -1199,13 +1204,27 @@ export class AutoTradingScheduler {
           console.log(`🔄 [${operationId}] Compatibilidade: ${dropped.join(', ')} não disponível em ${selectedSymbol} → usando: ${compatibleModalities.join(', ')}`);
         }
 
-        // Selecionar modalidade por rotação baseada no timestamp em segundos + hash do operationId
-        // Isso garante variedade real entre trades consecutivos, não apenas a cada minuto
-        const opHash = operationId.split('').reduce((acc: number, c: string) => acc + c.charCodeAt(0), 0);
-        const rotationIndex = (Math.floor(Date.now() / 1000) + opHash) % compatibleModalities.length;
-        const selectedModality = compatibleModalities[rotationIndex];
+        // 🧠 SUPREME MARKET ANALYZER: Selecionar modalidade por inteligência, não por rotação de tempo
+        let selectedModality: string;
+        const supremeAnalysis = supremeAnalyzer.getLatestAnalysis(selectedSymbol);
 
-        console.log(`🎯 [${operationId}] Modalidade selecionada: ${selectedModality} ✅ compatível com ${selectedSymbol} (pool: ${compatibleModalities.join(', ')})`);
+        if (supremeAnalysis && supremeAnalysis.adaptiveParams && supremeAnalysis.adaptiveParams.modalityScore > 30) {
+          const recommended = supremeAnalysis.adaptiveParams.recommendedModality;
+          if (compatibleModalities.includes(recommended)) {
+            selectedModality = recommended;
+            console.log(`🧠 [${operationId}] Modalidade pelo Motor Supremo: ${selectedModality} (score=${supremeAnalysis.adaptiveParams.modalityScore.toFixed(0)}% | regime=${supremeAnalysis.regime} | hurst=${supremeAnalysis.statistics.hurstExponent.toFixed(2)} | entropy=${supremeAnalysis.statistics.shannonEntropy.toFixed(2)} | opp=${supremeAnalysis.opportunityScore.toFixed(0)}%)`);
+          } else {
+            const opHash = operationId.split('').reduce((acc: number, c: string) => acc + c.charCodeAt(0), 0);
+            const rotationIndex = (Math.floor(Date.now() / 1000) + opHash) % compatibleModalities.length;
+            selectedModality = compatibleModalities[rotationIndex];
+            console.log(`🔄 [${operationId}] ${recommended} incompatível com ${selectedSymbol} → fallback rotação: ${selectedModality}`);
+          }
+        } else {
+          const opHash = operationId.split('').reduce((acc: number, c: string) => acc + c.charCodeAt(0), 0);
+          const rotationIndex = (Math.floor(Date.now() / 1000) + opHash) % compatibleModalities.length;
+          selectedModality = compatibleModalities[rotationIndex];
+          console.log(`⏳ [${operationId}] Motor Supremo acumulando dados → rotação: ${selectedModality} (pool: ${compatibleModalities.join(', ')})`);
+        }
 
 
         // ─── EXECUÇÃO POR MODALIDADE ─────────────────────────────────────
@@ -1313,14 +1332,16 @@ export class AutoTradingScheduler {
           let barrier: string;
 
           if (currentPrice && currentPrice > 0) {
-            const offsetPct = selectedModality === 'no_touch' ? 0.015 : 0.004;
+            // 🧠 SUPREMO: barreira adaptativa por volatilidade real do mercado
+            const adaptivePct = supremeAnalysis?.adaptiveParams?.touch?.barrierOffsetPct;
+            const offsetPct = adaptivePct ?? (selectedModality === 'no_touch' ? 0.015 : 0.004);
             const offset = parseFloat((currentPrice * offsetPct).toFixed(4));
             barrier = (safeDirection === 'up' ? '+' : '-') + offset;
+            console.log(`📊 [${operationId}] ${contractType}: barrier=${barrier} (offset=${(offsetPct*100).toFixed(2)}%${adaptivePct ? ' ADAPTATIVO' : ' padrão'}) | Symbol: ${selectedSymbol}`);
           } else {
             barrier = safeDirection === 'up' ? '+0.5' : '-0.5';
+            console.log(`📊 [${operationId}] ${contractType}: barrier=${barrier} | Symbol: ${selectedSymbol}`);
           }
-
-          console.log(`📊 [${operationId}] ${contractType}: barrier=${barrier} | Symbol: ${selectedSymbol}`);
           contract = await derivAPI.buyFlexibleContract({
             contract_type: contractType,
             symbol: selectedSymbol,
@@ -1334,12 +1355,14 @@ export class AutoTradingScheduler {
         } else if (MULTIPLIER_TYPES[selectedModality]) {
           // ── Contratos Multiplicadores (MULTUP, MULTDOWN) ──
           const contractType = MULTIPLIER_TYPES[selectedModality];
-          console.log(`📊 [${operationId}] ${contractType}: multiplier=10x | Symbol: ${selectedSymbol}`);
+          // 🧠 SUPREMO: multiplicador adaptativo por força de tendência e volatilidade
+          const adaptiveMult = supremeAnalysis?.adaptiveParams?.multiplier?.factor ?? 10;
+          console.log(`📊 [${operationId}] ${contractType}: multiplier=${adaptiveMult}x${supremeAnalysis ? ` ADAPTATIVO (regime=${supremeAnalysis.regime})` : ' padrão'} | Symbol: ${selectedSymbol}`);
           contract = await derivAPI.buyFlexibleContract({
             contract_type: contractType,
             symbol: selectedSymbol,
             amount: tradeParams.amount,
-            multiplier: 10,
+            multiplier: adaptiveMult,
           });
           if (!contract) {
             console.warn(`⚠️ [${operationId}] Multiplier rejeitado pela Deriv → fallback DIGITDIFF`);
@@ -1352,12 +1375,15 @@ export class AutoTradingScheduler {
 
         } else if (selectedModality === 'accumulator') {
           // ── Contratos Acumuladores (ACCU) ──
-          console.log(`📊 [${operationId}] ACCU: growth_rate=2% | Symbol: ${selectedSymbol}`);
+          // 🧠 SUPREMO: growth_rate adaptativo por volatilidade e regime do mercado
+          const adaptiveGrowth = supremeAnalysis?.adaptiveParams?.accumulator?.growthRate ?? 0.02;
+          const accuRisk = supremeAnalysis?.adaptiveParams?.accumulator?.riskLevel ?? 'medium';
+          console.log(`📊 [${operationId}] ACCU: growth_rate=${(adaptiveGrowth*100).toFixed(1)}%${supremeAnalysis ? ` ADAPTATIVO (regime=${supremeAnalysis.regime} | risco=${accuRisk} | hurst=${supremeAnalysis.statistics.hurstExponent.toFixed(2)})` : ' padrão'} | Symbol: ${selectedSymbol}`);
           contract = await derivAPI.buyFlexibleContract({
             contract_type: 'ACCU',
             symbol: selectedSymbol,
             amount: tradeParams.amount,
-            growth_rate: 0.02,
+            growth_rate: adaptiveGrowth,
           });
           if (!contract) {
             console.warn(`⚠️ [${operationId}] Accumulator rejeitado pela Deriv → fallback DIGITDIFF`);
@@ -1379,12 +1405,15 @@ export class AutoTradingScheduler {
             contract = await derivAPI.buyDigitDifferContract(fallback);
             resolvedTradeType = 'digitdiff';
           } else {
-            const knockoutOffset = currentPrice * 0.015;
+            // 🧠 SUPREMO: knockout adaptativo por volatilidade real
+            const adaptiveTurboPct = supremeAnalysis?.adaptiveParams?.turbo?.knockoutOffsetPct ?? 0.015;
+            const adaptiveTurboDur = supremeAnalysis?.adaptiveParams?.turbo?.durationMin ?? 15;
+            const knockoutOffset = currentPrice * adaptiveTurboPct;
             const barrier = selectedModality === 'turbo_up'
               ? (currentPrice - knockoutOffset).toFixed(4)
               : (currentPrice + knockoutOffset).toFixed(4);
-            const dateExpiry = Math.floor(Date.now() / 1000) + 900;
-            console.log(`📊 [${operationId}] ${contractType}: barrier=${barrier}, expiry=15min | Symbol: ${selectedSymbol}`);
+            const dateExpiry = Math.floor(Date.now() / 1000) + (adaptiveTurboDur * 60);
+            console.log(`📊 [${operationId}] ${contractType}: barrier=${barrier} (${(adaptiveTurboPct*100).toFixed(2)}%${supremeAnalysis ? ' ADAPTATIVO' : ' padrão'}), expiry=${adaptiveTurboDur}min | Symbol: ${selectedSymbol}`);
             contract = await derivAPI.buyFlexibleContract({
               contract_type: contractType,
               symbol: selectedSymbol,
@@ -1413,12 +1442,15 @@ export class AutoTradingScheduler {
             contract = await derivAPI.buyDigitDifferContract(fallback);
             resolvedTradeType = 'digitdiff';
           } else {
-            const strikeOffset = currentPrice * 0.005;
+            // 🧠 SUPREMO: strike adaptativo por momentum real do mercado
+            const adaptiveVanillaPct = supremeAnalysis?.adaptiveParams?.vanilla?.strikeOffsetPct ?? 0.005;
+            const adaptiveVanillaDur = supremeAnalysis?.adaptiveParams?.vanilla?.durationMin ?? 15;
+            const strikeOffset = currentPrice * adaptiveVanillaPct;
             const strike = selectedModality === 'vanilla_call'
               ? (currentPrice + strikeOffset).toFixed(4)
               : (currentPrice - strikeOffset).toFixed(4);
-            const dateExpiry = Math.floor(Date.now() / 1000) + 900;
-            console.log(`📊 [${operationId}] ${contractType}: strike=${strike}, expiry=15min | Symbol: ${selectedSymbol}`);
+            const dateExpiry = Math.floor(Date.now() / 1000) + (adaptiveVanillaDur * 60);
+            console.log(`📊 [${operationId}] ${contractType}: strike=${strike} (${(adaptiveVanillaPct*100).toFixed(2)}%${supremeAnalysis ? ' ADAPTATIVO' : ' padrão'}), expiry=${adaptiveVanillaDur}min | Symbol: ${selectedSymbol}`);
             contract = await derivAPI.buyFlexibleContract({
               contract_type: contractType,
               symbol: selectedSymbol,

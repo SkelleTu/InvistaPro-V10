@@ -3,6 +3,7 @@ import { DerivAPIService, DerivTickData } from './deriv-api.js';
 import { storage } from '../storage.js';
 import { microscopicAnalyzer } from './microscopic-technical-analysis.js';
 import { digitFrequencyAnalyzer } from './digit-frequency-analyzer.js';
+import { supremeAnalyzer } from './supreme-market-analyzer.js';
 
 interface TickBuffer {
   symbol: string;
@@ -152,6 +153,9 @@ export class MarketDataCollector extends EventEmitter {
     } else {
       console.warn('⚠️ [FNACIA] microscopicAnalyzer não disponível:', microscopicAnalyzer);
     }
+
+    // 🧠 SUPREME MARKET ANALYZER: alimentar com preço em tempo real
+    supremeAnalyzer.addTick(symbol, tickData.quote, tickData.epoch ? tickData.epoch * 1000 : Date.now());
 
     // 🎯 DIGIT FREQUENCY ANALYZER: Alimentar com o último dígito do tick em tempo real
     try {
