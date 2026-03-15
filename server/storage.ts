@@ -246,6 +246,8 @@ export interface IStorage {
   // Cleanup: expirar automaticamente trades pendentes irrecuperáveis
   expireOldPendingTrades(olderThanMinutes?: number): Promise<number>;
 
+  // Reset total de dados operacionais (mantém usuário, token e configurações)
+  resetAllTradingData(userId: string): Promise<{ tablesCleared: string[]; rowsDeleted: number }>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1711,6 +1713,73 @@ export class DatabaseStorage implements IStorage {
     );
 
     return (result as any).changes ?? 0;
+  }
+
+  async resetAllTradingData(userId: string): Promise<{ tablesCleared: string[]; rowsDeleted: number }> {
+    const tablesCleared: string[] = [];
+    let rowsDeleted = 0;
+
+    const del = async (table: any, condition: any, name: string) => {
+      try {
+        const rows = await db.delete(table).where(condition).returning();
+        if (rows.length > 0 || true) {
+          tablesCleared.push(name);
+          rowsDeleted += rows.length;
+        }
+      } catch {}
+    };
+
+    await del(tradeOperations, eq(tradeOperations.userId, userId), 'trade_operations');
+    await del(aiLogs, eq(aiLogs.userId, userId), 'ai_logs');
+    await del(dailyPnL, eq(dailyPnL.userId, userId), 'daily_pnl');
+    await del(aiRecoveryStrategies, eq(aiRecoveryStrategies.userId, userId), 'ai_recovery_strategies');
+    await del(blockedAssets, eq(blockedAssets.userId, userId), 'blocked_assets');
+    await del(assetBlacklist, eq(assetBlacklist.userId, userId), 'asset_blacklist');
+
+    // Sessões e WebSockets — limpar tudo (são temporários de qualquer forma)
+    try {
+      const sessions = await db.delete(activeTradingSessions).returning();
+      tablesCleared.push('active_trading_sessions');
+      rowsDeleted += sessions.length;
+    } catch {}
+
+    try {
+      const wsSubs = await db.delete(activeWebSocketSubscriptions).returning();
+      tablesCleared.push('active_websocket_subscriptions');
+      rowsDeleted += wsSubs.length;
+    } catch {}
+
+    // Memória de IA global — limpar para começar do zero
+    try {
+      await db.run(sql`DELETE FROM episodic_memory`);
+      tablesCleared.push('episodic_memory');
+    } catch {}
+    try {
+      await db.run(sql`DELETE FROM dynamic_weights`);
+      tablesCleared.push('dynamic_weights');
+    } catch {}
+    try {
+      await db.run(sql`DELETE FROM emergent_patterns`);
+      tablesCleared.push('emergent_patterns');
+    } catch {}
+    try {
+      await db.run(sql`DELETE FROM strategy_evolution`);
+      tablesCleared.push('strategy_evolution');
+    } catch {}
+    try {
+      await db.run(sql`DELETE FROM meta_learning`);
+      tablesCleared.push('meta_learning');
+    } catch {}
+    try {
+      await db.run(sql`DELETE FROM experiment_tracking`);
+      tablesCleared.push('experiment_tracking');
+    } catch {}
+    try {
+      await db.run(sql`DELETE FROM performance_analytics`);
+      tablesCleared.push('performance_analytics');
+    } catch {}
+
+    return { tablesCleared, rowsDeleted };
   }
 
 }

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -41,10 +41,22 @@ import {
   ToggleLeft,
   Sparkles,
   RefreshCw,
-  Gauge
+  Gauge,
+  Trash2
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 interface AccountInfo {
   balance: number;
@@ -737,6 +749,31 @@ export default function TradingSystemPage() {
     }
   });
 
+  const resetAllDataMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("/api/trading/reset-all-data", { method: "POST" });
+      return response.json();
+    },
+    onSuccess: (data) => {
+      toast({
+        title: "Reset concluído",
+        description: `${data.rowsDeleted} registros removidos. O sistema está zerado e pronto para novos testes.`,
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/auto-trading/status"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/trading/operations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/trading/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/auto-trading/scheduler-status"] });
+      localStorage.removeItem("trade_modalities");
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Erro ao resetar dados",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   // Verificar acesso
   if (!hasAccess) {
     return (
@@ -927,6 +964,59 @@ export default function TradingSystemPage() {
                   )}
                 </div>
               </CardContent>
+
+              <div className="px-6 pb-5">
+                <Separator className="mb-4" />
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">Zona de Reset</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Apaga todo o histórico operacional para começar do zero. Credenciais e conta não são afetadas.
+                    </p>
+                  </div>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="border-red-400/50 text-red-500 hover:bg-red-500/10 hover:border-red-500 shrink-0 ml-4"
+                        disabled={resetAllDataMutation.isPending}
+                        data-testid="button-reset-all-data"
+                      >
+                        <Trash2 className="h-4 w-4 mr-2" />
+                        {resetAllDataMutation.isPending ? 'Apagando...' : 'Resetar Tudo'}
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Confirmar reset completo</AlertDialogTitle>
+                        <AlertDialogDescription className="space-y-2">
+                          <span className="block">Esta ação vai apagar permanentemente:</span>
+                          <ul className="list-disc list-inside text-sm space-y-1 mt-2">
+                            <li>Todo o histórico de operações</li>
+                            <li>Logs de análise das IAs</li>
+                            <li>Estatísticas de PnL diário</li>
+                            <li>Memória de aprendizado das IAs</li>
+                            <li>Sessões e conexões ativas</li>
+                            <li>Ativos bloqueados</li>
+                          </ul>
+                          <span className="block mt-2 font-medium">Suas credenciais, token Deriv e conta de usuário <span className="text-green-600">não serão afetados</span>.</span>
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                        <AlertDialogAction
+                          className="bg-red-600 hover:bg-red-700"
+                          onClick={() => resetAllDataMutation.mutate()}
+                          data-testid="button-confirm-reset"
+                        >
+                          Sim, resetar tudo
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                </div>
+              </div>
             </Card>
 
             {/* Cards de estatísticas - Linha 1 */}

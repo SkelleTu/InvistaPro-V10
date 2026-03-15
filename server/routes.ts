@@ -38,6 +38,7 @@ import { and } from "drizzle-orm";
 import { derivAPI } from './services/deriv-api';
 import { huggingFaceAI } from './services/huggingface-ai';
 import { autoTradingScheduler } from './services/auto-trading-scheduler';
+import { realStatsTracker } from './services/real-stats-tracker';
 import { isAuthorizedEmail, ACCESS_DENIED_MESSAGE } from './config/access';
 import { errorTracker } from './services/error-tracker';
 import { asyncErrorHandler } from './middleware/error-handler';
@@ -3182,6 +3183,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('❌ Erro ao resetar cool-off:', error);
       res.status(500).json({ message: 'Erro ao resetar sistema', error });
+    }
+  });
+
+  // =========================== RESET TOTAL DE DADOS OPERACIONAIS ===========================
+
+  app.post('/api/trading/reset-all-data', isAuthenticated, isTradingAuthorized, async (req: any, res: any) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: 'Usuário não autenticado' });
+
+      // 1. Pausar o scheduler se estiver ativo
+      autoTradingScheduler.clearAllSessions();
+
+      // 2. Resetar memória em tempo real
+      realStatsTracker.resetUserMemory(userId);
+
+      // 3. Limpar dados do banco
+      const result = await dbStorage.resetAllTradingData(userId);
+
+      console.log(`🧹 [RESET] Usuário ${userId} executou reset completo: ${result.rowsDeleted} registros removidos de ${result.tablesCleared.length} tabelas`);
+
+      res.json({
+        success: true,
+        message: `Reset concluído com sucesso`,
+        rowsDeleted: result.rowsDeleted,
+        tablesCleared: result.tablesCleared,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error('❌ Erro no reset de dados:', error);
+      res.status(500).json({ message: 'Erro ao executar reset', error: String(error) });
     }
   });
 

@@ -283,6 +283,22 @@ class RealStatsTracker {
       console.log(`📊 [REAL STATS] Trades: ${this.totalTrades} | WinRate: ${this.winRate.toFixed(1)}% | Lucro: $${this.totalProfit.toFixed(2)} | Sharpe: ${sharpe.toFixed(2)}${modeStr}`);
     }
   }
+
+  resetUserMemory(userId: string): void {
+    this.wonTrades = 0;
+    this.lostTrades = 0;
+    this.totalProfit = 0;
+    this.initialized = false;
+    this.consecutiveLosses = 0;
+    this.circuitBreakerUntil = 0;
+    this.postLossMode = false;
+    this.lastKnownBalance = 0;
+    this.balanceToRecover = 0;
+    this.blockedAsset = '';
+    this.assetBlockedUntil = 0;
+    this.lastTradedAssetByUser.delete(userId);
+    console.log(`🧹 [REAL STATS] Memória em tempo real resetada para usuário ${userId}`);
+  }
 }
 
 export const realStatsTracker = new RealStatsTracker();
