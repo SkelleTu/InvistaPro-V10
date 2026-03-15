@@ -672,7 +672,7 @@ export class MicroscopicTechnicalAnalyzer extends EventEmitter {
     const netSignal = upSignals - downSignals;
     
     const confidence = activeSignalsWeight > 0 
-      ? Math.min(90, (Math.abs(netSignal) / activeSignalsWeight * 100))
+      ? Math.min(97, (Math.abs(netSignal) / activeSignalsWeight * 100))
       : 0;
     
     let technicalDirection: 'up' | 'down' | 'neutral' = 'neutral';

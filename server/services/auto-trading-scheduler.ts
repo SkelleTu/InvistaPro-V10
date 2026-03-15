@@ -2445,23 +2445,47 @@ export class AutoTradingScheduler {
 
   private calculateDynamicTicks(symbol: string, baseTicks: number = 10): number {
     const performance = this.assetPerformance.get(symbol);
-    if (!performance) return baseTicks;
-    
-    const totalTrades = performance.wins + performance.losses;
-    if (totalTrades === 0) return baseTicks;
-    
-    const winRate = performance.wins / totalTrades;
-    
-    let ticksAdjustment = baseTicks;
-    
-    if (winRate > 0.60) {
-      ticksAdjustment = Math.min(10, baseTicks + 2); // Máx 10 ticks (limite Deriv DIGITDIFF)
-      console.log(`📈 [DYNAMIC TICKS] Alto win rate (${(winRate*100).toFixed(0)}%) → ${ticksAdjustment} ticks`);
-    } else if (winRate < 0.40) {
-      ticksAdjustment = Math.max(3, baseTicks - 3); // Mín 3 ticks
-      console.log(`📉 [DYNAMIC TICKS] Baixo win rate (${(winRate*100).toFixed(0)}%) → ${ticksAdjustment} ticks`);
+    const totalTrades = performance ? performance.wins + performance.losses : 0;
+    const winRate = totalTrades > 0 ? performance!.wins / totalTrades : 0.5;
+
+    // 🧠 INTEGRAÇÃO SUPREMA: ajusta duração com base no regime de mercado
+    const supreme = supremeAnalyzer.getLatestAnalysis(symbol);
+    let regimeAdj = 0;
+    let regimeReason = '';
+
+    if (supreme) {
+      const regime = supreme.regime;
+      const hurst = supreme.statistics.hurstExponent;
+      const entropy = supreme.statistics.shannonEntropy;
+
+      if (regime === 'trending') {
+        // Tendência forte: mais ticks para capturar momentum
+        regimeAdj = hurst > 0.6 ? +3 : +2;
+        regimeReason = `trending (hurst=${hurst.toFixed(2)}) → +${regimeAdj}`;
+      } else if (regime === 'ranging') {
+        // Mercado lateral/reversão: menos ticks, saída rápida
+        regimeAdj = hurst < 0.4 ? -3 : -2;
+        regimeReason = `ranging (hurst=${hurst.toFixed(2)}) → ${regimeAdj}`;
+      } else if (regime === 'chaotic' || entropy > 3.5) {
+        // Caótico: mínimo de ticks, exposição mínima
+        regimeAdj = -4;
+        regimeReason = `chaotic (entropy=${entropy.toFixed(2)}) → ${regimeAdj}`;
+      } else {
+        regimeReason = `${regime} → neutro`;
+      }
     }
-    
+
+    // Ajuste por win rate histórico
+    let winRateAdj = 0;
+    if (winRate > 0.60) winRateAdj = +1;
+    else if (winRate < 0.40) winRateAdj = -2;
+
+    const ticksAdjustment = Math.min(10, Math.max(3, baseTicks + regimeAdj + winRateAdj));
+
+    if (regimeAdj !== 0 || winRateAdj !== 0) {
+      console.log(`⏱️ [DYNAMIC TICKS] ${symbol}: base=${baseTicks} | regime=${regimeReason} | wr=${(winRate*100).toFixed(0)}%(${winRateAdj>0?'+':''}${winRateAdj}) → ${ticksAdjustment} ticks`);
+    }
+
     return ticksAdjustment;
   }
 
@@ -2495,9 +2519,15 @@ export class AutoTradingScheduler {
           amount = Math.max(0.50, Math.min(amount, 1.50)); // Entre $0.50 e $1.50
           console.log(`💰 [STAKE] Banca grande ($${bankSize.toFixed(2)}): stake $${amount.toFixed(2)} (0.75%)`);
         } else {
-          amount = bankSize * 0.01; // 1% da banca (máximo conservador)
-          amount = Math.max(1.00, Math.min(amount, 3.00)); // Entre $1.00 e $3.00
-          console.log(`💰 [STAKE] Banca muito grande ($${bankSize.toFixed(2)}): stake $${amount.toFixed(2)} (1%)`);
+          amount = bankSize * 0.01; // 1% da banca base
+          // Teto dinâmico proporcional à banca — elimina o cap fixo de $3
+          const dynamicMax = bankSize <= 1000
+            ? Math.max(3.00, bankSize * 0.005)  // $200-$1000: 0.5% da banca
+            : bankSize <= 10000
+              ? bankSize * 0.004                  // $1000-$10000: 0.4% da banca
+              : bankSize * 0.003;                 // >$10000: 0.3% da banca (proteção extra)
+          amount = Math.max(1.00, Math.min(amount, dynamicMax));
+          console.log(`💰 [STAKE] Banca muito grande ($${bankSize.toFixed(2)}): stake $${amount.toFixed(2)} (${(amount/bankSize*100).toFixed(2)}% — teto=$${dynamicMax.toFixed(2)})`);
         }
         
         // 🚀 APLICAR FLEXIBILIDADE DINÂMICA (se consenso fornecido)

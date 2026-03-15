@@ -160,7 +160,7 @@ export class DigitFrequencyAnalyzer {
       hottestDigit: hottest.digit,
       recommendedBarrier: coldest.digit.toString(),
       confidence,
-      winRateExpected: Math.min(99, Math.max(85, winRateExpected)),
+      winRateExpected: Math.min(99, Math.max(80, winRateExpected)),
       lastUpdated: state.lastUpdate
     };
   }
@@ -216,7 +216,7 @@ export class DigitFrequencyAnalyzer {
       coldestDigit: bestDigit,
       coldestDigitEdge: avgEdge,
       recommendedBarrier: bestDigit.toString(),
-      winRateExpected: Math.min(99, Math.max(85, 90 + avgEdge)),
+      winRateExpected: Math.min(99, Math.max(80, 90 + avgEdge)),
       confidence: Math.min(100, primaryResult.confidence * (bestVotes / totalWeight + 0.5))
     };
   }
