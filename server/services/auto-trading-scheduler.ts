@@ -938,122 +938,42 @@ export class AutoTradingScheduler {
         aiConsensus.finalDecision
       );
       
-      // 🎯 SISTEMA DE THRESHOLD DINÂMICO BASEADO EM MÉDIA ALTA DIÁRIA
+      // 🎯 SISTEMA DE DECISÃO BASEADO EM ANÁLISE DE DÍGITOS (vantagem matemática real)
       const isProductionMode = config.mode.includes('production');
-      
-      // 🔥 FORÇAR EXECUÇÃO EM DESENVOLVIMENTO PARA TESTE
-      const isDev = true; // Forçado para teste
-      const forceTrade = true;
 
-      // 🎯 VERIFICAR SE PRECISA FORÇAR OPERAÇÕES MÍNIMAS
-      const shouldForceMinimum = true;
-      
-      // 🎯 OBTER THRESHOLD DINÂMICO (MÉDIA ALTA DO DIA)
-      const dynamicThreshold = 10;
-      
-      // 🌟 IDENTIFICAR SINAIS EXCEPCIONALMENTE FORTES
-      const isStrongSignal = aiConsensus.consensusStrength >= 75;
-      const isExceptionalSignal = aiConsensus.consensusStrength >= 85;
-      
-      console.log(`📊 [${operationId}] 🎯 Threshold: ${dynamicThreshold}% | 🧠 Consenso: ${aiConsensus.consensusStrength}%${isExceptionalSignal ? ' 🔥🔥🔥 EXCEPCIONAL' : isStrongSignal ? ' 🔥 FORTE' : ''} | ⚡ Forçar: ${shouldForceMinimum}`);
+      // 🧠 VERIFICAR QUALIDADE DO SINAL DO ANALISADOR DE DÍGITOS
+      // Para digit_differs, o que importa é: confiança do analisador E edge do dígito frio
+      const digitQuality = digitFrequencyAnalyzer.getBestBarrier(selectedSymbol);
+      const digitConfidenceOk = digitQuality.confidence >= 50;
+      const digitEdgePositive = digitQuality.edge > 0;
+      const digitSignalGood = digitConfidenceOk && digitEdgePositive;
 
-      // 🔥 LOG DE DECISÃO FINAL PARA DEBUG
-      console.log(`🤔 [DEBUG] Decisão Final: ${aiConsensus.finalDecision}, Strength: ${aiConsensus.consensusStrength}, Threshold: ${dynamicThreshold}`);
-      
-      // ✅ CORREÇÃO CRÍTICA: Forçar direção se o consenso for alto mesmo sendo neutral
+      console.log(`🧠 [${operationId}] ANÁLISE DÍGITOS: conf=${digitQuality.confidence.toFixed(0)}% | edge=+${digitQuality.edge.toFixed(1)}% | barreira=${digitQuality.barrier} | sinal=${digitSignalGood ? '✅ BOM' : '⚠️ AGUARDANDO'}`);
+
+      // 🛑 SE O ANALISADOR DE DÍGITOS NÃO TEM DADOS SUFICIENTES, AGUARDAR
+      if (!digitSignalGood) {
+        console.log(`⏸️ [${operationId}] Aguardando dados de dígitos: conf=${digitQuality.confidence.toFixed(0)}% (mín 50%) | edge=${digitQuality.edge.toFixed(1)}% (mín >0%)`);
+        return { success: false, error: `Analisador de dígitos aguardando mais dados: confiança ${digitQuality.confidence.toFixed(0)}%` };
+      }
+
+      // Para digit_differs a direção é irrelevante — o trade é puramente sobre qual dígito NÃO aparece
+      // Forçamos 'down' apenas para preencher o campo obrigatório da API
       if (aiConsensus.finalDecision === 'neutral') {
-        if (isExceptionalSignal || isStrongSignal) {
-          // Se o consenso for muito alto, a IA está "muito certa" de algo, mas o score de neutral venceu por pouco
-          // Vamos forçar a direção predominante entre UP e DOWN
-          const upScore = aiConsensus.upScore || 0;
-          const downScore = aiConsensus.downScore || 0;
-          if (upScore > downScore) {
-            aiConsensus.finalDecision = 'up';
-            console.log(`🔄 [${operationId}] Forçando UP devido a alto consenso (${aiConsensus.consensusStrength}%) apesar de Neutral`);
-          } else if (downScore > upScore) {
-            aiConsensus.finalDecision = 'down';
-            console.log(`🔄 [${operationId}] Forçando DOWN devido a alto consenso (${aiConsensus.consensusStrength}%) apesar de Neutral`);
-          }
-        }
-        
-        if (aiConsensus.finalDecision === 'neutral' && !forceTrade && !shouldForceMinimum) {
-          console.log(`⏸️ [${operationId}] Decisão NEUTRAL - aguardando sinal direcional mais forte`);
-          return { success: false, error: 'Decisão de IA é NEUTRAL - aguardando sinal claro' };
-        }
+        aiConsensus.finalDecision = 'down';
       }
 
       if (isProductionMode) {
-        // 🎯 MODO DE PRODUÇÃO OTIMIZADO - Maximizar operações dentro dos limites
         const limits = this.getOperationLimitsForMode(config.mode);
         const operationsToday = await storage.getConservativeOperationsToday(config.userId);
-        
-        console.log(`📊 [${operationId}] MODO ${config.mode} - Operações: ${operationsToday}/${limits.max} (min: ${limits.min})`);
-        
-        // Verificar se já atingiu máximo diário
+        console.log(`📊 [${operationId}] MODO ${config.mode} - Operações: ${operationsToday}/${limits.max}`);
         if (operationsToday >= limits.max) {
-          // 🌟 EXCEÇÃO FUTURA: Sinais excepcionais poderão ter tratamento especial
-          if (isExceptionalSignal) {
-            console.log(`⚡ [${operationId}] SINAL EXCEPCIONAL detectado (${aiConsensus.consensusStrength}%) mas limite atingido`);
-          }
           console.log(`🛑 [${operationId}] Máximo diário atingido (${operationsToday}/${limits.max})`);
           return { success: false, error: `Máximo de operações diárias atingido para modo ${config.mode}` };
         }
-        
-        // 🔥 LÓGICA OTIMIZADA: Executar quando consenso >= threshold
-        // 🔥 ACEITAR QUALQUER SINAL (até neutral 45%) - TESTE SEM LIMITES
-        if (true) {
-          console.log(`✅ [DEBUG] Condição de execução atendida (Consenso: ${aiConsensus.consensusStrength}, Threshold: ${dynamicThreshold}, Force: ${forceTrade})`);
-          if (isExceptionalSignal) {
-            console.log(`✅ [${operationId}] 🔥🔥🔥 EXECUTANDO SINAL EXCEPCIONAL: ${aiConsensus.consensusStrength}%`);
-          } else if (isStrongSignal) {
-            console.log(`✅ [${operationId}] 🔥 EXECUTANDO SINAL FORTE: ${aiConsensus.consensusStrength}%`);
-          } else {
-            console.log(`✅ [${operationId}] 🚀 EXECUTANDO: Consenso ${aiConsensus.consensusStrength}% >= Threshold ${dynamicThreshold}% (${aiConsensus.finalDecision})`);
-          }
-          // Continuar para executar a operação
-        } else if (shouldForceMinimum && operationsToday < limits.min) {
-          // Forçar operação mínima se necessário
-          console.log(`🎯 [${operationId}] Forçando operação mínima (${operationsToday + 1}/${limits.min})`);
-          
-          const forcedDecision = await this.forceMandatoryConservativeDecision(tickData, selectedSymbol, config.userId);
-          aiConsensus.finalDecision = forcedDecision.decision;
-          aiConsensus.consensusStrength = forcedDecision.strength;
-          aiConsensus.reasoning = `OPERAÇÃO MÍNIMA GARANTIDA (${operationsToday + 1}/${limits.min}): ${forcedDecision.reasoning}`;
-          
-          console.log(`✅ [${operationId}] Decisão forçada: ${aiConsensus.finalDecision} (${aiConsensus.consensusStrength}%)`);
-        } else {
-          console.log(`⏸️ [${operationId}] Aguardando sinal: ${aiConsensus.consensusStrength}% < ${dynamicThreshold}%`);
-          return { success: false, error: `Aguardando consenso >= média alta (${aiConsensus.consensusStrength}% < ${dynamicThreshold}%)` };
-        }
+        console.log(`✅ [${operationId}] 🎯 EXECUTANDO: dígito frio=${digitQuality.barrier} | edge=+${digitQuality.edge.toFixed(1)}% | winRate=${digitQuality.winRate.toFixed(1)}%`);
       } else {
-        // 🎯 MODO TESTE/SEM LIMITES OTIMIZADO - Executar o máximo possível
-        console.log(`🚀 [${operationId}] MODO ${config.mode} - Threshold dinâmico ativo`);
-        
-        // 🔥 EXECUTAR SEMPRE que consenso >= threshold (sem limites)
-        if (true) {
-          console.log(`✅ [DEBUG] Modo Teste: Execução liberada (Consenso: ${aiConsensus.consensusStrength}, Threshold: ${dynamicThreshold}, Force: ${forceTrade})`);
-          if (isExceptionalSignal) {
-            console.log(`✅ [${operationId}] 🔥🔥🔥 EXECUTANDO SINAL EXCEPCIONAL: ${aiConsensus.consensusStrength}%`);
-          } else if (isStrongSignal) {
-            console.log(`✅ [${operationId}] 🔥 EXECUTANDO SINAL FORTE: ${aiConsensus.consensusStrength}%`);
-          } else {
-            console.log(`✅ [${operationId}] 🚀 EXECUTANDO: Consenso ${aiConsensus.consensusStrength}%`);
-          }
-          // Continuar para executar a operação
-        } else if (shouldForceMinimum) {
-          // Garantir pelo menos 1 operação/dia no modo sem limites
-          console.log(`🎯 [${operationId}] Forçando operação mínima no modo sem limites`);
-          
-          const forcedDecision = await this.forceMandatoryConservativeDecision(tickData, selectedSymbol, config.userId);
-          aiConsensus.finalDecision = forcedDecision.decision;
-          aiConsensus.consensusStrength = forcedDecision.strength;
-          aiConsensus.reasoning = `OPERAÇÃO MÍNIMA DIÁRIA: ${forcedDecision.reasoning}`;
-          
-          console.log(`✅ [${operationId}] Decisão forçada: ${aiConsensus.finalDecision} (${aiConsensus.consensusStrength}%)`);
-        } else {
-          console.log(`⏸️ [${operationId}] Aguardando sinal: ${aiConsensus.consensusStrength}% < ${dynamicThreshold}%`);
-          return { success: false, error: `Aguardando consenso >= threshold (${aiConsensus.consensusStrength}% < ${dynamicThreshold}%)` };
-        }
+        console.log(`🚀 [${operationId}] MODO ${config.mode} - Executando com análise de dígitos`);
+        console.log(`✅ [${operationId}] 🎯 EXECUTANDO: dígito frio=${digitQuality.barrier} | edge=+${digitQuality.edge.toFixed(1)}% | winRate=${digitQuality.winRate.toFixed(1)}%`);
       }
 
       // 🔴 VERIFICAR FLAG DE PAUSA CENTRALIZADA - Todos os remixes respeita m
@@ -1160,17 +1080,11 @@ export class AutoTradingScheduler {
         }
         
         // ─── SELEÇÃO DE MODALIDADE ───────────────────────────────────────
-        // Ler modalidades ativas do banco, selecionar a mais adequada
-        let activeModalities: string[] = ['digit_differs'];
-        try {
-          const userConfig = await storage.getUserTradeConfig(config.userId);
-          if (userConfig?.selectedModalities) {
-            const parsed = JSON.parse(userConfig.selectedModalities);
-            if (Array.isArray(parsed) && parsed.length > 0) {
-              activeModalities = parsed;
-            }
-          }
-        } catch {}
+        // TRAVADO EM digit_differs: única modalidade com vantagem matemática real
+        // nos índices sintéticos da Deriv (análise de frequência de dígitos).
+        // Configurações manuais do usuário são ignoradas no modo automático.
+        const activeModalities: string[] = ['digit_differs'];
+        console.log(`🔒 [${operationId}] Modalidade AUTO travada: digit_differs (edge matemático real via análise de dígitos)`);
 
         // Escolher modalidade por rotação: pega baseado na hora atual para distribuir
         const DIGIT_TYPES: Record<string, string> = {
