@@ -542,11 +542,14 @@ export default function TradingSystemPage() {
     refetchInterval: 1000, // Atualiza a cada 1 segundo para estatísticas
   });
 
-  const { data: recentOperations = [] } = useQuery<TradeOperation[]>({
+  const { data: recentOperationsRaw = [] } = useQuery<TradeOperation[]>({
     queryKey: ["/api/trading/operations"],
     enabled: hasAccess,
     refetchInterval: 1000, // Atualiza a cada 1 segundo para ver novas operações
   });
+  const recentOperations: TradeOperation[] = Array.isArray(recentOperationsRaw)
+    ? recentOperationsRaw
+    : ((recentOperationsRaw as any)?.operations ?? []);
 
   const { data: aiLogs = [] } = useQuery<AILog[]>({
     queryKey: ["/api/trading/ai-logs"],
@@ -588,7 +591,7 @@ export default function TradingSystemPage() {
   });
 
   useEffect(() => { latestStats.current = tradeStats; }, [tradeStats]);
-  useEffect(() => { latestOps.current = recentOperations as any[]; }, [recentOperations]);
+  useEffect(() => { latestOps.current = recentOperations; }, [recentOperations]);
   useEffect(() => { latestAiThreshold.current = aiThresholdStats; }, [aiThresholdStats]);
 
   // Query para buscar ativos disponíveis e bloqueados
