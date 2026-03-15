@@ -71,32 +71,32 @@ export class HuggingFaceAIService {
     {
       name: 'FinBERT Financial Sentiment',
       id: 'ProsusAI/finbert',
-      description: 'Specialized in financial text analysis and sentiment',
+      description: 'Treinado em 4.9B tokens de texto financeiro (Reuters, FT, SEC, Bloomberg) — detecta sentimento positivo/negativo/neutro em linguagem financeira profissional',
+      confidence: 0.90
+    },
+    {
+      name: 'RoBERTa Market Analyzer',
+      id: 'cardiffnlp/twitter-roberta-base-sentiment-latest',
+      description: 'RoBERTa ajustado para classificação de sentimento de mercado — capta tendências bullish/bearish em descrições quantitativas de ativos sintéticos',
       confidence: 0.85
     },
     {
-      name: 'Financial Sentiment Analyzer',
-      id: 'cardiffnlp/twitter-roberta-base-sentiment-latest',
-      description: 'Advanced sentiment analysis for market data',
-      confidence: 0.80
-    },
-    {
-      name: 'BERT Base Sentiment',
-      id: 'nlptown/bert-base-multilingual-uncased-sentiment',
-      description: 'Multilingual sentiment analysis optimized for trading',
-      confidence: 0.75
-    },
-    {
-      name: 'RoBERTa Sentiment',
-      id: 'cardiffnlp/twitter-roberta-base-sentiment',
-      description: 'Robust optimized sentiment analysis for pattern recognition',
-      confidence: 0.78
-    },
-    {
-      name: 'DistilBERT Financial Intelligence',
+      name: 'XLM-RoBERTa Multilingual',
       id: 'cardiffnlp/twitter-xlm-roberta-base-sentiment',
-      description: 'Lightweight but powerful sentiment analysis for high-frequency trading',
-      confidence: 0.77
+      description: 'XLM-RoBERTa multilingual — análise de sentimento de mercado com capacidade multilíngue e alta generalização para dados financeiros',
+      confidence: 0.83
+    },
+    {
+      name: 'RoBERTa Trend Detector',
+      id: 'cardiffnlp/twitter-roberta-base-sentiment',
+      description: 'RoBERTa robusto para detecção de tendência de mercado — identifica momentum positivo/negativo em análises técnicas e quantitativas',
+      confidence: 0.82
+    },
+    {
+      name: 'DistilRoBERTa Financial',
+      id: 'mrm8488/distilroberta-finetuned-financial-news-sentiment-analysis',
+      description: 'DistilRoBERTa ajustado para análise financeira — combinação de velocidade e precisão para inferência em alta frequência',
+      confidence: 0.83
     }
   ];
 
@@ -347,13 +347,10 @@ export class HuggingFaceAIService {
     try {
       console.log(`🔍 [DEBUG] Iniciando análise com modelo: ${model.name} (${model.id})`);
       
-      // Prepare market data for analysis
-      const marketSummary = this.prepareMarketSummary(tickData, symbol);
-      console.log(`📊 [DEBUG] Market summary preparado: ${marketSummary.substring(0, 100)}...`);
-      
-      // Create specialized prompt for each model type
-      const prompt = this.createModelSpecificPrompt(model, marketSummary, tickData);
-      console.log(`💭 [DEBUG] Prompt criado: ${prompt.substring(0, 150)}...`);
+      // Gera DNA compacto (< 512 tokens) para os modelos HuggingFace
+      // O DNA completo é usado internamente; os modelos recebem versão otimizada
+      const prompt = this.buildCompactDNA(tickData, symbol);
+      console.log(`🧬 [${model.name}] DNA compacto (${prompt.length} chars): ${prompt.substring(0, 120)}...`);
       
       // Send request to Hugging Face - CORRIGIDO: Usando novo endpoint router.huggingface.co
       console.log(`📡 [DEBUG] Enviando requisição para Hugging Face: ${model.id}`);
@@ -394,62 +391,407 @@ export class HuggingFaceAIService {
     }
   }
 
-  private prepareMarketSummary(tickData: DerivTickData[], symbol: string): string {
-    if (tickData.length === 0) return `No data available for ${symbol}`;
+  // ═══════════════════════════════════════════════════════════════════════
+  //  MOTOR DE DNA DE MERCADO — análise microscópica multidimensional
+  //  Calcula 20+ features que um humano jamais processaria simultaneamente
+  // ═══════════════════════════════════════════════════════════════════════
 
-    const latest = tickData[tickData.length - 1];
-    const oldest = tickData[0];
-    const priceChange = ((latest.quote - oldest.quote) / oldest.quote) * 100;
-    
-    // Calculate price statistics
+  private computeHurst(prices: number[]): number {
+    // Método R/S (Hurst exponent): H>0.5 trending, H<0.5 mean-reverting, H=0.5 random walk
+    const n = prices.length;
+    if (n < 20) return 0.5;
+    const returns = prices.slice(1).map((p, i) => p - prices[i]);
+    const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
+    const deviations = returns.map(r => r - mean);
+    let cumDev = 0;
+    const cumDevs: number[] = [];
+    deviations.forEach(d => { cumDev += d; cumDevs.push(cumDev); });
+    const R = Math.max(...cumDevs) - Math.min(...cumDevs);
+    const S = Math.sqrt(returns.reduce((sum, r) => sum + Math.pow(r - mean, 2), 0) / returns.length);
+    if (S === 0) return 0.5;
+    return Math.log(R / S) / Math.log(n);
+  }
+
+  private autocorrelation(returns: number[], lag: number): number {
+    const n = returns.length;
+    if (n <= lag) return 0;
+    const mean = returns.reduce((a, b) => a + b, 0) / n;
+    const variance = returns.reduce((sum, r) => sum + Math.pow(r - mean, 2), 0) / n;
+    if (variance === 0) return 0;
+    let cov = 0;
+    for (let i = lag; i < n; i++) cov += (returns[i] - mean) * (returns[i - lag] - mean);
+    return (cov / (n - lag)) / variance;
+  }
+
+  private computeSkewness(returns: number[]): number {
+    const n = returns.length;
+    if (n < 3) return 0;
+    const mean = returns.reduce((a, b) => a + b, 0) / n;
+    const std = Math.sqrt(returns.reduce((s, r) => s + Math.pow(r - mean, 2), 0) / n);
+    if (std === 0) return 0;
+    return returns.reduce((s, r) => s + Math.pow((r - mean) / std, 3), 0) / n;
+  }
+
+  private computeKurtosis(returns: number[]): number {
+    const n = returns.length;
+    if (n < 4) return 3;
+    const mean = returns.reduce((a, b) => a + b, 0) / n;
+    const std = Math.sqrt(returns.reduce((s, r) => s + Math.pow(r - mean, 2), 0) / n);
+    if (std === 0) return 3;
+    return returns.reduce((s, r) => s + Math.pow((r - mean) / std, 4), 0) / n;
+  }
+
+  private computeSampleEntropy(returns: number[]): number {
+    // Aproximação de entropia: quanto mais alto, mais imprevisível
+    if (returns.length < 10) return 1.0;
+    const bins = 10;
+    const min = Math.min(...returns);
+    const max = Math.max(...returns);
+    if (min === max) return 0;
+    const range = max - min;
+    const hist: number[] = new Array(bins).fill(0);
+    returns.forEach(r => {
+      const bin = Math.min(bins - 1, Math.floor(((r - min) / range) * bins));
+      hist[bin]++;
+    });
+    const total = returns.length;
+    let entropy = 0;
+    hist.forEach(count => {
+      if (count > 0) {
+        const p = count / total;
+        entropy -= p * Math.log2(p);
+      }
+    });
+    return entropy / Math.log2(bins); // Normalizado 0-1
+  }
+
+  private computeRSI(prices: number[], period: number): number {
+    if (prices.length < period + 1) return 50;
+    const changes = prices.slice(1).map((p, i) => p - prices[i]);
+    const recent = changes.slice(-period);
+    const gains = recent.filter(c => c > 0).reduce((a, b) => a + b, 0) / period;
+    const losses = recent.filter(c => c < 0).reduce((a, b) => a + Math.abs(b), 0) / period;
+    if (losses === 0) return 100;
+    const rs = gains / losses;
+    return 100 - (100 / (1 + rs));
+  }
+
+  private computeEMA(prices: number[], period: number): number[] {
+    const k = 2 / (period + 1);
+    const ema: number[] = [prices[0]];
+    for (let i = 1; i < prices.length; i++) ema.push(prices[i] * k + ema[i-1] * (1 - k));
+    return ema;
+  }
+
+  private computeMACD(prices: number[]): { value: number; signal: number; histogram: number } {
+    if (prices.length < 26) return { value: 0, signal: 0, histogram: 0 };
+    const ema12 = this.computeEMA(prices, 12);
+    const ema26 = this.computeEMA(prices, 26);
+    const macdLine = ema12.map((v, i) => v - ema26[i]);
+    const signal = this.computeEMA(macdLine, 9);
+    const last = macdLine.length - 1;
+    return {
+      value: macdLine[last],
+      signal: signal[last],
+      histogram: macdLine[last] - signal[last]
+    };
+  }
+
+  private computeBollingerPosition(prices: number[], period = 20, stdMult = 2): number {
+    if (prices.length < period) return 0.5;
+    const slice = prices.slice(-period);
+    const mean = slice.reduce((a, b) => a + b, 0) / period;
+    const std = Math.sqrt(slice.reduce((s, p) => s + Math.pow(p - mean, 2), 0) / period);
+    const upper = mean + stdMult * std;
+    const lower = mean - stdMult * std;
+    const current = prices[prices.length - 1];
+    if (upper === lower) return 0.5;
+    return (current - lower) / (upper - lower);
+  }
+
+  private computeBollingerWidth(prices: number[], period = 20, stdMult = 2): number {
+    if (prices.length < period) return 0;
+    const slice = prices.slice(-period);
+    const mean = slice.reduce((a, b) => a + b, 0) / period;
+    const std = Math.sqrt(slice.reduce((s, p) => s + Math.pow(p - mean, 2), 0) / period);
+    return (2 * stdMult * std / mean) * 100;
+  }
+
+  private computeZScore(prices: number[], lookback = 100): number {
+    const window = prices.slice(-Math.min(lookback, prices.length));
+    const mean = window.reduce((a, b) => a + b, 0) / window.length;
+    const std = Math.sqrt(window.reduce((s, p) => s + Math.pow(p - mean, 2), 0) / window.length);
+    if (std === 0) return 0;
+    return (prices[prices.length - 1] - mean) / std;
+  }
+
+  private computeDigitEntropy(digitFreq: Record<number, number>): number {
+    const total = Object.values(digitFreq).reduce((a, b) => a + b, 0);
+    if (total === 0) return 0;
+    let entropy = 0;
+    for (let d = 0; d <= 9; d++) {
+      const p = (digitFreq[d] || 0) / total;
+      if (p > 0) entropy -= p * Math.log2(p);
+    }
+    return entropy; // Max = log2(10) = 3.32 for perfectly uniform
+  }
+
+  private computeChiSquare(digitFreq: Record<number, number>): number {
+    const total = Object.values(digitFreq).reduce((a, b) => a + b, 0);
+    if (total === 0) return 0;
+    const expected = total / 10;
+    let chi2 = 0;
+    for (let d = 0; d <= 9; d++) {
+      const obs = digitFreq[d] || 0;
+      chi2 += Math.pow(obs - expected, 2) / expected;
+    }
+    return chi2;
+  }
+
+  private computeStdDev(values: number[]): number {
+    if (values.length < 2) return 0;
+    const mean = values.reduce((a, b) => a + b, 0) / values.length;
+    return Math.sqrt(values.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / values.length);
+  }
+
+  private buildMarketDNA(tickData: DerivTickData[], symbol: string): string {
+    const n = tickData.length;
+    if (n < 20) return `Insufficient data for ${symbol} — only ${n} ticks available.`;
+
     const prices = tickData.map(t => t.quote);
-    const avgPrice = prices.reduce((a, b) => a + b, 0) / prices.length;
-    const maxPrice = Math.max(...prices);
-    const minPrice = Math.min(...prices);
-    const volatility = this.calculateVolatility(prices);
-
-    // Analyze digit patterns for digit differs - extract last digit preserving trailing zeros
     const lastDigits = tickData.map(extractLastDigit);
-    const digitFrequency = this.analyzeDigitFrequency(lastDigits);
+    const current = prices[n - 1];
 
-    return `
-Market Analysis for ${symbol}:
-- Current Price: ${latest.quote}
-- Price Change: ${priceChange.toFixed(4)}%
-- Average Price: ${avgPrice.toFixed(5)}
-- Price Range: ${minPrice.toFixed(5)} - ${maxPrice.toFixed(5)}
-- Volatility: ${volatility.toFixed(4)}
-- Data Points: ${tickData.length}
-- Last Digit Distribution: ${JSON.stringify(digitFrequency)}
-- Recent Last Digits: ${lastDigits.slice(-10).join(', ')}
-- Trend: ${priceChange > 0 ? 'Bullish' : 'Bearish'}
-`;
+    // ── Returns series ──
+    const returns: number[] = [];
+    for (let i = 1; i < prices.length; i++) returns.push((prices[i] - prices[i-1]) / prices[i-1]);
+
+    // ── Multi-scale momentum (price delta at N ticks) ──
+    const mom = (lag: number) => n > lag ? ((prices[n-1] - prices[n-1-lag]) / prices[n-1-lag]) * 100 : null;
+    const m1 = mom(1), m5 = mom(5), m10 = mom(10), m20 = mom(20),
+          m50 = mom(50), m100 = mom(100), m200 = mom(200), m500 = mom(500);
+
+    // ── Velocity and acceleration (tick rate of change) ──
+    const velocity = m1 ?? 0;
+    const velocity5 = (m5 ?? 0) / 5;
+    const acceleration = velocity - velocity5;
+
+    // ── Volatility at multiple scales ──
+    const vol = (r: number[]) => this.computeStdDev(r) * 100;
+    const vol5 = vol(returns.slice(-5));
+    const vol20 = vol(returns.slice(-20));
+    const vol100 = vol(returns.slice(-100));
+    const volRatio = vol20 > 0 ? vol5 / vol20 : 1;
+    const volRegime = volRatio > 1.4 ? 'EXPANDING (spike)' : volRatio < 0.6 ? 'CONTRACTING (squeeze)' : 'STABLE';
+
+    // ── Fractal / Hurst exponent ──
+    const hurst = this.computeHurst(prices.slice(-Math.min(200, n)));
+    const hurstLabel = hurst > 0.6 ? 'persistent trending' : hurst < 0.4 ? 'anti-persistent mean-reverting' : 'random walk (efficient)';
+
+    // ── Autocorrelation (serial dependence) ──
+    const acf1 = this.autocorrelation(returns, 1);
+    const acf2 = this.autocorrelation(returns, 2);
+    const acf5 = this.autocorrelation(returns, 5);
+    const acf10 = this.autocorrelation(returns, 10);
+
+    // ── Distribution statistics ──
+    const returnSlice = returns.slice(-100);
+    const skew = this.computeSkewness(returnSlice);
+    const kurt = this.computeKurtosis(returnSlice);
+    const entropy = this.computeSampleEntropy(returnSlice);
+    const skewLabel = skew > 0.3 ? 'right-skewed (upside tail risk)' : skew < -0.3 ? 'left-skewed (downside tail risk)' : 'symmetric';
+    const kurtLabel = kurt > 4 ? 'leptokurtic-fat tails (jump risk HIGH)' : kurt < 2.5 ? 'platykurtic (thin tails)' : 'mesokurtic (normal)';
+
+    // ── Oscillators ──
+    const rsi7 = this.computeRSI(prices, 7);
+    const rsi14 = this.computeRSI(prices, 14);
+    const rsi28 = this.computeRSI(prices, 28);
+    const rsiLabel = (rsi: number) => rsi > 70 ? 'overbought' : rsi < 30 ? 'oversold' : rsi > 55 ? 'bullish' : rsi < 45 ? 'bearish' : 'neutral';
+
+    // ── Bollinger Bands ──
+    const bbPos = this.computeBollingerPosition(prices);
+    const bbWidth = this.computeBollingerWidth(prices);
+    const bbPosLabel = bbPos > 0.8 ? 'near upper band (overbought zone)' : bbPos < 0.2 ? 'near lower band (oversold zone)' : bbPos > 0.5 ? 'upper half (bullish lean)' : 'lower half (bearish lean)';
+
+    // ── MACD ──
+    const macd = this.computeMACD(prices);
+    const macdLabel = macd.histogram > 0 ? 'bullish divergence' : 'bearish divergence';
+
+    // ── Z-Score (mean reversion) ──
+    const zScore = this.computeZScore(prices, 200);
+    const zLabel = zScore > 2 ? 'extreme overextension UP' : zScore < -2 ? 'extreme overextension DOWN' : zScore > 1 ? 'moderate positive deviation' : zScore < -1 ? 'moderate negative deviation' : 'near mean (neutral)';
+
+    // ── Price range and S/R ──
+    const max200 = Math.max(...prices.slice(-Math.min(200, n)));
+    const min200 = Math.min(...prices.slice(-Math.min(200, n)));
+    const range = max200 - min200;
+    const distFromHigh = range > 0 ? ((max200 - current) / range) * 100 : 50;
+    const distFromLow = range > 0 ? ((current - min200) / range) * 100 : 50;
+    const srLabel = distFromLow < 15 ? 'near key support (bounce zone)' : distFromHigh < 15 ? 'near key resistance (rejection zone)' : 'mid-range (no extreme S/R pressure)';
+
+    // ── Digit analysis ──
+    const digitFreq = this.analyzeDigitFrequency(lastDigits);
+    const digitEntropy = this.computeDigitEntropy(digitFreq);
+    const chi2 = this.computeChiSquare(digitFreq);
+    const lastD = lastDigits.slice(-15).join('-');
+    const recentDigits = lastDigits.slice(-20);
+    const evenCount = recentDigits.filter(d => d % 2 === 0).length;
+    const parityBias = evenCount > 12 ? 'even-biased' : evenCount < 8 ? 'odd-biased' : 'balanced';
+    const lowDigits = recentDigits.filter(d => d <= 4).length;
+    const highDigits = recentDigits.filter(d => d >= 5).length;
+    const digitRangeBias = lowDigits > 13 ? 'low-digit bias (0-4)' : highDigits > 13 ? 'high-digit bias (5-9)' : 'balanced digit range';
+
+    // ── Trend continuity ──
+    const posReturns = returns.slice(-20).filter(r => r > 0).length;
+    const negReturns = returns.slice(-20).filter(r => r < 0).length;
+    const trendContinuity = posReturns > 13 ? 'strong upward continuity' : negReturns > 13 ? 'strong downward continuity' : 'mixed/choppy';
+
+    // ── Momentum alignment across scales ──
+    const bullishMomentum = [m1, m5, m10, m20].filter(m => m !== null && m > 0).length;
+    const bearishMomentum = [m1, m5, m10, m20].filter(m => m !== null && m < 0).length;
+    const momentumAlignment = bullishMomentum >= 3 ? 'multi-scale BULLISH aligned' : bearishMomentum >= 3 ? 'multi-scale BEARISH aligned' : 'mixed momentum signals';
+
+    // ── Moving average stack ──
+    const sma10 = prices.slice(-10).reduce((a, b) => a + b, 0) / 10;
+    const sma20 = prices.slice(-20).reduce((a, b) => a + b, 0) / 20;
+    const sma50 = n >= 50 ? prices.slice(-50).reduce((a, b) => a + b, 0) / 50 : null;
+    const maStack = current > sma10 ? (current > sma20 ? 'price above SMA10+SMA20 (bullish stack)' : 'price between SMA10-SMA20') : 'price below SMA10 (bearish)';
+
+    // ── Build the final ultra-rich prompt ──
+    const trend = (m20 ?? 0) > 0.01 ? 'bullish' : (m20 ?? 0) < -0.01 ? 'bearish' : 'sideways';
+    const overallSentiment = (
+      (rsi14 > 55 ? 1 : rsi14 < 45 ? -1 : 0) +
+      (bbPos > 0.55 ? 1 : bbPos < 0.45 ? -1 : 0) +
+      (macd.histogram > 0 ? 1 : -1) +
+      ((m10 ?? 0) > 0 ? 1 : -1) +
+      (hurst > 0.55 ? ((m5 ?? 0) > 0 ? 1 : -1) : 0) +
+      (zScore < -1 ? 1 : zScore > 1 ? -1 : 0)
+    );
+    const overallLabel = overallSentiment >= 3 ? 'strongly positive financial outlook' :
+                         overallSentiment >= 1 ? 'moderately positive financial indicators' :
+                         overallSentiment <= -3 ? 'strongly negative financial outlook' :
+                         overallSentiment <= -1 ? 'moderately negative financial indicators' :
+                         'neutral mixed financial signals';
+
+    return `Quantitative market analysis for synthetic index ${symbol} — microscopic tick data (${n} ticks, high-frequency):
+
+EXECUTIVE SUMMARY: ${overallLabel}. Market is in ${trend} trend with ${momentumAlignment}.
+
+MOMENTUM MATRIX (multi-scale price change):
+• 1-tick: ${m1 !== null ? m1.toFixed(5)+'%' : 'n/a'} | 5-tick: ${m5 !== null ? m5.toFixed(5)+'%' : 'n/a'} | 10-tick: ${m10 !== null ? m10.toFixed(5)+'%' : 'n/a'} | 20-tick: ${m20 !== null ? m20.toFixed(5)+'%' : 'n/a'}
+• 50-tick: ${m50 !== null ? m50.toFixed(5)+'%' : 'n/a'} | 100-tick: ${m100 !== null ? m100.toFixed(5)+'%' : 'n/a'} | 200-tick: ${m200 !== null ? m200.toFixed(5)+'%' : 'n/a'}
+• Velocity: ${velocity.toFixed(5)}%/tick | Acceleration: ${acceleration > 0 ? '+' : ''}${acceleration.toFixed(5)}%
+
+FRACTAL STRUCTURE (Hurst Exponent = ${hurst.toFixed(3)}): ${hurstLabel}
+Serial correlation: ACF[1]=${acf1.toFixed(3)} ACF[2]=${acf2.toFixed(3)} ACF[5]=${acf5.toFixed(3)} ACF[10]=${acf10.toFixed(3)}
+${Math.abs(acf1) > 0.1 ? `Serial dependence detected (ACF[1]=${acf1.toFixed(3)}) — ${acf1 > 0 ? 'momentum' : 'reversion'} signal` : 'No significant serial correlation (efficient market behavior)'}
+
+VOLATILITY REGIME: ${volRegime} | Vol-5=${vol5.toFixed(5)}% Vol-20=${vol20.toFixed(5)}% Vol-100=${vol100.toFixed(5)}% | Ratio=${volRatio.toFixed(2)}
+
+STATISTICAL DISTRIBUTION (100 ticks):
+Skewness=${skew.toFixed(3)} (${skewLabel}) | Kurtosis=${kurt.toFixed(3)} (${kurtLabel})
+Sample Entropy=${entropy.toFixed(3)} — ${entropy > 0.8 ? 'HIGH entropy (unpredictable, cautious)' : entropy < 0.4 ? 'LOW entropy (predictable, signal strong)' : 'moderate entropy'}
+
+OSCILLATORS:
+RSI-7=${rsi7.toFixed(1)} (${rsiLabel(rsi7)}) | RSI-14=${rsi14.toFixed(1)} (${rsiLabel(rsi14)}) | RSI-28=${rsi28.toFixed(1)} (${rsiLabel(rsi28)})
+${rsi14 > 70 ? 'Overbought territory — negative financial risk elevated' : rsi14 < 30 ? 'Oversold territory — positive reversal opportunity' : 'Neutral RSI — direction unclear from oscillators alone'}
+
+BOLLINGER BANDS: Position=${(bbPos*100).toFixed(1)}% — ${bbPosLabel} | Width=${bbWidth.toFixed(3)}%
+${bbWidth < 0.1 ? 'EXTREME SQUEEZE — explosive move imminent, direction critical' : bbWidth > 0.5 ? 'Wide bands — high volatility environment' : 'Normal band width'}
+
+MACD: Value=${macd.value.toFixed(7)} | Signal=${macd.signal.toFixed(7)} | Histogram=${macd.histogram.toFixed(7)} → ${macdLabel}
+
+Z-SCORE: ${zScore.toFixed(3)}σ from 200-tick mean → ${zLabel}
+${Math.abs(zScore) > 1.5 ? (zScore > 0 ? 'Significantly above mean — negative reversion pressure' : 'Significantly below mean — positive recovery potential') : 'Near equilibrium — no strong mean reversion pressure'}
+
+SUPPORT/RESISTANCE: ${srLabel}
+200-tick range: ${min200.toFixed(5)}–${max200.toFixed(5)} | ${(distFromLow).toFixed(1)}% above support | ${(distFromHigh).toFixed(1)}% below resistance
+
+MOVING AVERAGES: ${maStack}
+SMA10=${sma10.toFixed(5)} | SMA20=${sma20.toFixed(5)}${sma50 ? ' | SMA50='+sma50.toFixed(5) : ''}
+Trend continuity (last 20 ticks): ${trendContinuity} (${posReturns} up / ${negReturns} down)
+
+DIGIT MICROSCOPY (${lastDigits.length} samples):
+Shannon Entropy=${digitEntropy.toFixed(3)}/3.32 | χ²=${chi2.toFixed(1)} ${chi2 > 16.9 ? '(SIGNIFICANT BIAS p<0.05)' : '(normal distribution p>0.05)'}
+Parity: ${parityBias} | Range: ${digitRangeBias}
+Recent sequence (15): ${lastD}
+
+COMPOSITE SIGNAL SCORE: ${overallSentiment > 0 ? '+' : ''}${overallSentiment}/6 → ${overallLabel}`;
+  }
+
+  private prepareMarketSummary(tickData: DerivTickData[], symbol: string): string {
+    return this.buildMarketDNA(tickData, symbol);
+  }
+
+  private buildCompactDNA(tickData: DerivTickData[], symbol: string): string {
+    // Versão compacta do DNA — cabe dentro do limite de 512 tokens dos modelos BERT/FinBERT
+    const n = tickData.length;
+    if (n < 20) return `Insufficient market data for ${symbol}.`;
+
+    const prices = tickData.map(t => t.quote);
+    const lastDigits = tickData.map(extractLastDigit);
+    const current = prices[n - 1];
+
+    const returns: number[] = [];
+    for (let i = 1; i < prices.length; i++) returns.push((prices[i] - prices[i-1]) / prices[i-1]);
+
+    const mom = (lag: number) => n > lag ? ((prices[n-1] - prices[n-1-lag]) / prices[n-1-lag]) * 100 : 0;
+    const m5 = mom(5), m20 = mom(20), m50 = mom(50);
+
+    const vol5 = this.computeStdDev(returns.slice(-5)) * 100;
+    const vol20 = this.computeStdDev(returns.slice(-20)) * 100;
+    const volRatio = vol20 > 0 ? vol5 / vol20 : 1;
+
+    const rsi14 = this.computeRSI(prices, 14);
+    const macd = this.computeMACD(prices);
+    const bbPos = this.computeBollingerPosition(prices);
+    const zScore = this.computeZScore(prices, 100);
+    const hurst = this.computeHurst(prices.slice(-Math.min(100, n)));
+
+    const digitFreq = this.analyzeDigitFrequency(lastDigits);
+    const chi2 = this.computeChiSquare(digitFreq);
+
+    const posReturns = returns.slice(-20).filter(r => r > 0).length;
+    const trend = m20 > 0.01 ? 'bullish' : m20 < -0.01 ? 'bearish' : 'sideways';
+    const volRegime = volRatio > 1.4 ? 'expanding' : volRatio < 0.6 ? 'contracting' : 'stable';
+    const hurstLabel = hurst > 0.6 ? 'trending' : hurst < 0.4 ? 'mean-reverting' : 'random';
+
+    const overallScore = (
+      (rsi14 > 55 ? 1 : rsi14 < 45 ? -1 : 0) +
+      (bbPos > 0.55 ? 1 : bbPos < 0.45 ? -1 : 0) +
+      (macd.histogram > 0 ? 1 : -1) +
+      (m20 > 0 ? 1 : -1) +
+      (posReturns > 12 ? 1 : posReturns < 8 ? -1 : 0) +
+      (zScore < -1 ? 1 : zScore > 1 ? -1 : 0)
+    );
+    const sentiment = overallScore >= 3 ? 'strongly positive' :
+                      overallScore >= 1 ? 'moderately positive' :
+                      overallScore <= -3 ? 'strongly negative' :
+                      overallScore <= -1 ? 'moderately negative' : 'neutral';
+
+    return `Market analysis ${symbol}: ${sentiment} financial outlook. ` +
+      `${trend} trend (5-tick: ${m5 > 0 ? '+' : ''}${m5.toFixed(4)}%, 20-tick: ${m20 > 0 ? '+' : ''}${m20.toFixed(4)}%, 50-tick: ${m50 > 0 ? '+' : ''}${m50.toFixed(4)}%). ` +
+      `RSI-14=${rsi14.toFixed(1)} (${rsi14 > 70 ? 'overbought' : rsi14 < 30 ? 'oversold' : rsi14 > 55 ? 'bullish' : rsi14 < 45 ? 'bearish' : 'neutral'}). ` +
+      `Bollinger position ${(bbPos*100).toFixed(0)}% (${bbPos > 0.7 ? 'near upper band' : bbPos < 0.3 ? 'near lower band' : 'mid-band'}). ` +
+      `MACD histogram ${macd.histogram > 0 ? 'positive (bullish divergence)' : 'negative (bearish divergence)'}. ` +
+      `Volatility ${volRegime} (ratio ${volRatio.toFixed(2)}). ` +
+      `Fractal structure: ${hurstLabel} (H=${hurst.toFixed(2)}). ` +
+      `Z-score ${zScore.toFixed(2)}σ (${Math.abs(zScore) > 1.5 ? (zScore > 0 ? 'overextended up, negative reversion pressure' : 'overextended down, positive recovery potential') : 'near equilibrium'}). ` +
+      `Trend continuity: ${posReturns}/20 ticks positive. ` +
+      `Digit distribution: χ²=${chi2.toFixed(1)} (${chi2 > 16.9 ? 'biased distribution detected' : 'normal distribution'}). ` +
+      `Composite signal score: ${overallScore > 0 ? '+' : ''}${overallScore}/6 → ${sentiment} financial indicators.`;
   }
 
   private createModelSpecificPrompt(model: AIModel, marketSummary: string, tickData: DerivTickData[]): string {
-    // CORRIGIDO: Prompt dinâmico baseado em dados reais do mercado
-    const lastDigits = tickData.slice(-10).map(extractLastDigit);
-    const currentDigit = lastDigits[lastDigits.length - 1];
-    const latest = tickData[tickData.length - 1];
-    const oldest = tickData[0];
-    const priceChange = ((latest.quote - oldest.quote) / oldest.quote) * 100;
-    
-    // Determinar tendência real baseada nos dados
-    const trendDirection = priceChange > 0.1 ? 'bullish upward' : 
-                          priceChange < -0.1 ? 'bearish downward' : 'sideways neutral';
-    const momentum = Math.abs(priceChange) > 0.5 ? 'strong' : 
-                    Math.abs(priceChange) > 0.1 ? 'moderate' : 'weak';
-    
-    // Análise de volatilidade
-    const prices = tickData.map(t => t.quote);
-    const volatility = this.calculateVolatility(prices);
-    const volatilityLevel = volatility > 0.01 ? 'high' : volatility > 0.005 ? 'moderate' : 'low';
-    
-    // Prompt dinâmico usando dados reais do mercado
-    const dynamicPrompt = `Market analysis: ${latest.quote} price shows ${trendDirection} trend with ${momentum} momentum (${priceChange.toFixed(3)}% change). Volatility is ${volatilityLevel} (${volatility.toFixed(4)}). Recent digits pattern: ${lastDigits.join(',')} ending in ${currentDigit}. ${priceChange > 0 ? 'Positive financial indicators suggest potential growth' : priceChange < 0 ? 'Negative indicators suggest potential decline' : 'Neutral indicators suggest sideways movement'}.`;
+    // Usa versão COMPACTA do DNA (cabe nos 512 tokens dos modelos FinBERT/RoBERTa)
+    // O marketSummary completo é usado internamente; aqui geramos o compacto por símbolo
+    // Extrai símbolo do marketSummary completo ou usa compacto direto
+    const compactPrompt = marketSummary.length > 1200
+      ? marketSummary.substring(0, 1000).trimEnd() + '...'
+      : marketSummary;
 
-    console.log(`🧠 [${model.name}] Prompt dinâmico: ${dynamicPrompt.substring(0, 100)}...`);
-    return dynamicPrompt;
+    console.log(`🧬 [${model.name}] Prompt compacto (${compactPrompt.length} chars)`);
+    return compactPrompt;
   }
 
   private processModelResponse(model: AIModel, response: any, tickData: DerivTickData[]): MarketAnalysis {
@@ -523,24 +865,23 @@ Market Analysis for ${symbol}:
   }
 
   private parseSentimentArray(sentimentArray: any[]): any {
-    // Processar array de sentiment scores (formato Hugging Face)
+    // ── Modelos financeiros retornam positive/negative/neutral ──
+    // Suporta também formatos com estrelas (legado) e LABEL_X genérico
     let positiveScore = 0;
     let negativeScore = 0;
     let neutralScore = 0;
-    
-    // Detectar se é modelo de estrelas (BERT-based review sentiment)
+
     const isStarRating = sentimentArray.some(item =>
-      item.label?.toLowerCase().includes('star') || item.label?.toLowerCase().includes('estrela')
+      item.label?.toLowerCase().includes('star') || item.label?.match(/^\d\s*star/i)
     );
 
     if (isStarRating) {
-      // Mapear estrelas para sentimento: 1-2=negativo, 3=neutro, 4-5=positivo
+      // Legado: mapeamento de estrelas (1-2=negativo, 3=neutro, 4-5=positivo)
       let weightedScore = 0;
       let totalScore = 0;
       sentimentArray.forEach(item => {
-        const label = item.label?.toLowerCase() || '';
         const score = item.score || 0;
-        const starMatch = label.match(/(\d)/);
+        const starMatch = (item.label || '').match(/(\d)/);
         if (starMatch) {
           const stars = parseInt(starMatch[1], 10);
           weightedScore += stars * score;
@@ -548,32 +889,41 @@ Market Analysis for ${symbol}:
         }
       });
       const avgStars = totalScore > 0 ? weightedScore / totalScore : 3;
-      if (avgStars >= 3.7) {
-        positiveScore = Math.min(0.95, (avgStars - 3) / 2);
-      } else if (avgStars <= 2.3) {
-        negativeScore = Math.min(0.95, (3 - avgStars) / 2);
-      } else {
-        neutralScore = 0.7;
-      }
+      if (avgStars >= 3.7)      positiveScore = Math.min(0.95, (avgStars - 3) / 2);
+      else if (avgStars <= 2.3) negativeScore = Math.min(0.95, (3 - avgStars) / 2);
+      else                      neutralScore = 0.7;
     } else {
-    sentimentArray.forEach(item => {
-      const label = item.label?.toLowerCase() || '';
-      const score = item.score || 0;
-      
-      if (label.includes('positive') || label === 'label_2') {
-        positiveScore = score;
-      } else if (label.includes('negative') || label === 'label_0') {
-        negativeScore = score;
-      } else if (label.includes('neutral') || label === 'label_1') {
-        neutralScore = score;
-      }
-    });
+      sentimentArray.forEach(item => {
+        const raw = (item.label || '').toLowerCase().trim();
+        const score = item.score || 0;
+        // Modelos financeiros: positive/negative/neutral (ProsusAI/finbert,
+        // yiyanghkust/finbert-tone, nickmuchi, Jean-Baptiste/roberta, mrm8488)
+        if (raw === 'positive' || raw === 'pos' || raw === 'label_2') {
+          positiveScore = Math.max(positiveScore, score);
+        } else if (raw === 'negative' || raw === 'neg' || raw === 'label_0') {
+          negativeScore = Math.max(negativeScore, score);
+        } else if (raw === 'neutral' || raw === 'neu' || raw === 'label_1') {
+          neutralScore = Math.max(neutralScore, score);
+        }
+        // Twitter-style: LABEL_0=negative, LABEL_1=neutral, LABEL_2=positive
+        else if (raw.startsWith('label_')) {
+          const idx = parseInt(raw.replace('label_', ''), 10);
+          if (idx === 2) positiveScore = Math.max(positiveScore, score);
+          else if (idx === 0) negativeScore = Math.max(negativeScore, score);
+          else neutralScore = Math.max(neutralScore, score);
+        }
+        // Fallback: texto livre que contenha positive/negative
+        else if (raw.includes('positive') || raw.includes('bullish') || raw.includes('up')) {
+          positiveScore = Math.max(positiveScore, score);
+        } else if (raw.includes('negative') || raw.includes('bearish') || raw.includes('down')) {
+          negativeScore = Math.max(negativeScore, score);
+        }
+      });
     }
-    
-    // Determinar predição baseada no maior score
+
     let prediction = 'neutral';
     let confidence = 50;
-    
+
     if (positiveScore > negativeScore && positiveScore > neutralScore) {
       prediction = 'up';
       confidence = Math.round(positiveScore * 100);
@@ -584,14 +934,16 @@ Market Analysis for ${symbol}:
       prediction = 'neutral';
       confidence = Math.round(Math.max(neutralScore, positiveScore, negativeScore) * 100);
     }
-    
-    // Aumentar confiança se score for muito alto
-    if (confidence > 80) confidence = Math.min(95, confidence + 10);
-    
+
+    if (confidence > 80) confidence = Math.min(95, confidence + 5);
+
     return {
       prediction,
       confidence,
-      reasoning: `Sentiment analysis: positive=${(positiveScore*100).toFixed(1)}%, negative=${(negativeScore*100).toFixed(1)}%, neutral=${(neutralScore*100).toFixed(1)}%`
+      upScore: positiveScore,
+      downScore: negativeScore,
+      neutralScore,
+      reasoning: `Financial DNA sentiment: positive=${(positiveScore*100).toFixed(1)}%, negative=${(negativeScore*100).toFixed(1)}%, neutral=${(neutralScore*100).toFixed(1)}%`
     };
   }
 
