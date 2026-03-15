@@ -1427,7 +1427,14 @@ export default function TradingSystemPage() {
                   };
                   const AUTOMATED_MODALITIES = new Set([
                     'digit_differs','digit_matches','digit_even','digit_odd','digit_over','digit_under',
-                    'rise','fall','higher','lower'
+                    'rise','fall','higher','lower',
+                    'accumulator',
+                    'multiplier_up','multiplier_down',
+                    'turbo_up','turbo_down',
+                    'vanilla_call','vanilla_put',
+                    'lookback_high_close','lookback_close_low','lookback_high_low',
+                    'ends_between','ends_outside','stays_between','goes_outside',
+                    'touch','no_touch',
                   ]);
                   const saveModalities = (updated: Record<string, boolean>) => {
                     localStorage.setItem("trade_modalities", JSON.stringify(updated));
@@ -1441,11 +1448,10 @@ export default function TradingSystemPage() {
                     const updated = { ...enabledModalities, [id]: newVal };
                     setEnabledModalities(updated);
                     saveModalities(updated);
-                    const isAutomated = AUTOMATED_MODALITIES.has(id);
                     toast({
                       title: newVal ? `${name} ativada` : `${name} desativada`,
                       description: newVal
-                        ? isAutomated ? "IA irá operar automaticamente com esta modalidade." : "Modalidade ativada para análise (automação em breve)."
+                        ? "As 5 IAs irão operar automaticamente com esta modalidade na Deriv."
                         : "Modalidade removida do sistema.",
                       duration: 2500,
                     });
@@ -1688,22 +1694,21 @@ export default function TradingSystemPage() {
                     </Button>
                     <Button
                       variant="outline"
-                      className="h-auto p-4 flex flex-col items-start space-y-2 opacity-50"
-                      disabled
+                      className="h-auto p-4 flex flex-col items-start space-y-2"
                       data-testid="button-digit-matches"
                     >
                       <div className="flex items-center space-x-2">
-                        <div className="w-3 h-3 bg-gray-400 rounded-full"></div>
+                        <div className="w-3 h-3 bg-green-500 rounded-full"></div>
                         <span className="font-medium">Digit Matches</span>
                       </div>
                       <p className="text-xs text-muted-foreground text-left">
-                        Em breve: Ganha se o último dígito for IGUAL ao previsto
+                        Ganha se o último dígito for IGUAL ao previsto
                       </p>
                     </Button>
                   </div>
                   <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
                     <p className="text-sm text-blue-800 dark:text-blue-200">
-                      <strong>Digit Differs Ativo:</strong> O sistema prevê um dígito (0-9) e ganha se o último dígito do preço final for diferente da previsão.
+                      <strong>Todos os tipos Digit estão operacionais:</strong> As IAs selecionam automaticamente entre Differs, Matches, Even, Odd, Over e Under conforme o padrão de dígitos identificado em tempo real.
                     </p>
                   </div>
                 </div>
