@@ -87,76 +87,305 @@ interface AILog {
   createdAt: string;
 }
 
-const TRADE_MODALITIES = [
+interface TradeModality {
+  id: string;
+  name: string;
+  description: string;
+  aiStrategy: string;
+  risk: string;
+  riskColor: string;
+  defaultEnabled?: boolean;
+}
+
+interface TradeCategory {
+  id: string;
+  name: string;
+  description: string;
+  color: string;
+  modalities: TradeModality[];
+}
+
+const TRADE_CATEGORIES: TradeCategory[] = [
   {
-    id: "digit_differs",
-    name: "Digit Differs",
-    description: "Ganha se o último dígito for diferente do previsto",
-    aiStrategy: "Análise estatística de frequência de dígitos + modelo preditivo LSTM. Identifica padrões de repetição e evita dígitos com alta probabilidade de repetição.",
-    icon: "hash",
-    risk: "Baixo",
-    riskColor: "green",
-    enabled: true,
+    id: "digits",
+    name: "Dígitos",
+    description: "Operações baseadas no último dígito do preço de saída",
+    color: "blue",
+    modalities: [
+      {
+        id: "digit_differs",
+        name: "Digit Differs",
+        description: "Ganha se o último dígito for DIFERENTE do previsto",
+        aiStrategy: "LSTM + análise de frequência estatística. Identifica dígitos com alta repetição e seleciona o oposto como barreira, maximizando edge de 10-15%.",
+        risk: "Baixo",
+        riskColor: "green",
+        defaultEnabled: true,
+      },
+      {
+        id: "digit_matches",
+        name: "Digit Matches",
+        description: "Ganha se o último dígito for IGUAL ao previsto",
+        aiStrategy: "CNN treinada em histórico de 10.000+ ticks por ativo. Detecta clusters de convergência e seleciona o dígito com maior probabilidade de ocorrência no momento.",
+        risk: "Médio",
+        riskColor: "yellow",
+      },
+      {
+        id: "digit_even",
+        name: "Digit Even",
+        description: "Ganha se o último dígito for PAR (0, 2, 4, 6, 8)",
+        aiStrategy: "Cadeia de Markov + análise de paridade temporal. Monitora sequências de par/ímpar e detecta desvios estatísticos para entrada com vantagem.",
+        risk: "Baixo",
+        riskColor: "green",
+      },
+      {
+        id: "digit_odd",
+        name: "Digit Odd",
+        description: "Ganha se o último dígito for ÍMPAR (1, 3, 5, 7, 9)",
+        aiStrategy: "Cadeia de Markov inversa com janela adaptativa. Alterna automaticamente com Digit Even baseado na sequência recente para explorar desequilíbrios de distribuição.",
+        risk: "Baixo",
+        riskColor: "green",
+      },
+      {
+        id: "digit_over",
+        name: "Digit Over",
+        description: "Ganha se o último dígito for MAIOR que o previsto (ex: >4)",
+        aiStrategy: "Modelo bayesiano adaptativo. Ajusta o threshold ótimo (1-8) em tempo real baseado na distribuição recente dos últimos 200 ticks do ativo.",
+        risk: "Baixo",
+        riskColor: "green",
+      },
+      {
+        id: "digit_under",
+        name: "Digit Under",
+        description: "Ganha se o último dígito for MENOR que o previsto (ex: <5)",
+        aiStrategy: "Modelo bayesiano espelhado ao Over. IA seleciona automaticamente threshold (1-8) com maior probabilidade de acerto baseado no histórico recente.",
+        risk: "Baixo",
+        riskColor: "green",
+      },
+    ],
   },
   {
-    id: "digit_matches",
-    name: "Digit Matches",
-    description: "Ganha se o último dígito for igual ao previsto",
-    aiStrategy: "Redes neurais convolucionais para detecção de padrões de convergência. Algoritmo de reforço seleciona dígitos com maior probabilidade de ocorrência.",
-    icon: "target",
-    risk: "Médio",
-    riskColor: "yellow",
-    enabled: false,
+    id: "ups_downs",
+    name: "Altas & Baixas",
+    description: "Previsão de direção do preço (alta ou baixa)",
+    color: "emerald",
+    modalities: [
+      {
+        id: "rise",
+        name: "Rise (Alta)",
+        description: "Ganha se o preço de saída for MAIOR que o de entrada",
+        aiStrategy: "Transformer de séries temporais + RSI/MACD multi-timeframe. Analisa momentum, volume sintético e padrões de candles nos últimos 50/100/200 ticks.",
+        risk: "Médio",
+        riskColor: "yellow",
+      },
+      {
+        id: "fall",
+        name: "Fall (Baixa)",
+        description: "Ganha se o preço de saída for MENOR que o de entrada",
+        aiStrategy: "Transformer invertido + análise de tendência de Bollinger Bands. Detecta topos e reversões com modelo treinado em dados históricos de volatilidade sintética.",
+        risk: "Médio",
+        riskColor: "yellow",
+      },
+      {
+        id: "higher",
+        name: "Higher",
+        description: "Ganha se o preço final for ESTRITAMENTE acima de uma barreira",
+        aiStrategy: "XGBoost com features de suporte/resistência + ATR dinâmico. Define barreiras ótimas calculando a zona de menor risco de toque baseado em volatilidade histórica.",
+        risk: "Médio",
+        riskColor: "yellow",
+      },
+      {
+        id: "lower",
+        name: "Lower",
+        description: "Ganha se o preço final for ESTRITAMENTE abaixo de uma barreira",
+        aiStrategy: "XGBoost espelhado com análise de suporte dinâmico. Combina retração de Fibonacci com volatilidade ATR para posicionar barreiras com maior probabilidade de sucesso.",
+        risk: "Médio",
+        riskColor: "yellow",
+      },
+    ],
   },
   {
-    id: "rise_fall",
-    name: "Rise / Fall",
-    description: "Previsão de alta ou baixa do preço ao final do contrato",
-    aiStrategy: "Análise técnica multi-timeframe com RSI, MACD e Bollinger Bands. IA de séries temporais (Transformer) prevê direção do movimento com janela de 50 ticks.",
-    icon: "trending",
-    risk: "Médio",
-    riskColor: "yellow",
-    enabled: false,
+    id: "in_out",
+    name: "Dentro & Fora",
+    description: "Previsão se o preço permanecerá dentro ou sairá de uma faixa",
+    color: "violet",
+    modalities: [
+      {
+        id: "ends_between",
+        name: "Ends Between",
+        description: "Ganha se o preço de saída estiver ENTRE duas barreiras",
+        aiStrategy: "Monte Carlo + análise de range histórico. Calcula as barreiras ótimas (alta/baixa) com base na volatilidade esperada, maximizando probabilidade de encerramento dentro do range.",
+        risk: "Médio",
+        riskColor: "yellow",
+      },
+      {
+        id: "ends_outside",
+        name: "Ends Outside",
+        description: "Ganha se o preço de saída estiver FORA de duas barreiras",
+        aiStrategy: "Modelo de breakout + detecção de expansão de volatilidade. Identifica períodos de compressão de preço onde a ruptura fora do range é estatisticamente mais provável.",
+        risk: "Alto",
+        riskColor: "orange",
+      },
+      {
+        id: "stays_between",
+        name: "Stays Between",
+        description: "Ganha se o preço NUNCA sair da faixa durante o contrato",
+        aiStrategy: "Random Forest com análise de bandas de Bollinger e ATR. Seleciona contratos em períodos de baixa volatilidade com range bem estabelecido para minimizar risco de ruptura.",
+        risk: "Alto",
+        riskColor: "orange",
+      },
+      {
+        id: "goes_outside",
+        name: "Goes Outside",
+        description: "Ganha se o preço SAI da faixa em algum momento do contrato",
+        aiStrategy: "Detector de breakout com análise de squeeze de volatilidade. Identifica padrões de consolidação seguidos de expansão para prever rompimento iminente.",
+        risk: "Alto",
+        riskColor: "orange",
+      },
+    ],
   },
   {
-    id: "higher_lower",
-    name: "Higher / Lower",
-    description: "Previsão se o preço será maior ou menor que o preço atual",
-    aiStrategy: "Modelo de regressão XGBoost treinado em dados históricos de volatilidade. Combina com análise de suporte/resistência em tempo real.",
-    icon: "arrows",
-    risk: "Médio",
-    riskColor: "yellow",
-    enabled: false,
+    id: "touch",
+    name: "Toque",
+    description: "Previsão se o preço vai ou não tocar uma barreira específica",
+    color: "cyan",
+    modalities: [
+      {
+        id: "touch",
+        name: "Touch",
+        description: "Ganha se o preço TOCAR a barreira em algum momento",
+        aiStrategy: "Simulação de Monte Carlo com 10.000 trajetórias por operação. Calcula probabilidade de toque baseada em volatilidade real, posiciona barreira na zona de maior atratividade estatística.",
+        risk: "Médio",
+        riskColor: "yellow",
+      },
+      {
+        id: "no_touch",
+        name: "No Touch",
+        description: "Ganha se o preço NUNCA tocar a barreira durante o contrato",
+        aiStrategy: "Modelo inverso do Touch com análise de suporte/resistência forte. IA posiciona barreiras além de zonas de suporte/resistência consolidadas para maximizar chance de não-toque.",
+        risk: "Médio",
+        riskColor: "yellow",
+      },
+    ],
   },
   {
-    id: "touch_no_touch",
-    name: "Touch / No Touch",
-    description: "Previsão se o preço vai ou não tocar uma barreira",
-    aiStrategy: "Modelo de simulação Monte Carlo com deep learning para calcular probabilidade de toque. Ajusta barreiras dinamicamente conforme ATR do ativo.",
-    icon: "circle",
-    risk: "Alto",
-    riskColor: "orange",
-    enabled: false,
+    id: "multipliers",
+    name: "Multiplicadores",
+    description: "Lucros (e perdas) são multiplicados conforme movimento do preço",
+    color: "amber",
+    modalities: [
+      {
+        id: "multiplier_up",
+        name: "Multiplier Up",
+        description: "Lucros multiplicados quando o preço SOBE. Stop loss/profit protegem capital",
+        aiStrategy: "Reinforcement Learning (PPO) para gestão dinâmica de multiplicador (×2 a ×100) e stop loss. IA ajusta parâmetros em tempo real baseado em momentum e volatilidade, maximizando EV.",
+        risk: "Alto",
+        riskColor: "orange",
+      },
+      {
+        id: "multiplier_down",
+        name: "Multiplier Down",
+        description: "Lucros multiplicados quando o preço CAI. Stop loss/profit protegem capital",
+        aiStrategy: "Reinforcement Learning espelhado ao Up. Detecta tendências de baixa e posiciona multiplicador ótimo com gestão automática de risco via stop loss dinâmico.",
+        risk: "Alto",
+        riskColor: "orange",
+      },
+    ],
   },
   {
-    id: "even_odd",
-    name: "Even / Odd",
-    description: "Previsão se o último dígito será par ou ímpar",
-    aiStrategy: "Análise de distribuição estatística + cadeia de Markov para identificar tendências de paridade. Algoritmo adaptatilvo ajusta probabilidades a cada 10 trades.",
-    icon: "layers",
-    risk: "Baixo",
-    riskColor: "green",
-    enabled: false,
+    id: "accumulators",
+    name: "Acumuladores",
+    description: "Lucro acumula continuamente enquanto o preço permanece dentro de um range",
+    color: "teal",
+    modalities: [
+      {
+        id: "accumulator",
+        name: "Accumulator",
+        description: "Lucro acumula a cada tick enquanto o spot permanecer dentro da faixa de crescimento",
+        aiStrategy: "Modelo de sobrevivência estatística + RL para gestão de saída. IA monitora taxa de crescimento, volatilidade instantânea e calcula o momento ótimo de encerramento para maximizar lucro acumulado antes de uma ruptura.",
+        risk: "Alto",
+        riskColor: "orange",
+      },
+    ],
   },
   {
-    id: "over_under",
-    name: "Over / Under",
-    description: "Previsão se o último dígito será maior ou menor que um valor",
-    aiStrategy: "Modelo bayesiano atualiza probabilidades em tempo real por dígito-alvo. IA seleciona automaticamente o threshold com maior edge estatístico.",
-    icon: "zap",
-    risk: "Baixo",
-    riskColor: "green",
-    enabled: false,
+    id: "turbos",
+    name: "Turbos (Knockouts)",
+    description: "Contratos com barreira de knockout — alto potencial de retorno",
+    color: "red",
+    modalities: [
+      {
+        id: "turbo_up",
+        name: "Turbo Up",
+        description: "Lucro se o preço encerrar ACIMA da barreira. Knockout se tocar a barreira",
+        aiStrategy: "LSTM + análise de momentum extremo. IA define barreira de knockout em zonas de suporte forte, minimizando probabilidade de toque enquanto maximiza potencial de retorno.",
+        risk: "Muito Alto",
+        riskColor: "red",
+      },
+      {
+        id: "turbo_down",
+        name: "Turbo Down",
+        description: "Lucro se o preço encerrar ABAIXO da barreira. Knockout se tocar a barreira",
+        aiStrategy: "LSTM invertido + análise de resistência forte. Posiciona barreira em zonas de resistência consolidadas para reduzir risco de knockout e aumentar retorno esperado.",
+        risk: "Muito Alto",
+        riskColor: "red",
+      },
+    ],
+  },
+  {
+    id: "vanillas",
+    name: "Vanillas (Opções)",
+    description: "Opções financeiras clássicas com prêmio e vencimento definidos",
+    color: "pink",
+    modalities: [
+      {
+        id: "vanilla_call",
+        name: "Vanilla Call",
+        description: "Lucro se o preço de saída estiver ACIMA do strike. Perda limitada ao prêmio pago",
+        aiStrategy: "Modelo Black-Scholes adaptado com ML. IA estima volatilidade implícita, seleciona o strike ótimo e o vencimento com melhor relação risco/retorno baseado em dados históricos de opções sintéticas.",
+        risk: "Médio-Alto",
+        riskColor: "orange",
+      },
+      {
+        id: "vanilla_put",
+        name: "Vanilla Put",
+        description: "Lucro se o preço de saída estiver ABAIXO do strike. Perda limitada ao prêmio pago",
+        aiStrategy: "Black-Scholes adaptado espelhado ao Call. Detecta pressão vendedora e seleciona strikes com maior delta negativo para maximizar retorno esperado da opção de venda.",
+        risk: "Médio-Alto",
+        riskColor: "orange",
+      },
+    ],
+  },
+  {
+    id: "lookbacks",
+    name: "Lookbacks",
+    description: "Contratos baseados no máximo ou mínimo atingido durante o período",
+    color: "indigo",
+    modalities: [
+      {
+        id: "lookback_high_close",
+        name: "High-Close",
+        description: "Paga multiplicador × (Máximo − Fechamento) do período",
+        aiStrategy: "Análise de amplitude de range + detector de tendência de alta. IA identifica períodos com alta amplitude e tendência descendente no final, maximizando o spread High-Close.",
+        risk: "Alto",
+        riskColor: "orange",
+      },
+      {
+        id: "lookback_close_low",
+        name: "Close-Low",
+        description: "Paga multiplicador × (Fechamento − Mínimo) do período",
+        aiStrategy: "Detector de consolidação baixa + análise de reversão. IA identifica momentos com mínimos profundos e recuperação no fechamento para maximizar o spread Close-Low.",
+        risk: "Alto",
+        riskColor: "orange",
+      },
+      {
+        id: "lookback_high_low",
+        name: "High-Low",
+        description: "Paga multiplicador × (Máximo − Mínimo) do período",
+        aiStrategy: "Detector de expansão de volatilidade com análise de range esperado. IA entra em períodos de alta volatilidade implícita onde o range High-Low esperado supera o custo do contrato.",
+        risk: "Alto",
+        riskColor: "orange",
+      },
+    ],
   },
 ];
 
@@ -777,84 +1006,127 @@ export default function TradingSystemPage() {
                   <Badge className="bg-blue-500 text-white ml-2">{Object.values(enabledModalities).filter(Boolean).length} ativa{Object.values(enabledModalities).filter(Boolean).length !== 1 ? 's' : ''}</Badge>
                 </CardTitle>
                 <CardDescription>
-                  Selecione quais modalidades o sistema deve operar. As IAs adaptam suas estratégias automaticamente em tempo real conforme as seleções abaixo.
+                  Selecione quais modalidades e subtipos o sistema deve operar. As IAs adaptam suas estratégias automaticamente em tempo real — o sistema alterna e prioriza conforme rentabilidade.
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="space-y-5">
                 <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-sm text-blue-800 dark:text-blue-200">
-                  <strong>Como funciona:</strong> O sistema opera de forma simultânea e alternada entre as modalidades ativas, priorizando automaticamente as mais rentáveis e menos arriscadas em cada momento. As IAs cooperativas monitoram o desempenho em tempo real e rebalanceiam o peso de cada modalidade.
+                  <strong>Como funciona:</strong> Marque qualquer combinação de modalidades. O sistema opera simultânea e alternadamente entre todas as ativas, priorizando as mais rentáveis e seguras a cada momento. As IAs rebalanceiam os pesos em tempo real.
                 </div>
-                <div className="grid gap-3 md:grid-cols-2">
-                  {TRADE_MODALITIES.map((modality) => {
-                    const isEnabled = enabledModalities[modality.id] ?? false;
-                    const riskColors: Record<string, string> = {
-                      green: "text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800",
-                      yellow: "text-yellow-600 dark:text-yellow-400 bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800",
-                      orange: "text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800",
-                    };
+
+                {(() => {
+                  const riskColors: Record<string, string> = {
+                    green: "text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800",
+                    yellow: "text-yellow-700 dark:text-yellow-400 bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800",
+                    orange: "text-orange-700 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800",
+                    red: "text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800",
+                  };
+                  const catHeaderColors: Record<string, string> = {
+                    blue: "bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800 text-blue-800 dark:text-blue-200",
+                    emerald: "bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200",
+                    violet: "bg-violet-50 dark:bg-violet-900/20 border-violet-200 dark:border-violet-800 text-violet-800 dark:text-violet-200",
+                    cyan: "bg-cyan-50 dark:bg-cyan-900/20 border-cyan-200 dark:border-cyan-800 text-cyan-800 dark:text-cyan-200",
+                    amber: "bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200",
+                    teal: "bg-teal-50 dark:bg-teal-900/20 border-teal-200 dark:border-teal-800 text-teal-800 dark:text-teal-200",
+                    red: "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-800 dark:text-red-200",
+                    pink: "bg-pink-50 dark:bg-pink-900/20 border-pink-200 dark:border-pink-800 text-pink-800 dark:text-pink-200",
+                    indigo: "bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800 text-indigo-800 dark:text-indigo-200",
+                  };
+                  const toggleModality = (id: string, newVal: boolean, name: string) => {
+                    const updated = { ...enabledModalities, [id]: newVal };
+                    setEnabledModalities(updated);
+                    localStorage.setItem("trade_modalities", JSON.stringify(updated));
+                    const active = Object.entries(updated).filter(([, v]) => v).map(([k]) => k);
+                    apiRequest("POST", "/api/trading/modalities", { modalities: active }).catch(() => {});
+                    toast({
+                      title: newVal ? `${name} ativada` : `${name} desativada`,
+                      description: newVal ? "Sistema já operando com esta modalidade." : "Modalidade removida do sistema.",
+                      duration: 2000,
+                    });
+                  };
+                  const toggleCategory = (cat: TradeCategory, enable: boolean) => {
+                    const updated = { ...enabledModalities };
+                    cat.modalities.forEach(m => { updated[m.id] = enable; });
+                    setEnabledModalities(updated);
+                    localStorage.setItem("trade_modalities", JSON.stringify(updated));
+                    const active = Object.entries(updated).filter(([, v]) => v).map(([k]) => k);
+                    apiRequest("POST", "/api/trading/modalities", { modalities: active }).catch(() => {});
+                    toast({
+                      title: enable ? `${cat.name}: todos ativados` : `${cat.name}: todos desativados`,
+                      description: enable ? `${cat.modalities.length} modalidade(s) ativada(s).` : "Categoria removida do sistema.",
+                      duration: 2000,
+                    });
+                  };
+                  return TRADE_CATEGORIES.map((cat) => {
+                    const allEnabled = cat.modalities.every(m => enabledModalities[m.id]);
+                    const someEnabled = cat.modalities.some(m => enabledModalities[m.id]);
                     return (
-                      <div
-                        key={modality.id}
-                        className={`p-4 border-2 rounded-lg transition-all cursor-pointer ${isEnabled ? 'border-blue-400 dark:border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-border bg-background'}`}
-                        onClick={() => {
-                          const updated = { ...enabledModalities, [modality.id]: !isEnabled };
-                          setEnabledModalities(updated);
-                          localStorage.setItem("trade_modalities", JSON.stringify(updated));
-                          const active = Object.entries(updated).filter(([, v]) => v).map(([k]) => k);
-                          apiRequest("POST", "/api/trading/modalities", { modalities: active }).catch(() => {});
-                          toast({
-                            title: !isEnabled ? `${modality.name} ativada` : `${modality.name} desativada`,
-                            description: !isEnabled ? "O sistema já está operando com esta modalidade." : "Modalidade removida do sistema.",
-                            duration: 2500,
-                          });
-                        }}
-                        data-testid={`modality-card-${modality.id}`}
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex items-center gap-3 flex-1 min-w-0">
+                      <div key={cat.id} className="space-y-2">
+                        <div className={`flex items-center justify-between p-3 rounded-lg border ${catHeaderColors[cat.color]}`}>
+                          <div className="flex items-center gap-3">
                             <Checkbox
-                              checked={isEnabled}
-                              onCheckedChange={(checked) => {
-                                const updated = { ...enabledModalities, [modality.id]: !!checked };
-                                setEnabledModalities(updated);
-                                localStorage.setItem("trade_modalities", JSON.stringify(updated));
-                                const active = Object.entries(updated).filter(([, v]) => v).map(([k]) => k);
-                                apiRequest("POST", "/api/trading/modalities", { modalities: active }).catch(() => {});
-                                toast({
-                                  title: checked ? `${modality.name} ativada` : `${modality.name} desativada`,
-                                  description: checked ? "O sistema já está operando com esta modalidade." : "Modalidade removida do sistema.",
-                                  duration: 2500,
-                                });
-                              }}
-                              data-testid={`checkbox-modality-${modality.id}`}
-                              onClick={(e) => e.stopPropagation()}
+                              checked={allEnabled}
+                              data-testid={`checkbox-category-${cat.id}`}
+                              onCheckedChange={(checked) => toggleCategory(cat, !!checked)}
+                              className={someEnabled && !allEnabled ? "opacity-60" : ""}
                             />
-                            <div className="min-w-0">
-                              <p className="font-semibold text-sm">{modality.name}</p>
-                              <p className="text-xs text-muted-foreground leading-snug">{modality.description}</p>
+                            <div>
+                              <p className="font-semibold text-sm">{cat.name}</p>
+                              <p className="text-xs opacity-70">{cat.description}</p>
                             </div>
                           </div>
-                          <Badge variant="outline" className={`text-xs shrink-0 ${riskColors[modality.riskColor]}`}>
-                            {modality.risk}
+                          <Badge variant="outline" className="text-xs opacity-80 shrink-0">
+                            {cat.modalities.filter(m => enabledModalities[m.id]).length}/{cat.modalities.length}
                           </Badge>
                         </div>
-                        {isEnabled && (
-                          <div className="mt-3 pt-3 border-t border-blue-200 dark:border-blue-700">
-                            <div className="flex items-center gap-1 mb-1">
-                              <Brain className="h-3 w-3 text-blue-500" />
-                              <span className="text-xs font-medium text-blue-600 dark:text-blue-400">Estratégia de IA:</span>
-                            </div>
-                            <p className="text-xs text-muted-foreground leading-relaxed">{modality.aiStrategy}</p>
-                          </div>
-                        )}
+                        <div className="grid gap-2 md:grid-cols-2 pl-2">
+                          {cat.modalities.map((modality) => {
+                            const isEnabled = enabledModalities[modality.id] ?? false;
+                            return (
+                              <div
+                                key={modality.id}
+                                className={`p-3 border-2 rounded-lg transition-all cursor-pointer ${isEnabled ? 'border-blue-400 dark:border-blue-500 bg-blue-50/60 dark:bg-blue-900/20' : 'border-border bg-background hover:border-muted-foreground/30'}`}
+                                onClick={() => toggleModality(modality.id, !isEnabled, modality.name)}
+                                data-testid={`modality-card-${modality.id}`}
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                                    <Checkbox
+                                      checked={isEnabled}
+                                      onCheckedChange={(checked) => toggleModality(modality.id, !!checked, modality.name)}
+                                      data-testid={`checkbox-modality-${modality.id}`}
+                                      onClick={(e) => e.stopPropagation()}
+                                    />
+                                    <div className="min-w-0">
+                                      <p className="font-medium text-sm leading-tight">{modality.name}</p>
+                                      <p className="text-xs text-muted-foreground leading-snug mt-0.5">{modality.description}</p>
+                                    </div>
+                                  </div>
+                                  <Badge variant="outline" className={`text-xs shrink-0 ${riskColors[modality.riskColor]}`}>
+                                    {modality.risk}
+                                  </Badge>
+                                </div>
+                                {isEnabled && (
+                                  <div className="mt-2 pt-2 border-t border-blue-200 dark:border-blue-700">
+                                    <div className="flex items-center gap-1 mb-0.5">
+                                      <Brain className="h-3 w-3 text-blue-500" />
+                                      <span className="text-xs font-medium text-blue-600 dark:text-blue-400">Estratégia de IA:</span>
+                                    </div>
+                                    <p className="text-xs text-muted-foreground leading-relaxed">{modality.aiStrategy}</p>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
                     );
-                  })}
-                </div>
+                  });
+                })()}
 
                 <Separator />
 
-                {/* Painel de IAs e Estratégias */}
+                {/* Motor de IAs */}
                 <div className="space-y-3">
                   <h4 className="font-semibold flex items-center gap-2">
                     <Cpu className="h-4 w-4 text-purple-500" />
@@ -883,18 +1155,19 @@ export default function TradingSystemPage() {
                         <Brain className="h-4 w-4 text-emerald-500" />
                         <span className="text-sm font-medium">IA Arbitragem</span>
                       </div>
-                      <p className="text-xs text-muted-foreground">Reinforcement Learning (RL)</p>
+                      <p className="text-xs text-muted-foreground">Reinforcement Learning (PPO/SAC)</p>
                       <p className="text-xs text-emerald-600 dark:text-emerald-400">Otimização de portfólio em tempo real</p>
                     </div>
                   </div>
                   <div className="p-3 bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-900/20 dark:to-blue-900/20 border border-purple-200 dark:border-purple-800 rounded-lg">
-                    <p className="text-sm font-medium text-purple-800 dark:text-purple-200 mb-1">Como as IAs cooperam:</p>
+                    <p className="text-sm font-medium text-purple-800 dark:text-purple-200 mb-1">Como as IAs cooperam entre modalidades:</p>
                     <ul className="text-xs text-muted-foreground space-y-1 list-disc list-inside">
-                      <li>A IA Primária analisa padrões e emite sinais para cada modalidade ativa</li>
-                      <li>A IA Secundária valida cada sinal e bloqueia operações de alto risco</li>
-                      <li>A IA de Arbitragem distribui capital entre modalidades conforme rentabilidade</li>
-                      <li>O sistema alterna automaticamente entre modalidades para maximizar ganhos e minimizar perdas consecutivas</li>
-                      <li>Threshold de confiança mínimo: 70% — abaixo disso a operação é cancelada</li>
+                      <li>A IA Primária analisa padrões e emite sinais específicos para cada tipo de contrato ativo</li>
+                      <li>A IA Secundária valida cada sinal e bloqueia operações com risco acima do threshold</li>
+                      <li>A IA de Arbitragem distribui capital entre categorias conforme desempenho recente</li>
+                      <li>O sistema rotaciona automaticamente entre modalidades para evitar sequências de perdas</li>
+                      <li>Threshold de confiança mínimo: 70% — abaixo disso a operação é cancelada independente da modalidade</li>
+                      <li>Lookbacks, Turbos e Acumuladores exigem confiança mínima de 85% para ativação</li>
                     </ul>
                   </div>
                 </div>
