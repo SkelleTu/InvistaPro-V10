@@ -1375,14 +1375,27 @@ export class AutoTradingScheduler {
 
         } else if (selectedModality === 'accumulator') {
           // ── Contratos Acumuladores (ACCU) ──
+          // 🧠 ACCU tem risco binário (knock-out = perda total): stake INDEPENDENTE e conservador
+          // NÃO usa o AI amplifier do DIGITDIFF — o ACCU já compõe internamente a 2%/tick
+          let accuStake = tradeParams.amount; // fallback ao stake base
+          try {
+            const balanceAnalysis = await storage.getBalanceAnalysis(userId);
+            if (balanceAnalysis?.currentBalance > 0) {
+              const bk = balanceAnalysis.currentBalance;
+              // ACCU: 0.1% da banca, mínimo $0.35, máximo $10 (independente do tamanho da banca)
+              // Razão: knock-out perde 100% do stake — risco deve ser mínimo por trade
+              accuStake = Math.max(0.35, Math.min(bk * 0.001, 10));
+              accuStake = Math.round(accuStake * 100) / 100;
+            }
+          } catch {}
           // 🧠 SUPREMO: growth_rate adaptativo por volatilidade e regime do mercado
           const adaptiveGrowth = supremeAnalysis?.adaptiveParams?.accumulator?.growthRate ?? 0.02;
           const accuRisk = supremeAnalysis?.adaptiveParams?.accumulator?.riskLevel ?? 'medium';
-          console.log(`📊 [${operationId}] ACCU: growth_rate=${(adaptiveGrowth*100).toFixed(1)}%${supremeAnalysis ? ` ADAPTATIVO (regime=${supremeAnalysis.regime} | risco=${accuRisk} | hurst=${supremeAnalysis.statistics.hurstExponent.toFixed(2)})` : ' padrão'} | Symbol: ${selectedSymbol}`);
+          console.log(`📊 [${operationId}] ACCU: stake=$${accuStake} (0.1% banca, sem amplificador) | growth_rate=${(adaptiveGrowth*100).toFixed(1)}%${supremeAnalysis ? ` ADAPTATIVO (regime=${supremeAnalysis.regime} | risco=${accuRisk} | hurst=${supremeAnalysis.statistics.hurstExponent.toFixed(2)})` : ' padrão'} | Symbol: ${selectedSymbol}`);
           contract = await derivAPI.buyFlexibleContract({
             contract_type: 'ACCU',
             symbol: selectedSymbol,
-            amount: tradeParams.amount,
+            amount: accuStake,
             growth_rate: adaptiveGrowth,
           });
           if (!contract) {
