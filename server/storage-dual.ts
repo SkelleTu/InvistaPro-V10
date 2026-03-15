@@ -322,6 +322,14 @@ export class DualStorage implements IStorage {
   async expireOldPendingTrades(olderThanMinutes: number = 5): Promise<number> {
     return this.sqlite.expireOldPendingTrades(olderThanMinutes);
   }
+
+  async resetAllTradingData(userId: string): Promise<{ tablesCleared: string[]; rowsDeleted: number }> {
+    return this.primaryWrite(
+      () => this.turso!.resetAllTradingData(userId),
+      () => this.sqlite.resetAllTradingData(userId),
+      'resetAllTradingData'
+    );
+  }
 }
 
 export const dualStorage = new DualStorage();

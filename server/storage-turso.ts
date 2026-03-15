@@ -908,6 +908,40 @@ export class TursoStorage implements IStorage {
       updatedAt: new Date().toISOString(),
     }).where(eq(pauseConfiguration.userId, userId));
   }
+
+  async resetAllTradingData(userId: string): Promise<{ tablesCleared: string[]; rowsDeleted: number }> {
+    const tablesCleared: string[] = [];
+    let rowsDeleted = 0;
+
+    const del = async (table: any, condition: any, name: string) => {
+      try {
+        const rows = await getDb().delete(table).where(condition).returning();
+        tablesCleared.push(name);
+        rowsDeleted += rows.length;
+      } catch {}
+    };
+
+    await del(tradeOperations, eq(tradeOperations.userId, userId), 'trade_operations');
+    await del(aiLogs, eq(aiLogs.userId, userId), 'ai_logs');
+    await del(dailyPnL, eq(dailyPnL.userId, userId), 'daily_pnl');
+    await del(aiRecoveryStrategies, eq(aiRecoveryStrategies.userId, userId), 'ai_recovery_strategies');
+    await del(blockedAssets, eq(blockedAssets.userId, userId), 'blocked_assets');
+    await del(assetBlacklist, eq(assetBlacklist.userId, userId), 'asset_blacklist');
+
+    try {
+      const sessions = await getDb().delete(activeTradingSessions).returning();
+      tablesCleared.push('active_trading_sessions');
+      rowsDeleted += sessions.length;
+    } catch {}
+
+    try {
+      const wsSubs = await getDb().delete(activeWebSocketSubscriptions).returning();
+      tablesCleared.push('active_websocket_subscriptions');
+      rowsDeleted += wsSubs.length;
+    } catch {}
+
+    return { tablesCleared, rowsDeleted };
+  }
 }
 
 export const tursoStorage = new TursoStorage();
