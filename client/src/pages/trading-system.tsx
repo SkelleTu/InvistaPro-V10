@@ -990,19 +990,21 @@ export default function TradingSystemPage() {
                     <AlertDialogContent>
                       <AlertDialogHeader>
                         <AlertDialogTitle>Confirmar reset completo</AlertDialogTitle>
-                        <AlertDialogDescription className="space-y-2">
-                          <span className="block">Esta ação vai apagar permanentemente:</span>
-                          <ul className="list-disc list-inside text-sm space-y-1 mt-2">
-                            <li>Todo o histórico de operações</li>
-                            <li>Logs de análise das IAs</li>
-                            <li>Estatísticas de PnL diário</li>
-                            <li>Memória de aprendizado das IAs</li>
-                            <li>Sessões e conexões ativas</li>
-                            <li>Ativos bloqueados</li>
-                          </ul>
-                          <span className="block mt-2 font-medium">Suas credenciais, token Deriv e conta de usuário <span className="text-green-600">não serão afetados</span>.</span>
+                        <AlertDialogDescription>
+                          Esta ação vai apagar permanentemente todos os dados operacionais do sistema.
                         </AlertDialogDescription>
                       </AlertDialogHeader>
+                      <div className="px-1 space-y-3 text-sm">
+                        <ul className="list-disc list-inside space-y-1 text-muted-foreground">
+                          <li>Todo o histórico de operações</li>
+                          <li>Logs de análise das IAs</li>
+                          <li>Estatísticas de PnL diário</li>
+                          <li>Memória de aprendizado das IAs</li>
+                          <li>Sessões e conexões ativas</li>
+                          <li>Ativos bloqueados</li>
+                        </ul>
+                        <p className="font-medium">Suas credenciais, token Deriv e conta de usuário <span className="text-green-600 dark:text-green-400">não serão afetados</span>.</p>
+                      </div>
                       <AlertDialogFooter>
                         <AlertDialogCancel>Cancelar</AlertDialogCancel>
                         <AlertDialogAction
