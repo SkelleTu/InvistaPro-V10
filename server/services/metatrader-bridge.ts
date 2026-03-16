@@ -50,6 +50,40 @@ export interface SpikeInfo {
   imminencePercent: number;
   momentumConfirms: boolean;
   lastSpikeSize: number;
+  preEntryWindow: boolean;
+  entryTimingScore: number;
+  ticksUntilSpikeEstimate: number;
+}
+
+export interface NestedFibonacciZone {
+  parentLevel1: string;
+  parentLevel2: string;
+  parentLayer: 'macro' | 'meso' | 'micro';
+  price1: number;
+  price2: number;
+  nestedLevels: Record<string, number>;
+  currentPriceInZone: boolean;
+  nearestNestedLevel: { level: string; price: number; distancePct: number } | null;
+}
+
+export interface FibZoneBehavior {
+  zoneType: 'support' | 'resistance';
+  continuationScore: number;
+  reversalScore: number;
+  candlePattern: 'bullish_engulfing' | 'bearish_engulfing' | 'doji' | 'pin_bar_bull' | 'pin_bar_bear' | 'none';
+  confirmation: 'continuation' | 'reversal' | 'unclear';
+  narrative: string;
+}
+
+export interface PositionMonitorResult {
+  ticket: number;
+  action: 'HOLD' | 'CLOSE_PROFIT' | 'CLOSE_LOSS_PREVENTION' | 'CLOSE_SPIKE_EXIT';
+  urgency: 'normal' | 'high' | 'critical';
+  reason: string;
+  currentPnLPct?: number;
+  fibZoneReached?: FibZoneInfo;
+  spikeRisk?: number;
+  narrative: string;
 }
 
 export interface FibonacciAnalysis {
@@ -60,6 +94,8 @@ export interface FibonacciAnalysis {
   confluenceScore: number;
   zoneType: 'support' | 'resistance' | 'neutral';
   confluenceNarrative: string;
+  nestedZones: NestedFibonacciZone[];
+  zoneBehavior?: FibZoneBehavior;
 }
 
 export interface MT5Indicators {
@@ -837,7 +873,7 @@ class MetaTraderBridge extends EventEmitter {
     return signal;
   }
 
-  private buildReason(action: string, signals: Array<{ action: string; confidence: number; source: string }>, indicators: MT5Indicators, aiReasoning?: string): string {
+  private buildReason(action: string, signals: Array<{ action: string; confidence: number; source: string }>, indicators: MT5Indicators, aiReasoning?: string, fibZoneLabel?: string): string {
     const parts: string[] = [];
 
     // Razão principal: IA
@@ -858,6 +894,21 @@ class MetaTraderBridge extends EventEmitter {
     }
     const aiCount = signals.filter(s => s.action === action).length;
     parts.push(`${aiCount}/${signals.length} módulos em consenso`);
+    if (fibZoneLabel && fibZoneLabel !== 'fora de zona') {
+      parts.push(`📐 Zona Fib: ${fibZoneLabel}`);
+    }
+    if (indicators.fibonacci?.zoneBehavior) {
+      const beh = indicators.fibonacci.zoneBehavior;
+      if (beh.confirmation !== 'unclear') {
+        parts.push(`${beh.confirmation === 'continuation' ? '→ CONTINUIDADE' : '← REVERSÃO'} (${Math.max(beh.continuationScore, beh.reversalScore)}%)`);
+      }
+    }
+    if (indicators.fibonacci?.nestedZones?.length > 0) {
+      const nz = indicators.fibonacci.nestedZones[0];
+      if (nz.nearestNestedLevel) {
+        parts.push(`Nano-Fib ${nz.nearestNestedLevel.level} em [${nz.parentLevel1}–${nz.parentLevel2}] ${nz.parentLayer}`);
+      }
+    }
     return parts.join(' | ') || `IA indica ${action}`;
   }
 
@@ -1105,6 +1156,44 @@ class MetaTraderBridge extends EventEmitter {
     narrative += `• Força: ADX ${ind.adx?.toFixed(1)} ${ind.adx > 25 ? '(tendência forte ✓)' : '(tendência fraca ✗)'}\n`;
     narrative += `• Volatilidade: ATR ${ind.atr?.toFixed(5)} | ${ind.volatility?.toFixed(3)}% do preço\n`;
     narrative += `• Zonas: Suporte ${ind.support?.toFixed(4)} ↔ Resistência ${ind.resistance?.toFixed(4)}\n`;
+
+    // Fibonacci section
+    if (ind.fibonacci) {
+      const fib = ind.fibonacci;
+      narrative += `\n📐 FIBONACCI MULTI-CAMADA:\n`;
+      narrative += `• ${fib.confluenceNarrative}\n`;
+
+      if (fib.zoneBehavior) {
+        const beh = fib.zoneBehavior;
+        const behLabel = beh.confirmation === 'continuation' ? '→ CONTINUIDADE' : beh.confirmation === 'reversal' ? '← REVERSÃO' : '? INDEFINIDO';
+        narrative += `• Comportamento na zona: ${behLabel} | Continuidade: ${beh.continuationScore}% vs Reversão: ${beh.reversalScore}%\n`;
+        narrative += `• Padrão de vela: ${beh.candlePattern.replace(/_/g, ' ')}\n`;
+      }
+
+      if (fib.nestedZones.length > 0) {
+        narrative += `\n🔬 FIBONACCI DENTRO DE FIBONACCI (zonas ativas):\n`;
+        fib.nestedZones.slice(0, 3).forEach(nz => {
+          narrative += `• [${nz.parentLayer.toUpperCase()}] Entre ${nz.parentLevel1} e ${nz.parentLevel2}: `;
+          if (nz.nearestNestedLevel) {
+            narrative += `nível nano ${nz.nearestNestedLevel.level} em ${nz.nearestNestedLevel.price.toFixed(5)} (dist ${(nz.nearestNestedLevel.distancePct * 10).toFixed(1)}‰)\n`;
+          }
+        });
+      }
+    }
+
+    // Spike section for Crash/Boom
+    if (ind.spike?.expected) {
+      const sp = ind.spike;
+      narrative += `\n⚡ CRASH/BOOM — ANÁLISE DE SPIKE:\n`;
+      narrative += `• Direção esperada: ${sp.direction?.toUpperCase()} | Iminência: ${sp.imminencePercent}% | Confiança: ${sp.confidence}%\n`;
+      narrative += `• ${sp.candlesSinceLastSpike} candles desde último spike (média: ${sp.avgCandleInterval})\n`;
+      narrative += `• Momentum confirma: ${sp.momentumConfirms ? 'SIM ✓' : 'NÃO ✗'}\n`;
+      if (sp.preEntryWindow) {
+        narrative += `• ⚡ JANELA DE ENTRADA PRÉ-SPIKE ATIVA — Score de timing: ${sp.entryTimingScore}/100\n`;
+        narrative += `• Estimativa: ~${sp.ticksUntilSpikeEstimate} ticks para o spike\n`;
+      }
+    }
+
     return narrative;
   }
 
@@ -1432,7 +1521,303 @@ class MetaTraderBridge extends EventEmitter {
       confluenceNarrative += ` Comportamento esperado: ${zoneType === 'support' ? 'SUPORTE — pressão compradora provável, continuidade altista ou reversão de baixa' : zoneType === 'resistance' ? 'RESISTÊNCIA — pressão vendedora provável, rejeição ou continuidade baixista' : 'INDEFINIDO — aguardar vela de confirmação direcional'}.`;
     }
 
-    return { macro, meso, micro, nearestLevels, confluenceScore, zoneType, confluenceNarrative };
+    // ── Fibonacci dentro de Fibonacci (nested zones) ──
+    // For each pair of adjacent key levels where price sits between them, draw a nested Fibonacci
+    const nestedZones: NestedFibonacciZone[] = [];
+    const keyPairs: Array<[string, string]> = [
+      ['0%', '23.6%'], ['23.6%', '38.2%'], ['38.2%', '50%'],
+      ['50%', '61.8%'], ['61.8%', '78.6%'], ['78.6%', '100%']
+    ];
+
+    (['macro', 'meso', 'micro'] as const).forEach(layer => {
+      const levels = layer === 'macro' ? macro : layer === 'meso' ? meso : micro;
+      keyPairs.forEach(([k1, k2]) => {
+        const p1 = levels[k1];
+        const p2 = levels[k2];
+        if (p1 !== undefined && p2 !== undefined) {
+          const lo = Math.min(p1, p2);
+          const hi = Math.max(p1, p2);
+          if (currentPrice >= lo && currentPrice <= hi) {
+            nestedZones.push(this.calcNestedFibonacci(p1, p2, k1, k2, layer, currentPrice));
+          }
+        }
+      });
+    });
+
+    // ── Zone behavior analysis for the nearest level ──
+    let zoneBehavior: FibZoneBehavior | undefined;
+    if (nearestLevels.length > 0) {
+      zoneBehavior = this.analyzeFibZoneBehavior(marketData, currentPrice, nearestLevels[0]);
+    }
+
+    return { macro, meso, micro, nearestLevels, confluenceScore, zoneType, confluenceNarrative, nestedZones, zoneBehavior };
+  }
+
+  // ============================================================
+  // FIBONACCI DENTRO DE FIBONACCI — NESTED FIBONACCI ENGINE
+  // ============================================================
+
+  /**
+   * Draws a complete Fibonacci retracement between two parent Fibonacci levels.
+   * Example: if price is between 38.2% and 61.8%, this creates a new set of
+   * Fibonacci levels precisely within that "golden zone" for entry/exit precision.
+   */
+  private calcNestedFibonacci(
+    price1: number,
+    price2: number,
+    parentLevel1: string,
+    parentLevel2: string,
+    parentLayer: 'macro' | 'meso' | 'micro',
+    currentPrice: number
+  ): NestedFibonacciZone {
+    const lo = Math.min(price1, price2);
+    const hi = Math.max(price1, price2);
+    const trend: 'up' | 'down' = price2 > price1 ? 'up' : 'down';
+    const nestedLevels = this.calcFibLevels(hi, lo, trend);
+
+    let nearestNestedLevel: NestedFibonacciZone['nearestNestedLevel'] = null;
+    let minDist = Infinity;
+    Object.entries(nestedLevels).forEach(([name, price]) => {
+      const dist = Math.abs(currentPrice - price) / (currentPrice || 1) * 100;
+      if (dist < minDist) {
+        minDist = dist;
+        nearestNestedLevel = { level: name, price, distancePct: dist };
+      }
+    });
+
+    return {
+      parentLevel1, parentLevel2, parentLayer,
+      price1, price2, nestedLevels,
+      currentPriceInZone: true,
+      nearestNestedLevel
+    };
+  }
+
+  // ============================================================
+  // FIBONACCI ZONE BEHAVIOR — CONTINUIDADE VS RESISTÊNCIA
+  // ============================================================
+
+  /**
+   * When price arrives at a Fibonacci zone, determines whether the market will:
+   * - CONTINUE through it (breakout / breakdown)
+   * - REVERSE at it (bounce / rejection)
+   * Uses candle patterns, RSI, MACD momentum at the zone.
+   */
+  private analyzeFibZoneBehavior(marketData: any[], currentPrice: number, zone: FibZoneInfo): FibZoneBehavior {
+    if (marketData.length < 3) {
+      return {
+        zoneType: zone.type,
+        continuationScore: 50,
+        reversalScore: 50,
+        candlePattern: 'none',
+        confirmation: 'unclear',
+        narrative: 'Dados insuficientes para análise de comportamento na zona Fibonacci.'
+      };
+    }
+
+    const highs  = marketData.map(d => d.high  || d.close * 1.001);
+    const lows   = marketData.map(d => d.low   || d.close * 0.999);
+    const opens  = marketData.map(d => d.open  || d.close);
+    const closes = marketData.map(d => d.close);
+    const n      = closes.length;
+
+    const lastClose = closes[n - 1];
+    const lastOpen  = opens[n - 1];
+    const lastHigh  = highs[n - 1];
+    const lastLow   = lows[n - 1];
+    const prevClose = closes[n - 2];
+    const prevOpen  = opens[n - 2];
+
+    const body       = Math.abs(lastClose - lastOpen);
+    const range      = lastHigh - lastLow || 0.0001;
+    const upperWick  = lastHigh - Math.max(lastClose, lastOpen);
+    const lowerWick  = Math.min(lastClose, lastOpen) - lastLow;
+
+    let candlePattern: FibZoneBehavior['candlePattern'] = 'none';
+    if (body / range < 0.15) {
+      candlePattern = 'doji';
+    } else if (lastClose > lastOpen && prevClose < prevOpen && lastClose > prevOpen && lastOpen < prevClose) {
+      candlePattern = 'bullish_engulfing';
+    } else if (lastClose < lastOpen && prevClose > prevOpen && lastClose < prevOpen && lastOpen > prevClose) {
+      candlePattern = 'bearish_engulfing';
+    } else if (lowerWick > range * 0.6 && body < range * 0.3) {
+      candlePattern = 'pin_bar_bull';
+    } else if (upperWick > range * 0.6 && body < range * 0.3) {
+      candlePattern = 'pin_bar_bear';
+    }
+
+    const rsi  = this.calcRSI(closes, Math.min(14, n - 1));
+    const macd = this.calcMACD(closes);
+
+    let continuationScore = 50;
+    let reversalScore     = 50;
+
+    if (zone.type === 'support') {
+      if (candlePattern === 'bullish_engulfing') { reversalScore += 22; continuationScore -= 10; }
+      if (candlePattern === 'pin_bar_bull')      { reversalScore += 16; continuationScore -= 6; }
+      if (candlePattern === 'doji')              { reversalScore += 5; }
+      if (candlePattern === 'bearish_engulfing') { continuationScore += 22; reversalScore -= 10; }
+      if (candlePattern === 'pin_bar_bear')      { continuationScore += 12; reversalScore -= 6; }
+      if (rsi < 30)  { reversalScore += 18; continuationScore -= 8; }
+      else if (rsi < 45) { reversalScore += 8; }
+      else if (rsi > 60) { continuationScore += 12; reversalScore -= 6; }
+      if (macd.macd > macd.signal) { reversalScore += 10; continuationScore -= 5; }
+      else { continuationScore += 10; reversalScore -= 5; }
+    } else {
+      if (candlePattern === 'bearish_engulfing') { reversalScore += 22; continuationScore -= 10; }
+      if (candlePattern === 'pin_bar_bear')      { reversalScore += 16; continuationScore -= 6; }
+      if (candlePattern === 'doji')              { reversalScore += 5; }
+      if (candlePattern === 'bullish_engulfing') { continuationScore += 22; reversalScore -= 10; }
+      if (candlePattern === 'pin_bar_bull')      { continuationScore += 12; reversalScore -= 6; }
+      if (rsi > 70)  { reversalScore += 18; continuationScore -= 8; }
+      else if (rsi > 55) { reversalScore += 8; }
+      else if (rsi < 40) { continuationScore += 12; reversalScore -= 6; }
+      if (macd.macd < macd.signal) { reversalScore += 10; continuationScore -= 5; }
+      else { continuationScore += 10; reversalScore -= 5; }
+    }
+
+    continuationScore = Math.max(0, Math.min(100, continuationScore));
+    reversalScore     = Math.max(0, Math.min(100, reversalScore));
+
+    let confirmation: FibZoneBehavior['confirmation'] = 'unclear';
+    if (continuationScore > reversalScore + 15) confirmation = 'continuation';
+    else if (reversalScore > continuationScore + 15) confirmation = 'reversal';
+
+    const zoneLabel = zone.type === 'support' ? 'SUPORTE' : 'RESISTÊNCIA';
+    const candleNames: Record<FibZoneBehavior['candlePattern'], string> = {
+      bullish_engulfing: 'Engolfo de Alta',
+      bearish_engulfing: 'Engolfo de Baixa',
+      doji:              'Doji (indecisão)',
+      pin_bar_bull:      'Pin Bar Altista',
+      pin_bar_bear:      'Pin Bar Baixista',
+      none:              'sem padrão definido'
+    };
+    const rsiCtx = rsi < 30 ? 'sobrevenda extrema' : rsi < 45 ? 'zona bearish' : rsi > 70 ? 'sobrecompra extrema' : rsi > 55 ? 'zona bullish' : 'neutro';
+
+    let narrative = `Zona Fib ${zone.level} (${zone.layer}) como ${zoneLabel}. `;
+    narrative += `Vela: ${candleNames[candlePattern]}. RSI ${rsi.toFixed(1)} — ${rsiCtx}. `;
+    if (confirmation === 'continuation') {
+      narrative += `→ CONTINUIDADE (${continuationScore} vs reversão ${reversalScore}): `;
+      narrative += zone.type === 'support'
+        ? 'suporte sendo rompido — operar na quebra para baixo.'
+        : 'resistência sendo rompida — operar na quebra para cima.';
+    } else if (confirmation === 'reversal') {
+      narrative += `→ REVERSÃO (${reversalScore} vs continuidade ${continuationScore}): `;
+      narrative += zone.type === 'support'
+        ? 'suporte segurando — bounce altista esperado.'
+        : 'resistência rejeitando — queda esperada.';
+    } else {
+      narrative += '→ INDEFINIDO — aguardar vela de confirmação.';
+    }
+
+    return { zoneType: zone.type, continuationScore, reversalScore, candlePattern, confirmation, narrative };
+  }
+
+  // ============================================================
+  // MONITOR DE OPERAÇÕES EM TEMPO REAL
+  // ============================================================
+
+  /**
+   * Called on every market data update while a position is open.
+   * Evaluates Fibonacci zone behavior and spike risk to decide:
+   * HOLD | CLOSE_PROFIT | CLOSE_LOSS_PREVENTION | CLOSE_SPIKE_EXIT
+   */
+  monitorOpenPosition(position: MT5Position, marketData: any[], symbol: string): PositionMonitorResult {
+    const base: PositionMonitorResult = {
+      ticket: position.ticket, action: 'HOLD', urgency: 'normal',
+      reason: '', narrative: ''
+    };
+
+    if (!marketData || marketData.length < 5) {
+      base.reason = 'Dados insuficientes para monitoramento em tempo real.';
+      base.narrative = base.reason;
+      return base;
+    }
+
+    const closes       = marketData.map(d => d.close);
+    const currentPrice = closes[closes.length - 1];
+    const pnlPct       = ((currentPrice - position.openPrice) / (position.openPrice || 1) * 100)
+                         * (position.type === 'BUY' ? 1 : -1);
+    base.currentPnLPct = pnlPct;
+
+    // ── 1. Crash / Boom spike check (prioritário) ──
+    if (this.isSpikeIndex(symbol)) {
+      const spike = this.detectSpikePattern(marketData, symbol);
+      base.spikeRisk = spike.confidence;
+
+      if (this.shouldExitForSpike(position.type, spike)) {
+        const isCritical = spike.imminencePercent >= 85;
+        return {
+          ...base,
+          action:   'CLOSE_SPIKE_EXIT',
+          urgency:  isCritical ? 'critical' : 'high',
+          reason:   `⚡ SAÍDA EMERGENCIAL: spike ${spike.direction?.toUpperCase()} iminente (${spike.imminencePercent}% iminerência, ${spike.confidence}% confiança)`,
+          narrative: `Posição ${position.type} em ${symbol} DEVE SER FECHADA IMEDIATAMENTE. ` +
+            `${spike.candlesSinceLastSpike} candles desde o último spike (média: ${spike.avgCandleInterval}). ` +
+            (spike.momentumConfirms ? 'Momentum confirma o spike.' : 'Aguardando momentum de confirmação.') +
+            (spike.preEntryWindow ? ' Janela pré-spike ativa.' : '')
+        };
+      }
+
+      if (spike.imminencePercent >= 60) {
+        base.narrative += `⚠️ Alerta spike ${spike.direction?.toUpperCase()} (${spike.imminencePercent}% de iminência). `;
+        base.urgency = 'high';
+      }
+    }
+
+    // ── 2. Fibonacci zone analysis ──
+    const fib = this.calcMultiLayerFibonacci(marketData, currentPrice);
+
+    // Check nested Fibonacci zones for precision exit points
+    if (fib.nestedZones.length > 0) {
+      const activeNested = fib.nestedZones.find(z => z.nearestNestedLevel && z.nearestNestedLevel.distancePct < 0.05);
+      if (activeNested?.nearestNestedLevel) {
+        base.narrative += `📐 Nano-Fib: nível ${activeNested.nearestNestedLevel.level} dentro de [${activeNested.parentLevel1}–${activeNested.parentLevel2}] (${activeNested.parentLayer}) a ${(activeNested.nearestNestedLevel.distancePct * 10).toFixed(1)}‰. `;
+      }
+    }
+
+    if (fib.nearestLevels.length > 0) {
+      const zone     = fib.nearestLevels[0];
+      const behavior = fib.zoneBehavior ?? this.analyzeFibZoneBehavior(marketData, currentPrice, zone);
+      base.fibZoneReached = zone;
+
+      const isAdverse = (
+        (position.type === 'BUY'  && zone.type === 'resistance' && behavior.confirmation === 'reversal') ||
+        (position.type === 'SELL' && zone.type === 'support'    && behavior.confirmation === 'reversal')
+      );
+      const isProfitTarget = (
+        (position.type === 'BUY'  && currentPrice > position.openPrice) ||
+        (position.type === 'SELL' && currentPrice < position.openPrice)
+      );
+      const highConfluence = fib.confluenceScore >= 50;
+
+      if (isAdverse && highConfluence) {
+        return {
+          ...base,
+          action:  'CLOSE_PROFIT',
+          urgency: fib.confluenceScore >= 70 ? 'high' : 'normal',
+          reason:  `Zona Fib ${zone.level} (${zone.layer}) com ${zone.type === 'resistance' ? 'RESISTÊNCIA' : 'SUPORTE'} confirmado contra a posição`,
+          narrative: `${behavior.narrative} Confluência multi-camada: ${fib.confluenceScore}. ${fib.confluenceNarrative}`
+        };
+      }
+
+      if (isProfitTarget && behavior.confirmation === 'reversal' && pnlPct > 0.05) {
+        return {
+          ...base,
+          action:  'CLOSE_PROFIT',
+          urgency: 'normal',
+          reason:  `Alvo de lucro Fibonacci ${zone.level} atingido com sinal de reversão`,
+          narrative: `${behavior.narrative}`
+        };
+      }
+
+      base.narrative += `Zona Fib mais próxima: ${zone.level} (${zone.layer}). ${behavior.narrative} `;
+      base.narrative += `P&L: ${pnlPct > 0 ? '+' : ''}${pnlPct.toFixed(3)}%.`;
+    } else {
+      base.narrative += `P&L: ${pnlPct > 0 ? '+' : ''}${pnlPct.toFixed(3)}%. ${fib.confluenceNarrative}`;
+    }
+
+    return base;
   }
 
   // ============================================================
@@ -1504,6 +1889,18 @@ class MetaTraderBridge extends EventEmitter {
 
     const expected = imminencePercent >= 65;
 
+    // ── Pre-entry timing window ──
+    // Enter the spike position when imminence is very high (>= 80%) AND momentum confirms.
+    // entryTimingScore: 0–100, with 100 = optimal entry window
+    const timingBase = Math.max(0, imminencePercent - 50) * 2;        // 50% imminence = 0, 100% = 100
+    const timingBoost = momentumConfirms ? 20 : 0;
+    const entryTimingScore = Math.min(100, Math.round(timingBase + timingBoost));
+    const preEntryWindow = entryTimingScore >= 70 && expected;
+
+    // Estimated ticks until spike (linear extrapolation)
+    const remainingFraction = Math.max(0, 1 - candlesSinceLastSpike / avgCandleInterval);
+    const ticksUntilSpikeEstimate = Math.round(remainingFraction * avgCandleInterval * 10); // 10 ticks/candle approx
+
     return {
       expected,
       direction: spikeDirection as 'down' | 'up',
@@ -1512,7 +1909,10 @@ class MetaTraderBridge extends EventEmitter {
       avgCandleInterval,
       imminencePercent,
       momentumConfirms,
-      lastSpikeSize
+      lastSpikeSize,
+      preEntryWindow,
+      entryTimingScore,
+      ticksUntilSpikeEstimate
     };
   }
 

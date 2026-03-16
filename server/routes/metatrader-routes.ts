@@ -221,4 +221,23 @@ router.get('/ai-analysis', (_req: Request, res: Response) => {
   }
 });
 
+/**
+ * POST /api/mt5/position/monitor
+ * Real-time position monitor called by the EA on every tick while a position is open.
+ * Body: { position: MT5Position, marketData: candle[], symbol: string }
+ * Returns: PositionMonitorResult with action (HOLD/CLOSE_PROFIT/CLOSE_SPIKE_EXIT/CLOSE_LOSS_PREVENTION)
+ */
+router.post('/position/monitor', (req: Request, res: Response) => {
+  try {
+    const { position, marketData, symbol } = req.body;
+    if (!position || !marketData || !symbol) {
+      return res.status(400).json({ error: 'position, marketData e symbol são obrigatórios' });
+    }
+    const result = metaTraderBridge.monitorOpenPosition(position, marketData, symbol);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;

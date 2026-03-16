@@ -4,7 +4,7 @@
 //|   Versão com auto-descoberta de URL — reconecta automaticamente   |
 //+------------------------------------------------------------------+
 #property copyright "InvistaPRO"
-#property version   "3.0"
+#property version   "4.0"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -32,8 +32,11 @@ datetime g_lastSignal    = 0;
 int      g_failCount     = 0;
 bool     g_isDiscovering = false;
 string   g_pendingSignalId = "";
+datetime g_lastMonitor   = 0;     // Última vez que o monitor de posição foi chamado
+int      g_monitorSeconds = 2;    // Monitorar posição aberta a cada N segundos
 
-CTrade trade;
+CTrade         trade;
+CPositionInfo  posInfo;
 
 //+------------------------------------------------------------------+
 //| Inicialização do EA                                               |
@@ -81,11 +84,123 @@ void OnTick()
       }
    }
 
-   // Busca de sinal periódica
-   if (now - g_lastSignal >= SignalSeconds)
+   // Monitor de posição em tempo real (Fibonacci + spike check)
+   // Chamado a cada g_monitorSeconds enquanto há posição aberta
+   if (PositionsTotal() > 0 && (now - g_lastMonitor >= g_monitorSeconds))
+   {
+      g_lastMonitor = now;
+      MonitorOpenPositions();
+   }
+
+   // Busca de sinal periódica (apenas se não há posição aberta)
+   if (PositionsTotal() == 0 && (now - g_lastSignal >= SignalSeconds))
    {
       g_lastSignal = now;
       FetchAndProcessSignal();
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Monitor em tempo real para todas as posições abertas              |
+//| Envia dados de mercado + posição para a IA e executa a decisão   |
+//+------------------------------------------------------------------+
+void MonitorOpenPositions()
+{
+   // Coleta candles recentes para análise de Fibonacci e spike
+   MqlRates rates[];
+   int copied = CopyRates(g_symbol, PERIOD_M1, 0, 100, rates);
+   if (copied < 5) return;
+
+   // Monta JSON de candles
+   string candlesJson = "[";
+   for (int i = 0; i < copied; i++)
+   {
+      if (i > 0) candlesJson += ",";
+      candlesJson += "{";
+      candlesJson += "\"time\":"   + IntegerToString(rates[i].time)                    + ",";
+      candlesJson += "\"open\":"   + DoubleToString(rates[i].open,  _Digits)           + ",";
+      candlesJson += "\"high\":"   + DoubleToString(rates[i].high,  _Digits)           + ",";
+      candlesJson += "\"low\":"    + DoubleToString(rates[i].low,   _Digits)           + ",";
+      candlesJson += "\"close\":"  + DoubleToString(rates[i].close, _Digits)           + ",";
+      candlesJson += "\"volume\":" + IntegerToString(rates[i].tick_volume);
+      candlesJson += "}";
+   }
+   candlesJson += "]";
+
+   // Itera sobre as posições abertas deste EA
+   for (int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      if (!posInfo.SelectByIndex(i))     continue;
+      if (posInfo.Magic() != MagicNumber) continue;
+      if (posInfo.Symbol() != g_symbol)   continue;
+
+      long   ticket    = posInfo.Ticket();
+      string posType   = posInfo.PositionType() == POSITION_TYPE_BUY ? "BUY" : "SELL";
+      double openPrice = posInfo.PriceOpen();
+      double curPrice  = posInfo.PriceCurrent();
+      double sl        = posInfo.StopLoss();
+      double tp        = posInfo.TakeProfit();
+      double profit    = posInfo.Profit();
+
+      // Monta JSON da posição
+      string posJson  = "{";
+      posJson += "\"ticket\":"      + IntegerToString(ticket)               + ",";
+      posJson += "\"symbol\":\""    + g_symbol                              + "\",";
+      posJson += "\"type\":\""      + posType                               + "\",";
+      posJson += "\"lots\":"        + DoubleToString(posInfo.Volume(), 2)   + ",";
+      posJson += "\"openPrice\":"   + DoubleToString(openPrice, _Digits)    + ",";
+      posJson += "\"currentPrice\":" + DoubleToString(curPrice, _Digits)   + ",";
+      posJson += "\"stopLoss\":"    + DoubleToString(sl, _Digits)           + ",";
+      posJson += "\"takeProfit\":"  + DoubleToString(tp, _Digits)           + ",";
+      posJson += "\"profit\":"      + DoubleToString(profit, 2)             + ",";
+      posJson += "\"openTime\":"    + IntegerToString((long)posInfo.Time()) + ",";
+      posJson += "\"signalId\":\""  + posType + "_" + IntegerToString(ticket) + "\"";
+      posJson += "}";
+
+      // Chamada à IA para decisão de monitoramento
+      string body = "{";
+      body += "\"position\":"   + posJson    + ",";
+      body += "\"marketData\":" + candlesJson + ",";
+      body += "\"symbol\":\""   + g_symbol   + "\"";
+      body += "}";
+
+      string url     = g_serverUrl + "/api/mt5/position/monitor";
+      string headers = "Content-Type: application/json\r\n";
+      char   postData[], result[];
+      StringToCharArray(body, postData, 0, StringLen(body));
+      string responseHeaders;
+
+      int res = WebRequest("POST", url, headers, 5000, postData, result, responseHeaders);
+      if (res != 200) continue;
+
+      string resp   = CharArrayToString(result);
+      string action = ExtractJsonString(resp, "action");
+      string reason = ExtractJsonString(resp, "reason");
+      string urgency= ExtractJsonString(resp, "urgency");
+
+      // Decide se deve fechar
+      bool shouldClose = (action == "CLOSE_PROFIT" ||
+                          action == "CLOSE_SPIKE_EXIT" ||
+                          action == "CLOSE_LOSS_PREVENTION");
+
+      if (shouldClose)
+      {
+         Print("🤖 Monitor IA → ", action, " | Ticket #", ticket,
+               " | Urgência: ", urgency, " | Razão: ", reason);
+
+         bool closed = trade.PositionClose(ticket);
+         if (closed)
+            Print("✅ Posição #", ticket, " fechada pelo monitor IA (", action, ")");
+         else
+            Print("❌ Falha ao fechar posição #", ticket, ": ", GetLastError());
+      }
+      else
+      {
+         // HOLD: apenas loga o status periodicamente
+         string narrative = ExtractJsonString(resp, "narrative");
+         if (narrative != "")
+            Print("📐 Monitor #", ticket, " [HOLD]: ", StringSubstr(narrative, 0, 120));
+      }
    }
 }
 
