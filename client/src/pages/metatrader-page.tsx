@@ -16,7 +16,8 @@ import {
   Activity, TrendingUp, TrendingDown, Settings, Download, Wifi, WifiOff,
   BarChart2, Zap, Shield, RefreshCw, AlertTriangle, CheckCircle2,
   Brain, Target, DollarSign, ArrowUpRight, ArrowDownRight, Clock, Info, ChevronLeft,
-  Eye, Cpu, XCircle, CheckCircle, Minus, ChevronDown, ChevronUp, Copy, ClipboardCheck
+  Eye, Cpu, XCircle, CheckCircle, Minus, ChevronDown, ChevronUp, Copy, ClipboardCheck,
+  Flame, ArrowDownCircle, ArrowUpCircle, Gauge, Layers, ToggleLeft, ToggleRight
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 
@@ -202,6 +203,11 @@ export default function MetaTraderPage() {
   const { data: aiAnalysis } = useQuery<AIAnalysisResponse>({
     queryKey: ['/api/mt5/ai-analysis'],
     refetchInterval: 3000
+  });
+
+  const { data: spikeDashboard } = useQuery<any>({
+    queryKey: ['/api/mt5/spike-dashboard'],
+    refetchInterval: 5000
   });
 
   const updateConfigMutation = useMutation({
@@ -392,9 +398,18 @@ export default function MetaTraderPage() {
         )}
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-4" data-testid="tabs-metatrader">
+          <TabsList className="grid w-full grid-cols-5" data-testid="tabs-metatrader">
             <TabsTrigger value="dashboard" data-testid="tab-dashboard">Dashboard</TabsTrigger>
             <TabsTrigger value="signals" data-testid="tab-signals">Sinais & IAs</TabsTrigger>
+            <TabsTrigger value="spike" data-testid="tab-spike" className="relative">
+              <Flame className="h-3.5 w-3.5 mr-1" />
+              Spike
+              {spikeDashboard?.criticalAlerts?.length > 0 && (
+                <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center font-bold">
+                  {spikeDashboard.criticalAlerts.length}
+                </span>
+              )}
+            </TabsTrigger>
             <TabsTrigger value="positions" data-testid="tab-positions">Posições</TabsTrigger>
             <TabsTrigger value="config" data-testid="tab-config">Configuração</TabsTrigger>
           </TabsList>
@@ -814,6 +829,217 @@ export default function MetaTraderPage() {
                       {sym}
                     </Button>
                   ))}
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="spike" className="space-y-4 mt-4">
+            {/* Header de alerta crítico */}
+            {spikeDashboard?.criticalAlerts?.length > 0 && (
+              <div className="rounded-lg border border-red-500/60 bg-red-500/10 p-4 space-y-2" data-testid="banner-spike-critical">
+                <div className="flex items-center gap-2 font-bold text-red-500">
+                  <Flame className="h-5 w-5" />
+                  {spikeDashboard.criticalAlerts.length} SPIKE(S) IMINENTE(S) DETECTADO(S)
+                </div>
+                {spikeDashboard.criticalAlerts.map((alert: any, i: number) => (
+                  <div key={i} className="flex items-center justify-between text-sm border border-red-500/30 rounded-md px-3 py-2" data-testid={`alert-spike-critical-${i}`}>
+                    <span className="font-semibold">{alert.symbol}</span>
+                    <div className="flex items-center gap-3">
+                      <Badge variant="destructive">{alert.direction === 'down' ? '↓ CRASH' : '↑ BOOM'}</Badge>
+                      <span className="text-muted-foreground">Iminência: <strong className="text-red-400">{alert.imminence}%</strong></span>
+                      <span className="text-muted-foreground">Confiança: <strong className="text-red-400">{alert.confidence}%</strong></span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Estado vazio */}
+            {(!spikeDashboard || spikeDashboard.totalSymbolsMonitored === 0) && (
+              <Card data-testid="card-spike-empty">
+                <CardContent className="py-16 text-center space-y-3">
+                  <Flame className="h-12 w-12 mx-auto text-orange-400 opacity-40" />
+                  <p className="font-semibold text-muted-foreground">Nenhum Crash/Boom com dados carregados</p>
+                  <p className="text-sm text-muted-foreground max-w-md mx-auto">
+                    O EA precisa enviar dados de mercado de pelo menos um índice Crash ou Boom para a análise de spike funcionar.
+                    Certifique-se de que o símbolo configurado no EA é Crash 1000, Crash 500, Boom 1000 ou similar.
+                  </p>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Cards de análise por símbolo */}
+            {spikeDashboard?.analyses?.map((analysis: any, i: number) => (
+              <Card
+                key={i}
+                className={`border-2 ${
+                  analysis.overallConfidence >= 75 ? 'border-red-500/60' :
+                  analysis.overallConfidence >= 50 ? 'border-orange-400/60' :
+                  'border-border'
+                }`}
+                data-testid={`card-spike-${analysis.symbol.replace(/\s/g, '-').toLowerCase()}`}
+              >
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center justify-between text-base">
+                    <div className="flex items-center gap-2">
+                      {analysis.spikeType === 'crash'
+                        ? <ArrowDownCircle className="h-5 w-5 text-red-500" />
+                        : <ArrowUpCircle className="h-5 w-5 text-green-500" />
+                      }
+                      <span>{analysis.symbol}</span>
+                      <Badge variant={analysis.spikeType === 'crash' ? 'destructive' : 'default'} className={analysis.spikeType === 'boom' ? 'bg-green-500' : ''}>
+                        {analysis.spikeType === 'crash' ? '↓ CRASH' : '↑ BOOM'}
+                      </Badge>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Badge
+                        variant="outline"
+                        className={`text-sm font-bold ${
+                          analysis.imminenceLabel === 'crítica' ? 'border-red-500 text-red-500 bg-red-500/10' :
+                          analysis.imminenceLabel === 'alta'    ? 'border-orange-400 text-orange-400 bg-orange-400/10' :
+                          analysis.imminenceLabel === 'moderada'? 'border-yellow-400 text-yellow-400 bg-yellow-400/10' :
+                                                                   'border-muted-foreground text-muted-foreground'
+                        }`}
+                        data-testid={`badge-imminence-${i}`}
+                      >
+                        {analysis.imminenceLabel?.toUpperCase()}
+                      </Badge>
+                    </div>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+
+                  {/* Barras de progresso */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5" data-testid={`progress-imminence-${i}`}>
+                      <div className="flex justify-between text-xs text-muted-foreground">
+                        <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> Iminência do Spike</span>
+                        <span className="font-bold text-foreground">{analysis.imminencePercent}%</span>
+                      </div>
+                      <Progress value={analysis.imminencePercent} className="h-2" />
+                      <p className="text-xs text-muted-foreground">{analysis.candlesSinceLastSpike} / {analysis.averageInterval} candles (média)</p>
+                    </div>
+                    <div className="space-y-1.5" data-testid={`progress-confidence-${i}`}>
+                      <div className="flex justify-between text-xs text-muted-foreground">
+                        <span className="flex items-center gap-1"><Gauge className="h-3 w-3" /> Confiança Total</span>
+                        <span className={`font-bold ${analysis.overallConfidence >= 70 ? 'text-red-500' : analysis.overallConfidence >= 45 ? 'text-orange-400' : 'text-foreground'}`}>
+                          {analysis.overallConfidence}%
+                        </span>
+                      </div>
+                      <Progress
+                        value={analysis.overallConfidence}
+                        className={`h-2 ${analysis.overallConfidence >= 70 ? '[&>div]:bg-red-500' : analysis.overallConfidence >= 45 ? '[&>div]:bg-orange-400' : ''}`}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Indicadores */}
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className={`flex items-center gap-2 p-2 rounded-md border text-xs ${analysis.momentumConfirms ? 'border-orange-400/50 bg-orange-400/10 text-orange-400' : 'border-border text-muted-foreground'}`} data-testid={`badge-momentum-${i}`}>
+                      {analysis.momentumConfirms ? <CheckCircle className="h-3.5 w-3.5" /> : <Minus className="h-3.5 w-3.5" />}
+                      Momentum Confirma
+                    </div>
+                    <div className={`flex items-center gap-2 p-2 rounded-md border text-xs ${analysis.volatilityCompressed ? 'border-purple-400/50 bg-purple-400/10 text-purple-400' : 'border-border text-muted-foreground'}`} data-testid={`badge-compression-${i}`}>
+                      {analysis.volatilityCompressed ? <CheckCircle className="h-3.5 w-3.5" /> : <Minus className="h-3.5 w-3.5" />}
+                      Vol. Comprimida {analysis.volatilityCompressed ? `(${analysis.compressionScore}%)` : ''}
+                    </div>
+                    <div className={`flex items-center gap-2 p-2 rounded-md border text-xs ${analysis.preEntryWindow ? 'border-green-400/50 bg-green-400/10 text-green-400' : 'border-border text-muted-foreground'}`} data-testid={`badge-entry-window-${i}`}>
+                      {analysis.preEntryWindow ? <Zap className="h-3.5 w-3.5" /> : <Minus className="h-3.5 w-3.5" />}
+                      {analysis.preEntryWindow ? '⚡ JANELA ABERTA' : 'Janela Fechada'}
+                    </div>
+                  </div>
+
+                  {/* Fibonacci */}
+                  {analysis.fibZoneScore && (
+                    <div className="rounded-md border border-blue-400/40 bg-blue-400/5 p-3 space-y-1.5" data-testid={`card-fib-zone-${i}`}>
+                      <div className="flex items-center gap-2 text-sm font-semibold text-blue-400">
+                        <Layers className="h-4 w-4" />
+                        Zona Fibonacci Mais Próxima
+                      </div>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">Nível: <strong className="text-foreground">{analysis.fibZoneScore.level}</strong> ({analysis.fibZoneScore.layer})</span>
+                        <span className="text-muted-foreground">Distância: <strong className="text-foreground">{analysis.fibZoneScore.distancePct?.toFixed(2)}%</strong></span>
+                        <Badge variant="outline" className="border-blue-400 text-blue-400">{analysis.fibZoneScore.significance}</Badge>
+                        <span className="text-blue-400 font-bold">{analysis.fibZoneScore.spikeMultiplier?.toFixed(1)}× spike</span>
+                      </div>
+                      {analysis.nearestFibLevels?.length > 1 && (
+                        <div className="flex gap-1.5 flex-wrap mt-1">
+                          {analysis.nearestFibLevels.map((fib: any, fi: number) => (
+                            <Badge key={fi} variant="secondary" className="text-xs">
+                              {fib.label} ({fib.layer}) {fib.distancePct?.toFixed(2)}%
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Recomendação de transição */}
+                  {analysis.switchRecommendation && (
+                    <div className={`rounded-md border-2 p-4 space-y-2 ${
+                      analysis.switchRecommendation.urgency === 'critical' ? 'border-red-500 bg-red-500/10' :
+                      analysis.switchRecommendation.urgency === 'high'     ? 'border-orange-400 bg-orange-400/10' :
+                                                                              'border-yellow-400 bg-yellow-400/10'
+                    }`} data-testid={`card-switch-${i}`}>
+                      <div className={`flex items-center gap-2 font-bold text-sm ${
+                        analysis.switchRecommendation.urgency === 'critical' ? 'text-red-500' :
+                        analysis.switchRecommendation.urgency === 'high'     ? 'text-orange-400' : 'text-yellow-400'
+                      }`}>
+                        <Flame className="h-4 w-4" />
+                        TRANSIÇÃO RECOMENDADA — {analysis.switchRecommendation.urgency.toUpperCase()}
+                      </div>
+                      <div className="flex items-center gap-3 text-sm">
+                        <div className="flex items-center gap-1.5">
+                          <Badge variant="outline" className="border-red-400 text-red-400">{analysis.switchRecommendation.exitDirection}</Badge>
+                          <span className="text-muted-foreground text-xs">→ fechar continuidade</span>
+                        </div>
+                        <span className="text-muted-foreground">depois</span>
+                        <div className="flex items-center gap-1.5">
+                          <Badge className={analysis.switchRecommendation.spikeDirection === 'SELL' ? 'bg-red-500' : 'bg-green-500'}>
+                            {analysis.switchRecommendation.spikeDirection} SPIKE
+                          </Badge>
+                          <span className="text-muted-foreground text-xs">→ entrar no spike</span>
+                        </div>
+                        <span className="ml-auto font-bold text-muted-foreground">
+                          ⏱ {analysis.switchRecommendation.secondsToAct}s para agir
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground leading-relaxed">{analysis.switchRecommendation.reasoning}</p>
+                    </div>
+                  )}
+
+                  {/* Alertas */}
+                  {analysis.alerts?.length > 0 && (
+                    <div className="space-y-1">
+                      {analysis.alerts.map((alert: string, ai: number) => (
+                        <p key={ai} className="text-xs text-muted-foreground bg-muted/50 rounded px-2 py-1" data-testid={`text-spike-alert-${i}-${ai}`}>
+                          {alert}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Narrativa */}
+                  <p className="text-xs text-muted-foreground border-t pt-3 leading-relaxed" data-testid={`text-spike-narrative-${i}`}>
+                    {analysis.narrative}
+                  </p>
+                </CardContent>
+              </Card>
+            ))}
+
+            {/* Info sobre estratégia */}
+            <Card className="border-dashed" data-testid="card-spike-strategy-info">
+              <CardContent className="py-4">
+                <div className="flex items-start gap-3">
+                  <Info className="h-4 w-4 text-blue-400 shrink-0 mt-0.5" />
+                  <div className="space-y-1 text-xs text-muted-foreground">
+                    <p className="font-semibold text-foreground">Estratégia Dupla Crash/Boom</p>
+                    <p>1. <strong>Continuidade:</strong> IA opera na tendência e acumula pips enquanto o mercado se move suavemente.</p>
+                    <p>2. <strong>Detecção de Spike:</strong> Motor analisa Fibonacci + contagem de candles + momentum + compressão de volatilidade.</p>
+                    <p>3. <strong>Transição:</strong> Quando a janela pré-spike abre, a IA fecha a posição de continuidade e abre na direção do spike.</p>
+                    <p>4. <strong>Saída rápida:</strong> Após o spike, a IA fecha a posição de spike e aguarda a próxima oportunidade de continuidade.</p>
+                  </div>
                 </div>
               </CardContent>
             </Card>

@@ -1286,6 +1286,14 @@ class MetaTraderBridge extends EventEmitter {
     return this.marketDataCache.get(symbol) || [];
   }
 
+  getMarketData(symbol: string): any[] {
+    return this.marketDataCache.get(symbol) || [];
+  }
+
+  getCachedSymbols(): string[] {
+    return Array.from(this.marketDataCache.keys());
+  }
+
   // generateMockSignal removido — sinais aleatórios são proibidos.
   // O sistema só opera quando a IA real retorna consenso >= 70%.
 

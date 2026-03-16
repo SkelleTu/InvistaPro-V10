@@ -5,6 +5,7 @@
 
 import { Router, Request, Response } from 'express';
 import { metaTraderBridge, MT5Position, MT5TradeResult } from '../services/metatrader-bridge';
+import { analyzeCrashBoomSpike, analyzeContinuitySafety } from '../services/crash-boom-spike-engine';
 
 const router = Router();
 
@@ -235,6 +236,108 @@ router.post('/position/monitor', (req: Request, res: Response) => {
     }
     const result = metaTraderBridge.monitorOpenPosition(position, marketData, symbol);
     res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/mt5/spike-analysis?symbol=Crash+1000+Index
+ * Retorna análise completa de spike para um símbolo Crash/Boom.
+ * Usa dados de mercado já carregados via /market-data.
+ * Se não houver dados, retorna análise vazia com isSpikeIndex=false.
+ */
+router.get('/spike-analysis', (req: Request, res: Response) => {
+  try {
+    const symbol = (req.query.symbol as string) || '';
+    if (!symbol) return res.status(400).json({ error: 'symbol é obrigatório' });
+    const candles = metaTraderBridge.getMarketData(symbol);
+    const openPositions = metaTraderBridge.getOpenPositions();
+    const openPos = openPositions.find((p: any) => p.symbol === symbol);
+    const result = analyzeCrashBoomSpike(
+      symbol,
+      candles,
+      openPos ? { type: openPos.type, profit: openPos.profit } : null
+    );
+    res.json({ ...result, candlesLoaded: candles.length, cachedSymbols: metaTraderBridge.getCachedSymbols() });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/mt5/spike-analysis
+ * Análise de spike com candles fornecidos diretamente no body.
+ * Body: { symbol, candles, openPosition? }
+ */
+router.post('/spike-analysis', (req: Request, res: Response) => {
+  try {
+    const { symbol, candles, openPosition } = req.body;
+    if (!symbol || !Array.isArray(candles) || candles.length === 0) {
+      return res.status(400).json({ error: 'symbol e candles são obrigatórios' });
+    }
+    const result = analyzeCrashBoomSpike(symbol, candles, openPosition || null);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/mt5/spike-continuity-check
+ * Verifica se é seguro manter uma operação de continuidade aberta dado o risco de spike.
+ * Body: { symbol, candles, positionType: 'BUY' | 'SELL' }
+ */
+router.post('/spike-continuity-check', (req: Request, res: Response) => {
+  try {
+    const { symbol, candles, positionType } = req.body;
+    if (!symbol || !positionType) {
+      return res.status(400).json({ error: 'symbol e positionType são obrigatórios' });
+    }
+    const data = Array.isArray(candles) && candles.length > 0
+      ? candles
+      : metaTraderBridge.getMarketData(symbol);
+    const result = analyzeContinuitySafety(symbol, data, positionType);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/mt5/spike-dashboard
+ * Retorna análise de spike para todos os símbolos Crash/Boom com dados carregados.
+ */
+router.get('/spike-dashboard', (_req: Request, res: Response) => {
+  try {
+    const cachedSymbols = metaTraderBridge.getCachedSymbols();
+    const spikeSymbols = cachedSymbols.filter(s => {
+      const u = s.toUpperCase();
+      return u.includes('CRASH') || u.includes('BOOM');
+    });
+
+    const openPositions = metaTraderBridge.getOpenPositions();
+
+    const analyses = spikeSymbols.map(symbol => {
+      const candles = metaTraderBridge.getMarketData(symbol);
+      const openPos = openPositions.find((p: any) => p.symbol === symbol);
+      return analyzeCrashBoomSpike(
+        symbol,
+        candles,
+        openPos ? { type: openPos.type, profit: openPos.profit } : null
+      );
+    });
+
+    const criticalAlerts = analyses
+      .filter(a => a.spikeExpected && a.overallConfidence >= 70)
+      .map(a => ({ symbol: a.symbol, confidence: a.overallConfidence, imminence: a.imminencePercent, direction: a.spikeDirection }));
+
+    res.json({
+      analyses,
+      criticalAlerts,
+      totalSymbolsMonitored: spikeSymbols.length,
+      timestamp: Date.now(),
+    });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
