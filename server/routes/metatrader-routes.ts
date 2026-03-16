@@ -211,4 +211,14 @@ router.post('/signal/generate', async (req: Request, res: Response) => {
   }
 });
 
+router.get('/ai-analysis', (_req: Request, res: Response) => {
+  try {
+    const log = metaTraderBridge.getAnalysisLog();
+    const latest = metaTraderBridge.getLatestAnalysis();
+    res.json({ log, latest, total: log.length });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;

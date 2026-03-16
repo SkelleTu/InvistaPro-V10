@@ -15,8 +15,10 @@ import { Separator } from "@/components/ui/separator";
 import {
   Activity, TrendingUp, TrendingDown, Settings, Download, Wifi, WifiOff,
   BarChart2, Zap, Shield, RefreshCw, AlertTriangle, CheckCircle2,
-  Brain, Target, DollarSign, ArrowUpRight, ArrowDownRight, Clock, Info, ChevronLeft
+  Brain, Target, DollarSign, ArrowUpRight, ArrowDownRight, Clock, Info, ChevronLeft,
+  Eye, Cpu, XCircle, CheckCircle, Minus, ChevronDown, ChevronUp
 } from "lucide-react";
+import { Progress } from "@/components/ui/progress";
 
 interface MT5Status {
   connected: boolean;
@@ -53,6 +55,42 @@ interface MT5Config {
   pollingIntervalMs: number;
   riskPercent: number;
   apiToken: string;
+}
+
+interface AIModelResult {
+  model: string;
+  prediction: 'up' | 'down' | 'neutral';
+  confidence: number;
+  reasoning: string;
+}
+
+interface AIAnalysisEntry {
+  id: string;
+  timestamp: number;
+  symbol: string;
+  phase: 'circuit_breaker' | 'data_check' | 'huggingface' | 'technical' | 'decision';
+  status: 'processing' | 'approved' | 'rejected' | 'waiting' | 'blocked';
+  aiConsensus?: number;
+  aiDirection?: 'up' | 'down' | 'neutral';
+  aiReasoning?: string;
+  modelResults?: AIModelResult[];
+  participatingModels?: number;
+  technicalAction?: 'BUY' | 'SELL' | 'HOLD';
+  technicalAgrees?: boolean;
+  technicalScore?: number;
+  indicators?: Record<string, any>;
+  finalDecision?: 'BUY' | 'SELL' | 'HOLD' | null;
+  decisionReason: string;
+  circuitBreakerActive?: boolean;
+  consecutiveLosses?: number;
+  circuitBreakerRemainingMin?: number;
+  candlesAvailable?: number;
+}
+
+interface AIAnalysisResponse {
+  log: AIAnalysisEntry[];
+  latest: AIAnalysisEntry | null;
+  total: number;
 }
 
 const HEALTH_COLOR = {
@@ -102,6 +140,11 @@ export default function MetaTraderPage() {
     queryKey: ['/api/mt5/signal'],
     refetchInterval: 15000,
     enabled: !!status?.connected
+  });
+
+  const { data: aiAnalysis } = useQuery<AIAnalysisResponse>({
+    queryKey: ['/api/mt5/ai-analysis'],
+    refetchInterval: 3000
   });
 
   const updateConfigMutation = useMutation({
@@ -386,34 +429,289 @@ export default function MetaTraderPage() {
           </TabsContent>
 
           <TabsContent value="signals" className="space-y-4 mt-4">
-            <div className="grid md:grid-cols-5 gap-3">
-              {['Quantum Neural', 'Advanced Learning', 'Microscopic TA', 'Hugging Face', 'Supreme Analyzer'].map((aiName, i) => (
-                <Card key={i} data-testid={`card-ai-${i}`}>
-                  <CardContent className="pt-4">
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                      <span className="text-xs font-medium">{aiName}</span>
+
+            {/* Circuit breaker warning */}
+            {aiAnalysis?.latest?.circuitBreakerActive && (
+              <Card className="border-red-500 bg-red-500/10" data-testid="card-circuit-breaker">
+                <CardContent className="pt-4">
+                  <div className="flex items-center gap-3">
+                    <Shield className="h-6 w-6 text-red-500 shrink-0" />
+                    <div>
+                      <p className="font-bold text-red-500">Circuit Breaker Ativo</p>
+                      <p className="text-sm text-muted-foreground">
+                        {aiAnalysis.latest.consecutiveLosses} perdas consecutivas — Pausa de {aiAnalysis.latest.circuitBreakerRemainingMin} min para proteção da banca
+                      </p>
                     </div>
-                    <p className="text-xs text-muted-foreground">IA #{i + 1}</p>
-                    <Badge variant="outline" className="mt-2 text-xs">Ativa</Badge>
-                  </CardContent>
-                </Card>
-              ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Status bar: consenso mínimo e perdas */}
+            <div className="grid grid-cols-3 gap-3">
+              <Card data-testid="card-min-consensus">
+                <CardContent className="pt-4">
+                  <p className="text-xs text-muted-foreground">Consenso Mínimo Exigido</p>
+                  <p className="text-2xl font-bold text-primary">70%</p>
+                  <p className="text-xs text-muted-foreground mt-1">Limiar de segurança da IA</p>
+                </CardContent>
+              </Card>
+              <Card data-testid="card-consecutive-losses">
+                <CardContent className="pt-4">
+                  <p className="text-xs text-muted-foreground">Perdas Consecutivas</p>
+                  <p className={`text-2xl font-bold ${(aiAnalysis?.latest?.consecutiveLosses || 0) >= 2 ? 'text-red-500' : 'text-green-500'}`}>
+                    {aiAnalysis?.latest?.consecutiveLosses ?? 0}/3
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">Circuit breaker em 3</p>
+                </CardContent>
+              </Card>
+              <Card data-testid="card-analyses-count">
+                <CardContent className="pt-4">
+                  <p className="text-xs text-muted-foreground">Análises Realizadas</p>
+                  <p className="text-2xl font-bold">{aiAnalysis?.total ?? 0}</p>
+                  <p className="text-xs text-muted-foreground mt-1">Desde o último restart</p>
+                </CardContent>
+              </Card>
             </div>
 
-            <Card>
-              <CardHeader>
+            {/* Última análise — detalhes completos */}
+            {aiAnalysis?.latest && (
+              <Card data-testid="card-latest-analysis">
+                <CardHeader className="pb-2">
+                  <CardTitle className="flex items-center justify-between text-base">
+                    <span className="flex items-center gap-2">
+                      <Eye className="h-5 w-5 text-primary" />
+                      Última Análise — {aiAnalysis.latest.symbol}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground">
+                        {new Date(aiAnalysis.latest.timestamp).toLocaleTimeString('pt-BR')}
+                      </span>
+                      <Badge className={
+                        aiAnalysis.latest.status === 'approved' ? 'bg-green-500' :
+                        aiAnalysis.latest.status === 'rejected' ? 'bg-red-500' :
+                        aiAnalysis.latest.status === 'blocked' ? 'bg-orange-500' :
+                        aiAnalysis.latest.status === 'waiting' ? 'bg-yellow-500' :
+                        'bg-blue-500'
+                      }>
+                        {aiAnalysis.latest.status === 'approved' ? '✅ Aprovado' :
+                         aiAnalysis.latest.status === 'rejected' ? '❌ Rejeitado' :
+                         aiAnalysis.latest.status === 'blocked' ? '🛑 Bloqueado' :
+                         aiAnalysis.latest.status === 'waiting' ? '⏳ Aguardando' :
+                         '🔄 Processando'}
+                      </Badge>
+                    </div>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <p className="text-sm bg-muted/40 rounded-md p-3 border-l-4 border-primary">
+                    {aiAnalysis.latest.decisionReason}
+                  </p>
+
+                  {/* Resultados por modelo de IA */}
+                  {aiAnalysis.latest.modelResults && aiAnalysis.latest.modelResults.length > 0 && (
+                    <div>
+                      <p className="text-sm font-semibold mb-3 flex items-center gap-2">
+                        <Brain className="h-4 w-4 text-primary" />
+                        Modelos de IA — Resultados Individuais ({aiAnalysis.latest.participatingModels} modelos)
+                      </p>
+                      <div className="space-y-2">
+                        {aiAnalysis.latest.modelResults.map((model, i) => (
+                          <div key={i} className="flex items-center gap-3 p-2 rounded-lg bg-muted/30" data-testid={`card-model-${i}`}>
+                            <div className={`w-2 h-2 rounded-full shrink-0 ${
+                              model.prediction === 'up' ? 'bg-green-500' :
+                              model.prediction === 'down' ? 'bg-red-500' : 'bg-yellow-500'
+                            }`} />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between mb-1">
+                                <p className="text-xs font-medium truncate">{model.model}</p>
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <Badge variant="outline" className={`text-xs ${
+                                    model.prediction === 'up' ? 'text-green-500 border-green-500' :
+                                    model.prediction === 'down' ? 'text-red-500 border-red-500' :
+                                    'text-yellow-500 border-yellow-500'
+                                  }`}>
+                                    {model.prediction === 'up' ? '↑ COMPRA' : model.prediction === 'down' ? '↓ VENDA' : '— NEUTRO'}
+                                  </Badge>
+                                  <span className="text-xs font-bold w-8 text-right">{model.confidence}%</span>
+                                </div>
+                              </div>
+                              <Progress value={model.confidence} className="h-1.5" />
+                              {model.reasoning && (
+                                <p className="text-xs text-muted-foreground mt-1 truncate">{model.reasoning}</p>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Consenso geral */}
+                      {aiAnalysis.latest.aiConsensus !== undefined && (
+                        <div className="mt-3 p-3 rounded-lg border bg-muted/20">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-sm font-semibold">Consenso Final das IAs</span>
+                            <span className={`text-lg font-bold ${
+                              aiAnalysis.latest.aiConsensus >= 80 ? 'text-green-500' :
+                              aiAnalysis.latest.aiConsensus >= 70 ? 'text-blue-500' : 'text-red-500'
+                            }`}>
+                              {aiAnalysis.latest.aiConsensus.toFixed(1)}%
+                              {aiAnalysis.latest.aiDirection && (
+                                <span className="ml-2 text-sm">
+                                  {aiAnalysis.latest.aiDirection === 'up' ? '↑ COMPRA' :
+                                   aiAnalysis.latest.aiDirection === 'down' ? '↓ VENDA' : '— NEUTRO'}
+                                </span>
+                              )}
+                            </span>
+                          </div>
+                          <Progress
+                            value={aiAnalysis.latest.aiConsensus}
+                            className="h-3"
+                          />
+                          <div className="flex justify-between text-xs text-muted-foreground mt-1">
+                            <span>0%</span>
+                            <span className="text-yellow-500">70% mínimo</span>
+                            <span>100%</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Indicadores técnicos */}
+                  {aiAnalysis.latest.indicators && (
+                    <div>
+                      <p className="text-sm font-semibold mb-3 flex items-center gap-2">
+                        <BarChart2 className="h-4 w-4 text-primary" />
+                        Indicadores Técnicos
+                        {aiAnalysis.latest.technicalAction && (
+                          <Badge variant="outline" className={`text-xs ml-auto ${
+                            aiAnalysis.latest.technicalAction === 'BUY' ? 'text-green-500 border-green-500' :
+                            aiAnalysis.latest.technicalAction === 'SELL' ? 'text-red-500 border-red-500' :
+                            'text-muted-foreground'
+                          }`}>
+                            Sinal Técnico: {aiAnalysis.latest.technicalAction}
+                            {aiAnalysis.latest.technicalAgrees !== undefined && (
+                              <span className="ml-1">{aiAnalysis.latest.technicalAgrees ? '✓ Confirma' : '✗ Diverge'}</span>
+                            )}
+                          </Badge>
+                        )}
+                      </p>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                        {[
+                          { label: 'RSI (14)', value: aiAnalysis.latest.indicators.rsi?.toFixed(1), color: (aiAnalysis.latest.indicators.rsi < 30 || aiAnalysis.latest.indicators.rsi > 70) ? 'text-orange-500' : 'text-foreground' },
+                          { label: 'MACD', value: aiAnalysis.latest.indicators.macd?.toFixed(5), color: aiAnalysis.latest.indicators.macd > 0 ? 'text-green-500' : 'text-red-500' },
+                          { label: 'Sinal MACD', value: aiAnalysis.latest.indicators.macdSignal?.toFixed(5), color: 'text-foreground' },
+                          { label: 'EMA 20', value: aiAnalysis.latest.indicators.ema20?.toFixed(4), color: 'text-foreground' },
+                          { label: 'EMA 50', value: aiAnalysis.latest.indicators.ema50?.toFixed(4), color: 'text-foreground' },
+                          { label: 'EMA 200', value: aiAnalysis.latest.indicators.ema200?.toFixed(4), color: 'text-foreground' },
+                          { label: 'Boll. Upper', value: aiAnalysis.latest.indicators.bollingerUpper?.toFixed(4), color: 'text-blue-400' },
+                          { label: 'Boll. Lower', value: aiAnalysis.latest.indicators.bollingerLower?.toFixed(4), color: 'text-blue-400' },
+                          { label: 'ATR (14)', value: aiAnalysis.latest.indicators.atr?.toFixed(5), color: 'text-foreground' },
+                          { label: 'ADX (14)', value: aiAnalysis.latest.indicators.adx?.toFixed(1), color: (aiAnalysis.latest.indicators.adx > 25) ? 'text-green-500' : 'text-muted-foreground' },
+                          { label: 'Stoch %K', value: aiAnalysis.latest.indicators.stochK?.toFixed(1), color: 'text-foreground' },
+                          { label: 'Stoch %D', value: aiAnalysis.latest.indicators.stochD?.toFixed(1), color: 'text-foreground' },
+                          { label: 'Suporte', value: aiAnalysis.latest.indicators.support?.toFixed(4), color: 'text-green-500' },
+                          { label: 'Resistência', value: aiAnalysis.latest.indicators.resistance?.toFixed(4), color: 'text-red-500' },
+                          { label: 'Tendência', value: aiAnalysis.latest.indicators.trend, color: aiAnalysis.latest.indicators.trend === 'bullish' ? 'text-green-500' : aiAnalysis.latest.indicators.trend === 'bearish' ? 'text-red-500' : 'text-yellow-500' },
+                          { label: 'Volatilidade', value: aiAnalysis.latest.indicators.volatility ? aiAnalysis.latest.indicators.volatility.toFixed(3) + '%' : '-', color: 'text-foreground' },
+                        ].map((ind, i) => (
+                          <div key={i} className="bg-muted/30 rounded p-2" data-testid={`indicator-${ind.label.replace(/\s/g,'-').toLowerCase()}`}>
+                            <p className="text-xs text-muted-foreground">{ind.label}</p>
+                            <p className={`text-sm font-bold ${ind.color}`}>{ind.value ?? '—'}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Feed de análises em tempo real */}
+            <Card data-testid="card-analysis-feed">
+              <CardHeader className="pb-2">
                 <CardTitle className="flex items-center justify-between text-base">
                   <span className="flex items-center gap-2">
-                    <Brain className="h-5 w-5 text-primary" />
-                    Gerar Sinal Manual
+                    <Cpu className="h-5 w-5 text-primary" />
+                    Feed de Análises em Tempo Real
                   </span>
+                  <Badge variant="outline" className="text-xs gap-1">
+                    <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                    Atualiza a cada 3s
+                  </Badge>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {aiAnalysis?.log && aiAnalysis.log.length > 0 ? (
+                  <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+                    {aiAnalysis.log.slice(0, 30).map((entry, i) => (
+                      <div key={entry.id} className={`flex gap-3 p-2 rounded-lg border text-xs ${
+                        entry.status === 'approved' ? 'border-green-500/30 bg-green-500/5' :
+                        entry.status === 'rejected' ? 'border-red-500/30 bg-red-500/5' :
+                        entry.status === 'blocked' ? 'border-orange-500/30 bg-orange-500/5' :
+                        entry.status === 'waiting' ? 'border-yellow-500/30 bg-yellow-500/5' :
+                        'border-border bg-muted/20'
+                      }`} data-testid={`feed-entry-${i}`}>
+                        <div className="shrink-0 mt-0.5">
+                          {entry.status === 'approved' ? <CheckCircle className="h-3.5 w-3.5 text-green-500" /> :
+                           entry.status === 'rejected' ? <XCircle className="h-3.5 w-3.5 text-red-500" /> :
+                           entry.status === 'blocked' ? <Shield className="h-3.5 w-3.5 text-orange-500" /> :
+                           entry.status === 'waiting' ? <Clock className="h-3.5 w-3.5 text-yellow-500" /> :
+                           <RefreshCw className="h-3.5 w-3.5 text-blue-500" />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-2 mb-0.5">
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold">{entry.symbol}</span>
+                              <Badge variant="outline" className="text-xs py-0 h-4">
+                                {entry.phase === 'circuit_breaker' ? '🛑 CB' :
+                                 entry.phase === 'data_check' ? '📊 Dados' :
+                                 entry.phase === 'huggingface' ? '🧠 IA' :
+                                 entry.phase === 'technical' ? '📈 Técnico' :
+                                 '🎯 Decisão'}
+                              </Badge>
+                              {entry.aiConsensus !== undefined && (
+                                <span className={`font-semibold ${entry.aiConsensus >= 70 ? 'text-green-500' : 'text-red-500'}`}>
+                                  {entry.aiConsensus.toFixed(0)}%
+                                </span>
+                              )}
+                              {entry.finalDecision && entry.finalDecision !== 'HOLD' && (
+                                <Badge className={`text-xs py-0 h-4 ${entry.finalDecision === 'BUY' ? 'bg-green-500' : 'bg-red-500'}`}>
+                                  {entry.finalDecision}
+                                </Badge>
+                              )}
+                            </div>
+                            <span className="text-muted-foreground shrink-0">
+                              {new Date(entry.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                            </span>
+                          </div>
+                          <p className="text-muted-foreground leading-tight">{entry.decisionReason}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+                    <Cpu className="h-10 w-10 mb-3 opacity-30" />
+                    <p className="font-medium">Aguardando análises das IAs...</p>
+                    <p className="text-xs mt-1">As análises aparecem aqui assim que o EA envia dados de mercado</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Gerar sinal manual */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Zap className="h-5 w-5 text-yellow-500" />
+                  Forçar Análise Manual
                 </CardTitle>
                 <CardDescription>
-                  Force as 5 IAs a analisar um par específico agora
+                  Força as IAs a analisar um par agora com os dados em cache
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent>
                 <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
                   {(config?.symbols || ['EURUSD', 'GBPUSD', 'XAUUSD', 'USDJPY', 'BTCUSD']).map((sym: string) => (
                     <Button
@@ -429,46 +727,6 @@ export default function MetaTraderPage() {
                     </Button>
                   ))}
                 </div>
-
-                {status?.activeSignal && (
-                  <div className="border rounded-lg p-4 bg-muted/30 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <h4 className="font-semibold">Último Sinal</h4>
-                      <Badge className={status.activeSignal.action === 'BUY' ? 'bg-green-500' : status.activeSignal.action === 'SELL' ? 'bg-red-500' : 'bg-gray-500'}>
-                        {status.activeSignal.action} {status.activeSignal.symbol}
-                      </Badge>
-                    </div>
-                    {status.activeSignal.indicators && (
-                      <div className="grid grid-cols-3 md:grid-cols-6 gap-3 text-sm">
-                        <div>
-                          <span className="text-muted-foreground text-xs">RSI</span>
-                          <p className="font-bold">{status.activeSignal.indicators.rsi?.toFixed(1)}</p>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground text-xs">MACD</span>
-                          <p className="font-bold">{status.activeSignal.indicators.macd?.toFixed(5)}</p>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground text-xs">EMA20</span>
-                          <p className="font-bold">{status.activeSignal.indicators.ema20?.toFixed(4)}</p>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground text-xs">EMA50</span>
-                          <p className="font-bold">{status.activeSignal.indicators.ema50?.toFixed(4)}</p>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground text-xs">ADX</span>
-                          <p className="font-bold">{status.activeSignal.indicators.adx?.toFixed(1)}</p>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground text-xs">ATR</span>
-                          <p className="font-bold">{status.activeSignal.indicators.atr?.toFixed(5)}</p>
-                        </div>
-                      </div>
-                    )}
-                    <p className="text-xs text-muted-foreground">{status.activeSignal.reason}</p>
-                  </div>
-                )}
               </CardContent>
             </Card>
           </TabsContent>
