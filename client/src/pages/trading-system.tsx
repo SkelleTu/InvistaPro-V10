@@ -1101,35 +1101,37 @@ export default function TradingSystemPage() {
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-8">
-            <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
-            <TabsTrigger value="config">Configurações</TabsTrigger>
-            <TabsTrigger value="blocked">Bloqueio</TabsTrigger>
-            <TabsTrigger value="operations">Operações</TabsTrigger>
-            <TabsTrigger value="ai-analysis">IA e Análises</TabsTrigger>
-            <TabsTrigger value="learning" data-testid="tab-learning" className="relative">
-              <span>🧠 Aprendizado</span>
-            </TabsTrigger>
-            <TabsTrigger value="monitor" className="relative" data-testid="tab-monitor">
-              <span>Monitor IA</span>
-              {(monitorData as any)?.activeContracts > 0 && (
-                <span className="absolute -top-1 -right-1 bg-green-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center animate-pulse">
-                  {(monitorData as any).activeContracts}
+          <div className="overflow-x-auto -mx-1 px-1">
+            <TabsList className="flex w-max min-w-full gap-0">
+              <TabsTrigger value="dashboard" className="flex-1 min-w-[80px] text-xs sm:text-sm">Dashboard</TabsTrigger>
+              <TabsTrigger value="config" className="flex-1 min-w-[90px] text-xs sm:text-sm">Configurações</TabsTrigger>
+              <TabsTrigger value="blocked" className="flex-1 min-w-[75px] text-xs sm:text-sm">Bloqueio</TabsTrigger>
+              <TabsTrigger value="operations" className="flex-1 min-w-[80px] text-xs sm:text-sm">Operações</TabsTrigger>
+              <TabsTrigger value="ai-analysis" className="flex-1 min-w-[90px] text-xs sm:text-sm">IA e Análises</TabsTrigger>
+              <TabsTrigger value="learning" data-testid="tab-learning" className="relative flex-1 min-w-[90px] text-xs sm:text-sm">
+                <span>🧠 Aprendizado</span>
+              </TabsTrigger>
+              <TabsTrigger value="monitor" className="relative flex-1 min-w-[80px] text-xs sm:text-sm" data-testid="tab-monitor">
+                <span>Monitor IA</span>
+                {(monitorData as any)?.activeContracts > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-green-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center animate-pulse">
+                    {(monitorData as any).activeContracts}
+                  </span>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="metatrader" className="relative flex-1 min-w-[60px] text-xs sm:text-sm" data-testid="tab-metatrader">
+                <span className="flex items-center gap-1">
+                  <Monitor className="h-3 w-3" />
+                  MT5
                 </span>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="metatrader" className="relative" data-testid="tab-metatrader">
-              <span className="flex items-center gap-1">
-                <Monitor className="h-3 w-3" />
-                MT5
-              </span>
-              {(mt5Status as any)?.openPositions > 0 && (
-                <span className="absolute -top-1 -right-1 bg-blue-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center animate-pulse">
-                  {(mt5Status as any).openPositions}
-                </span>
-              )}
-            </TabsTrigger>
-          </TabsList>
+                {(mt5Status as any)?.openPositions > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-blue-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center animate-pulse">
+                    {(mt5Status as any).openPositions}
+                  </span>
+                )}
+              </TabsTrigger>
+            </TabsList>
+          </div>
 
           {/* Dashboard Tab */}
           <TabsContent value="dashboard" className="space-y-6">
@@ -1184,18 +1186,18 @@ export default function TradingSystemPage() {
                     : "O sistema está pausado e não está executando operações"}
                 </CardDescription>
               </CardHeader>
-              <CardContent className="flex items-center justify-between">
-                <div className="flex items-center space-x-4">
+              <CardContent className="flex flex-col gap-4">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   <div>
-                    <p className="text-sm text-muted-foreground">Sessões em Memória</p>
+                    <p className="text-xs text-muted-foreground">Sessões em Memória</p>
                     <p className="text-2xl font-bold">{(schedulerStatus as any)?.stats?.totalSessions || 0}</p>
                   </div>
                   <div>
-                    <p className="text-sm text-muted-foreground">Ops Executadas (Sessão)</p>
+                    <p className="text-xs text-muted-foreground">Ops Executadas (Sessão)</p>
                     <p className="text-2xl font-bold">{(schedulerStatus as any)?.stats?.totalExecutedOperations || 0}</p>
                   </div>
                   <div>
-                    <p className="text-sm text-muted-foreground">Token Deriv</p>
+                    <p className="text-xs text-muted-foreground">Token Deriv</p>
                     <p className="text-sm font-bold mt-1">
                       {(schedulerStatus as any)?.derivTokenConfigured
                         ? <span className="text-green-600">✓ Configurado</span>
@@ -1203,14 +1205,15 @@ export default function TradingSystemPage() {
                     </p>
                   </div>
                   <div>
-                    <p className="text-sm text-muted-foreground">Configs Ativas</p>
+                    <p className="text-xs text-muted-foreground">Configs Ativas</p>
                     <p className="text-2xl font-bold">{(schedulerStatus as any)?.activeConfigsCount ?? 0}</p>
                   </div>
                 </div>
-                <div className="flex space-x-2">
+                <div className="flex">
                   {(schedulerStatus as any)?.schedulerActive ? (
                     <Button
                       variant="destructive"
+                      className="w-full sm:w-auto"
                       onClick={() => controlSchedulerMutation.mutate('pause')}
                       disabled={controlSchedulerMutation.isPending}
                       data-testid="button-pause-system"
@@ -1221,6 +1224,7 @@ export default function TradingSystemPage() {
                   ) : (
                     <Button
                       variant="default"
+                      className="w-full sm:w-auto"
                       onClick={() => controlSchedulerMutation.mutate('resume')}
                       disabled={controlSchedulerMutation.isPending}
                       data-testid="button-start-system"
