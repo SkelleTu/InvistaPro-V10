@@ -21,6 +21,7 @@ import Transparencia from "@/pages/transparencia";
 import Resultados from "@/pages/resultados";
 import TecnologiaFinanceira from "@/pages/tecnologia-financeira";
 import TradingSystemPage from "@/pages/trading-system";
+import MetaTraderPage from "@/pages/metatrader-page";
 import KeepAliveSetup from "@/pages/KeepAliveSetup";
 
 import { useAuth } from "@/hooks/useAuth";
@@ -75,6 +76,7 @@ function Router() {
             <Route path="/" component={Home} />
             <Route path="/dashboard" component={Home} />
             <Route path="/trading" component={TradingSystemPage} />
+            <Route path="/metatrader" component={MetaTraderPage} />
           </>
         );
       })()}

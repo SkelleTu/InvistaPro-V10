@@ -1,4 +1,50 @@
-# InvestaPRO - Sistema de Renda Variável
+# InvestaPRO - Sistema de Renda Variável + MetaTrader Integration
+
+## 🤖 METATRADER INTEGRATION - Março 2026
+
+### Arquitetura MT4/MT5
+- **`server/services/metatrader-bridge.ts`** - Serviço bridge central: gera sinais via 5 IAs, gerencia posições e resultados
+- **`server/routes/metatrader-routes.ts`** - Endpoints REST `/api/mt5/*` consumidos pelo EA
+- **`client/src/pages/metatrader-page.tsx`** - Dashboard completo: status, sinais, posições, configuração, download do EA
+- Rota frontend: `/metatrader`
+
+### Fluxo de Comunicação
+```
+5 IAs (Quantum + Advanced + Microscopic + HuggingFace + Supreme)
+   ↓ geram sinais
+Backend Bridge (/api/mt5/signal)
+   ↓ EA consulta via HTTP
+MetaTrader EA (InvestaPRO_EA.mq5)
+   ↓ executa ordens
+MT4/MT5 Broker
+   ↓ reporta resultado
+Backend (/api/mt5/trade/close)
+```
+
+### Endpoints MT5
+- `POST /api/mt5/heartbeat` - EA reporta status da conta
+- `GET /api/mt5/signal?symbol=EURUSD` - EA busca sinal das IAs
+- `POST /api/mt5/market-data` - EA envia candles históricos para análise
+- `POST /api/mt5/trade/open` - EA confirma abertura de posição
+- `POST /api/mt5/trade/update` - EA atualiza P&L de posição aberta
+- `POST /api/mt5/trade/close` - EA confirma fechamento de posição
+- `GET /api/mt5/positions` - Posições abertas
+- `GET /api/mt5/trades` - Histórico de operações
+- `GET /api/mt5/status` - Status do sistema
+- `GET/POST /api/mt5/config` - Configurações
+- `POST /api/mt5/signal/generate` - Geração manual de sinal
+
+### Expert Advisor MQL5
+O EA pode ser baixado em `/metatrader` → aba Configuração → "Baixar InvestaPRO_EA.mq5"
+Funcionalidades do EA:
+- Poll de sinais a cada 5 segundos
+- Heartbeat a cada 15 segundos
+- Upload de 200 candles (H1) a cada minuto para análise das IAs
+- Trailing stop automático
+- Limites diários de perda e lucro
+- Relatório completo de abertura/fechamento para o backend
+
+
 
 ## 🛑 CONTROLE CENTRALIZADO DE PAUSA - 18 DEC 2025 FINAL
 

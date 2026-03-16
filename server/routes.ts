@@ -22,6 +22,7 @@ import kycRoutes from "./routes/kyc";
 import adminRoutes from "./routes/admin";
 import monitorRoutes from "./routes/monitor-routes";
 import learningRoutes from "./routes/learning-routes";
+import metaTraderRoutes from "./routes/metatrader-routes";
 import fetch from "node-fetch";
 import express from "express";
 import { keepAliveSystem } from "./services/keep-alive-system";
@@ -1763,6 +1764,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Motor de Aprendizado Persistente Real
   app.use('/api/learning', learningRoutes);
+  app.use('/api/mt5', metaTraderRoutes);
 
   // Marketing Email Routes
   app.post('/api/marketing/add-email', isAuthenticated, async (req, res) => {
