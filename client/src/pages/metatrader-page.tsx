@@ -173,6 +173,7 @@ export default function MetaTraderPage() {
   const [newApiToken, setNewApiToken] = useState('');
   const [activeTab, setActiveTab] = useState('dashboard');
   const [urlCopied, setUrlCopied] = useState(false);
+  const [platformUrlCopied, setPlatformUrlCopied] = useState(false);
 
   const { data: status, isLoading: statusLoading } = useQuery<MT5Status>({
     queryKey: ['/api/mt5/status'],
@@ -249,6 +250,13 @@ export default function MetaTraderPage() {
     navigator.clipboard.writeText(window.location.origin).then(() => {
       setUrlCopied(true);
       setTimeout(() => setUrlCopied(false), 2500);
+    });
+  };
+
+  const copyPlatformUrl = () => {
+    navigator.clipboard.writeText(window.location.origin).then(() => {
+      setPlatformUrlCopied(true);
+      setTimeout(() => setPlatformUrlCopied(false), 2500);
     });
   };
 
@@ -371,27 +379,50 @@ export default function MetaTraderPage() {
         </div>
 
         {!status?.connected && (
-          <div className="rounded-lg border border-yellow-500/50 bg-yellow-500/10 p-4 flex flex-col sm:flex-row items-start sm:items-center gap-3" data-testid="banner-ea-disconnected">
-            <AlertTriangle className="h-5 w-5 text-yellow-500 shrink-0 mt-0.5 sm:mt-0" />
-            <div className="flex-1 min-w-0">
-              <p className="font-semibold text-yellow-600 dark:text-yellow-400 text-sm">EA não conectado — URL do servidor pode ter mudado</p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                No MetaTrader abra as propriedades do EA (F7) → aba <strong>Inputs</strong> → atualize o campo <strong>ServerURL</strong> com a URL abaixo.
-              </p>
-              <div className="flex items-center gap-2 mt-2">
-                <code className="text-xs bg-background border rounded px-2 py-1 flex-1 truncate font-mono" data-testid="text-current-server-url">
-                  {window.location.origin}
-                </code>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="shrink-0 gap-1.5 text-xs h-7"
-                  onClick={copyServerUrl}
-                  data-testid="button-copy-server-url"
-                >
-                  {urlCopied ? <ClipboardCheck className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
-                  {urlCopied ? 'Copiado!' : 'Copiar'}
-                </Button>
+          <div className="rounded-lg border border-yellow-500/50 bg-yellow-500/10 p-4 flex flex-col sm:flex-row items-start gap-3" data-testid="banner-ea-disconnected">
+            <AlertTriangle className="h-5 w-5 text-yellow-500 shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0 space-y-3">
+              <div>
+                <p className="font-semibold text-yellow-600 dark:text-yellow-400 text-sm">EA não conectado — URL do servidor pode ter mudado</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Atualize nos dois lugares abaixo sempre que o Replit reiniciar.</p>
+              </div>
+              <div className="space-y-2">
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground mb-1">① EA (F7 → Inputs → <strong>ServerURL</strong>)</p>
+                  <div className="flex items-center gap-2">
+                    <code className="text-xs bg-background border rounded px-2 py-1 flex-1 truncate font-mono" data-testid="text-current-server-url">
+                      {window.location.origin}
+                    </code>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="shrink-0 gap-1.5 text-xs h-7"
+                      onClick={copyServerUrl}
+                      data-testid="button-copy-server-url"
+                    >
+                      {urlCopied ? <ClipboardCheck className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+                      {urlCopied ? 'Copiado!' : 'Copiar'}
+                    </Button>
+                  </div>
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground mb-1">② Plataforma MT (Ferramentas → Opções → Expert Advisors → <strong>Permitir WebRequest</strong>)</p>
+                  <div className="flex items-center gap-2">
+                    <code className="text-xs bg-background border rounded px-2 py-1 flex-1 truncate font-mono" data-testid="text-current-platform-url">
+                      {window.location.origin}
+                    </code>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="shrink-0 gap-1.5 text-xs h-7"
+                      onClick={copyPlatformUrl}
+                      data-testid="button-copy-platform-url"
+                    >
+                      {platformUrlCopied ? <ClipboardCheck className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+                      {platformUrlCopied ? 'Copiado!' : 'Copiar'}
+                    </Button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -1262,7 +1293,7 @@ export default function MetaTraderPage() {
                   </ol>
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-xs">URL do Servidor (para o EA)</Label>
+                  <Label className="text-xs">① URL do Servidor — EA (F7 → Inputs → ServerURL)</Label>
                   <div className="flex gap-2">
                     <Input
                       readOnly
@@ -1280,6 +1311,28 @@ export default function MetaTraderPage() {
                     >
                       {urlCopied ? <ClipboardCheck className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
                       {urlCopied ? 'Copiado!' : 'Copiar'}
+                    </Button>
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">② URL da Plataforma — MT (Ferramentas → Opções → Expert Advisors → Permitir WebRequest)</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      readOnly
+                      value={window.location.origin}
+                      className="text-xs font-mono"
+                      data-testid="input-platform-url"
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="shrink-0 gap-1.5"
+                      onClick={copyPlatformUrl}
+                      data-testid="button-copy-platform-url-config"
+                    >
+                      {platformUrlCopied ? <ClipboardCheck className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+                      {platformUrlCopied ? 'Copiado!' : 'Copiar'}
                     </Button>
                   </div>
                 </div>
