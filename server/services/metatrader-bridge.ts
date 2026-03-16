@@ -505,6 +505,42 @@ class MetaTraderBridge extends EventEmitter {
         decisionReason: `${marketData.length} candles recebidos. Iniciando análise das IAs...`
       });
 
+      // ============================================================
+      // ROTA RÁPIDA DE SPIKE: Para Crash/Boom, verifica spike antes
+      // da IA HuggingFace — se confiança >= 70%, executa direto sem
+      // depender do consenso mínimo que a IA NLP dificilmente atinge
+      // nos índices sintéticos.
+      // ============================================================
+      if (this.isSpikeIndex(symbol)) {
+        const earlySpike = this.detectSpikePattern(marketData, symbol);
+        if (earlySpike.expected && earlySpike.confidence >= 70) {
+          const spikeAction: MT5Signal['action'] = earlySpike.direction === 'down' ? 'SELL' : 'BUY';
+          const spikeConf = earlySpike.confidence / 100;
+          const spikeSignal = this.fuseSignals(
+            symbol,
+            [{ action: spikeAction, confidence: spikeConf, source: 'technical_spike' }],
+            marketData,
+            `Spike detectado com ${earlySpike.confidence.toFixed(1)}% de confiança — iminência ${earlySpike.imminencePercent.toFixed(0)}%`,
+            spikeConf,
+            earlySpike
+          );
+          if (spikeSignal && spikeSignal.action !== 'HOLD') {
+            this.logAnalysis({
+              id: `${entryId}_spike_fast`,
+              timestamp: Date.now(),
+              symbol,
+              phase: 'decision',
+              status: 'approved',
+              finalDecision: spikeSignal.action as 'BUY' | 'SELL' | 'HOLD',
+              consecutiveLosses: this.consecutiveLosses,
+              decisionReason: `✅ SPIKE FAST TRACK: ${spikeSignal.action} ${symbol} | Spike confiança: ${earlySpike.confidence.toFixed(1)}% | Iminência: ${earlySpike.imminencePercent.toFixed(0)}% | Momentum: ${earlySpike.momentumConfirms ? 'confirmado' : 'não confirmado'}`
+            });
+            console.log(`[MT5Bridge] ⚡ SPIKE FAST TRACK: ${spikeSignal.action} ${symbol} | ${earlySpike.confidence.toFixed(1)}% confiança`);
+            return spikeSignal;
+          }
+        }
+      }
+
       // Converter candles do MT5 para formato DerivTickData
       const tickData: DerivTickData[] = marketData.map((candle, i) => ({
         symbol,
