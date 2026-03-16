@@ -948,7 +948,7 @@ void UpdateOpenPositions() {
       if(closeReason != "") {
          trade.PositionClose(ticket);
          ReportTradeClose(ticket, posInfo.Symbol(), posInfo.TypeDescription(),
-                          posInfo.VolumeCurrent(), posInfo.PriceOpen(), current,
+                          posInfo.Volume(), posInfo.PriceOpen(), current,
                           profit, closeReason);
       }
    }
