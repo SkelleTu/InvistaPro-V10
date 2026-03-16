@@ -189,12 +189,21 @@ class MetaTraderBridge extends EventEmitter {
 
   getStatus(): MT5Status {
     const now = Date.now();
-    const connected = (now - this.status.lastHeartbeat) < 30000 && this.status.lastHeartbeat > 0;
-    
+    const connected = (now - this.status.lastHeartbeat) < 120000 && this.status.lastHeartbeat > 0;
+
     let health: MT5Status['systemHealth'] = 'excellent';
-    if (!connected) health = 'critical';
-    else if (this.status.dailyLoss > this.config.maxDailyLoss * 0.8) health = 'warning';
-    else if (this.status.dailyLoss > this.config.maxDailyLoss * 0.5) health = 'good';
+    if (!connected) {
+      if (this.status.lastHeartbeat === 0) {
+        health = 'warning';
+      } else {
+        const secsSince = Math.floor((now - this.status.lastHeartbeat) / 1000);
+        health = secsSince > 300 ? 'critical' : 'warning';
+      }
+    } else if (this.status.dailyLoss > this.config.maxDailyLoss * 0.8) {
+      health = 'critical';
+    } else if (this.status.dailyLoss > this.config.maxDailyLoss * 0.5) {
+      health = 'warning';
+    }
 
     return {
       ...this.status,

@@ -65,7 +65,7 @@ const HEALTH_COLOR = {
 const HEALTH_LABEL = {
   excellent: 'Excelente',
   good: 'Bom',
-  warning: 'Atenção',
+  warning: 'Aguardando',
   critical: 'Crítico'
 };
 
@@ -180,10 +180,31 @@ export default function MetaTraderPage() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border ${status?.connected ? 'border-green-500 bg-green-500/10' : 'border-red-500 bg-red-500/10'}`}>
-              {status?.connected ? <Wifi className="h-4 w-4 text-green-500" /> : <WifiOff className="h-4 w-4 text-red-500" />}
-              <span className={`text-sm font-medium ${status?.connected ? 'text-green-500' : 'text-red-500'}`}>
-                {status?.connected ? `Conectado • ${status.broker}` : 'Aguardando EA'}
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border ${
+              status?.connected
+                ? 'border-green-500 bg-green-500/10'
+                : status?.systemHealth === 'critical'
+                  ? 'border-red-500 bg-red-500/10'
+                  : 'border-yellow-500 bg-yellow-500/10'
+            }`}>
+              {status?.connected
+                ? <Wifi className="h-4 w-4 text-green-500" />
+                : status?.systemHealth === 'critical'
+                  ? <WifiOff className="h-4 w-4 text-red-500" />
+                  : <WifiOff className="h-4 w-4 text-yellow-500" />
+              }
+              <span className={`text-sm font-medium ${
+                status?.connected
+                  ? 'text-green-500'
+                  : status?.systemHealth === 'critical'
+                    ? 'text-red-500'
+                    : 'text-yellow-500'
+              }`}>
+                {status?.connected
+                  ? `Conectado • ${status.broker}`
+                  : status?.systemHealth === 'critical'
+                    ? 'EA Desconectado'
+                    : 'Aguardando EA'}
               </span>
             </div>
             <Button onClick={downloadEA} data-testid="button-download-ea" className="gap-2">
