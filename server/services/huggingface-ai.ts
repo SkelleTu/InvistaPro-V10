@@ -29,6 +29,8 @@ export interface AIModel {
   id: string;
   description: string;
   confidence: number;
+  type?: 'sentiment' | 'zero-shot' | 'tone' | 'crypto' | 'technical';
+  candidateLabels?: string[];
 }
 
 export interface MarketAnalysis {
@@ -96,7 +98,44 @@ export class HuggingFaceAIService {
       name: 'DistilRoBERTa Financial',
       id: 'mrm8488/distilroberta-finetuned-financial-news-sentiment-analysis',
       description: 'DistilRoBERTa ajustado para análise financeira — combinação de velocidade e precisão para inferência em alta frequência',
-      confidence: 0.83
+      confidence: 0.83,
+      type: 'sentiment'
+    },
+    {
+      name: 'CryptoBERT Price Action',
+      id: 'ElKulako/cryptobert',
+      description: 'BERT treinado exclusivamente em dados de mercados cripto e sintéticos — detecta padrões de price action, momentum e reversão em ativos digitais de alta frequência',
+      confidence: 0.88,
+      type: 'crypto'
+    },
+    {
+      name: 'FinBERT Tone Bullish/Bearish',
+      id: 'yiyanghkust/finbert-tone',
+      description: 'FinBERT especializado em identificar tom bullish/bearish/neutro — treinado em análises financeiras profissionais, identifica viés direcional com alta precisão',
+      confidence: 0.87,
+      type: 'tone'
+    },
+    {
+      name: 'FinTwits Sentiment Classifier',
+      id: 'nickmuchi/finbert-tone-finetuned-fintwits-classification',
+      description: 'Fine-tuned em FinTwits (plataforma social de traders) — identifica sentimento bullish/bearish de traders profissionais analisando ativos financeiros em tempo real',
+      confidence: 0.85,
+      type: 'tone'
+    },
+    {
+      name: 'RoBERTa Large FinTwits',
+      id: 'nickmuchi/roberta-large-finetuned-fintwits-classification',
+      description: 'RoBERTa Large ajustado para FinTwits — maior capacidade de reconhecimento de padrões bullish/bearish com arquitetura profunda, excelente para tendências complexas',
+      confidence: 0.89,
+      type: 'tone'
+    },
+    {
+      name: 'Zero-Shot Pattern Classifier',
+      id: 'facebook/bart-large-mnli',
+      description: 'BART-Large com inferência de linguagem natural (NLI) — classifica padrões técnicos como reversão, continuidade, breakout, Fibonacci e consolidação em zero-shot',
+      confidence: 0.86,
+      type: 'zero-shot',
+      candidateLabels: ['bullish reversal', 'bearish reversal', 'bullish continuation', 'bearish continuation', 'consolidation breakout', 'fibonacci support bounce', 'fibonacci resistance rejection']
     }
   ];
 
@@ -346,11 +385,16 @@ export class HuggingFaceAIService {
       // ═══════════════════════════════════════════════════════════════════
       // Sensibilidades distintas: cada modelo amplifica diferente parte do sinal
       const modelSensitivities = [
-        { base: 0.90, bias: 0.05,  name: 'sentiment' },  // FinBERT: leve viés positivo
-        { base: 0.85, bias: -0.03, name: 'trend' },       // RoBERTa Market: leve viés negativo
-        { base: 0.83, bias: 0.0,   name: 'neutral' },     // XLM-RoBERTa: neutro
-        { base: 0.82, bias: 0.02,  name: 'momentum' },    // RoBERTa Trend: momentum
-        { base: 0.83, bias: -0.01, name: 'speed' },       // DistilRoBERTa: velocidade
+        { base: 0.90, bias: 0.05,  name: 'sentiment',      specialty: 'financial-sentiment' },   // FinBERT: sentimento financeiro
+        { base: 0.85, bias: -0.03, name: 'trend',          specialty: 'social-trend' },           // RoBERTa Market: tendência social
+        { base: 0.83, bias: 0.0,   name: 'multilingual',   specialty: 'global-sentiment' },       // XLM-RoBERTa: multilíngue neutro
+        { base: 0.82, bias: 0.02,  name: 'momentum',       specialty: 'momentum-trend' },         // RoBERTa Trend: momentum
+        { base: 0.83, bias: -0.01, name: 'speed',          specialty: 'fast-inference' },         // DistilRoBERTa: velocidade
+        { base: 0.91, bias: 0.03,  name: 'price-action',   specialty: 'crypto-patterns' },        // CryptoBERT: price action cripto
+        { base: 0.87, bias: 0.0,   name: 'tone',           specialty: 'bullish-bearish-tone' },   // FinBERT Tone: tom direcional
+        { base: 0.85, bias: -0.02, name: 'fintwits',       specialty: 'trader-sentiment' },       // FinTwits: sentimento de traders
+        { base: 0.88, bias: 0.04,  name: 'large-fintwits', specialty: 'deep-trader-analysis' },   // RoBERTa Large FinTwits: análise profunda
+        { base: 0.86, bias: 0.01,  name: 'zero-shot',      specialty: 'pattern-classification' }, // Zero-Shot: padrões técnicos
       ];
 
       // Signal strength: quão forte é o sinal do sistema avançado
@@ -460,18 +504,28 @@ export class HuggingFaceAIService {
     try {
       console.log(`🔍 [DEBUG] Iniciando análise com modelo: ${model.name} (${model.id})`);
       
-      // Gera DNA compacto (< 512 tokens) para os modelos HuggingFace
-      // O DNA completo é usado internamente; os modelos recebem versão otimizada
-      const prompt = this.buildCompactDNA(tickData, symbol);
-      console.log(`🧬 [${model.name}] DNA compacto (${prompt.length} chars): ${prompt.substring(0, 120)}...`);
+      // Gera prompt especializado baseado no tipo de modelo
+      const prompt = model.type === 'crypto'
+        ? this.buildCryptoPrompt(tickData, symbol)
+        : model.type === 'zero-shot'
+        ? this.buildTechnicalPatternPrompt(tickData, symbol)
+        : model.type === 'tone'
+        ? this.buildTonePrompt(tickData, symbol)
+        : this.buildCompactDNA(tickData, symbol);
       
-      // Send request to Hugging Face - CORRIGIDO: Usando novo endpoint router.huggingface.co
+      console.log(`🧬 [${model.name}] Prompt especializado (${prompt.length} chars): ${prompt.substring(0, 120)}...`);
+      
+      // Payload varia: zero-shot precisa de candidate_labels
+      const payload: any = { inputs: prompt };
+      if (model.type === 'zero-shot' && model.candidateLabels) {
+        payload.parameters = { candidate_labels: model.candidateLabels };
+      }
+      
+      // Send request to Hugging Face
       console.log(`📡 [DEBUG] Enviando requisição para Hugging Face: ${model.id}`);
       const response = await axios.post(
         `${this.baseURL}/hf-inference/models/${model.id}`,
-        {
-          inputs: prompt
-        },
+        payload,
         {
           headers: {
             'Authorization': `Bearer ${this.apiKey}`,
