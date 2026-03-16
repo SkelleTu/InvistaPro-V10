@@ -261,7 +261,47 @@ void FetchAndProcessSignal()
    if (lotSize <= 0) lotSize = LotSize;
    if (signalId == g_pendingSignalId) return;
 
-   Print("📡 Sinal recebido: ", action, " | Confiança: ", confidence, "% | Lot: ", lotSize);
+   //--- Crash/Boom: operar sem SL e TP (spikes pulam stops — proteção não funciona)
+   string symUpper = g_symbol;
+   StringToUpper(symUpper);
+   bool isSpikeIndex = (StringFind(symUpper, "CRASH") >= 0 || StringFind(symUpper, "BOOM") >= 0);
+
+   if(isSpikeIndex)
+   {
+      stopLoss   = 0;
+      takeProfit = 0;
+      Print("ℹ️ Crash/Boom detectado — operando sem SL/TP (spikes ignoram stops)");
+   }
+   else
+   {
+      //--- Outros símbolos: respeitar distância mínima exigida pelo broker
+      double ask        = SymbolInfoDouble(g_symbol, SYMBOL_ASK);
+      double bid        = SymbolInfoDouble(g_symbol, SYMBOL_BID);
+      double point      = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
+      long   stopsLevel = SymbolInfoInteger(g_symbol, SYMBOL_TRADE_STOPS_LEVEL);
+      double minDist    = MathMax((double)stopsLevel * point, (ask - bid) * 3.0);
+      if(minDist <= 0) minDist = ask * 0.005;
+
+      if(action == "BUY")
+      {
+         double entry = ask;
+         if(stopLoss > 0 && (entry - stopLoss) < minDist)
+            stopLoss = NormalizeDouble(entry - minDist, _Digits);
+         if(takeProfit > 0 && (takeProfit - entry) < minDist)
+            takeProfit = NormalizeDouble(entry + minDist, _Digits);
+      }
+      else if(action == "SELL")
+      {
+         double entry = bid;
+         if(stopLoss > 0 && (stopLoss - entry) < minDist)
+            stopLoss = NormalizeDouble(entry + minDist, _Digits);
+         if(takeProfit > 0 && (entry - takeProfit) < minDist)
+            takeProfit = NormalizeDouble(entry - minDist, _Digits);
+      }
+   }
+
+   Print("📡 Sinal recebido: ", action, " | Confiança: ", confidence, "% | Lot: ", lotSize,
+         " | SL: ", stopLoss, " | TP: ", takeProfit);
    g_pendingSignalId = signalId;
 
    bool success = false;

@@ -229,6 +229,15 @@ class MetaTraderBridge extends EventEmitter {
   }
 
   /**
+   * Crash e Boom têm spikes que pulam qualquer stop — operar sem SL/TP.
+   * Retorna true se o símbolo for um índice de spike.
+   */
+  private isSpikeIndex(symbol: string): boolean {
+    const sym = symbol.toUpperCase();
+    return sym.includes('CRASH') || sym.includes('BOOM');
+  }
+
+  /**
    * Retorna o lote mínimo correto para cada tipo de símbolo.
    * Índices sintéticos da Deriv (Crash/Boom) exigem lote mínimo de 1.0.
    * Índices de Volatilidade aceitam 0.01. Forex aceita 0.01.
@@ -436,15 +445,16 @@ class MetaTraderBridge extends EventEmitter {
     const slPips = Math.max(rawSlPips, 1);
     const tpPips = Math.max(rawTpPips, 1);
 
+    const spike = this.isSpikeIndex(symbol);
     const signal: MT5Signal = {
       id: `MT5_${Date.now()}_${Math.random().toString(36).substr(2, 6).toUpperCase()}`,
       symbol,
       action,
       lotSize: this.getValidLotSize(symbol),
-      stopLoss: action === 'BUY' ? lastPrice - slPips * pipSize : lastPrice + slPips * pipSize,
-      takeProfit: action === 'BUY' ? lastPrice + tpPips * pipSize : lastPrice - tpPips * pipSize,
-      stopLossPips: slPips,
-      takeProfitPips: tpPips,
+      stopLoss: spike ? 0 : (action === 'BUY' ? lastPrice - slPips * pipSize : lastPrice + slPips * pipSize),
+      takeProfit: spike ? 0 : (action === 'BUY' ? lastPrice + tpPips * pipSize : lastPrice - tpPips * pipSize),
+      stopLossPips: spike ? 0 : slPips,
+      takeProfitPips: spike ? 0 : tpPips,
       entryPrice: lastPrice,
       confidence: finalConfidence,
       aiSources: signals.map(s => s.source),
@@ -637,13 +647,14 @@ class MetaTraderBridge extends EventEmitter {
     const slDistance = basePrice * 0.003;
     const tpDistance = basePrice * 0.006;
     const pipSize = basePrice < 1000 ? 0.0001 : 1;
+    const isSpike = this.isSpikeIndex(symbol);
     return {
       id: `MT5_${Date.now()}_DEMO`,
       symbol,
       action,
       lotSize: this.getValidLotSize(symbol),
-      stopLoss: action === 'BUY' ? basePrice - slDistance : basePrice + slDistance,
-      takeProfit: action === 'BUY' ? basePrice + tpDistance : basePrice - tpDistance,
+      stopLoss: isSpike ? 0 : (action === 'BUY' ? basePrice - slDistance : basePrice + slDistance),
+      takeProfit: isSpike ? 0 : (action === 'BUY' ? basePrice + tpDistance : basePrice - tpDistance),
       stopLossPips: Math.round(slDistance / pipSize),
       takeProfitPips: Math.round(tpDistance / pipSize),
       entryPrice: basePrice,
