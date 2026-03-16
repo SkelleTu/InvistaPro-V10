@@ -905,17 +905,46 @@ void CheckAndExecuteSignal() {
    double point      = SymbolInfoDouble(symbol, SYMBOL_POINT);
    int    digits     = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
    
-   if(!UseAIStopLoss || slPrice <= 0) {
-      slPrice = (action == "BUY") ? entryPrice - StopLoss * point : entryPrice + StopLoss * point;
+   //--- Crash/Boom: spikes pulam stops — operar sem SL e TP
+   string symUp = symbol;
+   StringToUpper(symUp);
+   bool isSpikeIdx = (StringFind(symUp, "CRASH") >= 0 || StringFind(symUp, "BOOM") >= 0);
+
+   if(isSpikeIdx)
+   {
+      slPrice = 0;
+      tpPrice = 0;
+      Print("ℹ️ Crash/Boom — sem SL/TP");
    }
-   if(!UseAIStopLoss || tpPrice <= 0) {
-      tpPrice = (action == "BUY") ? entryPrice + TakeProfit * point : entryPrice - TakeProfit * point;
+   else
+   {
+      if(!UseAIStopLoss || slPrice <= 0) {
+         slPrice = (action == "BUY") ? entryPrice - StopLoss * point : entryPrice + StopLoss * point;
+      }
+      if(!UseAIStopLoss || tpPrice <= 0) {
+         tpPrice = (action == "BUY") ? entryPrice + TakeProfit * point : entryPrice - TakeProfit * point;
+      }
+      //--- Garantir distância mínima exigida pelo broker
+      long   stopsLevel = SymbolInfoInteger(symbol, SYMBOL_TRADE_STOPS_LEVEL);
+      double minDist    = MathMax((double)stopsLevel * point, (SymbolInfoDouble(symbol, SYMBOL_ASK) - SymbolInfoDouble(symbol, SYMBOL_BID)) * 3.0);
+      if(minDist > 0)
+      {
+         if(action == "BUY")
+         {
+            if((entryPrice - slPrice) < minDist) slPrice = NormalizeDouble(entryPrice - minDist, digits);
+            if((tpPrice - entryPrice) < minDist) tpPrice = NormalizeDouble(entryPrice + minDist, digits);
+         }
+         else
+         {
+            if((slPrice - entryPrice) < minDist) slPrice = NormalizeDouble(entryPrice + minDist, digits);
+            if((entryPrice - tpPrice) < minDist) tpPrice = NormalizeDouble(entryPrice - minDist, digits);
+         }
+      }
+      slPrice = NormalizeDouble(slPrice, digits);
+      tpPrice = NormalizeDouble(tpPrice, digits);
    }
    if(lotSize <= 0) lotSize = LotSize;
-   
-   slPrice = NormalizeDouble(slPrice, digits);
-   tpPrice = NormalizeDouble(tpPrice, digits);
-   
+
    bool ok = false;
    if(action == "BUY")  ok = trade.Buy(lotSize, symbol, entryPrice, slPrice, tpPrice, "InvistaPRO_" + signalId);
    if(action == "SELL") ok = trade.Sell(lotSize, symbol, entryPrice, slPrice, tpPrice, "InvistaPRO_" + signalId);
