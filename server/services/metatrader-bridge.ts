@@ -173,6 +173,7 @@ export interface AIModelResult {
   prediction: 'up' | 'down' | 'neutral';
   confidence: number;
   reasoning: string;
+  narrative?: string;
 }
 
 export interface AIAnalysisEntry {
@@ -192,9 +193,11 @@ export interface AIAnalysisEntry {
   technicalAgrees?: boolean;
   technicalScore?: number;
   indicators?: MT5Indicators;
+  technicalNarrative?: string;
   // Decision
   finalDecision?: 'BUY' | 'SELL' | 'HOLD' | null;
   decisionReason: string;
+  fullNarrative?: string;
   // Safety state
   circuitBreakerActive?: boolean;
   consecutiveLosses?: number;
@@ -511,6 +514,12 @@ class MetaTraderBridge extends EventEmitter {
       // Build indicators for the log
       const prices = marketData.map((d: any) => d.close);
       const indicators = this.buildIndicators(prices, marketData);
+      const technicalNarrative = this.buildTechnicalNarrative(indicators, prices);
+
+      // Enrich model results with individual narratives
+      const enrichedModelResults = modelResults.length > 0
+        ? this.buildModelNarratives(modelResults, indicators, aiDirection, aiConsensus, symbol)
+        : modelResults;
 
       this.logAnalysis({
         id: `${entryId}_tech`,
@@ -522,8 +531,10 @@ class MetaTraderBridge extends EventEmitter {
         technicalAgrees,
         technicalScore: Math.round(technicalSignal.confidence * 100),
         indicators,
+        technicalNarrative,
         aiConsensus,
         aiDirection,
+        modelResults: enrichedModelResults,
         decisionReason: !technicalAgrees && aiConsensus < 80
           ? `Divergência: IA diz ${aiDirection.toUpperCase()} mas análise técnica diz ${technicalSignal.action}. Consenso ${aiConsensus.toFixed(1)}% < 80% — sem trade`
           : technicalAgrees
@@ -546,6 +557,12 @@ class MetaTraderBridge extends EventEmitter {
 
       const signal = this.fuseSignals(symbol, signals, marketData, aiReasoning, finalConfidence);
 
+      // Build full narrative for the decision entry
+      const fullNarrative = this.buildFullNarrative(
+        symbol, aiDirection, aiConsensus, technicalAgrees, indicators,
+        signal.action !== 'HOLD' ? signal.action : null, prices
+      );
+
       // Log decisão final
       this.logAnalysis({
         id: `${entryId}_decision`,
@@ -559,9 +576,11 @@ class MetaTraderBridge extends EventEmitter {
         technicalAction: technicalSignal.action as 'BUY' | 'SELL' | 'HOLD',
         technicalAgrees,
         indicators,
-        modelResults,
+        technicalNarrative,
+        modelResults: enrichedModelResults,
         participatingModels,
         consecutiveLosses: this.consecutiveLosses,
+        fullNarrative,
         decisionReason: signal.action !== 'HOLD'
           ? `✅ SINAL APROVADO: ${signal.action} ${symbol} | Consenso IA: ${aiConsensus.toFixed(1)}% | Técnico: ${technicalSignal.action} | ${signal.reason}`
           : `❌ Sinal bloqueado na fusão final`
@@ -738,6 +757,199 @@ class MetaTraderBridge extends EventEmitter {
       support,
       resistance
     };
+  }
+
+  private buildTechnicalNarrative(ind: MT5Indicators, prices: number[]): string {
+    const last = prices[prices.length - 1];
+    const parts: string[] = [];
+
+    // RSI
+    if (ind.rsi !== undefined) {
+      const rsiInt = Math.round(ind.rsi);
+      if (rsiInt > 75) parts.push(`RSI em ${rsiInt} — mercado em sobrecompra forte, pressão vendedora esperada em breve.`);
+      else if (rsiInt > 65) parts.push(`RSI em ${rsiInt} — sobrecompra moderada, ainda há força compradora mas o mercado está esticado.`);
+      else if (rsiInt > 55) parts.push(`RSI em ${rsiInt} — zona bullish saudável, compradores no controle sem excessos.`);
+      else if (rsiInt >= 45) parts.push(`RSI em ${rsiInt} — zona neutra, equilíbrio entre compradores e vendedores.`);
+      else if (rsiInt >= 35) parts.push(`RSI em ${rsiInt} — zona bearish, vendedores pressionando mas sem pânico.`);
+      else if (rsiInt >= 25) parts.push(`RSI em ${rsiInt} — sobrevenda moderada, possível recuperação técnica.`);
+      else parts.push(`RSI em ${rsiInt} — sobrevenda extrema, alto potencial de reversão para cima.`);
+    }
+
+    // MACD
+    if (ind.macd !== undefined && ind.macdSignal !== undefined) {
+      const hist = ind.macd - ind.macdSignal;
+      if (hist > 0 && ind.macd > 0)
+        parts.push(`MACD positivo (histograma +${hist.toFixed(5)}) — momentum de alta confirmado, linha MACD acima do sinal e acima de zero.`);
+      else if (hist > 0 && ind.macd <= 0)
+        parts.push(`MACD cruzou acima do sinal (histograma +${hist.toFixed(5)}) — possível início de reversão para cima, ainda em território negativo.`);
+      else if (hist < 0 && ind.macd < 0)
+        parts.push(`MACD negativo (histograma ${hist.toFixed(5)}) — momentum de baixa confirmado, linha MACD abaixo do sinal e abaixo de zero.`);
+      else
+        parts.push(`MACD cruzou abaixo do sinal (histograma ${hist.toFixed(5)}) — possível início de enfraquecimento da alta.`);
+    }
+
+    // EMAs
+    if (ind.ema20 !== undefined && ind.ema50 !== undefined && ind.ema200 !== undefined) {
+      if (ind.ema20 > ind.ema50 && ind.ema50 > ind.ema200)
+        parts.push(`Médias móveis em alinhamento perfeito de alta (EMA20 > EMA50 > EMA200) — sinal clássico de bull trend confirmado em todos os tempos gráficos.`);
+      else if (ind.ema20 < ind.ema50 && ind.ema50 < ind.ema200)
+        parts.push(`Médias móveis em alinhamento de baixa (EMA20 < EMA50 < EMA200) — sinal clássico de bear trend confirmado em todos os tempos gráficos.`);
+      else if (ind.ema20 > ind.ema50)
+        parts.push(`EMA20 (${ind.ema20.toFixed(4)}) acima da EMA50 (${ind.ema50.toFixed(4)}) — tendência de curto prazo em alta, mas EMA200 (${ind.ema200.toFixed(4)}) ainda não confirma o longo prazo.`);
+      else
+        parts.push(`EMA20 (${ind.ema20.toFixed(4)}) abaixo da EMA50 (${ind.ema50.toFixed(4)}) — tendência de curto prazo em baixa, alerta de reversão no médio prazo.`);
+    }
+
+    // Bollinger
+    if (ind.bollingerUpper !== undefined && ind.bollingerLower !== undefined && ind.bollingerMid !== undefined) {
+      const range = ind.bollingerUpper - ind.bollingerLower;
+      const pos = range > 0 ? ((last - ind.bollingerLower) / range) * 100 : 50;
+      const bbWidth = range / ind.bollingerMid;
+      if (pos > 80)
+        parts.push(`Bollinger: preço em ${pos.toFixed(0)}% das bandas — próximo à banda superior, pressão vendedora das bandas. ${bbWidth < 0.005 ? 'Bandas estreitas indicam explosão de volatilidade iminente.' : ''}`);
+      else if (pos < 20)
+        parts.push(`Bollinger: preço em ${pos.toFixed(0)}% das bandas — próximo à banda inferior, suporte das bandas e potencial reversão. ${bbWidth < 0.005 ? 'Bandas estreitas indicam movimento explosivo próximo.' : ''}`);
+      else
+        parts.push(`Bollinger: preço em ${pos.toFixed(0)}% das bandas — região central, sem pressão extrema das bandas. ${bbWidth < 0.005 ? 'Bandas muito estreitas (squeeze) — movimento forte iminente.' : ''}`);
+    }
+
+    // ADX
+    if (ind.adx !== undefined) {
+      const adxInt = Math.round(ind.adx);
+      if (adxInt > 50) parts.push(`ADX em ${adxInt} — tendência extremamente forte, evitar operações contra a direção dominante.`);
+      else if (adxInt > 35) parts.push(`ADX em ${adxInt} — tendência forte estabelecida, seguir a direção é o mais seguro.`);
+      else if (adxInt > 25) parts.push(`ADX em ${adxInt} — tendência moderada confirmada (acima de 25), sinal direcional válido.`);
+      else if (adxInt > 15) parts.push(`ADX em ${adxInt} — tendência fraca, mercado em consolidação ou transição.`);
+      else parts.push(`ADX em ${adxInt} — mercado sem tendência definida (abaixo de 15), range lateral dominante.`);
+    }
+
+    // Stochastic
+    if (ind.stochK !== undefined && ind.stochD !== undefined) {
+      const k = Math.round(ind.stochK), d = Math.round(ind.stochD);
+      if (k > 80 && d > 80)
+        parts.push(`Estocástico em sobrecompra (%K=${k}, %D=${d}) — confirmação de sobrecompra, aguardar cruzamento para baixo antes de vender.`);
+      else if (k < 20 && d < 20)
+        parts.push(`Estocástico em sobrevenda (%K=${k}, %D=${d}) — confirmação de sobrevenda, aguardar cruzamento para cima antes de comprar.`);
+      else if (k > d)
+        parts.push(`Estocástico: %K (${k}) acima de %D (${d}) — momentum de alta no oscilador de curto prazo.`);
+      else
+        parts.push(`Estocástico: %K (${k}) abaixo de %D (${d}) — momentum de baixa no oscilador de curto prazo.`);
+    }
+
+    // Support / Resistance
+    if (ind.support !== undefined && ind.resistance !== undefined) {
+      const distSupport = last > 0 ? ((last - ind.support) / last * 100).toFixed(2) : '?';
+      const distResist = last > 0 ? ((ind.resistance - last) / last * 100).toFixed(2) : '?';
+      parts.push(`Zonas de preço: suporte em ${ind.support.toFixed(4)} (${distSupport}% abaixo) — resistência em ${ind.resistance.toFixed(4)} (${distResist}% acima).`);
+    }
+
+    // Trend summary
+    if (ind.trend) {
+      const map: Record<string, string> = {
+        bullish: 'Tendência geral: ALTISTA — confluência de indicadores aponta para continuação da alta.',
+        bearish: 'Tendência geral: BAIXISTA — confluência de indicadores aponta para continuação da queda.',
+        sideways: 'Tendência geral: LATERAL — mercado em consolidação, aguardar definição de direção.'
+      };
+      parts.push(map[ind.trend] || '');
+    }
+
+    return parts.filter(Boolean).join(' ');
+  }
+
+  private buildModelNarratives(
+    modelResults: AIModelResult[],
+    ind: MT5Indicators,
+    prediction: 'up' | 'down' | 'neutral',
+    confidence: number,
+    symbol: string
+  ): AIModelResult[] {
+    const dir = prediction === 'up' ? 'ALTA' : prediction === 'down' ? 'BAIXA' : 'NEUTRA';
+    const confLabel = confidence >= 80 ? 'alta confiança' : confidence >= 65 ? 'confiança moderada' : 'baixa confiança';
+
+    const specializations: Record<string, (ind: MT5Indicators, dir: string, conf: number) => string> = {
+      'FinBERT Financial Sentiment': (ind, dir, conf) => {
+        const rsiCtx = ind.rsi > 60 ? 'padrão quantitativo com linguagem positiva (momentum bullish detectado)' :
+                       ind.rsi < 40 ? 'padrão quantitativo com linguagem negativa (pressão bearish detectada)' :
+                       'padrão quantitativo neutro (equilíbrio entre forças)';
+        const macdCtx = ind.macd > ind.macdSignal ? 'histograma MACD positivo reforça o sentimento de alta' : 'histograma MACD negativo reforça sentimento de baixa';
+        return `O FinBERT processa o "DNA de mercado" de ${symbol} — uma descrição quantitativa dos preços transformada em linguagem financeira. Ele foi treinado em 4.9 bilhões de tokens de texto financeiro (Reuters, Bloomberg, FT, SEC). Nesta análise, identificou ${rsiCtx}. O ${macdCtx}. Conclusão do FinBERT: direção ${dir} com ${confLabel} (${conf}%).`;
+      },
+      'RoBERTa Market Analyzer': (ind, dir, conf) => {
+        const trendCtx = ind.trend === 'bullish' ? 'alinhamento bullish das médias móveis (EMA20>EMA50>EMA200)' :
+                         ind.trend === 'bearish' ? 'alinhamento bearish das médias móveis (EMA20<EMA50<EMA200)' :
+                         'médias móveis sem alinhamento claro (mercado lateral)';
+        const adxCtx = ind.adx > 25 ? `ADX em ${ind.adx.toFixed(0)} confirma tendência direcional forte` : `ADX em ${ind.adx.toFixed(0)} indica tendência fraca/lateral`;
+        return `O RoBERTa Market Analyzer foca em momentum direcional e força de tendência. Analisa o contexto do mercado como um texto de análise técnica. Detectou: ${trendCtx}. ${adxCtx}. Posicionamento do preço nas bandas de Bollinger (${ind.bollingerUpper !== undefined ? ((ind.bollingerUpper + ind.bollingerLower) / 2).toFixed(4) : '?'}) reforça a direção. Veredicto RoBERTa: ${dir} com ${confLabel} (${conf}%).`;
+      },
+      'XLM-RoBERTa Multilingual': (ind, dir, conf) => {
+        const stochCtx = ind.stochK > 80 ? `estocástico em sobrecompra (${ind.stochK.toFixed(0)}) — cuidado com exaustão` :
+                         ind.stochK < 20 ? `estocástico em sobrevenda (${ind.stochK.toFixed(0)}) — potencial de recuperação` :
+                         `estocástico em zona neutra (${ind.stochK.toFixed(0)})`;
+        const srCtx = `suporte em ${ind.support?.toFixed(4)} e resistência em ${ind.resistance?.toFixed(4)}`;
+        return `O XLM-RoBERTa tem capacidade multilíngue e alta generalização — ideal para mercados sintéticos como ${symbol}. Avalia padrões de preço em múltiplos contextos simultaneamente. Analisou: ${stochCtx}. Estrutura de ${srCtx} define o campo de batalha atual entre compradores e vendedores. A posição do preço nessa estrutura indica ${dir === 'ALTA' ? 'favor dos compradores' : dir === 'BAIXA' ? 'favor dos vendedores' : 'equilíbrio'}. Avaliação XLM-RoBERTa: ${dir} (${conf}%).`;
+      },
+      'RoBERTa Trend Detector': (ind, dir, conf) => {
+        const rsiCtx = ind.rsi !== undefined ? `RSI em ${ind.rsi.toFixed(1)}` : 'RSI indisponível';
+        const ema20vs50 = ind.ema20 > ind.ema50 ? `EMA20 (${ind.ema20.toFixed(4)}) acima da EMA50 (${ind.ema50.toFixed(4)}) — cruzamento de alta ativo` :
+                                                   `EMA20 (${ind.ema20.toFixed(4)}) abaixo da EMA50 (${ind.ema50.toFixed(4)}) — cruzamento de baixa ativo`;
+        const volCtx = ind.volatility !== undefined ? `volatilidade atual em ${ind.volatility.toFixed(3)}% (${ind.volatility > 0.5 ? 'mercado volátil' : 'mercado estável'})` : '';
+        return `O RoBERTa Trend Detector é especializado em identificar se uma tendência está se iniciando, continuando ou revertendo. Para ${symbol}: ${ema20vs50}. ${rsiCtx} ${ind.rsi > 55 ? 'suporta o viés de alta' : ind.rsi < 45 ? 'suporta o viés de baixa' : 'está neutro'}. ${volCtx ? volCtx + '.' : ''} Sinal de tendência detectado: ${dir} com ${confLabel} (${conf}%).`;
+      },
+      'DistilRoBERTa Financial': (ind, dir, conf) => {
+        const macdCtx = ind.macd !== undefined ? `MACD ${ind.macd > 0 ? 'positivo' : 'negativo'} (${ind.macd.toFixed(5)})` : 'MACD indisponível';
+        const atrCtx = ind.atr !== undefined ? `ATR em ${ind.atr.toFixed(5)} indica ${ind.atr > 0.001 ? 'amplitude de movimento significativa' : 'movimentos pequenos'}` : '';
+        return `O DistilRoBERTa Financial combina velocidade e precisão para análise de alta frequência. Processa ${symbol} com foco em sinais de curto prazo. Identificou: ${macdCtx} — ${ind.macd > ind.macdSignal ? 'momentum de alta ativo' : 'momentum de baixa'}. ${atrCtx ? atrCtx + '.' : ''} Pela análise de frequência e momentum imediato, o modelo conclui: ${dir} com ${confLabel} (${conf}%).`;
+      }
+    };
+
+    return modelResults.map(m => {
+      const buildNarrative = specializations[m.model];
+      const narrative = buildNarrative
+        ? buildNarrative(ind, dir, m.confidence)
+        : `${m.model} analisou os dados de ${symbol} e identificou direção ${dir} com ${m.confidence}% de confiança. ${m.reasoning || ''}`;
+      return { ...m, narrative };
+    });
+  }
+
+  private buildFullNarrative(
+    symbol: string,
+    aiDirection: 'up' | 'down' | 'neutral',
+    aiConsensus: number,
+    technicalAgrees: boolean,
+    ind: MT5Indicators,
+    finalDecision: string | null | undefined,
+    prices: number[]
+  ): string {
+    const dir = aiDirection === 'up' ? 'COMPRA' : aiDirection === 'down' ? 'VENDA' : 'NEUTRO';
+    const techDir = technicalAgrees ? 'concorda' : 'diverge';
+    const last = prices[prices.length - 1];
+    const prev = prices.length > 1 ? prices[prices.length - 2] : last;
+    const change = ((last - prev) / prev * 100).toFixed(4);
+    const changeLabel = parseFloat(change) >= 0 ? `+${change}%` : `${change}%`;
+
+    let narrative = `━━ ANÁLISE COMPLETA — ${symbol} ━━\n\n`;
+    narrative += `📍 Preço atual: ${last.toFixed(5)} (${changeLabel} na última vela)\n`;
+    narrative += `🧠 Consenso das IAs: ${aiConsensus.toFixed(1)}% → ${dir} (mínimo exigido: 70%)\n`;
+    narrative += `📊 Análise técnica: ${techDir} com as IAs\n`;
+    if (finalDecision && finalDecision !== 'HOLD') {
+      narrative += `✅ Decisão final: ${finalDecision === 'BUY' ? 'EXECUTAR COMPRA' : 'EXECUTAR VENDA'}\n`;
+    } else {
+      narrative += `⏸️ Decisão: SEM OPERAÇÃO — critérios não atendidos\n`;
+    }
+    narrative += `\n📈 O QUE AS IAs CONSIDERAM:\n`;
+    narrative += `• ${aiConsensus >= 70 ? `Consenso de ${aiConsensus.toFixed(0)}% entre os modelos — acima do limiar de segurança de 70%` : `Consenso de ${aiConsensus.toFixed(0)}% — insuficiente (mínimo 70%)`}\n`;
+    if (aiConsensus < 80 && !technicalAgrees) {
+      narrative += `• Divergência IA vs. técnico exige consenso ≥80% — operação bloqueada por segurança\n`;
+    } else if (technicalAgrees) {
+      narrative += `• Análise técnica confirma a direção das IAs — dupla validação aprovada\n`;
+    }
+    narrative += `\n🔍 CONTEXTO TÉCNICO:\n`;
+    narrative += `• Tendência: ${ind.trend === 'bullish' ? 'ALTA — EMAs empilhadas para cima' : ind.trend === 'bearish' ? 'BAIXA — EMAs empilhadas para baixo' : 'LATERAL — EMAs entrelaçadas'}\n`;
+    narrative += `• Momentum: RSI ${ind.rsi?.toFixed(1)} ${ind.rsi > 60 ? '(momentum de alta)' : ind.rsi < 40 ? '(momentum de baixa)' : '(neutro)'}\n`;
+    narrative += `• Força: ADX ${ind.adx?.toFixed(1)} ${ind.adx > 25 ? '(tendência forte ✓)' : '(tendência fraca ✗)'}\n`;
+    narrative += `• Volatilidade: ATR ${ind.atr?.toFixed(5)} | ${ind.volatility?.toFixed(3)}% do preço\n`;
+    narrative += `• Zonas: Suporte ${ind.support?.toFixed(4)} ↔ Resistência ${ind.resistance?.toFixed(4)}\n`;
+    return narrative;
   }
 
   getPendingSignal(symbol?: string): MT5Signal | null {

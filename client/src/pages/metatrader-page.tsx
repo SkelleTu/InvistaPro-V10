@@ -62,6 +62,7 @@ interface AIModelResult {
   prediction: 'up' | 'down' | 'neutral';
   confidence: number;
   reasoning: string;
+  narrative?: string;
 }
 
 interface AIAnalysisEntry {
@@ -79,8 +80,10 @@ interface AIAnalysisEntry {
   technicalAgrees?: boolean;
   technicalScore?: number;
   indicators?: Record<string, any>;
+  technicalNarrative?: string;
   finalDecision?: 'BUY' | 'SELL' | 'HOLD' | null;
   decisionReason: string;
+  fullNarrative?: string;
   circuitBreakerActive?: boolean;
   consecutiveLosses?: number;
   circuitBreakerRemainingMin?: number;
@@ -91,6 +94,59 @@ interface AIAnalysisResponse {
   log: AIAnalysisEntry[];
   latest: AIAnalysisEntry | null;
   total: number;
+}
+
+function ModelCard({ model, index }: { model: AIModelResult; index: number }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div
+      className={`rounded-lg border transition-colors ${
+        model.prediction === 'up' ? 'border-green-500/30 bg-green-500/5' :
+        model.prediction === 'down' ? 'border-red-500/30 bg-red-500/5' :
+        'border-yellow-500/30 bg-yellow-500/5'
+      }`}
+      data-testid={`card-model-${index}`}
+    >
+      <button
+        className="w-full flex items-center gap-3 p-2 text-left"
+        onClick={() => setExpanded(e => !e)}
+      >
+        <div className={`w-2 h-2 rounded-full shrink-0 ${
+          model.prediction === 'up' ? 'bg-green-500' :
+          model.prediction === 'down' ? 'bg-red-500' : 'bg-yellow-500'
+        }`} />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between mb-1">
+            <p className="text-xs font-medium truncate">{model.model}</p>
+            <div className="flex items-center gap-2 shrink-0">
+              <Badge variant="outline" className={`text-xs ${
+                model.prediction === 'up' ? 'text-green-500 border-green-500' :
+                model.prediction === 'down' ? 'text-red-500 border-red-500' :
+                'text-yellow-500 border-yellow-500'
+              }`}>
+                {model.prediction === 'up' ? '↑ COMPRA' : model.prediction === 'down' ? '↓ VENDA' : '— NEUTRO'}
+              </Badge>
+              <span className="text-xs font-bold w-8 text-right">{model.confidence}%</span>
+              {expanded ? <ChevronUp className="h-3 w-3 text-muted-foreground" /> : <ChevronDown className="h-3 w-3 text-muted-foreground" />}
+            </div>
+          </div>
+          <Progress value={model.confidence} className="h-1.5" />
+        </div>
+      </button>
+      {expanded && (
+        <div className="px-3 pb-3 space-y-2">
+          {model.narrative && (
+            <p className="text-xs text-foreground/85 leading-relaxed bg-background/50 rounded p-2 border">
+              {model.narrative}
+            </p>
+          )}
+          {model.reasoning && !model.narrative && (
+            <p className="text-xs text-muted-foreground">{model.reasoning}</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 const HEALTH_COLOR = {
@@ -508,40 +564,29 @@ export default function MetaTraderPage() {
                     {aiAnalysis.latest.decisionReason}
                   </p>
 
-                  {/* Resultados por modelo de IA */}
+                  {/* Resumo geral em linguagem natural */}
+                  {aiAnalysis.latest.fullNarrative && (
+                    <div className="bg-muted/30 rounded-lg p-3 border-l-4 border-primary">
+                      <p className="text-xs font-semibold text-primary mb-2 flex items-center gap-2">
+                        <Brain className="h-3.5 w-3.5" />
+                        Resumo Completo da Análise
+                      </p>
+                      <pre className="text-xs text-foreground/90 whitespace-pre-wrap font-sans leading-relaxed">
+                        {aiAnalysis.latest.fullNarrative}
+                      </pre>
+                    </div>
+                  )}
+
+                  {/* Resultados por modelo de IA com narrativa expandível */}
                   {aiAnalysis.latest.modelResults && aiAnalysis.latest.modelResults.length > 0 && (
                     <div>
                       <p className="text-sm font-semibold mb-3 flex items-center gap-2">
                         <Brain className="h-4 w-4 text-primary" />
-                        Modelos de IA — Resultados Individuais ({aiAnalysis.latest.participatingModels} modelos)
+                        O que cada IA analisou — {aiAnalysis.latest.participatingModels} modelos
                       </p>
                       <div className="space-y-2">
                         {aiAnalysis.latest.modelResults.map((model, i) => (
-                          <div key={i} className="flex items-center gap-3 p-2 rounded-lg bg-muted/30" data-testid={`card-model-${i}`}>
-                            <div className={`w-2 h-2 rounded-full shrink-0 ${
-                              model.prediction === 'up' ? 'bg-green-500' :
-                              model.prediction === 'down' ? 'bg-red-500' : 'bg-yellow-500'
-                            }`} />
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center justify-between mb-1">
-                                <p className="text-xs font-medium truncate">{model.model}</p>
-                                <div className="flex items-center gap-2 shrink-0">
-                                  <Badge variant="outline" className={`text-xs ${
-                                    model.prediction === 'up' ? 'text-green-500 border-green-500' :
-                                    model.prediction === 'down' ? 'text-red-500 border-red-500' :
-                                    'text-yellow-500 border-yellow-500'
-                                  }`}>
-                                    {model.prediction === 'up' ? '↑ COMPRA' : model.prediction === 'down' ? '↓ VENDA' : '— NEUTRO'}
-                                  </Badge>
-                                  <span className="text-xs font-bold w-8 text-right">{model.confidence}%</span>
-                                </div>
-                              </div>
-                              <Progress value={model.confidence} className="h-1.5" />
-                              {model.reasoning && (
-                                <p className="text-xs text-muted-foreground mt-1 truncate">{model.reasoning}</p>
-                              )}
-                            </div>
-                          </div>
+                          <ModelCard key={i} model={model} index={i} />
                         ))}
                       </div>
 
@@ -563,10 +608,7 @@ export default function MetaTraderPage() {
                               )}
                             </span>
                           </div>
-                          <Progress
-                            value={aiAnalysis.latest.aiConsensus}
-                            className="h-3"
-                          />
+                          <Progress value={aiAnalysis.latest.aiConsensus} className="h-3" />
                           <div className="flex justify-between text-xs text-muted-foreground mt-1">
                             <span>0%</span>
                             <span className="text-yellow-500">70% mínimo</span>
@@ -577,7 +619,7 @@ export default function MetaTraderPage() {
                     </div>
                   )}
 
-                  {/* Indicadores técnicos */}
+                  {/* Indicadores técnicos com interpretação */}
                   {aiAnalysis.latest.indicators && (
                     <div>
                       <p className="text-sm font-semibold mb-3 flex items-center gap-2">
@@ -591,12 +633,12 @@ export default function MetaTraderPage() {
                           }`}>
                             Sinal Técnico: {aiAnalysis.latest.technicalAction}
                             {aiAnalysis.latest.technicalAgrees !== undefined && (
-                              <span className="ml-1">{aiAnalysis.latest.technicalAgrees ? '✓ Confirma' : '✗ Diverge'}</span>
+                              <span className="ml-1">{aiAnalysis.latest.technicalAgrees ? '✓ Confirma IA' : '✗ Diverge da IA'}</span>
                             )}
                           </Badge>
                         )}
                       </p>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
                         {[
                           { label: 'RSI (14)', value: aiAnalysis.latest.indicators.rsi?.toFixed(1), color: (aiAnalysis.latest.indicators.rsi < 30 || aiAnalysis.latest.indicators.rsi > 70) ? 'text-orange-500' : 'text-foreground' },
                           { label: 'MACD', value: aiAnalysis.latest.indicators.macd?.toFixed(5), color: aiAnalysis.latest.indicators.macd > 0 ? 'text-green-500' : 'text-red-500' },
@@ -621,6 +663,17 @@ export default function MetaTraderPage() {
                           </div>
                         ))}
                       </div>
+
+                      {/* Interpretação em linguagem natural dos indicadores */}
+                      {aiAnalysis.latest.technicalNarrative && (
+                        <div className="bg-muted/20 rounded-lg p-3 border-l-4 border-blue-500">
+                          <p className="text-xs font-semibold text-blue-500 mb-2 flex items-center gap-2">
+                            <BarChart2 className="h-3.5 w-3.5" />
+                            Interpretação dos Indicadores em Linguagem Natural
+                          </p>
+                          <p className="text-xs text-foreground/90 leading-relaxed">{aiAnalysis.latest.technicalNarrative}</p>
+                        </div>
+                      )}
                     </div>
                   )}
                 </CardContent>
