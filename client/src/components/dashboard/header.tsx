@@ -114,6 +114,10 @@ export default function Header() {
                         <BarChart3 className="h-4 w-4 mr-2" />
                         Sistema de Renda Variável
                       </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setLocation("/metatrader")}>
+                        <TrendingUp className="h-4 w-4 mr-2" />
+                        MetaTrader 4/5
+                      </DropdownMenuItem>
                     </>
                   )}
                   
