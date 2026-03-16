@@ -27,6 +27,39 @@ export interface MT5Signal {
   timestamp: number;
   expiresAt: number;
   reason: string;
+  spikeOpportunity?: boolean;
+  spikeExitRequired?: boolean;
+  fibZone?: string;
+  fibConfluence?: number;
+}
+
+export interface FibZoneInfo {
+  level: string;
+  price: number;
+  layer: 'macro' | 'meso' | 'micro';
+  type: 'support' | 'resistance';
+  distancePct: number;
+}
+
+export interface SpikeInfo {
+  expected: boolean;
+  direction: 'down' | 'up' | null;
+  confidence: number;
+  candlesSinceLastSpike: number;
+  avgCandleInterval: number;
+  imminencePercent: number;
+  momentumConfirms: boolean;
+  lastSpikeSize: number;
+}
+
+export interface FibonacciAnalysis {
+  macro: Record<string, number>;
+  meso: Record<string, number>;
+  micro: Record<string, number>;
+  nearestLevels: FibZoneInfo[];
+  confluenceScore: number;
+  zoneType: 'support' | 'resistance' | 'neutral';
+  confluenceNarrative: string;
 }
 
 export interface MT5Indicators {
@@ -49,6 +82,8 @@ export interface MT5Indicators {
   volatility: number;
   support: number;
   resistance: number;
+  fibonacci?: FibonacciAnalysis;
+  spike?: SpikeInfo;
 }
 
 export interface MT5Position {
@@ -595,16 +630,18 @@ class MetaTraderBridge extends EventEmitter {
     }
   }
 
-  private runTechnicalAnalysis(symbol: string, marketData: any[]): { action: string; confidence: number; source: string } {
+  private runTechnicalAnalysis(symbol: string, marketData: any[]): { action: string; confidence: number; source: string; fibScore: number; fibZone: string; spikeInfo?: SpikeInfo } {
     const prices = marketData.map(d => d.close);
-    const highs = marketData.map(d => d.high || d.close);
-    const lows = marketData.map(d => d.low || d.close);
+    const highs  = marketData.map(d => d.high || d.close);
+    const lows   = marketData.map(d => d.low  || d.close);
+    const last   = prices[prices.length - 1];
 
-    const rsi = this.calcRSI(prices, 14);
+    const rsi   = this.calcRSI(prices, 14);
     const ema20 = this.calcEMA(prices, 20);
     const ema50 = this.calcEMA(prices, 50);
-    const macd = this.calcMACD(prices);
+    const macd  = this.calcMACD(prices);
 
+    // ── Classic indicator score ──
     let score = 0;
     if (rsi < 30) score += 2;
     else if (rsi > 70) score -= 2;
@@ -617,10 +654,50 @@ class MetaTraderBridge extends EventEmitter {
     if (macd.macd > macd.signal) score += 1;
     else score -= 1;
 
-    const action = score > 0 ? 'BUY' : score < 0 ? 'SELL' : 'HOLD';
-    const confidence = 0.4 + Math.abs(score) * 0.1;
+    // ── Fibonacci multi-layer score (primary layer) ──
+    let fibScore = 0;
+    let fibZoneDesc = 'Sem confluência Fibonacci próxima';
+    const fib = marketData.length >= 15 ? this.calcMultiLayerFibonacci(marketData, last) : null;
 
-    return { action, confidence: Math.min(confidence, 0.9), source: 'technical' };
+    if (fib) {
+      fibZoneDesc = fib.confluenceNarrative;
+
+      if (fib.confluenceScore > 0 && fib.zoneType !== 'neutral') {
+        // Fibonacci at SUPPORT → price likely to continue up or bounce (BUY bias)
+        // Fibonacci at RESISTANCE → price likely to reject or fall (SELL bias)
+        if (fib.zoneType === 'support') {
+          fibScore += 3; // strong buy signal at support
+          score += 2;    // boost overall score
+        } else if (fib.zoneType === 'resistance') {
+          fibScore -= 3; // strong sell signal at resistance
+          score -= 2;
+        }
+
+        // Multi-layer confluence boosts confidence
+        const layers = new Set(fib.nearestLevels.map(l => l.layer)).size;
+        if (layers >= 2) { fibScore += layers; score += layers; }
+
+        // Key levels (38.2%, 50%, 61.8%) add extra weight
+        const keyHits = fib.nearestLevels.filter(l => ['38.2%', '50%', '61.8%'].includes(l.level)).length;
+        if (keyHits > 0) { score += keyHits; fibScore += keyHits * 2; }
+      }
+    }
+
+    // ── Crash/Boom spike override ──
+    const spikeInfo = this.isSpikeIndex(symbol) ? this.detectSpikePattern(marketData, symbol) : undefined;
+    if (spikeInfo?.expected && spikeInfo.confidence >= 50) {
+      // Override to spike direction with high confidence
+      const spikeAction = spikeInfo.direction === 'down' ? 'SELL' : 'BUY';
+      const spikeConf = 0.5 + spikeInfo.confidence / 200; // 50%→0.75, 80%→0.9
+      return { action: spikeAction, confidence: Math.min(0.92, spikeConf), source: 'technical_spike', fibScore, fibZone: fibZoneDesc, spikeInfo };
+    }
+
+    const action     = score > 0 ? 'BUY' : score < 0 ? 'SELL' : 'HOLD';
+    const baseConf   = 0.4 + Math.abs(score) * 0.08;
+    const fibBoost   = Math.abs(fibScore) > 0 ? 0.05 * Math.min(Math.abs(fibScore), 3) : 0;
+    const confidence = Math.min(0.92, baseConf + fibBoost);
+
+    return { action, confidence, source: 'technical', fibScore, fibZone: fibZoneDesc, spikeInfo };
   }
 
   private fuseSignals(
@@ -628,9 +705,10 @@ class MetaTraderBridge extends EventEmitter {
     signals: Array<{ action: string; confidence: number; source: string }>,
     marketData: any[],
     aiReasoning?: string,
-    overrideConfidence?: number
+    overrideConfidence?: number,
+    spikeOverride?: SpikeInfo
   ): MT5Signal {
-    const buyScore = signals.filter(s => s.action === 'BUY').reduce((a, s) => a + s.confidence, 0);
+    const buyScore  = signals.filter(s => s.action === 'BUY').reduce((a, s) => a + s.confidence, 0);
     const sellScore = signals.filter(s => s.action === 'SELL').reduce((a, s) => a + s.confidence, 0);
     const holdScore = signals.filter(s => s.action === 'HOLD').reduce((a, s) => a + s.confidence, 0);
 
@@ -650,34 +728,100 @@ class MetaTraderBridge extends EventEmitter {
     }
 
     const prices = marketData.map(d => d.close);
-    const indicators = this.buildIndicators(prices, marketData);
+    const indicators = this.buildIndicators(prices, marketData, symbol);
     const lastPrice = prices[prices.length - 1];
     const atr = indicators.atr || lastPrice * 0.001;
 
     const isForex = lastPrice < 1000;
     const pipSize = isForex ? 0.0001 : 1;
-    const rawSlPips = this.config.useAIStopLoss ? Math.round(atr * 1.5 / pipSize) : this.config.stopLossPips;
-    const rawTpPips = this.config.useAIStopLoss ? Math.round(atr * 3.0 / pipSize) : this.config.takeProfitPips;
-    const slPips = Math.max(rawSlPips, 1);
-    const tpPips = Math.max(rawTpPips, 1);
 
-    const spike = this.isSpikeIndex(symbol);
+    // Fibonacci-aware SL/TP: place SL beyond the nearest Fibonacci level
+    const fib = indicators.fibonacci;
+    let slPips: number;
+    let tpPips: number;
+
+    if (fib && fib.nearestLevels.length > 0 && this.config.useAIStopLoss) {
+      // SL just beyond the Fibonacci zone (1.2× ATR past nearest level)
+      const nearestFibPrice = fib.nearestLevels[0].price;
+      const fibDist = Math.abs(lastPrice - nearestFibPrice);
+      const fibSlDist = fibDist + atr * 1.2;
+      slPips = Math.max(Math.round(fibSlDist / pipSize), 1);
+      // TP at next major Fibonacci level (or 2× SL as minimum)
+      const nextLevelIdx = fib.nearestLevels.findIndex(l => l.distancePct > fib.nearestLevels[0].distancePct + 0.1);
+      if (nextLevelIdx >= 0) {
+        const nextFibDist = Math.abs(lastPrice - fib.nearestLevels[nextLevelIdx].price);
+        tpPips = Math.max(Math.round(nextFibDist / pipSize), slPips * 2);
+      } else {
+        tpPips = slPips * 2;
+      }
+    } else if (this.config.useAIStopLoss) {
+      slPips = Math.max(Math.round(atr * 1.5 / pipSize), 1);
+      tpPips = Math.max(Math.round(atr * 3.0 / pipSize), 1);
+    } else {
+      slPips = Math.max(this.config.stopLossPips, 1);
+      tpPips = Math.max(this.config.takeProfitPips, 1);
+    }
+
+    const isSpikeIdx = this.isSpikeIndex(symbol);
+    const spike = spikeOverride || indicators.spike;
+
+    // Spike trade: no fixed SL/TP (spike moves too fast for traditional stops)
+    // Continuity trade on Crash/Boom: tight SL to exit on spike
+    const isSpikeOpportunity = isSpikeIdx && spike?.expected && spike.confidence >= 50;
+    const isContinuityOnSpikeIdx = isSpikeIdx && !isSpikeOpportunity;
+
+    let stopLossPrice = 0;
+    let takeProfitPrice = 0;
+    let stopLossPipsFinal = 0;
+    let takeProfitPipsFinal = 0;
+
+    if (isSpikeOpportunity) {
+      // Spike trade: very tight TP (grab quick spike profit), very tight SL (if spike doesn't happen, exit fast)
+      const spikeSl = Math.max(Math.round(atr * 0.5 / pipSize), 1);
+      const spikeTp = Math.max(Math.round(atr * 2.0 / pipSize), spikeSl);
+      stopLossPrice       = action === 'BUY' ? lastPrice - spikeSl * pipSize : lastPrice + spikeSl * pipSize;
+      takeProfitPrice     = action === 'BUY' ? lastPrice + spikeTp * pipSize : lastPrice - spikeTp * pipSize;
+      stopLossPipsFinal   = spikeSl;
+      takeProfitPipsFinal = spikeTp;
+    } else if (isContinuityOnSpikeIdx) {
+      // Continuity on Crash/Boom: tight SL to exit if spike fires
+      const contSl = Math.max(Math.round(atr * 0.8 / pipSize), 1);
+      const contTp = Math.max(Math.round(atr * 2.5 / pipSize), contSl * 2);
+      stopLossPrice       = action === 'BUY' ? lastPrice - contSl * pipSize : lastPrice + contSl * pipSize;
+      takeProfitPrice     = action === 'BUY' ? lastPrice + contTp * pipSize : lastPrice - contTp * pipSize;
+      stopLossPipsFinal   = contSl;
+      takeProfitPipsFinal = contTp;
+    } else {
+      stopLossPrice       = action === 'BUY' ? lastPrice - slPips * pipSize : lastPrice + slPips * pipSize;
+      takeProfitPrice     = action === 'BUY' ? lastPrice + tpPips * pipSize : lastPrice - tpPips * pipSize;
+      stopLossPipsFinal   = slPips;
+      takeProfitPipsFinal = tpPips;
+    }
+
+    const fibZoneLabel = fib && fib.nearestLevels.length > 0
+      ? `${fib.nearestLevels[0].level} ${fib.zoneType} (${fib.nearestLevels[0].layer})`
+      : 'fora de zona';
+
     const signal: MT5Signal = {
       id: `MT5_${Date.now()}_${Math.random().toString(36).substr(2, 6).toUpperCase()}`,
       symbol,
       action,
-      lotSize: this.getValidLotSize(symbol),
-      stopLoss: spike ? 0 : (action === 'BUY' ? lastPrice - slPips * pipSize : lastPrice + slPips * pipSize),
-      takeProfit: spike ? 0 : (action === 'BUY' ? lastPrice + tpPips * pipSize : lastPrice - tpPips * pipSize),
-      stopLossPips: spike ? 0 : slPips,
-      takeProfitPips: spike ? 0 : tpPips,
-      entryPrice: lastPrice,
-      confidence: finalConfidence,
-      aiSources: signals.map(s => s.source),
+      lotSize:         this.getValidLotSize(symbol),
+      stopLoss:        stopLossPrice,
+      takeProfit:      takeProfitPrice,
+      stopLossPips:    stopLossPipsFinal,
+      takeProfitPips:  takeProfitPipsFinal,
+      entryPrice:      lastPrice,
+      confidence:      finalConfidence,
+      aiSources:       signals.map(s => s.source),
       indicators,
-      timestamp: Date.now(),
-      expiresAt: Date.now() + this.config.signalTimeoutSeconds * 1000,
-      reason: this.buildReason(action, signals, indicators, aiReasoning)
+      timestamp:       Date.now(),
+      expiresAt:       Date.now() + this.config.signalTimeoutSeconds * 1000,
+      reason:          this.buildReason(action, signals, indicators, aiReasoning, fibZoneLabel),
+      spikeOpportunity: isSpikeOpportunity,
+      spikeExitRequired: isContinuityOnSpikeIdx && (spike?.imminencePercent || 0) >= 60,
+      fibZone:          fibZoneLabel,
+      fibConfluence:    fib?.confluenceScore
     };
 
     if (action !== 'HOLD') {
@@ -685,7 +829,9 @@ class MetaTraderBridge extends EventEmitter {
       this.status.totalSignalsGenerated++;
       this.status.activeSignal = signal;
       this.emit('signal', signal);
-      console.log(`[MT5Bridge] ✅ Sinal aprovado pela IA: ${action} ${symbol} | Consenso: ${(finalConfidence * 100).toFixed(1)}%`);
+      const spikeTag = isSpikeOpportunity ? ' [⚡ SPIKE]' : isContinuityOnSpikeIdx ? ' [CONTINUIDADE]' : '';
+      const fibTag = fib && fib.nearestLevels.length > 0 ? ` | Fib: ${fibZoneLabel}` : '';
+      console.log(`[MT5Bridge] ✅ Sinal aprovado: ${action} ${symbol}${spikeTag}${fibTag} | Consenso: ${(finalConfidence * 100).toFixed(1)}%`);
     }
 
     return signal;
@@ -715,7 +861,7 @@ class MetaTraderBridge extends EventEmitter {
     return parts.join(' | ') || `IA indica ${action}`;
   }
 
-  private buildIndicators(prices: number[], marketData: any[]): MT5Indicators {
+  private buildIndicators(prices: number[], marketData: any[], symbol?: string): MT5Indicators {
     const highs = marketData.map(d => d.high || d.close * 1.001);
     const lows = marketData.map(d => d.low || d.close * 0.999);
     const last = prices[prices.length - 1];
@@ -736,6 +882,14 @@ class MetaTraderBridge extends EventEmitter {
     const trend = ema20 > ema50 && ema50 > ema200 ? 'bullish' :
       ema20 < ema50 && ema50 < ema200 ? 'bearish' : 'sideways';
 
+    const fibonacci = marketData.length >= 15
+      ? this.calcMultiLayerFibonacci(marketData, last)
+      : undefined;
+
+    const spike = symbol
+      ? this.detectSpikePattern(marketData, symbol)
+      : undefined;
+
     return {
       rsi,
       macd: macdData.macd,
@@ -755,7 +909,9 @@ class MetaTraderBridge extends EventEmitter {
       momentum: macdData.macd - macdData.signal,
       volatility: atr / last * 100,
       support,
-      resistance
+      resistance,
+      fibonacci,
+      spike
     };
   }
 
@@ -1146,6 +1302,231 @@ class MetaTraderBridge extends EventEmitter {
     const lowest = Math.min(...lowSlice);
     const k = highest === lowest ? 50 : (closes[closes.length - 1] - lowest) / (highest - lowest) * 100;
     return { k, d: k };
+  }
+
+  // ============================================================
+  // FIBONACCI MULTI-LAYER ENGINE
+  // ============================================================
+
+  private static readonly FIB_RATIOS = [0, 0.236, 0.382, 0.500, 0.618, 0.786, 1.000, 1.272, 1.618];
+  private static readonly FIB_NAMES  = ['0%', '23.6%', '38.2%', '50%', '61.8%', '78.6%', '100%', '127.2%', '161.8%'];
+
+  /**
+   * Find swing high and swing low indices in a slice
+   */
+  private findSwing(highs: number[], lows: number[]): { high: number; low: number; highIdx: number; lowIdx: number; trend: 'up' | 'down' } {
+    let high = -Infinity, low = Infinity, highIdx = 0, lowIdx = 0;
+    for (let i = 0; i < highs.length; i++) {
+      if (highs[i] > high) { high = highs[i]; highIdx = i; }
+      if (lows[i] < low)   { low  = lows[i];  lowIdx  = i; }
+    }
+    return { high, low, highIdx, lowIdx, trend: highIdx > lowIdx ? 'down' : 'up' };
+  }
+
+  /**
+   * Calculate Fibonacci retracement and extension levels from a swing
+   * If uptrend: levels fan down from swingHigh (retracement into bull move)
+   * If downtrend: levels fan up from swingLow (retracement into bear move)
+   */
+  private calcFibLevels(swingHigh: number, swingLow: number, trend: 'up' | 'down'): Record<string, number> {
+    const range = swingHigh - swingLow;
+    const result: Record<string, number> = {};
+    MetaTraderBridge.FIB_RATIOS.forEach((ratio, i) => {
+      if (trend === 'up') {
+        result[MetaTraderBridge.FIB_NAMES[i]] = swingHigh - range * ratio;
+      } else {
+        result[MetaTraderBridge.FIB_NAMES[i]] = swingLow + range * ratio;
+      }
+    });
+    return result;
+  }
+
+  /**
+   * Multi-layer Fibonacci analysis:
+   * - Macro layer: last 100 candles (dominant swing)
+   * - Meso layer: last 50 candles (intermediate structure)
+   * - Micro layer: last 20 candles (current move / entry precision)
+   * Confluence: where levels from multiple layers cluster together
+   */
+  private calcMultiLayerFibonacci(marketData: any[], currentPrice: number): FibonacciAnalysis {
+    const highs  = marketData.map(d => d.high || d.close * 1.001);
+    const lows   = marketData.map(d => d.low  || d.close * 0.999);
+    const closes = marketData.map(d => d.close);
+
+    const atr = this.calcATR(highs, lows, closes, 14);
+    const tolerance = Math.max(atr * 0.6, currentPrice * 0.002); // within 0.6 ATR or 0.2% price
+
+    const macroN = Math.min(100, marketData.length);
+    const mesoN  = Math.min(50,  marketData.length);
+    const microN = Math.min(20,  marketData.length);
+
+    const macroSwing = this.findSwing(highs.slice(-macroN), lows.slice(-macroN));
+    const mesoSwing  = this.findSwing(highs.slice(-mesoN),  lows.slice(-mesoN));
+    const microSwing = this.findSwing(highs.slice(-microN), lows.slice(-microN));
+
+    const macro = this.calcFibLevels(macroSwing.high, macroSwing.low, macroSwing.trend);
+    const meso  = this.calcFibLevels(mesoSwing.high,  mesoSwing.low,  mesoSwing.trend);
+    const micro = this.calcFibLevels(microSwing.high,  microSwing.low,  microSwing.trend);
+
+    const nearestLevels: FibZoneInfo[] = [];
+
+    const collectNear = (levels: Record<string, number>, layer: 'macro' | 'meso' | 'micro') => {
+      Object.entries(levels).forEach(([name, price]) => {
+        const dist = Math.abs(currentPrice - price);
+        if (dist <= tolerance) {
+          nearestLevels.push({
+            level: name,
+            price,
+            layer,
+            type: currentPrice >= price ? 'support' : 'resistance',
+            distancePct: price > 0 ? dist / price * 100 : 0
+          });
+        }
+      });
+    };
+
+    collectNear(macro, 'macro');
+    collectNear(meso,  'meso');
+    collectNear(micro, 'micro');
+
+    nearestLevels.sort((a, b) => a.distancePct - b.distancePct);
+
+    // Confluence score: count how many distinct layers are represented near price
+    const layersPresent = new Set(nearestLevels.map(l => l.layer)).size;
+    const levelsCount = nearestLevels.length;
+    // High-value Fibonacci levels (38.2%, 50%, 61.8%) carry extra weight
+    const keyLevels = ['38.2%', '50%', '61.8%', '78.6%'];
+    const keyLevelHits = nearestLevels.filter(l => keyLevels.includes(l.level)).length;
+    const confluenceScore = Math.min(100, layersPresent * 25 + levelsCount * 10 + keyLevelHits * 15);
+
+    const supportCount    = nearestLevels.filter(l => l.type === 'support').length;
+    const resistanceCount = nearestLevels.filter(l => l.type === 'resistance').length;
+    const zoneType = supportCount > resistanceCount ? 'support'
+                   : resistanceCount > supportCount ? 'resistance'
+                   : 'neutral';
+
+    let confluenceNarrative = '';
+    if (nearestLevels.length === 0) {
+      // Find the next nearest level from any layer
+      const allLevels: Array<{ name: string; price: number; layer: string }> = [];
+      (['macro', 'meso', 'micro'] as const).forEach(layer => {
+        const lvl = layer === 'macro' ? macro : layer === 'meso' ? meso : micro;
+        Object.entries(lvl).forEach(([name, price]) => allLevels.push({ name, price, layer }));
+      });
+      allLevels.sort((a, b) => Math.abs(currentPrice - a.price) - Math.abs(currentPrice - b.price));
+      const next = allLevels[0];
+      const distPct = next ? ((Math.abs(currentPrice - next.price) / currentPrice) * 100).toFixed(2) : '?';
+      confluenceNarrative = `Preço (${currentPrice.toFixed(5)}) fora de zona Fibonacci. Próxima região: ${next?.name || '?'} (${next?.layer}) em ${next?.price?.toFixed(5) || '?'} — ${distPct}% de distância.`;
+    } else {
+      const closest = nearestLevels[0];
+      const multiLayer = layersPresent > 1;
+      const layerNames = [...new Set(nearestLevels.map(l => l.layer))].join(' + ');
+      confluenceNarrative = `⚡ ZONA FIBONACCI ATIVA: nível ${closest.level} (${closest.layer}) em ${closest.price.toFixed(5)} — distância ${(closest.distancePct * 10).toFixed(1)}‰.`;
+      if (multiLayer) {
+        confluenceNarrative += ` CONFLUÊNCIA ${layersPresent} CAMADAS (${layerNames}) — zona de altíssima probabilidade.`;
+      }
+      if (keyLevelHits > 0) {
+        const key = nearestLevels.filter(l => keyLevels.includes(l.level))[0];
+        confluenceNarrative += ` Nível-chave: ${key.level} — ouro do Fibonacci para reversões e continuidades.`;
+      }
+      confluenceNarrative += ` Comportamento esperado: ${zoneType === 'support' ? 'SUPORTE — pressão compradora provável, continuidade altista ou reversão de baixa' : zoneType === 'resistance' ? 'RESISTÊNCIA — pressão vendedora provável, rejeição ou continuidade baixista' : 'INDEFINIDO — aguardar vela de confirmação direcional'}.`;
+    }
+
+    return { macro, meso, micro, nearestLevels, confluenceScore, zoneType, confluenceNarrative };
+  }
+
+  // ============================================================
+  // CRASH & BOOM — SPIKE DETECTION ENGINE
+  // ============================================================
+
+  /**
+   * Detects the probability of an imminent spike for Crash/Boom indices.
+   * - Counts candles since last detected spike
+   * - As count approaches expected average interval → probability increases
+   * - Momentum building in opposite direction to spike also raises probability
+   * - Returns full spike analysis with entry/exit guidance
+   */
+  private detectSpikePattern(marketData: any[], symbol: string): SpikeInfo {
+    const sym = symbol.toUpperCase();
+    const isCrash = sym.includes('CRASH');
+    const isBoom  = sym.includes('BOOM');
+
+    if (!isCrash && !isBoom) {
+      return { expected: false, direction: null, confidence: 0, candlesSinceLastSpike: 0, avgCandleInterval: 0, imminencePercent: 0, momentumConfirms: false, lastSpikeSize: 0 };
+    }
+
+    const closes = marketData.map(d => d.close);
+    const highs  = marketData.map(d => d.high || d.close * 1.001);
+    const lows   = marketData.map(d => d.low  || d.close * 0.999);
+
+    const ranges = marketData.map((d, i) => highs[i] - lows[i]);
+    const avgRange = ranges.slice(-50).reduce((a, b) => a + b, 0) / Math.min(50, ranges.length) || 1;
+
+    // Spike = candle with range > 4× average (strong spike threshold)
+    const spikeThreshold = avgRange * 4;
+    let lastSpikeIdx = -1;
+    let lastSpikeSize = 0;
+
+    for (let i = marketData.length - 2; i >= 0; i--) {
+      if (ranges[i] > spikeThreshold) {
+        lastSpikeIdx = i;
+        lastSpikeSize = ranges[i];
+        break;
+      }
+    }
+
+    const candlesSinceLastSpike = lastSpikeIdx >= 0 ? marketData.length - 1 - lastSpikeIdx : marketData.length;
+
+    // Estimated average candles between spikes (based on index type)
+    // Crash/Boom 1000 index: ~1 spike per 1000 ticks ≈ 100 M1 candles (10 ticks/candle approx)
+    // Crash/Boom 500: ~50 candles, 300: ~30 candles
+    let avgCandleInterval = 100;
+    if (sym.includes('500')) avgCandleInterval = 50;
+    if (sym.includes('300')) avgCandleInterval = 30;
+    if (sym.includes('200')) avgCandleInterval = 20;
+
+    const imminencePercent = Math.min(100, Math.round((candlesSinceLastSpike / avgCandleInterval) * 100));
+
+    // Spike direction
+    const spikeDirection = isCrash ? 'down' : 'up';
+
+    // Momentum analysis: before a Crash spike, price builds up tension (rises briefly)
+    // Before a Boom spike, price builds down tension (falls briefly)
+    const recentPrices = closes.slice(-5);
+    const momentum = recentPrices.length > 1
+      ? (recentPrices[recentPrices.length - 1] - recentPrices[0]) / recentPrices[0] * 100
+      : 0;
+    const momentumConfirms = (isCrash && momentum > 0.01) || (isBoom && momentum < -0.01);
+
+    // Confidence: base from imminence, boosted by momentum confirmation
+    let confidence = imminencePercent * 0.55;
+    if (momentumConfirms) confidence = Math.min(95, confidence * 1.35);
+
+    const expected = imminencePercent >= 65;
+
+    return {
+      expected,
+      direction: spikeDirection as 'down' | 'up',
+      confidence: Math.round(confidence),
+      candlesSinceLastSpike,
+      avgCandleInterval,
+      imminencePercent,
+      momentumConfirms,
+      lastSpikeSize
+    };
+  }
+
+  /**
+   * Determine if the current open position should exit due to an incoming spike
+   * (when in a continuity trade on Crash/Boom)
+   */
+  private shouldExitForSpike(positionType: 'BUY' | 'SELL', spike: SpikeInfo): boolean {
+    if (!spike.expected || spike.confidence < 50) return false;
+    // If in BUY and Crash spike coming → exit
+    if (positionType === 'BUY' && spike.direction === 'down') return true;
+    // If in SELL and Boom spike coming → exit
+    if (positionType === 'SELL' && spike.direction === 'up') return true;
+    return false;
   }
 }
 
