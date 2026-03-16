@@ -2,9 +2,14 @@
  * METATRADER BRIDGE SERVICE - INVESTAPRO
  * Ponte entre o sistema de IAs e o MetaTrader 4/5
  * Gerencia sinais de trading, posições abertas e resultados
+ * 
+ * INTEGRAÇÃO REAL COM IAs: usa HuggingFaceAI + análise técnica avançada.
+ * Limiar mínimo de consenso: 70% — sem sinal aleatório.
  */
 
 import { EventEmitter } from 'events';
+import { huggingFaceAI } from './huggingface-ai';
+import { DerivTickData } from './deriv-api';
 
 export interface MT5Signal {
   id: string;
@@ -173,6 +178,13 @@ class MetaTraderBridge extends EventEmitter {
   private marketDataCache: Map<string, any[]> = new Map();
   private isGeneratingSignal = false;
 
+  // Rastreamento de perdas consecutivas — circuit breaker
+  private consecutiveLosses = 0;
+  private circuitBreakerUntil = 0;
+  private readonly MAX_CONSECUTIVE_LOSSES = 3;
+  private readonly CIRCUIT_BREAKER_MS = 15 * 60 * 1000; // 15 min de pausa
+  private readonly MIN_AI_CONSENSUS = 70; // 70% mínimo de consenso da IA
+
   private diagnostics: ConnectionDiagnostics = {
     serverUrl: '',
     discoveryUrl: null,
@@ -314,75 +326,89 @@ class MetaTraderBridge extends EventEmitter {
     if (this.isGeneratingSignal) return null;
     if (!this.config.enabled) return null;
 
+    // Circuit breaker: pausa se perdas consecutivas atingiram o limite
+    if (Date.now() < this.circuitBreakerUntil) {
+      const remaining = Math.ceil((this.circuitBreakerUntil - Date.now()) / 60000);
+      console.log(`[MT5Bridge] ⛔ Circuit Breaker ativo — aguardando ${remaining} min após ${this.consecutiveLosses} perdas consecutivas`);
+      return null;
+    }
+
     this.isGeneratingSignal = true;
     try {
       const marketData = this.getMarketDataForSymbol(symbol);
-      if (marketData.length < 10) {
-        return this.generateMockSignal(symbol);
+
+      // Sem dados reais suficientes: não gera sinal (sem fallback aleatório)
+      if (marketData.length < 15) {
+        console.log(`[MT5Bridge] ⏳ Dados insuficientes para ${symbol} (${marketData.length} candles) — aguardando`);
+        return null;
       }
 
-      const [quantumResult, advancedResult] = await Promise.allSettled([
-        this.runQuantumAnalysis(symbol, marketData),
-        this.runAdvancedAnalysis(symbol, marketData)
-      ]);
+      // Converter candles do MT5 para formato DerivTickData para a IA real
+      const tickData: DerivTickData[] = marketData.map((candle, i) => ({
+        symbol,
+        quote: candle.close,
+        epoch: candle.time ? Math.floor(candle.time) : Math.floor(Date.now() / 1000) - (marketData.length - i) * 60,
+      }));
 
-      const signals: Array<{ action: string; confidence: number; source: string }> = [];
+      // ============================================================
+      // ANÁLISE REAL: HuggingFace AI (FinBERT + RoBERTa + modelos)
+      // ============================================================
+      let aiConsensus: number = 0;
+      let aiDirection: 'up' | 'down' | 'neutral' = 'neutral';
+      let aiReasoning = '';
 
-      if (quantumResult.status === 'fulfilled' && quantumResult.value) {
-        signals.push({
-          action: quantumResult.value.recommendation || 'HOLD',
-          confidence: quantumResult.value.confidence || 0.5,
-          source: 'quantum'
-        });
+      try {
+        const consensus = await huggingFaceAI.analyzeMarketData(tickData, symbol);
+        aiConsensus = consensus.consensusStrength;
+        aiDirection = consensus.finalDecision;
+        aiReasoning = consensus.reasoning;
+        console.log(`[MT5Bridge] 🧠 IA HuggingFace: ${aiDirection.toUpperCase()} | Consenso: ${aiConsensus.toFixed(1)}% | ${symbol}`);
+      } catch (aiErr) {
+        console.warn(`[MT5Bridge] ⚠️ Falha na IA HuggingFace para ${symbol}:`, aiErr);
+        // Se a IA falhar, não geramos sinal — segurança primeiro
+        return null;
       }
 
-      if (advancedResult.status === 'fulfilled' && advancedResult.value) {
-        signals.push({
-          action: advancedResult.value.action || 'HOLD',
-          confidence: advancedResult.value.confidence || 0.5,
-          source: 'advanced'
-        });
+      // Limiar mínimo de consenso: 70%
+      if (aiConsensus < this.MIN_AI_CONSENSUS) {
+        console.log(`[MT5Bridge] ❌ Consenso insuficiente para ${symbol}: ${aiConsensus.toFixed(1)}% < ${this.MIN_AI_CONSENSUS}% — sem trade`);
+        return null;
       }
 
+      if (aiDirection === 'neutral') {
+        console.log(`[MT5Bridge] ⏸️ IA indica mercado neutro para ${symbol} — sem trade`);
+        return null;
+      }
+
+      // ============================================================
+      // VALIDAÇÃO TÉCNICA: confirma o sinal da IA
+      // ============================================================
       const technicalSignal = this.runTechnicalAnalysis(symbol, marketData);
-      signals.push(technicalSignal);
+      const technicalAgrees =
+        (aiDirection === 'up' && technicalSignal.action === 'BUY') ||
+        (aiDirection === 'down' && technicalSignal.action === 'SELL');
 
-      return this.fuseSignals(symbol, signals, marketData);
+      if (!technicalAgrees && aiConsensus < 80) {
+        console.log(`[MT5Bridge] ⚠️ Análise técnica diverge da IA para ${symbol} (consenso ${aiConsensus.toFixed(1)}% < 80%) — sem trade`);
+        return null;
+      }
+
+      // Traduzir direção da IA para ação MT5
+      const action: MT5Signal['action'] = aiDirection === 'up' ? 'BUY' : 'SELL';
+      const finalConfidence = aiConsensus / 100;
+
+      const signals = [
+        { action, confidence: finalConfidence, source: 'huggingface_ai' },
+        { action: technicalSignal.action, confidence: technicalSignal.confidence, source: 'technical' }
+      ];
+
+      return this.fuseSignals(symbol, signals, marketData, aiReasoning, finalConfidence);
     } catch (err) {
       console.error('[MT5Bridge] Erro ao gerar sinal:', err);
       return null;
     } finally {
       this.isGeneratingSignal = false;
     }
-  }
-
-  private async runQuantumAnalysis(symbol: string, marketData: any[]): Promise<any> {
-    return this.simulateQuantumAnalysis(symbol, marketData);
-  }
-
-  private async runAdvancedAnalysis(symbol: string, marketData: any[]): Promise<any> {
-    try {
-      return this.simulateAdvancedAnalysis(symbol, marketData);
-    } catch {
-      return this.simulateAdvancedAnalysis(symbol, marketData);
-    }
-  }
-
-  private simulateQuantumAnalysis(symbol: string, marketData: any[]): any {
-    const last = marketData[marketData.length - 1];
-    const prev = marketData[marketData.length - 5] || last;
-    const momentum = last.close > prev.close ? 'BUY' : 'SELL';
-    const confidence = 0.55 + Math.random() * 0.35;
-    return { recommendation: momentum, confidence };
-  }
-
-  private simulateAdvancedAnalysis(symbol: string, marketData: any[]): any {
-    const prices = marketData.map(d => d.close);
-    const ema9 = this.calcEMA(prices, 9);
-    const ema21 = this.calcEMA(prices, 21);
-    const action = ema9 > ema21 ? 'BUY' : 'SELL';
-    const confidence = 0.5 + Math.abs(ema9 - ema21) / ema21 * 10;
-    return { action, confidence: Math.min(confidence, 0.95) };
   }
 
   private runTechnicalAnalysis(symbol: string, marketData: any[]): { action: string; confidence: number; source: string } {
@@ -413,24 +439,30 @@ class MetaTraderBridge extends EventEmitter {
     return { action, confidence: Math.min(confidence, 0.9), source: 'technical' };
   }
 
-  private fuseSignals(symbol: string, signals: Array<{ action: string; confidence: number; source: string }>, marketData: any[]): MT5Signal {
+  private fuseSignals(
+    symbol: string,
+    signals: Array<{ action: string; confidence: number; source: string }>,
+    marketData: any[],
+    aiReasoning?: string,
+    overrideConfidence?: number
+  ): MT5Signal {
     const buyScore = signals.filter(s => s.action === 'BUY').reduce((a, s) => a + s.confidence, 0);
     const sellScore = signals.filter(s => s.action === 'SELL').reduce((a, s) => a + s.confidence, 0);
     const holdScore = signals.filter(s => s.action === 'HOLD').reduce((a, s) => a + s.confidence, 0);
 
     let action: MT5Signal['action'] = 'HOLD';
-    let finalConfidence = 0.5;
+    let finalConfidence = overrideConfidence ?? 0.5;
 
     const total = buyScore + sellScore + holdScore || 1;
     if (buyScore > sellScore && buyScore / total > 0.4) {
       action = 'BUY';
-      finalConfidence = buyScore / total;
+      if (!overrideConfidence) finalConfidence = buyScore / total;
     } else if (sellScore > buyScore && sellScore / total > 0.4) {
       action = 'SELL';
-      finalConfidence = sellScore / total;
+      if (!overrideConfidence) finalConfidence = sellScore / total;
     } else {
       action = 'HOLD';
-      finalConfidence = holdScore / total;
+      if (!overrideConfidence) finalConfidence = holdScore / total;
     }
 
     const prices = marketData.map(d => d.close);
@@ -461,7 +493,7 @@ class MetaTraderBridge extends EventEmitter {
       indicators,
       timestamp: Date.now(),
       expiresAt: Date.now() + this.config.signalTimeoutSeconds * 1000,
-      reason: this.buildReason(action, signals, indicators)
+      reason: this.buildReason(action, signals, indicators, aiReasoning)
     };
 
     if (action !== 'HOLD') {
@@ -469,28 +501,34 @@ class MetaTraderBridge extends EventEmitter {
       this.status.totalSignalsGenerated++;
       this.status.activeSignal = signal;
       this.emit('signal', signal);
-      console.log(`[MT5Bridge] ✅ Sinal gerado: ${action} ${symbol} | Confiança: ${(finalConfidence * 100).toFixed(1)}%`);
+      console.log(`[MT5Bridge] ✅ Sinal aprovado pela IA: ${action} ${symbol} | Consenso: ${(finalConfidence * 100).toFixed(1)}%`);
     }
 
     return signal;
   }
 
-  private buildReason(action: string, signals: Array<{ action: string; confidence: number; source: string }>, indicators: MT5Indicators): string {
+  private buildReason(action: string, signals: Array<{ action: string; confidence: number; source: string }>, indicators: MT5Indicators, aiReasoning?: string): string {
     const parts: string[] = [];
+
+    // Razão principal: IA
+    if (aiReasoning) {
+      parts.push(`IA: ${aiReasoning.slice(0, 120)}`);
+    }
+
     if (action === 'BUY') {
       if (indicators.rsi < 40) parts.push(`RSI sobrevendido (${indicators.rsi.toFixed(1)})`);
-      if (indicators.ema20 > indicators.ema50) parts.push('EMA20 acima EMA50');
-      if (indicators.macd > indicators.macdSignal) parts.push('MACD cruzamento bullish');
-      if (indicators.trend === 'bullish') parts.push('Tendência de alta confirmada');
+      if (indicators.ema20 > indicators.ema50) parts.push('EMA20 > EMA50');
+      if (indicators.macd > indicators.macdSignal) parts.push('MACD bullish');
+      if (indicators.trend === 'bullish') parts.push('Tendência alta confirmada');
     } else if (action === 'SELL') {
       if (indicators.rsi > 60) parts.push(`RSI sobrecomprado (${indicators.rsi.toFixed(1)})`);
-      if (indicators.ema20 < indicators.ema50) parts.push('EMA20 abaixo EMA50');
-      if (indicators.macd < indicators.macdSignal) parts.push('MACD cruzamento bearish');
-      if (indicators.trend === 'bearish') parts.push('Tendência de baixa confirmada');
+      if (indicators.ema20 < indicators.ema50) parts.push('EMA20 < EMA50');
+      if (indicators.macd < indicators.macdSignal) parts.push('MACD bearish');
+      if (indicators.trend === 'bearish') parts.push('Tendência baixa confirmada');
     }
     const aiCount = signals.filter(s => s.action === action).length;
-    parts.push(`${aiCount}/${signals.length} IAs em consenso`);
-    return parts.join(' | ') || `Análise técnica indica ${action}`;
+    parts.push(`${aiCount}/${signals.length} módulos em consenso`);
+    return parts.join(' | ') || `IA indica ${action}`;
   }
 
   private buildIndicators(prices: number[], marketData: any[]): MT5Indicators {
@@ -580,16 +618,24 @@ class MetaTraderBridge extends EventEmitter {
     if (result.profit > 0) {
       this.status.dailyProfit += result.profit;
       this.status.dailyWins++;
+      this.consecutiveLosses = 0; // Reset ao ganhar
     } else {
       this.status.dailyLoss += Math.abs(result.profit);
       this.status.dailyLosses++;
+      this.consecutiveLosses++;
+
+      // Circuit breaker: pausa após perdas consecutivas
+      if (this.consecutiveLosses >= this.MAX_CONSECUTIVE_LOSSES) {
+        this.circuitBreakerUntil = Date.now() + this.CIRCUIT_BREAKER_MS;
+        console.log(`[MT5Bridge] 🛑 Circuit Breaker ativado após ${this.consecutiveLosses} perdas consecutivas — pausa de 15 min`);
+      }
     }
 
     const total = this.status.dailyWins + this.status.dailyLosses;
     this.status.winRate = total > 0 ? (this.status.dailyWins / total) * 100 : 0;
 
     this.emit('trade_closed', result);
-    console.log(`[MT5Bridge] 🔒 Posição fechada: #${result.ticket} | P&L: ${result.profit > 0 ? '+' : ''}${result.profit.toFixed(2)} | ${result.closeReason}`);
+    console.log(`[MT5Bridge] 🔒 Posição fechada: #${result.ticket} | P&L: ${result.profit > 0 ? '+' : ''}${result.profit.toFixed(2)} | ${result.closeReason} | Perdas consecutivas: ${this.consecutiveLosses}`);
   }
 
   getOpenPositions(): MT5Position[] {
@@ -618,54 +664,8 @@ class MetaTraderBridge extends EventEmitter {
     return this.marketDataCache.get(symbol) || [];
   }
 
-  private generateMockSignal(symbol: string): MT5Signal {
-    const actions: Array<MT5Signal['action']> = ['BUY', 'SELL', 'HOLD'];
-    const weights = [0.35, 0.35, 0.3];
-    const rand = Math.random();
-    let action: MT5Signal['action'] = 'HOLD';
-    let cumulative = 0;
-    for (let i = 0; i < actions.length; i++) {
-      cumulative += weights[i];
-      if (rand < cumulative) { action = actions[i]; break; }
-    }
-
-    const prices: Record<string, number> = {
-      EURUSD: 1.0850, GBPUSD: 1.2650, XAUUSD: 2340.00, USDJPY: 149.50, BTCUSD: 67000,
-      'Crash 1000 Index': 9500, 'Crash 500 Index': 9200, 'Boom 1000 Index': 8800,
-      'Boom 500 Index': 8500, 'Volatility 75 Index': 320, 'Volatility 25 Index': 100,
-      'Step Index': 200, 'Range Break 100 Index': 500, 'Range Break 200 Index': 1000,
-    };
-    const basePrice = prices[symbol] || 1000;
-    const indicators = this.buildIndicators(
-      Array.from({ length: 50 }, (_, i) => basePrice + (Math.random() - 0.5) * basePrice * 0.001),
-      Array.from({ length: 50 }, (_, i) => {
-        const c = basePrice + (Math.random() - 0.5) * basePrice * 0.001;
-        return { close: c, high: c * 1.0005, low: c * 0.9995 };
-      })
-    );
-
-    const slDistance = basePrice * 0.003;
-    const tpDistance = basePrice * 0.006;
-    const pipSize = basePrice < 1000 ? 0.0001 : 1;
-    const isSpike = this.isSpikeIndex(symbol);
-    return {
-      id: `MT5_${Date.now()}_DEMO`,
-      symbol,
-      action,
-      lotSize: this.getValidLotSize(symbol),
-      stopLoss: isSpike ? 0 : (action === 'BUY' ? basePrice - slDistance : basePrice + slDistance),
-      takeProfit: isSpike ? 0 : (action === 'BUY' ? basePrice + tpDistance : basePrice - tpDistance),
-      stopLossPips: Math.round(slDistance / pipSize),
-      takeProfitPips: Math.round(tpDistance / pipSize),
-      entryPrice: basePrice,
-      confidence: 0.6 + Math.random() * 0.3,
-      aiSources: ['quantum', 'technical', 'advanced'],
-      indicators,
-      timestamp: Date.now(),
-      expiresAt: Date.now() + 60000,
-      reason: 'Análise técnica multi-indicador'
-    };
-  }
+  // generateMockSignal removido — sinais aleatórios são proibidos.
+  // O sistema só opera quando a IA real retorna consenso >= 70%.
 
   private startSignalGeneration(): void {
     if (this.signalGenerationInterval) return;
