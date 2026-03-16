@@ -17,6 +17,7 @@ import { dualStorage as storage } from "./storage-dual";
 import { derivTradeSync } from "./services/deriv-trade-sync";
 import { realStatsTracker } from "./services/real-stats-tracker";
 import { runPostgresMigration } from "./migrate-postgres";
+import { initUrlRegistry } from "./services/url-registry";
 
 const app = express();
 app.use(express.json());
@@ -188,6 +189,10 @@ app.use((req, res, next) => {
   });
   
   console.log('✅ ResilienceSupervisor ativo e monitorando componentes');
+
+  // 🌐 INICIALIZAR URL REGISTRY — Registra URL atual para o EA MT5 auto-descobrir
+  console.log('🌐 Inicializando URL Registry para o EA do MT5...');
+  initUrlRegistry().catch(err => console.warn('⚠️ URL Registry falhou (não crítico):', err));
   
   // Inicializar serviço WhatsApp (não bloqueia a inicialização do servidor)
   console.log('🤖 Inicializando serviço de notificações WhatsApp...');

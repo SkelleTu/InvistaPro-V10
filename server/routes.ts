@@ -46,6 +46,7 @@ import { isAuthorizedEmail, ACCESS_DENIED_MESSAGE } from './config/access';
 import { errorTracker } from './services/error-tracker';
 import { asyncErrorHandler } from './middleware/error-handler';
 import { tpmSystem } from './services/tpm-system';
+import { getRegistryInfo } from './services/url-registry';
 
 // PIX payload generator compatível com Santander
 function generatePixPayload(data: {
@@ -195,6 +196,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Servir arquivos estáticos (incluindo logo para emails)
   app.use('/public', express.static(path.join(process.cwd(), 'server/public')));
+
+  // Servir downloads (EA do MT5, etc.)
+  app.use('/downloads', express.static(path.join(process.cwd(), 'public/downloads')));
 
   // =========================== KEEP-ALIVE SYSTEM 24/7 ===========================
   
@@ -1765,6 +1769,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Motor de Aprendizado Persistente Real
   app.use('/api/learning', learningRoutes);
   app.use('/api/mt5', metaTraderRoutes);
+  app.use('/api/metatrader', metaTraderRoutes);
+
+  // 🌐 ENDPOINT PÚBLICO — Retorna URL atual do servidor para o EA MT5 auto-descobrir
+  app.get('/api/url', (req, res) => {
+    const info = getRegistryInfo();
+    const serverUrl = info.currentServerUrl || `https://${process.env.REPLIT_DEV_DOMAIN || req.hostname}`;
+    res.json({
+      serverUrl,
+      discoveryUrl: info.discoveryUrl,
+      blobId: info.blobId,
+      timestamp: new Date().toISOString(),
+    });
+  });
 
   // Marketing Email Routes
   app.post('/api/marketing/add-email', isAuthenticated, async (req, res) => {
