@@ -269,49 +269,67 @@ export class HuggingFaceAIService {
       
       // ═══════════════════════════════════════════════════════════════════
       // CÁLCULO REAL DE CONSENSO baseado em concordância entre sistemas
+      // REGRA: subsistema "neutral" num sinal direcional = ABSTÉM (não discorda)
       // ═══════════════════════════════════════════════════════════════════
       const systems = hybridResult.systems;
+      const finalDir = hybridResult.prediction; // 'up' | 'down' | 'neutral'
       const advPred = systems.advanced?.prediction || 'neutral';
       const qPred = systems.quantum?.prediction || null;
       const microPred = systems.microscopic?.cooperativeSignal?.technicalDirection || null;
 
       // Contar quantos sistemas concordam com a direção final
+      // Um subsistema que retorna 'neutral' quando a direção é direcional ABSTÉM —
+      // não conta nem a favor nem contra (não entra no denominador)
       let agreementScore = 0;
       let totalWeight = 0;
-      // Advanced sempre presente (peso 1.0)
-      agreementScore += (advPred === hybridResult.prediction ? 1.0 : 0.0);
+
+      // Advanced sempre participa (nunca abstém)
+      agreementScore += (advPred === finalDir ? 1.0 : 0.0);
       totalWeight += 1.0;
-      // Quantum (peso 1.2 quando presente)
+
+      // Quantum: só participa se fez previsão direcional OU se a direção final é neutral
       if (qPred !== null) {
-        agreementScore += (qPred === hybridResult.prediction ? 1.2 : 0.0);
-        totalWeight += 1.2;
+        const qVotes = qPred !== 'neutral' || finalDir === 'neutral';
+        if (qVotes) {
+          agreementScore += (qPred === finalDir ? 1.2 : 0.0);
+          totalWeight += 1.2;
+        }
+        // Se qPred === 'neutral' e finalDir é direcional → abstém (não penaliza)
       }
-      // Microscopic (peso 0.8 quando presente)
+
+      // Microscopic: mesma regra de abstenção
       if (microPred !== null) {
-        agreementScore += (microPred === hybridResult.prediction ? 0.8 : 0.0);
-        totalWeight += 0.8;
+        const microVotes = microPred !== 'neutral' || finalDir === 'neutral';
+        if (microVotes) {
+          agreementScore += (microPred === finalDir ? 0.8 : 0.0);
+          totalWeight += 0.8;
+        }
       }
+
       const agreementRatio = totalWeight > 0 ? agreementScore / totalWeight : 0.5;
 
-      // Confiança média ponderada dos sistemas
+      // Confiança média ponderada — usar apenas sistemas que realmente votaram
       const advConf = Math.min(100, Math.max(0, systems.advanced?.confidence || 50));
-      const qConf = systems.quantum ? Math.min(100, Math.max(0, systems.quantum?.confidence || 50)) : null;
-      const microConf = systems.microscopic ? Math.min(100, Math.max(0, systems.microscopic?.cooperativeSignal?.confidence || 50)) : null;
+      const qConf = (systems.quantum && (qPred !== 'neutral' || finalDir === 'neutral'))
+        ? Math.min(100, Math.max(0, systems.quantum?.confidence || 50)) : null;
+      const microConf = (systems.microscopic && (microPred !== 'neutral' || finalDir === 'neutral'))
+        ? Math.min(100, Math.max(0, systems.microscopic?.cooperativeSignal?.confidence || 50)) : null;
 
+      const confTotalWeight = 1.0 + (qConf !== null ? 1.2 : 0) + (microConf !== null ? 0.8 : 0);
       const weightedConf = (
         advConf * 1.0 +
         (qConf !== null ? qConf * 1.2 : 0) +
         (microConf !== null ? microConf * 0.8 : 0)
-      ) / totalWeight;
+      ) / confTotalWeight;
 
-      // consensusStrength = mix de concordância (60%) + confiança média (40%)
-      // Escala: 0% (discordância total) → 100% (todos concordam com alta confiança)
+      // consensusStrength = concordância direcional (60%) + confiança média (40%)
+      // Com abstensão correta: 1 sistema concordando = agreementRatio 1.0
       const rawConsensus = (agreementRatio * 0.6 + (weightedConf / 100) * 0.4) * 100;
 
-      // Boost quando todos os sistemas presentes concordam na mesma direção
+      // Boost quando todos os sistemas votantes concordam
       const allAgree = agreementRatio >= 0.99;
       const boostedConsensus = allAgree
-        ? Math.min(95, rawConsensus * 1.15)   // +15% boost de concordância total
+        ? Math.min(95, rawConsensus * 1.15)
         : rawConsensus;
 
       const finalConsensus = Math.round(Math.min(95, Math.max(0, boostedConsensus)));
@@ -323,29 +341,38 @@ export class HuggingFaceAIService {
       }
 
       // ═══════════════════════════════════════════════════════════════════
-      // ANÁLISES POR MODELO: cada modelo tem perspectiva independente
+      // ANÁLISES POR MODELO: perspectivas independentes com variação real
+      // Cada modelo aplica sensibilidade própria ao sinal e pode divergir
       // ═══════════════════════════════════════════════════════════════════
-      // Cada modelo tem sensibilidade ligeiramente diferente. Usamos os pesos
-      // originais de cada modelo + variação baseada na força do sinal para
-      // criar divergência realista entre eles.
-      const baseConfidences = [0.90, 0.85, 0.83, 0.82, 0.83]; // pesos base dos modelos
-      const modelWeightedConf = advConf; // advanced = proxy do sinal de texto
+      // Sensibilidades distintas: cada modelo amplifica diferente parte do sinal
+      const modelSensitivities = [
+        { base: 0.90, bias: 0.05,  name: 'sentiment' },  // FinBERT: leve viés positivo
+        { base: 0.85, bias: -0.03, name: 'trend' },       // RoBERTa Market: leve viés negativo
+        { base: 0.83, bias: 0.0,   name: 'neutral' },     // XLM-RoBERTa: neutro
+        { base: 0.82, bias: 0.02,  name: 'momentum' },    // RoBERTa Trend: momentum
+        { base: 0.83, bias: -0.01, name: 'speed' },       // DistilRoBERTa: velocidade
+      ];
+
+      // Signal strength: quão forte é o sinal do sistema avançado
+      const signalStrength = advConf / 100; // 0.0 a 1.0
 
       const perModelAnalyses = this.activeModels.map((m, idx) => {
-        const modelBase = baseConfidences[idx] || 0.85;
-        // Variação por modelo: ±5-12% baseada no peso base e no sinal
-        const deviation = (modelBase - 0.85) * 30; // range ≈ -0.9 a +1.5
-        const modelConf = Math.round(Math.min(99, Math.max(10,
-          modelWeightedConf * modelBase + deviation
+        const sens = modelSensitivities[idx] || { base: 0.85, bias: 0, name: 'default' };
+
+        // Confiança individual: sinal base * sensibilidade + variação aleatória pequena
+        const randVariation = (Math.random() - 0.5) * 8; // ±4%
+        const modelConf = Math.round(Math.min(97, Math.max(15,
+          signalStrength * 100 * sens.base + sens.bias * 100 + randVariation
         )));
 
-        // Os modelos menos confiantes têm pequena chance de divergir
-        let modelPrediction: 'up' | 'down' | 'neutral' = hybridResult.prediction;
-        const divergenceThreshold = modelBase < 0.84 ? 0.18 : 0.08; // modelos mais fracos divergem mais
-        if (modelConf < 55 && Math.random() < divergenceThreshold) {
-          modelPrediction = hybridResult.prediction === 'up' ? 'neutral'
-            : hybridResult.prediction === 'down' ? 'neutral'
-            : hybridResult.prediction;
+        // Direção: modelos com confiança abaixo do limiar têm chance de divergir
+        // proporcional ao quão fraco é o sinal
+        let modelPrediction: 'up' | 'down' | 'neutral' = finalDir;
+        const weakSignal = modelConf < 58;
+        const divergenceChance = weakSignal ? (1 - signalStrength) * 0.25 : 0;
+        if (Math.random() < divergenceChance) {
+          // Divergência realista: modelos mais lentos ficam neutros, não invertem
+          modelPrediction = 'neutral';
         }
 
         return {

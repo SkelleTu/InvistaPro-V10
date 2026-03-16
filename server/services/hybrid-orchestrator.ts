@@ -253,19 +253,69 @@ export class HybridOrchestrator {
     else if (maxScore === predictions.down) finalPrediction = 'down';
     else finalPrediction = 'neutral';
     
-    // CORREÇÃO: Amplificar confiança híbrida para evitar sinais muito fracos
-    // Se todos sistemas concordam, aumentar confiança
-    const systemsAgree = (advancedResult.prediction === (quantumResult?.prediction || advancedResult.prediction));
-    const hybridConfidence = systemsAgree 
-      ? Math.min(95, Math.max(maxScore * 100, 65)) // Mínimo 65% quando acordam
-      : Math.min(95, Math.max(maxScore * 100, 45)); // Mínimo 45% quando discordam
+    // CORREÇÃO: "neutral" de subsistema = abstenção, não discordância
+    // Um sistema que retorna neutral num sinal direcional simplesmente não vota
+    const qPrediction = quantumResult?.prediction || null;
+    const microDirection = hasMicroscopic ? microscopicResult!.cooperativeSignal.technicalDirection : null;
+
+    // Contar apenas os sistemas que fizeram previsão direcional (excluindo abstensões)
+    let voteWeightFor = 0;
+    let voteWeightTotal = 0;
+
+    // Advanced: sempre vota
+    if (advancedResult.prediction !== 'neutral' || finalPrediction === 'neutral') {
+      voteWeightFor += advancedResult.prediction === finalPrediction ? advancedWeight : 0;
+      voteWeightTotal += advancedWeight;
+    }
+
+    // Quantum: só conta se fez previsão direcional ou final é neutral
+    if (qPrediction !== null && (qPrediction !== 'neutral' || finalPrediction === 'neutral')) {
+      voteWeightFor += qPrediction === finalPrediction ? quantumWeight : 0;
+      voteWeightTotal += quantumWeight;
+    }
+
+    // Microscopic: mesma regra
+    if (microDirection !== null && (microDirection !== 'neutral' || finalPrediction === 'neutral')) {
+      voteWeightFor += microDirection === finalPrediction ? microscopicWeight : 0;
+      voteWeightTotal += microscopicWeight;
+    }
+
+    const directionAgreement = voteWeightTotal > 0 ? voteWeightFor / voteWeightTotal : 1.0;
+
+    // Confiança híbrida: acordo direcional * confiança média dos sistemas que votaram
+    let confSum = safeAdvancedConfidence * advancedWeight;
+    let confWeightSum = advancedWeight;
+    if (qPrediction !== null && (qPrediction !== 'neutral' || finalPrediction === 'neutral')) {
+      confSum += safeQuantumConfidence * quantumWeight;
+      confWeightSum += quantumWeight;
+    }
+    if (microDirection !== null && (microDirection !== 'neutral' || finalPrediction === 'neutral')) {
+      confSum += safeMicroscopicConfidence * microscopicWeight;
+      confWeightSum += microscopicWeight;
+    }
+    const avgActiveConf = confWeightSum > 0 ? confSum / confWeightSum : safeAdvancedConfidence;
+
+    // hybridConfidence = acordo direcional * confiança média dos que votaram
+    // Floor: 70% quando todos concordam, 50% quando há discordância
+    const rawHybridConf = directionAgreement * avgActiveConf;
+    const hybridConfidence = Math.min(95, Math.max(
+      rawHybridConf,
+      directionAgreement >= 1.0 ? 70 : 50
+    ));
     const quantumAdvantage = quantumResult ? (quantumResult.quantumAdvantage || 0) : 0;
     
     // Construir reasoning dinâmico baseado nos sistemas ativos
     let reasoning = `FUSÃO HÍBRIDA: ${finalPrediction.toUpperCase()} (${hybridConfidence.toFixed(1)}%)`;
+    reasoning += ` | Acordo: ${(directionAgreement * 100).toFixed(0)}%`;
     reasoning += ` | Avançado: ${advancedResult.prediction}`;
-    if (quantumResult) reasoning += ` | Quântico: ${quantumResult.prediction}`;
-    if (hasMicroscopic) reasoning += ` | Microscópico: ${microscopicResult!.cooperativeSignal.technicalDirection}`;
+    if (quantumResult) {
+      const qAbstained = qPrediction === 'neutral' && finalPrediction !== 'neutral';
+      reasoning += ` | Quântico: ${quantumResult.prediction}${qAbstained ? ' (absteve)' : ''}`;
+    }
+    if (hasMicroscopic) {
+      const mAbstained = microDirection === 'neutral' && finalPrediction !== 'neutral';
+      reasoning += ` | Microscópico: ${microscopicResult!.cooperativeSignal.technicalDirection}${mAbstained ? ' (absteve)' : ''}`;
+    }
     if (quantumResult) reasoning += ` | Vantagem Quântica: ${(quantumAdvantage * 100).toFixed(1)}%`;
     
     // Construir mode baseado nos sistemas ativos
