@@ -518,12 +518,14 @@ class MetaTraderBridge extends EventEmitter {
   addMarketData(symbol: string, candles: any[]): void {
     this.marketDataCache.set(symbol, candles);
     const hasPending = !!this.getPendingSignal(symbol);
-    if (!hasPending) {
-      this.generateSignal(symbol).then(signal => {
-        if (signal && signal.action !== 'HOLD') {
-          console.log(`[MT5Bridge] 🎯 Sinal gerado para ${symbol} após receber dados: ${signal.action} (${(signal.confidence * 100).toFixed(1)}%)`);
-        }
-      }).catch(() => {});
+    if (!hasPending && this.config.enabled) {
+      setImmediate(() => {
+        this.generateSignal(symbol).then(signal => {
+          if (signal && signal.action !== 'HOLD') {
+            console.log(`[MT5Bridge] 🎯 Sinal gerado para ${symbol}: ${signal.action} (${(signal.confidence * 100).toFixed(1)}%)`);
+          }
+        }).catch(() => {});
+      });
     }
   }
 
@@ -582,12 +584,16 @@ class MetaTraderBridge extends EventEmitter {
   private startSignalGeneration(): void {
     if (this.signalGenerationInterval) return;
     console.log('[MT5Bridge] 🚀 Iniciando geração automática de sinais');
-    this.signalGenerationInterval = setInterval(async () => {
+    this.signalGenerationInterval = setInterval(() => {
       if (!this.config.enabled) return;
-      for (const symbol of this.config.symbols.slice(0, 3)) {
-        await this.generateSignal(symbol);
-        await new Promise(r => setTimeout(r, 1000));
-      }
+      const symbols = this.config.symbols.slice(0, 3);
+      symbols.forEach((symbol, i) => {
+        setTimeout(() => {
+          setImmediate(() => {
+            this.generateSignal(symbol).catch(() => {});
+          });
+        }, i * 2000);
+      });
     }, 30000);
   }
 

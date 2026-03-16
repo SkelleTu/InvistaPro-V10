@@ -32,7 +32,7 @@ router.post('/heartbeat', (req: Request, res: Response) => {
   }
 });
 
-router.get('/signal', async (req: Request, res: Response) => {
+router.get('/signal', (req: Request, res: Response) => {
   try {
     const { symbol, token } = req.query;
     const config = metaTraderBridge.getConfig();
@@ -43,14 +43,11 @@ router.get('/signal', async (req: Request, res: Response) => {
       return res.json({ action: 'HOLD', reason: 'Sistema desabilitado', confidence: 0 });
     }
     const symbolStr = (symbol as string) || config.symbols[0] || 'EURUSD';
-    let signal = metaTraderBridge.getPendingSignal(symbolStr);
-    if (!signal) {
-      signal = await metaTraderBridge.generateSignal(symbolStr);
-    }
+    const signal = metaTraderBridge.getPendingSignal(symbolStr);
     if (!signal || signal.action === 'HOLD') {
       return res.json({
         action: 'HOLD',
-        reason: signal?.reason || 'Aguardando condições ideais de mercado',
+        reason: signal?.reason || 'Aguardando próximo sinal da IA',
         confidence: signal?.confidence || 0,
         timestamp: Date.now()
       });
