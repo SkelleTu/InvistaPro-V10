@@ -506,36 +506,73 @@ class MetaTraderBridge extends EventEmitter {
       });
 
       // ============================================================
-      // ROTA RÁPIDA DE SPIKE: Para Crash/Boom, verifica spike antes
-      // da IA HuggingFace — se confiança >= 70%, executa direto sem
-      // depender do consenso mínimo que a IA NLP dificilmente atinge
-      // nos índices sintéticos.
+      // MODO SPIKE INTELIGENTE: Para Crash/Boom, o motor de spike
+      // técnico lidera a decisão. A IA HuggingFace roda em PARALELO
+      // e atua como AMPLIFICADORA de confiança — se concordar com o
+      // spike, aumenta a confiança final. Se discordar, o spike ainda
+      // executa (pois a IA NLP não é treinada pra índices sintéticos).
       // ============================================================
       if (this.isSpikeIndex(symbol)) {
         const earlySpike = this.detectSpikePattern(marketData, symbol);
         if (earlySpike.expected && earlySpike.confidence >= 70) {
           const spikeAction: MT5Signal['action'] = earlySpike.direction === 'down' ? 'SELL' : 'BUY';
-          const spikeConf = earlySpike.confidence / 100;
+          let spikeConf = earlySpike.confidence / 100;
+
+          // Rodar IA em paralelo com timeout de 3s — não bloqueia, só amplifica
+          let aiBoostLabel = 'IA: timeout/neutro';
+          let aiBoostAmount = 0;
+          try {
+            const tickDataForAI: DerivTickData[] = marketData.map((candle, i) => ({
+              symbol,
+              quote: candle.close,
+              epoch: candle.time ? Math.floor(candle.time) : Math.floor(Date.now() / 1000) - (marketData.length - i) * 60,
+            }));
+            const aiResult = await Promise.race([
+              huggingFaceAI.analyzeMarketData(tickDataForAI, symbol),
+              new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000))
+            ]);
+            if (aiResult) {
+              const aiDir = (aiResult as any).finalDecision as string;
+              const aiConf = (aiResult as any).consensusStrength as number;
+              const spikeExpectedAI = (spikeAction === 'BUY' && aiDir === 'up') || (spikeAction === 'SELL' && aiDir === 'down');
+              if (spikeExpectedAI && aiConf >= 40) {
+                // IA concorda → amplifica confiança (até +10%)
+                aiBoostAmount = Math.min(0.10, (aiConf / 100) * 0.15);
+                spikeConf = Math.min(0.97, spikeConf + aiBoostAmount);
+                aiBoostLabel = `IA CONCORDA: ${aiDir.toUpperCase()} (${aiConf.toFixed(0)}%) → +${(aiBoostAmount * 100).toFixed(1)}% boost`;
+              } else if (!spikeExpectedAI && aiDir !== 'neutral' && aiConf >= 60) {
+                // IA discorda com alta convicção → reduz levemente (até -5%), spike ainda executa
+                aiBoostAmount = -Math.min(0.05, (aiConf / 100) * 0.08);
+                spikeConf = Math.max(0.65, spikeConf + aiBoostAmount);
+                aiBoostLabel = `IA DIVERGE: ${aiDir.toUpperCase()} (${aiConf.toFixed(0)}%) → ${(aiBoostAmount * 100).toFixed(1)}% adj`;
+              } else {
+                aiBoostLabel = `IA: ${aiDir.toUpperCase()} (${aiConf.toFixed(0)}%) — neutro, sem ajuste`;
+              }
+            }
+          } catch {
+            aiBoostLabel = 'IA: erro — spike executa por análise técnica';
+          }
+
           const spikeSignal = this.fuseSignals(
             symbol,
             [{ action: spikeAction, confidence: spikeConf, source: 'technical_spike' }],
             marketData,
-            `Spike detectado com ${earlySpike.confidence.toFixed(1)}% de confiança — iminência ${earlySpike.imminencePercent.toFixed(0)}%`,
+            `Spike: ${earlySpike.confidence.toFixed(1)}% técnico | ${aiBoostLabel}`,
             spikeConf,
             earlySpike
           );
           if (spikeSignal && spikeSignal.action !== 'HOLD') {
             this.logAnalysis({
-              id: `${entryId}_spike_fast`,
+              id: `${entryId}_spike_ai`,
               timestamp: Date.now(),
               symbol,
               phase: 'decision',
               status: 'approved',
               finalDecision: spikeSignal.action as 'BUY' | 'SELL' | 'HOLD',
               consecutiveLosses: this.consecutiveLosses,
-              decisionReason: `✅ SPIKE FAST TRACK: ${spikeSignal.action} ${symbol} | Spike confiança: ${earlySpike.confidence.toFixed(1)}% | Iminência: ${earlySpike.imminencePercent.toFixed(0)}% | Momentum: ${earlySpike.momentumConfirms ? 'confirmado' : 'não confirmado'}`
+              decisionReason: `✅ SPIKE + IA: ${spikeSignal.action} ${symbol} | Técnico: ${earlySpike.confidence.toFixed(1)}% | Iminência: ${earlySpike.imminencePercent.toFixed(0)}% | ${aiBoostLabel} | Confiança final: ${(spikeConf * 100).toFixed(1)}%`
             });
-            console.log(`[MT5Bridge] ⚡ SPIKE FAST TRACK: ${spikeSignal.action} ${symbol} | ${earlySpike.confidence.toFixed(1)}% confiança`);
+            console.log(`[MT5Bridge] ⚡ SPIKE + IA: ${spikeSignal.action} ${symbol} | Técnico: ${earlySpike.confidence.toFixed(1)}% | ${aiBoostLabel}`);
             return spikeSignal;
           }
         }
