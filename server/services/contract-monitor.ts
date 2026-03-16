@@ -1,5 +1,5 @@
 /**
- * MONITOR UNIVERSAL DE CONTRATOS — InvestaPRO
+ * MONITOR UNIVERSAL DE CONTRATOS — InvistaPRO
  * 
  * Acompanha cada operação aberta tick a tick como um trader humano expert,
  * com inteligência específica para cada modalidade da Deriv.

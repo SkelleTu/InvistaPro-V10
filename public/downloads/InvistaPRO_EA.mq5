@@ -1,9 +1,9 @@
 //+------------------------------------------------------------------+
-//|                                              InvestaPRO_EA.mq5    |
-//|                                 InvestaPRO - Auto-Discovery URL   |
+//|                                              InvistaPRO_EA.mq5    |
+//|                                 InvistaPRO - Auto-Discovery URL   |
 //|   Versão com auto-descoberta de URL — reconecta automaticamente   |
 //+------------------------------------------------------------------+
-#property copyright "InvestaPRO"
+#property copyright "InvistaPRO"
 #property version   "3.0"
 #property strict
 
@@ -48,7 +48,7 @@ int OnInit()
 
    trade.SetExpertMagicNumber(MagicNumber);
 
-   Print("🚀 InvestaPRO EA iniciado | Servidor: ", g_serverUrl);
+   Print("🚀 InvistaPRO EA iniciado | Servidor: ", g_serverUrl);
    Print("📊 Símbolo: ", g_symbol, " | Conta: ", AccountInfoInteger(ACCOUNT_LOGIN));
 
    // Tenta descobrir URL de descoberta se não configurada
@@ -308,11 +308,11 @@ void FetchAndProcessSignal()
 
    if (action == "BUY")
    {
-      success = trade.Buy(lotSize, g_symbol, 0, stopLoss, takeProfit, "InvestaPRO_" + signalId);
+      success = trade.Buy(lotSize, g_symbol, 0, stopLoss, takeProfit, "InvistaPRO_" + signalId);
    }
    else if (action == "SELL")
    {
-      success = trade.Sell(lotSize, g_symbol, 0, stopLoss, takeProfit, "InvestaPRO_" + signalId);
+      success = trade.Sell(lotSize, g_symbol, 0, stopLoss, takeProfit, "InvistaPRO_" + signalId);
    }
 
    if (success)
@@ -397,7 +397,7 @@ void ConfirmTradeOpen(string signalId, int ticket, string type, double lots, dou
 //+------------------------------------------------------------------+
 void SaveDiscoveryUrl(string url)
 {
-   int handle = FileOpen("InvestaPRO_DiscoveryURL.txt", FILE_WRITE | FILE_TXT | FILE_COMMON);
+   int handle = FileOpen("InvistaPRO_DiscoveryURL.txt", FILE_WRITE | FILE_TXT | FILE_COMMON);
    if (handle != INVALID_HANDLE)
    {
       FileWriteString(handle, url);
@@ -411,7 +411,7 @@ void SaveDiscoveryUrl(string url)
 string LoadDiscoveryUrl()
 {
    string url    = "";
-   int    handle = FileOpen("InvestaPRO_DiscoveryURL.txt", FILE_READ | FILE_TXT | FILE_COMMON);
+   int    handle = FileOpen("InvistaPRO_DiscoveryURL.txt", FILE_READ | FILE_TXT | FILE_COMMON);
    if (handle != INVALID_HANDLE)
    {
       url = FileReadString(handle);
@@ -459,6 +459,6 @@ double ExtractJsonDouble(string json, string key)
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
-   Print("🛑 InvestaPRO EA encerrado. Razão: ", reason);
+   Print("🛑 InvistaPRO EA encerrado. Razão: ", reason);
 }
 //+------------------------------------------------------------------+

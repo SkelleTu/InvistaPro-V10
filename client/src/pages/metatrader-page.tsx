@@ -147,7 +147,7 @@ export default function MetaTraderPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'InvestaPRO_EA.mq5';
+    a.download = 'InvistaPRO_EA.mq5';
     a.click();
     URL.revokeObjectURL(url);
     toast({ title: 'Expert Advisor baixado!', description: 'Instale o arquivo .mq5 no MetaTrader e compile-o.' });
@@ -702,7 +702,7 @@ export default function MetaTraderPage() {
                 </div>
                 <Button onClick={downloadEA} className="w-full gap-2" data-testid="button-download-ea-config">
                   <Download className="h-4 w-4" />
-                  Baixar InvestaPRO_EA.mq5
+                  Baixar InvistaPRO_EA.mq5
                 </Button>
               </CardContent>
             </Card>
@@ -715,11 +715,11 @@ export default function MetaTraderPage() {
 
 function generateEAContent(serverUrl: string, token: string, config: Partial<MT5Config>): string {
   return `//+------------------------------------------------------------------+
-//|                                              InvestaPRO_EA.mq5   |
-//|                        Copyright 2025, InvestaPRO Systems        |
+//|                                              InvistaPRO_EA.mq5   |
+//|                        Copyright 2025, InvistaPRO Systems        |
 //|                     Powered by 5 AI Systems + MetaTrader Bridge  |
 //+------------------------------------------------------------------+
-#property copyright "InvestaPRO Systems"
+#property copyright "InvistaPRO Systems"
 #property link      "${serverUrl}"
 #property version   "2.00"
 #property strict
@@ -769,7 +769,7 @@ int OnInit() {
       return INIT_FAILED;
    }
    
-   Print("✅ InvestaPRO EA iniciado | Servidor: ", ServerURL);
+   Print("✅ InvistaPRO EA iniciado | Servidor: ", ServerURL);
    Print("📡 Conta: ", accountId, " | Par: ", GetSymbol());
    
    SendHeartbeat();
@@ -780,7 +780,7 @@ int OnInit() {
 //| Expert deinitialization                                          |
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason) {
-   Print("⏹️ InvestaPRO EA finalizado. Razão: ", reason);
+   Print("⏹️ InvistaPRO EA finalizado. Razão: ", reason);
 }
 
 //+------------------------------------------------------------------+
@@ -917,8 +917,8 @@ void CheckAndExecuteSignal() {
    tpPrice = NormalizeDouble(tpPrice, digits);
    
    bool ok = false;
-   if(action == "BUY")  ok = trade.Buy(lotSize, symbol, entryPrice, slPrice, tpPrice, "InvestaPRO_" + signalId);
-   if(action == "SELL") ok = trade.Sell(lotSize, symbol, entryPrice, slPrice, tpPrice, "InvestaPRO_" + signalId);
+   if(action == "BUY")  ok = trade.Buy(lotSize, symbol, entryPrice, slPrice, tpPrice, "InvistaPRO_" + signalId);
+   if(action == "SELL") ok = trade.Sell(lotSize, symbol, entryPrice, slPrice, tpPrice, "InvistaPRO_" + signalId);
    
    if(ok) {
       lastSignalId = signalId;

@@ -1,5 +1,5 @@
 /**
- * MOTOR DE ANÁLISE SUPREMA — InvestaPRO
+ * MOTOR DE ANÁLISE SUPREMA — InvistaPRO
  *
  * Analisa o mercado em dimensões que nenhum humano consegue monitorar simultaneamente:
  *
