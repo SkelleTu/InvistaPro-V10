@@ -63,7 +63,15 @@ import {
   Radio,
   ScanLine,
   Sigma,
+  Wifi,
+  WifiOff,
+  Monitor,
+  Globe,
+  Microscope,
+  LineChart,
+  Info,
 } from "lucide-react";
+import { Link } from "wouter";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -848,6 +856,30 @@ export default function TradingSystemPage() {
     enabled: hasAccess,
   });
 
+  const { data: mt5Status } = useQuery({
+    queryKey: ["/api/mt5/status"],
+    refetchInterval: 3000,
+    enabled: hasAccess,
+  });
+
+  const { data: mt5Positions } = useQuery({
+    queryKey: ["/api/mt5/positions"],
+    refetchInterval: 3000,
+    enabled: hasAccess,
+  });
+
+  const { data: mt5Trades } = useQuery({
+    queryKey: ["/api/mt5/trades"],
+    refetchInterval: 5000,
+    enabled: hasAccess,
+  });
+
+  const { data: mt5Signal } = useQuery({
+    queryKey: ["/api/mt5/signal"],
+    refetchInterval: 10000,
+    enabled: hasAccess,
+  });
+
   // Estatísticas históricas de threshold da IA em tempo real
   const { data: aiThresholdStats } = useQuery({
     queryKey: ["/api/auto-trading/ai-threshold-stats"],
@@ -1069,7 +1101,7 @@ export default function TradingSystemPage() {
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-7">
+          <TabsList className="grid w-full grid-cols-8">
             <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
             <TabsTrigger value="config">Configurações</TabsTrigger>
             <TabsTrigger value="blocked">Bloqueio</TabsTrigger>
@@ -1083,6 +1115,17 @@ export default function TradingSystemPage() {
               {(monitorData as any)?.activeContracts > 0 && (
                 <span className="absolute -top-1 -right-1 bg-green-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center animate-pulse">
                   {(monitorData as any).activeContracts}
+                </span>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="metatrader" className="relative" data-testid="tab-metatrader">
+              <span className="flex items-center gap-1">
+                <Monitor className="h-3 w-3" />
+                MT5
+              </span>
+              {(mt5Status as any)?.openPositions > 0 && (
+                <span className="absolute -top-1 -right-1 bg-blue-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center animate-pulse">
+                  {(mt5Status as any).openPositions}
                 </span>
               )}
             </TabsTrigger>
@@ -2375,6 +2418,529 @@ export default function TradingSystemPage() {
                 </div>
               </CardContent>
             </Card>
+
+            {/* ===== MONITOR METATRADER — abaixo do Monitor Universal ===== */}
+            <Card className="border-2 border-purple-500/30 bg-purple-500/5">
+              <CardHeader>
+                <CardTitle className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <Monitor className="h-5 w-5 text-purple-500" />
+                    <span>Monitor MetaTrader — Operações em Tempo Real</span>
+                    <Badge variant="outline" className={`${(mt5Status as any)?.connected ? 'border-green-500 text-green-600 animate-pulse' : 'border-gray-400 text-gray-500'}`}>
+                      {(mt5Status as any)?.connected
+                        ? <><span className="w-2 h-2 bg-green-500 rounded-full inline-block mr-1"></span>Conectado</>
+                        : <><span className="w-2 h-2 bg-gray-400 rounded-full inline-block mr-1"></span>Aguardando EA</>}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge className={(mt5Status as any)?.openPositions > 0 ? 'bg-blue-600' : 'bg-gray-500'}>
+                      {(mt5Status as any)?.openPositions ?? 0} posição(ões)
+                    </Badge>
+                    <Link href="/metatrader">
+                      <Button size="sm" variant="outline" className="gap-1 text-xs" data-testid="link-metatrader-config">
+                        <Settings className="h-3 w-3" />
+                        Configurar
+                      </Button>
+                    </Link>
+                  </div>
+                </CardTitle>
+                <CardDescription>
+                  Monitoramento completo das operações abertas no MetaTrader — estratégias das IAs, padrões detectados, indicadores e raciocínio em tempo real
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-5">
+
+                {/* Status do Broker */}
+                {(mt5Status as any)?.connected && (
+                  <div className="flex items-center gap-4 p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
+                    <Wifi className="h-5 w-5 text-green-500 shrink-0" />
+                    <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
+                      <span><span className="text-muted-foreground">Broker:</span> <strong>{(mt5Status as any)?.broker || '—'}</strong></span>
+                      <span><span className="text-muted-foreground">Conta:</span> <strong>{(mt5Status as any)?.accountId || '—'}</strong></span>
+                      <span><span className="text-muted-foreground">Win Rate:</span> <strong className="text-green-500">{((mt5Status as any)?.winRate || 0).toFixed(1)}%</strong></span>
+                      <span><span className="text-muted-foreground">Ganhos:</span> <strong className="text-green-500">+${((mt5Status as any)?.dailyProfit || 0).toFixed(2)}</strong></span>
+                      <span><span className="text-muted-foreground">Perdas:</span> <strong className="text-red-500">-${((mt5Status as any)?.dailyLoss || 0).toFixed(2)}</strong></span>
+                      <span><span className="text-muted-foreground">Trades:</span> <strong>{(mt5Status as any)?.totalTradesExecuted || 0}</strong></span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Sinal Ativo das IAs */}
+                {(mt5Signal as any)?.action && (mt5Signal as any).action !== 'HOLD' && (
+                  <div className="border border-yellow-500/40 bg-yellow-500/5 rounded-lg p-4 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Zap className="h-4 w-4 text-yellow-500" />
+                        <span className="font-semibold text-sm">Sinal Ativo das IAs</span>
+                        <Badge className={(mt5Signal as any).action === 'BUY' ? 'bg-green-500' : 'bg-red-500'}>
+                          {(mt5Signal as any).action} {(mt5Signal as any).symbol}
+                        </Badge>
+                      </div>
+                      <Badge variant="outline" className="text-purple-500 border-purple-400">
+                        {(((mt5Signal as any).confidence || 0) * 100).toFixed(1)}% confiança
+                      </Badge>
+                    </div>
+
+                    {/* Indicadores em grade */}
+                    {(mt5Signal as any)?.indicators && (
+                      <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
+                        {[
+                          { label: 'RSI', value: (mt5Signal as any).indicators.rsi?.toFixed(1), color: (mt5Signal as any).indicators.rsi < 30 ? 'text-green-500' : (mt5Signal as any).indicators.rsi > 70 ? 'text-red-500' : 'text-foreground', detail: (mt5Signal as any).indicators.rsi < 30 ? 'Sobrevendido' : (mt5Signal as any).indicators.rsi > 70 ? 'Sobrecomprado' : 'Neutro' },
+                          { label: 'MACD', value: (mt5Signal as any).indicators.macd?.toFixed(5), color: (mt5Signal as any).indicators.macd > (mt5Signal as any).indicators.macdSignal ? 'text-green-500' : 'text-red-500', detail: (mt5Signal as any).indicators.macd > (mt5Signal as any).indicators.macdSignal ? 'Bullish' : 'Bearish' },
+                          { label: 'ADX', value: (mt5Signal as any).indicators.adx?.toFixed(1), color: (mt5Signal as any).indicators.adx > 25 ? 'text-yellow-500' : 'text-muted-foreground', detail: (mt5Signal as any).indicators.adx > 25 ? 'Tendência forte' : 'Lateral' },
+                          { label: 'ATR', value: (mt5Signal as any).indicators.atr?.toFixed(5), color: 'text-foreground', detail: 'Volatilidade' },
+                          { label: 'Stoch %K', value: (mt5Signal as any).indicators.stochK?.toFixed(1), color: (mt5Signal as any).indicators.stochK < 20 ? 'text-green-500' : (mt5Signal as any).indicators.stochK > 80 ? 'text-red-500' : 'text-foreground', detail: (mt5Signal as any).indicators.stochK < 20 ? 'Sobrevendido' : (mt5Signal as any).indicators.stochK > 80 ? 'Sobrecomprado' : 'Neutro' },
+                          { label: 'Tendência', value: (mt5Signal as any).indicators.trend, color: (mt5Signal as any).indicators.trend === 'bullish' ? 'text-green-500' : (mt5Signal as any).indicators.trend === 'bearish' ? 'text-red-500' : 'text-yellow-500', detail: 'EMA20/50/200' },
+                        ].map((ind, idx) => (
+                          <div key={idx} className="bg-muted/40 rounded p-2 text-center">
+                            <p className="text-[10px] text-muted-foreground">{ind.label}</p>
+                            <p className={`text-xs font-bold ${ind.color}`}>{ind.value}</p>
+                            <p className="text-[9px] text-muted-foreground">{ind.detail}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* EMAs */}
+                    {(mt5Signal as any)?.indicators && (
+                      <div className="grid grid-cols-3 gap-2">
+                        {[
+                          { label: 'EMA 20', value: (mt5Signal as any).indicators.ema20?.toFixed(4) },
+                          { label: 'EMA 50', value: (mt5Signal as any).indicators.ema50?.toFixed(4) },
+                          { label: 'EMA 200', value: (mt5Signal as any).indicators.ema200?.toFixed(4) },
+                        ].map((e, i) => (
+                          <div key={i} className="flex justify-between text-xs px-2 py-1 bg-muted/20 rounded">
+                            <span className="text-muted-foreground">{e.label}</span>
+                            <span className="font-mono font-bold">{e.value}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Bollinger Bands */}
+                    {(mt5Signal as any)?.indicators && (
+                      <div className="grid grid-cols-3 gap-2">
+                        {[
+                          { label: 'BB Superior', value: (mt5Signal as any).indicators.bollingerUpper?.toFixed(4), color: 'text-red-400' },
+                          { label: 'BB Média', value: (mt5Signal as any).indicators.bollingerMid?.toFixed(4), color: 'text-foreground' },
+                          { label: 'BB Inferior', value: (mt5Signal as any).indicators.bollingerLower?.toFixed(4), color: 'text-green-400' },
+                        ].map((b, i) => (
+                          <div key={i} className="flex justify-between text-xs px-2 py-1 bg-muted/20 rounded">
+                            <span className="text-muted-foreground">{b.label}</span>
+                            <span className={`font-mono font-bold ${b.color}`}>{b.value}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Raciocínio da IA */}
+                    <div className="flex items-start gap-2 p-3 bg-purple-500/10 rounded border border-purple-500/20">
+                      <Brain className="h-4 w-4 text-purple-500 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-xs font-semibold text-purple-400 mb-1">Raciocínio das IAs</p>
+                        <p className="text-xs text-muted-foreground">{(mt5Signal as any).reason}</p>
+                        <div className="flex gap-1 mt-2 flex-wrap">
+                          {((mt5Signal as any).aiSources || []).map((src: string, i: number) => (
+                            <Badge key={i} variant="outline" className="text-[10px] border-purple-400 text-purple-400">{src}</Badge>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Posições Abertas — detalhe completo */}
+                {(mt5Positions as any[])?.length > 0 ? (
+                  <div className="space-y-3">
+                    <p className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
+                      <Activity className="h-4 w-4" />
+                      Posições abertas no MetaTrader ({(mt5Positions as any[]).length})
+                    </p>
+                    {(mt5Positions as any[]).map((pos: any, i: number) => (
+                      <div key={i} className={`border-2 rounded-lg p-4 space-y-3 ${pos.type === 'BUY' ? 'border-green-500/40 bg-green-500/5' : 'border-red-500/40 bg-red-500/5'}`} data-testid={`mt5-position-${pos.ticket}`}>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            {pos.type === 'BUY' ? <TrendingUp className="h-5 w-5 text-green-500" /> : <TrendingDown className="h-5 w-5 text-red-500" />}
+                            <div>
+                              <p className="font-bold">{pos.symbol} <span className="text-xs font-normal text-muted-foreground">#{pos.ticket}</span></p>
+                              <p className="text-xs text-muted-foreground">{pos.type} • {pos.lots} lots</p>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <p className={`font-bold text-lg ${pos.profit >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                              {pos.profit >= 0 ? '+' : ''}${pos.profit?.toFixed(2)}
+                            </p>
+                            <p className="text-xs text-muted-foreground">P&L flutuante</p>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
+                          <div className="bg-muted/30 rounded p-2">
+                            <p className="text-[10px] text-muted-foreground">Entrada</p>
+                            <p className="font-mono font-bold">{pos.openPrice?.toFixed(5)}</p>
+                          </div>
+                          <div className="bg-muted/30 rounded p-2">
+                            <p className="text-[10px] text-muted-foreground">Atual</p>
+                            <p className="font-mono font-bold">{pos.currentPrice?.toFixed(5)}</p>
+                          </div>
+                          <div className="bg-red-500/10 rounded p-2">
+                            <p className="text-[10px] text-muted-foreground">Stop Loss</p>
+                            <p className="font-mono font-bold text-red-400">{pos.stopLoss?.toFixed(5)}</p>
+                          </div>
+                          <div className="bg-green-500/10 rounded p-2">
+                            <p className="text-[10px] text-muted-foreground">Take Profit</p>
+                            <p className="font-mono font-bold text-green-400">{pos.takeProfit?.toFixed(5)}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <Clock className="h-3 w-3" />
+                          <span>Aberta em {new Date(pos.openTime).toLocaleTimeString('pt-BR')}</span>
+                          {pos.signalId && <><span>•</span><span className="font-mono">{pos.signalId}</span></>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center py-6 text-muted-foreground">
+                    <Monitor className="h-8 w-8 mb-2 opacity-30" />
+                    <p className="text-sm">{(mt5Status as any)?.connected ? 'Nenhuma posição aberta no MetaTrader' : 'EA do MetaTrader não conectado'}</p>
+                    <p className="text-xs mt-1">{(mt5Status as any)?.connected ? 'As IAs estão analisando o mercado...' : 'Baixe e instale o EA → aba MT5 → Configurar'}</p>
+                  </div>
+                )}
+
+                {/* Histórico recente de trades */}
+                {(mt5Trades as any[])?.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
+                      <BarChart2 className="h-4 w-4" />
+                      Últimas operações fechadas
+                    </p>
+                    <div className="space-y-1 max-h-48 overflow-y-auto">
+                      {(mt5Trades as any[]).slice(0, 10).map((t: any, i: number) => (
+                        <div key={i} className="flex items-center justify-between text-xs py-2 px-3 bg-muted/20 rounded border" data-testid={`mt5-trade-${t.ticket}`}>
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline" className={`text-[10px] ${t.type === 'BUY' ? 'border-blue-400 text-blue-400' : 'border-purple-400 text-purple-400'}`}>{t.type}</Badge>
+                            <span className="font-medium">{t.symbol}</span>
+                            <span className="text-muted-foreground">{t.lots} lots</span>
+                            <Badge variant="outline" className="text-[10px]">{t.closeReason}</Badge>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className="text-muted-foreground">{t.pips?.toFixed(1)} pips</span>
+                            <span className={`font-bold ${t.profit >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                              {t.profit >= 0 ? '+' : ''}${t.profit?.toFixed(2)}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* ===== ABA MT5 — Monitor Completo e Configuração ===== */}
+          <TabsContent value="metatrader" className="space-y-6">
+
+            {/* Header com conexão e acesso rápido à config */}
+            <div className="flex items-center justify-between p-4 border-2 border-purple-500/30 bg-purple-500/5 rounded-lg">
+              <div className="flex items-center gap-3">
+                <Monitor className="h-6 w-6 text-purple-500" />
+                <div>
+                  <p className="font-bold">MetaTrader 4/5 — Monitor & Controle</p>
+                  <p className="text-sm text-muted-foreground">5 IAs operando no mercado forex/commodities/cripto via EA</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border ${(mt5Status as any)?.connected ? 'border-green-500 bg-green-500/10' : 'border-orange-500 bg-orange-500/10'}`}>
+                  {(mt5Status as any)?.connected
+                    ? <Wifi className="h-4 w-4 text-green-500" />
+                    : <WifiOff className="h-4 w-4 text-orange-500" />}
+                  <span className={`text-sm font-medium ${(mt5Status as any)?.connected ? 'text-green-500' : 'text-orange-500'}`}>
+                    {(mt5Status as any)?.connected ? `Conectado • ${(mt5Status as any)?.broker}` : 'EA não conectado'}
+                  </span>
+                </div>
+                <Link href="/metatrader">
+                  <Button className="gap-2" data-testid="link-mt5-full-config">
+                    <Settings className="h-4 w-4" />
+                    Acessar Painel MT5
+                  </Button>
+                </Link>
+              </div>
+            </div>
+
+            {/* Estatísticas do dia */}
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+              {[
+                { label: 'Sinais Gerados', value: (mt5Status as any)?.totalSignalsGenerated ?? 0, icon: <Zap className="h-4 w-4 text-yellow-500" />, color: 'text-yellow-500' },
+                { label: 'Trades Executados', value: (mt5Status as any)?.totalTradesExecuted ?? 0, icon: <Activity className="h-4 w-4 text-blue-500" />, color: 'text-blue-500' },
+                { label: 'Win Rate', value: `${((mt5Status as any)?.winRate || 0).toFixed(1)}%`, icon: <Target className="h-4 w-4 text-green-500" />, color: 'text-green-500' },
+                { label: 'Lucro Diário', value: `$${((mt5Status as any)?.dailyProfit || 0).toFixed(2)}`, icon: <TrendingUp className="h-4 w-4 text-green-500" />, color: 'text-green-500' },
+                { label: 'Perda Diária', value: `$${((mt5Status as any)?.dailyLoss || 0).toFixed(2)}`, icon: <TrendingDown className="h-4 w-4 text-red-500" />, color: 'text-red-500' },
+              ].map((s, i) => (
+                <Card key={i}>
+                  <CardContent className="pt-4">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs text-muted-foreground">{s.label}</span>
+                      {s.icon}
+                    </div>
+                    <p className={`text-xl font-bold ${s.color}`}>{s.value}</p>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+
+            {/* Sinal ativo completo */}
+            {(mt5Signal as any)?.id && (mt5Signal as any)?.action !== 'HOLD' ? (
+              <Card className="border-yellow-500/40 bg-yellow-500/5">
+                <CardHeader>
+                  <CardTitle className="flex items-center justify-between text-base">
+                    <div className="flex items-center gap-2">
+                      <Brain className="h-5 w-5 text-yellow-500" />
+                      <span>Análise Completa das IAs — Sinal Ativo</span>
+                    </div>
+                    <Badge className={(mt5Signal as any).action === 'BUY' ? 'bg-green-500 text-white' : 'bg-red-500 text-white'}>
+                      {(mt5Signal as any).action} {(mt5Signal as any).symbol}
+                    </Badge>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {/* Info principal */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="text-center p-3 bg-muted/30 rounded">
+                      <p className="text-xs text-muted-foreground">Confiança</p>
+                      <p className="text-2xl font-bold text-purple-500">{(((mt5Signal as any).confidence || 0) * 100).toFixed(1)}%</p>
+                    </div>
+                    <div className="text-center p-3 bg-muted/30 rounded">
+                      <p className="text-xs text-muted-foreground">Stop Loss</p>
+                      <p className="text-2xl font-bold text-red-400">{(mt5Signal as any).stopLossPips} pips</p>
+                    </div>
+                    <div className="text-center p-3 bg-muted/30 rounded">
+                      <p className="text-xs text-muted-foreground">Take Profit</p>
+                      <p className="text-2xl font-bold text-green-400">{(mt5Signal as any).takeProfitPips} pips</p>
+                    </div>
+                    <div className="text-center p-3 bg-muted/30 rounded">
+                      <p className="text-xs text-muted-foreground">R:R Ratio</p>
+                      <p className="text-2xl font-bold text-blue-400">{((mt5Signal as any).takeProfitPips / ((mt5Signal as any).stopLossPips || 1)).toFixed(1)}x</p>
+                    </div>
+                  </div>
+
+                  {/* IAs em consenso */}
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-muted-foreground">IAs Envolvidas no Consenso</p>
+                    <div className="grid grid-cols-5 gap-2">
+                      {[
+                        { key: 'quantum', label: 'Quantum Neural', icon: '🌌' },
+                        { key: 'advanced', label: 'Advanced Learning', icon: '🧠' },
+                        { key: 'microscopic', label: 'Análise Microscópica', icon: '🔬' },
+                        { key: 'huggingface', label: 'HuggingFace NLP', icon: '🤗' },
+                        { key: 'supreme', label: 'Supreme Analyzer', icon: '⚡' },
+                      ].map((ai) => {
+                        const active = ((mt5Signal as any).aiSources || []).includes(ai.key);
+                        return (
+                          <div key={ai.key} className={`p-2 rounded border text-center ${active ? 'border-green-500/40 bg-green-500/10' : 'border-border opacity-50'}`}>
+                            <p className="text-lg">{ai.icon}</p>
+                            <p className="text-[10px] font-medium mt-1">{ai.label}</p>
+                            {active && <Badge className="text-[9px] bg-green-500 mt-1">Ativo</Badge>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Indicadores completos */}
+                  {(mt5Signal as any)?.indicators && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-semibold text-muted-foreground">Leitura Completa dos Indicadores</p>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                        {[
+                          { label: 'RSI(14)', value: (mt5Signal as any).indicators.rsi?.toFixed(2), status: (mt5Signal as any).indicators.rsi < 30 ? '🟢 Sobrevendido — oportunidade de compra' : (mt5Signal as any).indicators.rsi > 70 ? '🔴 Sobrecomprado — pressão de venda' : '🟡 Zona neutra' },
+                          { label: 'MACD', value: (mt5Signal as any).indicators.macd?.toFixed(6), status: (mt5Signal as any).indicators.macd > (mt5Signal as any).indicators.macdSignal ? '🟢 Cruzamento bullish — momentum positivo' : '🔴 Cruzamento bearish — momentum negativo' },
+                          { label: 'ADX(14)', value: (mt5Signal as any).indicators.adx?.toFixed(2), status: (mt5Signal as any).indicators.adx > 40 ? '🔥 Tendência muito forte' : (mt5Signal as any).indicators.adx > 25 ? '🟡 Tendência moderada' : '⬜ Mercado lateral' },
+                          { label: 'ATR(14)', value: (mt5Signal as any).indicators.atr?.toFixed(6), status: `📏 Volatilidade: ${((mt5Signal as any).indicators.volatility || 0).toFixed(3)}%` },
+                          { label: 'Stoch %K', value: (mt5Signal as any).indicators.stochK?.toFixed(2), status: (mt5Signal as any).indicators.stochK < 20 ? '🟢 Zona de sobrevendido' : (mt5Signal as any).indicators.stochK > 80 ? '🔴 Zona de sobrecomprado' : '🟡 Zona média' },
+                          { label: 'BB Largura', value: (((mt5Signal as any).indicators.bollingerUpper - (mt5Signal as any).indicators.bollingerLower) || 0).toFixed(5), status: '📊 Largura das Bandas de Bollinger' },
+                          { label: 'Suporte', value: (mt5Signal as any).indicators.support?.toFixed(5), status: '🛡️ Nível de suporte identificado' },
+                          { label: 'Resistência', value: (mt5Signal as any).indicators.resistance?.toFixed(5), status: '🚧 Nível de resistência identificado' },
+                        ].map((ind, i) => (
+                          <div key={i} className="p-2 bg-muted/20 rounded border">
+                            <p className="text-[10px] text-muted-foreground font-semibold">{ind.label}</p>
+                            <p className="font-mono font-bold text-sm">{ind.value}</p>
+                            <p className="text-[10px] text-muted-foreground mt-1">{ind.status}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Condições de Mercado & Padrões */}
+                  <div className="grid md:grid-cols-3 gap-3">
+                    <div className="p-3 bg-muted/20 rounded border space-y-1">
+                      <p className="text-xs font-semibold flex items-center gap-1"><LineChart className="h-3 w-3" /> Tendência</p>
+                      <p className={`text-sm font-bold ${(mt5Signal as any).indicators?.trend === 'bullish' ? 'text-green-500' : (mt5Signal as any).indicators?.trend === 'bearish' ? 'text-red-500' : 'text-yellow-500'}`}>
+                        {(mt5Signal as any).indicators?.trend === 'bullish' ? '📈 Alta (EMA20 > EMA50 > EMA200)' : (mt5Signal as any).indicators?.trend === 'bearish' ? '📉 Baixa (EMA20 < EMA50 < EMA200)' : '↔️ Lateral'}
+                      </p>
+                    </div>
+                    <div className="p-3 bg-muted/20 rounded border space-y-1">
+                      <p className="text-xs font-semibold flex items-center gap-1"><Gauge className="h-3 w-3" /> Momentum</p>
+                      <p className="text-sm font-bold">
+                        {(mt5Signal as any).indicators?.momentum > 0 ? <span className="text-green-500">🚀 Positivo ({((mt5Signal as any).indicators?.momentum || 0).toFixed(6)})</span> : <span className="text-red-500">📉 Negativo ({((mt5Signal as any).indicators?.momentum || 0).toFixed(6)})</span>}
+                      </p>
+                    </div>
+                    <div className="p-3 bg-muted/20 rounded border space-y-1">
+                      <p className="text-xs font-semibold flex items-center gap-1"><Activity className="h-3 w-3" /> Volatilidade</p>
+                      <p className="text-sm font-bold">
+                        {(mt5Signal as any).indicators?.volatility > 0.5 ? <span className="text-red-400">⚡ Alta ({((mt5Signal as any).indicators?.volatility || 0).toFixed(3)}%)</span> : <span className="text-green-400">😌 Normal ({((mt5Signal as any).indicators?.volatility || 0).toFixed(3)}%)</span>}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Raciocínio completo da IA */}
+                  <div className="p-4 bg-purple-500/10 border border-purple-500/30 rounded-lg">
+                    <p className="text-xs font-semibold text-purple-400 flex items-center gap-1 mb-2">
+                      <Brain className="h-3 w-3" />
+                      Estratégia & Raciocínio Completo das IAs
+                    </p>
+                    <p className="text-sm text-muted-foreground leading-relaxed">{(mt5Signal as any).reason}</p>
+                    <div className="mt-3 flex gap-2 flex-wrap">
+                      {((mt5Signal as any).aiSources || []).map((src: string, i: number) => (
+                        <Badge key={i} variant="outline" className="text-[10px] border-purple-400 text-purple-400 gap-1">
+                          <Microscope className="h-2 w-2" />
+                          {src === 'quantum' ? 'Quantum Neural' : src === 'advanced' ? 'Advanced Learning' : src === 'technical' ? 'Análise Técnica' : src}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : (
+              <Card className="border border-muted">
+                <CardContent className="py-10 text-center text-muted-foreground">
+                  <Brain className="h-10 w-10 mx-auto mb-3 opacity-30" />
+                  <p className="font-medium">Aguardando próxima análise das IAs...</p>
+                  <p className="text-sm mt-1">{(mt5Status as any)?.connected ? 'As 5 IAs estão monitorando o mercado continuamente' : 'Conecte o EA do MetaTrader para começar'}</p>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Posições abertas detalhadas */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Activity className="h-5 w-5 text-blue-500" />
+                  Posições Abertas — Detalhe Completo ({(mt5Positions as any[])?.length || 0})
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {(mt5Positions as any[])?.length > 0 ? (
+                  <div className="space-y-4">
+                    {(mt5Positions as any[]).map((pos: any, i: number) => (
+                      <div key={i} className={`border-2 rounded-lg p-4 space-y-3 ${pos.type === 'BUY' ? 'border-green-500/40 bg-green-500/5' : 'border-red-500/40 bg-red-500/5'}`}>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            {pos.type === 'BUY' ? <TrendingUp className="h-6 w-6 text-green-500" /> : <TrendingDown className="h-6 w-6 text-red-500" />}
+                            <div>
+                              <p className="font-bold text-lg">{pos.symbol} <span className="text-sm font-normal text-muted-foreground">#{pos.ticket}</span></p>
+                              <p className="text-sm text-muted-foreground">{pos.lots} lotes • {pos.type} • Aberta {new Date(pos.openTime).toLocaleTimeString('pt-BR')}</p>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <p className={`font-bold text-2xl ${pos.profit >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                              {pos.profit >= 0 ? '+' : ''}${pos.profit?.toFixed(2)}
+                            </p>
+                            <p className="text-xs text-muted-foreground">P&L Flutuante</p>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-sm">
+                          <div className="bg-muted/30 rounded p-2 text-center">
+                            <p className="text-[10px] text-muted-foreground">Preço Entrada</p>
+                            <p className="font-mono font-bold">{pos.openPrice?.toFixed(5)}</p>
+                          </div>
+                          <div className="bg-muted/30 rounded p-2 text-center">
+                            <p className="text-[10px] text-muted-foreground">Preço Atual</p>
+                            <p className="font-mono font-bold">{pos.currentPrice?.toFixed(5)}</p>
+                          </div>
+                          <div className="bg-red-500/10 rounded p-2 text-center">
+                            <p className="text-[10px] text-muted-foreground">Stop Loss</p>
+                            <p className="font-mono font-bold text-red-400">{pos.stopLoss?.toFixed(5)}</p>
+                          </div>
+                          <div className="bg-green-500/10 rounded p-2 text-center">
+                            <p className="text-[10px] text-muted-foreground">Take Profit</p>
+                            <p className="font-mono font-bold text-green-400">{pos.takeProfit?.toFixed(5)}</p>
+                          </div>
+                          <div className="bg-blue-500/10 rounded p-2 text-center">
+                            <p className="text-[10px] text-muted-foreground">Variação</p>
+                            <p className="font-mono font-bold text-blue-400">{pos.openPrice && pos.currentPrice ? ((pos.currentPrice - pos.openPrice) / pos.openPrice * 100).toFixed(4) : '0.0000'}%</p>
+                          </div>
+                        </div>
+                        {pos.signalId && (
+                          <p className="text-[10px] text-muted-foreground font-mono">Signal: {pos.signalId}</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="py-10 text-center text-muted-foreground">
+                    <Activity className="h-10 w-10 mx-auto mb-3 opacity-30" />
+                    <p>{(mt5Status as any)?.connected ? 'Nenhuma posição aberta — IAs monitorando o mercado' : 'Conecte o Expert Advisor para monitorar posições'}</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Histórico completo */}
+            {(mt5Trades as any[])?.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <BarChart3 className="h-5 w-5" />
+                    Histórico de Operações Fechadas ({(mt5Trades as any[]).length})
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2 max-h-80 overflow-y-auto">
+                    {(mt5Trades as any[]).map((t: any, i: number) => (
+                      <div key={i} className={`flex items-center justify-between px-3 py-2 rounded border ${t.profit >= 0 ? 'border-green-500/20 bg-green-500/5' : 'border-red-500/20 bg-red-500/5'}`} data-testid={`mt5-history-${t.ticket}`}>
+                        <div className="flex items-center gap-2 text-sm">
+                          {t.profit >= 0 ? <ArrowUpRight className="h-4 w-4 text-green-500" /> : <ArrowDownRight className="h-4 w-4 text-red-500" />}
+                          <Badge variant="outline" className={`text-[10px] ${t.type === 'BUY' ? 'border-blue-400 text-blue-400' : 'border-purple-400 text-purple-400'}`}>{t.type}</Badge>
+                          <span className="font-medium">{t.symbol}</span>
+                          <span className="text-muted-foreground text-xs">{t.lots}L</span>
+                          <span className="text-muted-foreground text-xs">#{t.ticket}</span>
+                        </div>
+                        <div className="flex items-center gap-4 text-sm">
+                          <span className="text-muted-foreground text-xs">{t.pips?.toFixed(1)} pips</span>
+                          <Badge variant="outline" className="text-[10px]">{t.closeReason}</Badge>
+                          <span className={`font-bold ${t.profit >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                            {t.profit >= 0 ? '+' : ''}${t.profit?.toFixed(2)}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Info de instalação */}
+            {!(mt5Status as any)?.connected && (
+              <Card className="border-blue-500/30 bg-blue-500/5">
+                <CardContent className="py-6">
+                  <div className="flex items-start gap-3">
+                    <Info className="h-5 w-5 text-blue-500 shrink-0 mt-0.5" />
+                    <div className="space-y-2">
+                      <p className="font-semibold">Como conectar o MetaTrader</p>
+                      <ol className="text-sm text-muted-foreground space-y-1 list-decimal list-inside">
+                        <li>Acesse <Link href="/metatrader"><span className="text-primary underline cursor-pointer">Painel MetaTrader</span></Link> e baixe o Expert Advisor</li>
+                        <li>No MetaTrader: Arquivo → MQL5/Experts, cole o arquivo .mq5</li>
+                        <li>Compile com F7 no MetaEditor</li>
+                        <li>Arraste o EA para qualquer gráfico e ative o AlgoTrading</li>
+                        <li>As 5 IAs começarão a enviar sinais automaticamente</li>
+                      </ol>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </TabsContent>
         </Tabs>
       </div>
