@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useLocation } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,7 +15,7 @@ import { Separator } from "@/components/ui/separator";
 import {
   Activity, TrendingUp, TrendingDown, Settings, Download, Wifi, WifiOff,
   BarChart2, Zap, Shield, RefreshCw, AlertTriangle, CheckCircle2,
-  Brain, Target, DollarSign, ArrowUpRight, ArrowDownRight, Clock, Info
+  Brain, Target, DollarSign, ArrowUpRight, ArrowDownRight, Clock, Info, ChevronLeft
 } from "lucide-react";
 
 interface MT5Status {
@@ -72,6 +73,7 @@ const ALL_SYMBOLS = ['EURUSD', 'GBPUSD', 'XAUUSD', 'USDJPY', 'BTCUSD', 'AUDUSD',
 
 export default function MetaTraderPage() {
   const { toast } = useToast();
+  const [, setLocation] = useLocation();
   const [configEdits, setConfigEdits] = useState<Partial<MT5Config>>({});
   const [newApiToken, setNewApiToken] = useState('');
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -156,14 +158,26 @@ export default function MetaTraderPage() {
       <div className="max-w-7xl mx-auto space-y-6">
 
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-bold flex items-center gap-2">
-              <BarChart2 className="h-8 w-8 text-primary" />
-              MetaTrader Integration
-            </h1>
-            <p className="text-muted-foreground mt-1">
-              5 IAs conectadas ao MetaTrader 4/5 via Expert Advisor
-            </p>
+          <div className="flex items-center gap-3">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setLocation('/trading')}
+              data-testid="button-back"
+              className="gap-1.5 text-muted-foreground hover:text-foreground"
+            >
+              <ChevronLeft className="h-4 w-4" />
+              Voltar
+            </Button>
+            <div>
+              <h1 className="text-3xl font-bold flex items-center gap-2">
+                <BarChart2 className="h-8 w-8 text-primary" />
+                MetaTrader Integration
+              </h1>
+              <p className="text-muted-foreground mt-1">
+                5 IAs conectadas ao MetaTrader 4/5 via Expert Advisor
+              </p>
+            </div>
           </div>
           <div className="flex items-center gap-3">
             <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border ${status?.connected ? 'border-green-500 bg-green-500/10' : 'border-red-500 bg-red-500/10'}`}>
