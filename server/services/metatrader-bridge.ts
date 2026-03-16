@@ -228,6 +228,40 @@ class MetaTraderBridge extends EventEmitter {
     }
   }
 
+  /**
+   * Retorna o lote mínimo correto para cada tipo de símbolo.
+   * Índices sintéticos da Deriv (Crash/Boom) exigem lote mínimo de 1.0.
+   * Índices de Volatilidade aceitam 0.01. Forex aceita 0.01.
+   */
+  private getValidLotSize(symbol: string): number {
+    const sym = symbol.toUpperCase();
+
+    // Crash Index (Crash 1000, Crash 500, Crash 300) — mínimo 1.0
+    if (sym.includes('CRASH')) return Math.max(this.config.defaultLotSize, 1.0);
+
+    // Boom Index (Boom 1000, Boom 500, Boom 300) — mínimo 1.0
+    if (sym.includes('BOOM')) return Math.max(this.config.defaultLotSize, 1.0);
+
+    // Step Index — mínimo 0.10
+    if (sym.includes('STEP')) return Math.max(this.config.defaultLotSize, 0.10);
+
+    // Jump Indices — mínimo 0.01
+    if (sym.includes('JUMP')) return Math.max(this.config.defaultLotSize, 0.01);
+
+    // Volatility Indices (R_10, R_25, R_50, R_75, R_100, 1HZ10V etc.) — mínimo 0.01
+    if (sym.match(/^(R_|1HZ|V)\d/) || sym.includes('VOLATILITY')) {
+      return Math.max(this.config.defaultLotSize, 0.01);
+    }
+
+    // Range Break — mínimo 0.10
+    if (sym.includes('RANGE') || sym.includes('RDBEAR') || sym.includes('RDBULL')) {
+      return Math.max(this.config.defaultLotSize, 0.10);
+    }
+
+    // Padrão (Forex, Metais, Crypto) — usa configuração
+    return this.config.defaultLotSize;
+  }
+
   getStatus(): MT5Status {
     const now = Date.now();
     const connected = (now - this.status.lastHeartbeat) < 120000 && this.status.lastHeartbeat > 0;
@@ -406,7 +440,7 @@ class MetaTraderBridge extends EventEmitter {
       id: `MT5_${Date.now()}_${Math.random().toString(36).substr(2, 6).toUpperCase()}`,
       symbol,
       action,
-      lotSize: this.config.defaultLotSize,
+      lotSize: this.getValidLotSize(symbol),
       stopLoss: action === 'BUY' ? lastPrice - slPips * pipSize : lastPrice + slPips * pipSize,
       takeProfit: action === 'BUY' ? lastPrice + tpPips * pipSize : lastPrice - tpPips * pipSize,
       stopLossPips: slPips,
@@ -607,7 +641,7 @@ class MetaTraderBridge extends EventEmitter {
       id: `MT5_${Date.now()}_DEMO`,
       symbol,
       action,
-      lotSize: this.config.defaultLotSize,
+      lotSize: this.getValidLotSize(symbol),
       stopLoss: action === 'BUY' ? basePrice - slDistance : basePrice + slDistance,
       takeProfit: action === 'BUY' ? basePrice + tpDistance : basePrice - tpDistance,
       stopLossPips: Math.round(slDistance / pipSize),
