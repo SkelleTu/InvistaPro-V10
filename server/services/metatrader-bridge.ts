@@ -139,6 +139,30 @@ const DEFAULT_CONFIG: MT5Config = {
   apiToken: ''
 };
 
+export interface ConnectionEvent {
+  timestamp: number;
+  type: 'heartbeat_ok' | 'heartbeat_fail' | 'connected' | 'disconnected' | 'signal_fail' | 'signal_ok' | 'reconnect_attempt' | 'data_sent';
+  code?: number;
+  message: string;
+  source?: string;
+  latencyMs?: number;
+}
+
+export interface ConnectionDiagnostics {
+  serverUrl: string;
+  discoveryUrl: string | null;
+  totalHeartbeats: number;
+  failedHeartbeats: number;
+  totalSignalRequests: number;
+  failedSignalRequests: number;
+  lastSuccessAt: number;
+  lastFailAt: number;
+  consecutiveFails: number;
+  uptimePercent: number;
+  avgLatencyMs: number;
+  events: ConnectionEvent[];
+}
+
 class MetaTraderBridge extends EventEmitter {
   private config: MT5Config = { ...DEFAULT_CONFIG };
   private status: MT5Status;
@@ -148,6 +172,23 @@ class MetaTraderBridge extends EventEmitter {
   private signalGenerationInterval: NodeJS.Timeout | null = null;
   private marketDataCache: Map<string, any[]> = new Map();
   private isGeneratingSignal = false;
+
+  private diagnostics: ConnectionDiagnostics = {
+    serverUrl: '',
+    discoveryUrl: null,
+    totalHeartbeats: 0,
+    failedHeartbeats: 0,
+    totalSignalRequests: 0,
+    failedSignalRequests: 0,
+    lastSuccessAt: 0,
+    lastFailAt: 0,
+    consecutiveFails: 0,
+    uptimePercent: 100,
+    avgLatencyMs: 0,
+    events: []
+  };
+
+  private latencyHistory: number[] = [];
 
   constructor() {
     super();
