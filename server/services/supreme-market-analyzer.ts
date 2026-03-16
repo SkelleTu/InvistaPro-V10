@@ -158,7 +158,7 @@ export class SupremeMarketAnalyzer extends EventEmitter {
   private volatilityBaseline: Map<string, number[]> = new Map(); // histórico de vol para z-score
   private lastAnalysis: Map<string, SupremeAnalysis> = new Map();
   private analysisInterval: NodeJS.Timeout | null = null;
-  private readonly ANALYSIS_INTERVAL_MS = 250;                   // análise a cada 250ms
+  private readonly ANALYSIS_INTERVAL_MS = 3000;                   // análise a cada 3s (libera event loop para requisições HTTP)
 
   constructor() {
     super();
@@ -168,7 +168,7 @@ export class SupremeMarketAnalyzer extends EventEmitter {
 
   start(): void {
     this.analysisInterval = setInterval(() => this.runCycle(), this.ANALYSIS_INTERVAL_MS);
-    console.log('🚀 [SUPREME] Motor ativo — análise a cada 250ms');
+    console.log('🚀 [SUPREME] Motor ativo — análise a cada 3s');
   }
 
   stop(): void {
@@ -202,16 +202,23 @@ export class SupremeMarketAnalyzer extends EventEmitter {
   }
 
   private runCycle(): void {
-    this.tickBuffers.forEach((prices, symbol) => {
-      if (prices.length < 60) return;
-      try {
-        const analysis = this.analyzeSymbol(symbol, prices);
-        this.lastAnalysis.set(symbol, analysis);
-        this.emit('analysis', analysis);
-      } catch (e) {
-        // silêncio para não poluir logs
+    const entries = Array.from(this.tickBuffers.entries());
+    let idx = 0;
+    const processNext = () => {
+      if (idx >= entries.length) return;
+      const [symbol, prices] = entries[idx++];
+      if (prices.length >= 60) {
+        try {
+          const analysis = this.analyzeSymbol(symbol, prices);
+          this.lastAnalysis.set(symbol, analysis);
+          this.emit('analysis', analysis);
+        } catch (e) {
+          // silêncio para não poluir logs
+        }
       }
-    });
+      setImmediate(processNext);
+    };
+    setImmediate(processNext);
   }
 
   // ─────────────────── Análise Principal ───────────────────
