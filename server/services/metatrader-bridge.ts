@@ -210,6 +210,11 @@ class MetaTraderBridge extends EventEmitter {
     this.status.lastHeartbeat = Date.now();
     this.status.accountId = accountData.accountId;
     this.status.broker = accountData.broker;
+    if (!this.config.enabled) {
+      this.config.enabled = true;
+      this.startSignalGeneration();
+      console.log(`[MT5Bridge] ✅ Sistema auto-habilitado via heartbeat do EA (${accountData.broker})`);
+    }
   }
 
   async generateSignal(symbol: string): Promise<MT5Signal | null> {
@@ -338,18 +343,22 @@ class MetaTraderBridge extends EventEmitter {
     const prices = marketData.map(d => d.close);
     const indicators = this.buildIndicators(prices, marketData);
     const lastPrice = prices[prices.length - 1];
-    const atr = indicators.atr || this.config.stopLossPips * 0.0001;
+    const atr = indicators.atr || lastPrice * 0.001;
 
-    const slPips = this.config.useAIStopLoss ? Math.round(atr * 10000 * 1.5) : this.config.stopLossPips;
-    const tpPips = this.config.useAIStopLoss ? Math.round(atr * 10000 * 3.0) : this.config.takeProfitPips;
+    const isForex = lastPrice < 1000;
+    const pipSize = isForex ? 0.0001 : 1;
+    const rawSlPips = this.config.useAIStopLoss ? Math.round(atr * 1.5 / pipSize) : this.config.stopLossPips;
+    const rawTpPips = this.config.useAIStopLoss ? Math.round(atr * 3.0 / pipSize) : this.config.takeProfitPips;
+    const slPips = Math.max(rawSlPips, 1);
+    const tpPips = Math.max(rawTpPips, 1);
 
     const signal: MT5Signal = {
       id: `MT5_${Date.now()}_${Math.random().toString(36).substr(2, 6).toUpperCase()}`,
       symbol,
       action,
       lotSize: this.config.defaultLotSize,
-      stopLoss: action === 'BUY' ? lastPrice - slPips * 0.0001 : lastPrice + slPips * 0.0001,
-      takeProfit: action === 'BUY' ? lastPrice + tpPips * 0.0001 : lastPrice - tpPips * 0.0001,
+      stopLoss: action === 'BUY' ? lastPrice - slPips * pipSize : lastPrice + slPips * pipSize,
+      takeProfit: action === 'BUY' ? lastPrice + tpPips * pipSize : lastPrice - tpPips * pipSize,
       stopLossPips: slPips,
       takeProfitPips: tpPips,
       entryPrice: lastPrice,
@@ -499,6 +508,14 @@ class MetaTraderBridge extends EventEmitter {
 
   addMarketData(symbol: string, candles: any[]): void {
     this.marketDataCache.set(symbol, candles);
+    const hasPending = !!this.getPendingSignal(symbol);
+    if (!hasPending) {
+      this.generateSignal(symbol).then(signal => {
+        if (signal && signal.action !== 'HOLD') {
+          console.log(`[MT5Bridge] 🎯 Sinal gerado para ${symbol} após receber dados: ${signal.action} (${(signal.confidence * 100).toFixed(1)}%)`);
+        }
+      }).catch(() => {});
+    }
   }
 
   private getMarketDataForSymbol(symbol: string): any[] {
@@ -516,8 +533,13 @@ class MetaTraderBridge extends EventEmitter {
       if (rand < cumulative) { action = actions[i]; break; }
     }
 
-    const prices = { EURUSD: 1.0850, GBPUSD: 1.2650, XAUUSD: 2340.00, USDJPY: 149.50, BTCUSD: 67000 };
-    const basePrice = prices[symbol as keyof typeof prices] || 1.0;
+    const prices: Record<string, number> = {
+      EURUSD: 1.0850, GBPUSD: 1.2650, XAUUSD: 2340.00, USDJPY: 149.50, BTCUSD: 67000,
+      'Crash 1000 Index': 9500, 'Crash 500 Index': 9200, 'Boom 1000 Index': 8800,
+      'Boom 500 Index': 8500, 'Volatility 75 Index': 320, 'Volatility 25 Index': 100,
+      'Step Index': 200, 'Range Break 100 Index': 500, 'Range Break 200 Index': 1000,
+    };
+    const basePrice = prices[symbol] || 1000;
     const indicators = this.buildIndicators(
       Array.from({ length: 50 }, (_, i) => basePrice + (Math.random() - 0.5) * basePrice * 0.001),
       Array.from({ length: 50 }, (_, i) => {
@@ -526,15 +548,18 @@ class MetaTraderBridge extends EventEmitter {
       })
     );
 
+    const slDistance = basePrice * 0.003;
+    const tpDistance = basePrice * 0.006;
+    const pipSize = basePrice < 1000 ? 0.0001 : 1;
     return {
       id: `MT5_${Date.now()}_DEMO`,
       symbol,
       action,
       lotSize: this.config.defaultLotSize,
-      stopLoss: action === 'BUY' ? basePrice - 0.003 : basePrice + 0.003,
-      takeProfit: action === 'BUY' ? basePrice + 0.006 : basePrice - 0.006,
-      stopLossPips: 30,
-      takeProfitPips: 60,
+      stopLoss: action === 'BUY' ? basePrice - slDistance : basePrice + slDistance,
+      takeProfit: action === 'BUY' ? basePrice + tpDistance : basePrice - tpDistance,
+      stopLossPips: Math.round(slDistance / pipSize),
+      takeProfitPips: Math.round(tpDistance / pipSize),
       entryPrice: basePrice,
       confidence: 0.6 + Math.random() * 0.3,
       aiSources: ['quantum', 'technical', 'advanced'],

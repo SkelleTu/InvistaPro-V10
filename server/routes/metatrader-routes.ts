@@ -10,17 +10,22 @@ const router = Router();
 
 router.post('/heartbeat', (req: Request, res: Response) => {
   try {
-    const { accountId, broker, balance, equity, freeMargin, openPositions, platform } = req.body;
+    const { accountId, broker, balance, equity, freeMargin, openPositions, platform, token } = req.body;
     if (!accountId) return res.status(400).json({ error: 'accountId obrigatório' });
-    metaTraderBridge.recordHeartbeat({ accountId, broker: broker || 'Unknown', balance, equity, freeMargin });
     const config = metaTraderBridge.getConfig();
+    if (config.apiToken && token && token !== config.apiToken) {
+      return res.status(401).json({ error: 'Token inválido' });
+    }
+    metaTraderBridge.recordHeartbeat({ accountId, broker: broker || 'Unknown', balance, equity, freeMargin });
+    const updatedConfig = metaTraderBridge.getConfig();
+    console.log(`[MT5Bridge] 💚 Heartbeat: ${broker || 'Unknown'} | Conta: ${accountId} | Saldo: $${balance} | Habilitado: ${updatedConfig.enabled}`);
     res.json({
       ok: true,
       serverTime: Date.now(),
-      enabled: config.enabled,
-      pollingIntervalMs: config.pollingIntervalMs,
-      maxOpenPositions: config.maxOpenPositions,
-      message: 'Heartbeat registrado'
+      enabled: updatedConfig.enabled,
+      pollingIntervalMs: updatedConfig.pollingIntervalMs,
+      maxOpenPositions: updatedConfig.maxOpenPositions,
+      message: updatedConfig.enabled ? 'Sistema ativo — IAs gerando sinais' : 'Heartbeat registrado'
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
