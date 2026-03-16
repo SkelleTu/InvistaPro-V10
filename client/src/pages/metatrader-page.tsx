@@ -16,7 +16,7 @@ import {
   Activity, TrendingUp, TrendingDown, Settings, Download, Wifi, WifiOff,
   BarChart2, Zap, Shield, RefreshCw, AlertTriangle, CheckCircle2,
   Brain, Target, DollarSign, ArrowUpRight, ArrowDownRight, Clock, Info, ChevronLeft,
-  Eye, Cpu, XCircle, CheckCircle, Minus, ChevronDown, ChevronUp
+  Eye, Cpu, XCircle, CheckCircle, Minus, ChevronDown, ChevronUp, Copy, ClipboardCheck
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 
@@ -171,6 +171,7 @@ export default function MetaTraderPage() {
   const [configEdits, setConfigEdits] = useState<Partial<MT5Config>>({});
   const [newApiToken, setNewApiToken] = useState('');
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [urlCopied, setUrlCopied] = useState(false);
 
   const { data: status, isLoading: statusLoading } = useQuery<MT5Status>({
     queryKey: ['/api/mt5/status'],
@@ -237,6 +238,13 @@ export default function MetaTraderPage() {
   };
 
   const cfg = { ...config, ...configEdits };
+
+  const copyServerUrl = () => {
+    navigator.clipboard.writeText(window.location.origin).then(() => {
+      setUrlCopied(true);
+      setTimeout(() => setUrlCopied(false), 2500);
+    });
+  };
 
   const downloadEA = () => {
     const baseUrl = window.location.origin;
@@ -355,6 +363,33 @@ export default function MetaTraderPage() {
             </CardContent>
           </Card>
         </div>
+
+        {!status?.connected && (
+          <div className="rounded-lg border border-yellow-500/50 bg-yellow-500/10 p-4 flex flex-col sm:flex-row items-start sm:items-center gap-3" data-testid="banner-ea-disconnected">
+            <AlertTriangle className="h-5 w-5 text-yellow-500 shrink-0 mt-0.5 sm:mt-0" />
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-yellow-600 dark:text-yellow-400 text-sm">EA não conectado — URL do servidor pode ter mudado</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                No MetaTrader abra as propriedades do EA (F7) → aba <strong>Inputs</strong> → atualize o campo <strong>ServerURL</strong> com a URL abaixo.
+              </p>
+              <div className="flex items-center gap-2 mt-2">
+                <code className="text-xs bg-background border rounded px-2 py-1 flex-1 truncate font-mono" data-testid="text-current-server-url">
+                  {window.location.origin}
+                </code>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="shrink-0 gap-1.5 text-xs h-7"
+                  onClick={copyServerUrl}
+                  data-testid="button-copy-server-url"
+                >
+                  {urlCopied ? <ClipboardCheck className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+                  {urlCopied ? 'Copiado!' : 'Copiar'}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="grid w-full grid-cols-4" data-testid="tabs-metatrader">
@@ -1000,15 +1035,26 @@ export default function MetaTraderPage() {
                     <li>Configure a URL do servidor nos parâmetros do EA</li>
                   </ol>
                 </div>
-                <div className="flex gap-2">
-                  <div className="flex-1 space-y-1">
-                    <Label className="text-xs">URL do Servidor (para o EA)</Label>
+                <div className="space-y-1">
+                  <Label className="text-xs">URL do Servidor (para o EA)</Label>
+                  <div className="flex gap-2">
                     <Input
                       readOnly
                       value={window.location.origin}
                       className="text-xs font-mono"
                       data-testid="input-server-url"
                     />
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="shrink-0 gap-1.5"
+                      onClick={copyServerUrl}
+                      data-testid="button-copy-server-url-config"
+                    >
+                      {urlCopied ? <ClipboardCheck className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+                      {urlCopied ? 'Copiado!' : 'Copiar'}
+                    </Button>
                   </div>
                 </div>
                 <Button onClick={downloadEA} className="w-full gap-2" data-testid="button-download-ea-config">
