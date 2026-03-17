@@ -1444,6 +1444,8 @@ datetime       lastHeartbeat    = 0;
 datetime       lastDataUpload   = 0;
 double         dailyProfit      = 0;
 double         dailyLoss        = 0;
+double         startDayBalance  = 0;   // saldo no início do dia
+datetime       lastDayReset     = 0;   // último reset diário
 string         lastSignalId     = "";
 string         accountId        = "";
 
@@ -1460,8 +1462,13 @@ int OnInit() {
       return INIT_FAILED;
    }
    
+   // Capturar saldo inicial do dia
+   startDayBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+   lastDayReset    = TimeCurrent();
+   
    Print("✅ InvistaPRO EA iniciado | Servidor: ", ServerURL);
    Print("📡 Conta: ", accountId, " | Par: ", GetSymbol());
+   Print("💰 Saldo inicial do dia: $", DoubleToString(startDayBalance, 2));
    
    SendHeartbeat();
    return INIT_SUCCEEDED;
@@ -1479,6 +1486,18 @@ void OnDeinit(const int reason) {
 //+------------------------------------------------------------------+
 void OnTick() {
    datetime now = TimeCurrent();
+   
+   // Reset diário à meia-noite (novo dia de trading)
+   MqlDateTime tmNow, tmLast;
+   TimeToStruct(now, tmNow);
+   TimeToStruct(lastDayReset, tmLast);
+   if(tmNow.day != tmLast.day || tmNow.mon != tmLast.mon) {
+      startDayBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+      dailyProfit     = 0;
+      dailyLoss       = 0;
+      lastDayReset    = now;
+      Print("🔄 Novo dia — saldo inicial resetado: $", DoubleToString(startDayBalance, 2));
+   }
    
    // Heartbeat
    if(now - lastHeartbeat >= HeartbeatSec) {
@@ -1670,6 +1689,28 @@ void ReportTradeOpen(ulong ticket, string signalId, string symbol, string type, 
 //| Atualiza posições abertas                                        |
 //+------------------------------------------------------------------+
 void UpdateOpenPositions() {
+   // Calcular P&L líquido do dia (saldo atual vs saldo do início do dia)
+   double currentBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+   double floatingPL     = 0;
+   
+   for(int i = PositionsTotal() - 1; i >= 0; i--) {
+      if(!posInfo.SelectByIndex(i)) continue;
+      if(posInfo.Magic() != 20250101) continue;
+      floatingPL += posInfo.Profit();
+   }
+   
+   double netDayPL = (currentBalance + floatingPL) - startDayBalance;
+   
+   // Atualizar variáveis diárias com P&L líquido real
+   if(netDayPL >= 0) {
+      dailyProfit = netDayPL;
+      dailyLoss   = 0;
+   } else {
+      dailyLoss   = MathAbs(netDayPL);
+      dailyProfit = 0;
+   }
+   
+   // Fechar posições se limites atingidos
    for(int i = PositionsTotal() - 1; i >= 0; i--) {
       if(!posInfo.SelectByIndex(i)) continue;
       if(posInfo.Magic() != 20250101) continue;
@@ -1678,12 +1719,8 @@ void UpdateOpenPositions() {
       double profit  = posInfo.Profit();
       double current = posInfo.PriceCurrent();
       
-      if(profit > 0) dailyProfit += profit;
-      else           dailyLoss   += MathAbs(profit);
-      
-      // Verificar se deve fechar por limite diário
       string closeReason = "";
-      if(dailyLoss >= MaxDailyLoss)   closeReason = "SL";
+      if(dailyLoss >= MaxDailyLoss)     closeReason = "SL";
       if(dailyProfit >= MaxDailyProfit) closeReason = "TP";
       
       if(closeReason != "") {
@@ -1738,12 +1775,21 @@ void ReportTradeClose(ulong ticket, string symbol, string type, double lots, dou
 //| Verifica limites diários                                         |
 //+------------------------------------------------------------------+
 bool CheckDailyLimits() {
-   if(dailyLoss >= MaxDailyLoss) {
-      Print("🛑 Limite diário de perda atingido: $", DoubleToString(dailyLoss, 2));
+   double currentBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+   double netDayPL       = currentBalance - startDayBalance;
+   double netDayLoss     = netDayPL < 0 ? MathAbs(netDayPL) : 0;
+   double netDayProfit   = netDayPL > 0 ? netDayPL          : 0;
+   
+   if(netDayLoss >= MaxDailyLoss) {
+      Print("🛑 Limite diário de PERDA LÍQUIDA atingido: -$", DoubleToString(netDayLoss, 2),
+            " | Início: $", DoubleToString(startDayBalance, 2),
+            " | Atual: $",  DoubleToString(currentBalance, 2),
+            " | Limite: $", DoubleToString(MaxDailyLoss, 2));
       return false;
    }
-   if(dailyProfit >= MaxDailyProfit) {
-      Print("🎯 Meta diária de lucro atingida: $", DoubleToString(dailyProfit, 2));
+   if(netDayProfit >= MaxDailyProfit) {
+      Print("🎯 Meta diária de LUCRO LÍQUIDO atingida: +$", DoubleToString(netDayProfit, 2),
+            " | Limite: $", DoubleToString(MaxDailyProfit, 2));
       return false;
    }
    return true;
