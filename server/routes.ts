@@ -2734,16 +2734,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const logs = await dbStorage.getUserAiLogs(userId, limit);
       
-      const formattedLogs = logs.map((log: any) => ({
-        id: log.id,
-        modelName: log.modelName,
-        decision: log.decision,
-        confidence: Math.round(log.confidence * 100),
-        analysis: JSON.parse(log.analysis),
-        createdAt: log.createdAt
-      }));
+      const formattedLogs = logs.map((log: any) => {
+        let analysis = log.analysis;
+        try { analysis = JSON.parse(log.analysis); } catch { /* manter como string */ }
+        return {
+          id: log.id,
+          modelName: log.modelName,
+          decision: log.decision,
+          confidence: Math.round(log.confidence * 100),
+          analysis,
+          createdAt: log.createdAt
+        };
+      });
 
-      res.json({ logs: formattedLogs });
+      res.json(formattedLogs);
 
     } catch (error) {
       console.error('❌ Erro ao buscar logs IA:', error);
