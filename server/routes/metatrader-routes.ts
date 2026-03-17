@@ -5,7 +5,13 @@
 
 import { Router, Request, Response } from 'express';
 import { metaTraderBridge, MT5Position, MT5TradeResult } from '../services/metatrader-bridge';
-import { analyzeCrashBoomSpike, analyzeContinuitySafety } from '../services/crash-boom-spike-engine';
+import {
+  analyzeCrashBoomSpike,
+  analyzeContinuitySafety,
+  storeExternalGirassolPivots,
+  getExternalGirassolPivots,
+  ExternalGirassolPivot,
+} from '../services/crash-boom-spike-engine';
 
 const router = Router();
 
@@ -338,6 +344,52 @@ router.get('/spike-dashboard', (_req: Request, res: Response) => {
       totalSymbolsMonitored: spikeSymbols.length,
       timestamp: Date.now(),
     });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/mt5/girassol-pivots
+ * O EA com o indicador Girassol carregado envia os pivôs detectados diretamente.
+ * Body: { symbol, pivots: [{ type: 'high'|'low', price, time, group: 1|2|3 }] }
+ *
+ * MQL5 example (no EA):
+ *   string body = "{\"symbol\":\"Crash 1000 Index\",\"pivots\":[{\"type\":\"high\",\"price\":5432.1,\"time\":1710000000,\"group\":1}]}";
+ *   WebRequest("POST", URL + "/api/mt5/girassol-pivots", ..., body, ...);
+ */
+router.post('/girassol-pivots', (req: Request, res: Response) => {
+  try {
+    const { symbol, pivots } = req.body;
+    if (!symbol || !Array.isArray(pivots)) {
+      return res.status(400).json({ error: 'symbol e pivots[] são obrigatórios' });
+    }
+    const validated: ExternalGirassolPivot[] = pivots.filter(
+      (p: any) => p && ['high', 'low'].includes(p.type) && typeof p.price === 'number' && [1, 2, 3].includes(p.group)
+    ).map((p: any) => ({ type: p.type, price: p.price, time: p.time || Date.now(), group: p.group }));
+
+    storeExternalGirassolPivots(symbol.toUpperCase(), validated);
+
+    res.json({
+      received: validated.length,
+      symbol: symbol.toUpperCase(),
+      message: `${validated.length} pivôs do Girassol armazenados com sucesso. Serão usados na próxima análise de spike.`,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/mt5/girassol-pivots?symbol=Crash+1000+Index
+ * Retorna os pivôs externos armazenados para um símbolo.
+ */
+router.get('/girassol-pivots', (req: Request, res: Response) => {
+  try {
+    const symbol = ((req.query.symbol as string) || '').toUpperCase();
+    if (!symbol) return res.status(400).json({ error: 'symbol é obrigatório' });
+    const pivots = getExternalGirassolPivots(symbol);
+    res.json({ symbol, pivots, count: pivots.length });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
