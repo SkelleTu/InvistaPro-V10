@@ -628,7 +628,7 @@ export default function TradingSystemPage() {
       const stored = localStorage.getItem("trade_modalities");
       if (stored) return JSON.parse(stored);
     } catch {}
-    return { digit_differs: true };
+    return {};
   });
   const [modalitiesLoaded, setModalitiesLoaded] = useState(false);
   const [autoMode, setAutoMode] = useState<boolean>(() => {
@@ -754,8 +754,8 @@ export default function TradingSystemPage() {
       const newActive = scored.slice(0, maxActive).map(m => m.id);
 
       // ── Atualizar UI (visualmente as checkboxes acendem/apagam) ──
-      setEnabledModalities(Object.fromEntries(allIds.map(id => [id, newActive.includes(id)])));
-
+      // NOTA: o autoMode altera apenas a visualização na UI — NÃO persiste no servidor.
+      // O servidor usa SEMPRE as modalidades que o usuário selecionou manualmente.
       setAutoDecision(prev => ({
         ...prev,
         active: newActive,
@@ -765,18 +765,8 @@ export default function TradingSystemPage() {
         metrics: { winRate, recentLosses, totalOps, consensus },
       }));
 
-      // ── Salvar modalidades no servidor (throttled: máximo 1x a cada 8 segundos) ──
-      // NÃO muda frequência — apenas as modalidades ativas
-      const now = Date.now();
-      if (now - lastModalityApiCallRef.current > 8000) {
-        lastModalityApiCallRef.current = now;
-        apiRequest("/api/trading/modalities", {
-          method: "PUT",
-          body: JSON.stringify({ modalities: newActive }),
-        }).catch(() => {});
-      }
-
       // ── NÃO chamar updateConfigRef — a frequência do usuário é sempre preservada ──
+      // ── NÃO salvar modalidades automáticas no servidor — respeitar seleção manual ──
     }, 2000);
     return () => clearInterval(interval);
   }, [autoMode]);
@@ -1155,6 +1145,17 @@ export default function TradingSystemPage() {
                   {!(schedulerStatus as any)?.derivTokenConfigured && (
                     <p className="mt-2 font-medium">Acesse a aba <strong>Configurações</strong> para inserir seu token da Deriv.</p>
                   )}
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {/* Aviso: Nenhuma Modalidade Selecionada */}
+            {Object.values(enabledModalities).filter(Boolean).length === 0 && (
+              <Alert className="border-yellow-500/50 bg-yellow-500/10" data-testid="alert-no-modalities">
+                <AlertTriangle className="h-4 w-4 text-yellow-600" />
+                <AlertDescription className="text-yellow-700 dark:text-yellow-400">
+                  <strong>Sistema Pausado — Sem Modalidade Selecionada</strong>
+                  <p className="mt-1">Por favor, selecione pelo menos uma Modalidade de Trade nas configurações da <strong>Renda Variável</strong> (aba Configurações) para que o sistema possa operar.</p>
                 </AlertDescription>
               </Alert>
             )}

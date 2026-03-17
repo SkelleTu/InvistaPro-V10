@@ -2386,15 +2386,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const userId = req.user.id;
     const config = await dbStorage.getUserTradeConfig(userId);
     if (!config) {
-      return res.json({ modalities: ['digit_differs'] });
+      return res.json({ modalities: [] });
     }
-    let modalities: string[] = ['digit_differs'];
+    let modalities: string[] = [];
     try {
       if (config.selectedModalities) {
         const parsed = JSON.parse(config.selectedModalities);
         if (Array.isArray(parsed)) modalities = parsed;
+        else {
+          // Fallback para string legada separada por vírgula
+          const split = config.selectedModalities.split(',').map((s: string) => s.trim()).filter(Boolean);
+          modalities = split;
+        }
       }
-    } catch {}
+    } catch {
+      if (config.selectedModalities) {
+        const split = config.selectedModalities.split(',').map((s: string) => s.trim()).filter(Boolean);
+        modalities = split;
+      }
+    }
     res.json({ modalities });
   }));
 
@@ -2413,7 +2423,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       'lookback_high_close','lookback_close_low','lookback_high_low'
     ]);
     const filtered = modalities.filter((m: string) => VALID.has(m));
-    const finalModalities = filtered.length > 0 ? filtered : ['digit_differs'];
+    // Permite array vazio — significa "sem modalidade selecionada → sistema pausado"
+    const finalModalities = filtered;
     await dbStorage.updateSelectedModalities(userId, finalModalities);
     console.log(`📋 [MODALITIES] Usuário ${userId} atualizou modalidades: ${finalModalities.join(', ')}`);
     res.json({ success: true, modalities: finalModalities });

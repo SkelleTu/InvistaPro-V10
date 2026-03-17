@@ -960,19 +960,36 @@ export class AutoTradingScheduler {
       // 🎯 SISTEMA DE DECISÃO BASEADO EM ANÁLISE DE DÍGITOS (vantagem matemática real)
       const isProductionMode = config.mode.includes('production');
 
+      // ── Pré-leitura de modalidades para decidir se a análise de dígitos é necessária ──
+      const DIGIT_MODALITY_KEYS = new Set(['digit_differs','digit_matches','digit_even','digit_odd','digit_over','digit_under']);
+      let preActiveModalities: string[] = [];
+      if (config.selectedModalities) {
+        try {
+          const parsed = JSON.parse(config.selectedModalities);
+          if (Array.isArray(parsed)) preActiveModalities = parsed;
+          else preActiveModalities = config.selectedModalities.split(',').map((s: string) => s.trim()).filter(Boolean);
+        } catch {
+          preActiveModalities = config.selectedModalities.split(',').map((s: string) => s.trim()).filter(Boolean);
+        }
+      }
+      const hasDigitModalities = preActiveModalities.some(m => DIGIT_MODALITY_KEYS.has(m));
+
       // 🧠 VERIFICAR QUALIDADE DO SINAL DO ANALISADOR DE DÍGITOS
-      // Para digit_differs, o que importa é: confiança do analisador E edge do dígito frio
+      // Apenas relevante se o usuário selecionou alguma modalidade de dígitos
       const digitQuality = digitFrequencyAnalyzer.getBestBarrier(selectedSymbol);
       const digitConfidenceOk = digitQuality.confidence >= 50;
       const digitEdgePositive = digitQuality.edge > 0;
       const digitSignalGood = digitConfidenceOk && digitEdgePositive;
 
-      console.log(`🧠 [${operationId}] ANÁLISE DÍGITOS: conf=${digitQuality.confidence.toFixed(0)}% | edge=+${digitQuality.edge.toFixed(1)}% | barreira=${digitQuality.barrier} | sinal=${digitSignalGood ? '✅ BOM' : '⚠️ AGUARDANDO'}`);
-
-      // 🛑 SE O ANALISADOR DE DÍGITOS NÃO TEM DADOS SUFICIENTES, AGUARDAR
-      if (!digitSignalGood) {
-        console.log(`⏸️ [${operationId}] Aguardando dados de dígitos: conf=${digitQuality.confidence.toFixed(0)}% (mín 50%) | edge=${digitQuality.edge.toFixed(1)}% (mín >0%)`);
-        return { success: false, error: `Analisador de dígitos aguardando mais dados: confiança ${digitQuality.confidence.toFixed(0)}%` };
+      if (hasDigitModalities) {
+        console.log(`🧠 [${operationId}] ANÁLISE DÍGITOS: conf=${digitQuality.confidence.toFixed(0)}% | edge=+${digitQuality.edge.toFixed(1)}% | barreira=${digitQuality.barrier} | sinal=${digitSignalGood ? '✅ BOM' : '⚠️ AGUARDANDO'}`);
+        // 🛑 SE O ANALISADOR DE DÍGITOS NÃO TEM DADOS SUFICIENTES, AGUARDAR
+        if (!digitSignalGood) {
+          console.log(`⏸️ [${operationId}] Aguardando dados de dígitos: conf=${digitQuality.confidence.toFixed(0)}% (mín 50%) | edge=${digitQuality.edge.toFixed(1)}% (mín >0%)`);
+          return { success: false, error: `Analisador de dígitos aguardando mais dados: confiança ${digitQuality.confidence.toFixed(0)}%` };
+        }
+      } else {
+        console.log(`ℹ️ [${operationId}] Análise de dígitos ignorada — modalidades selecionadas não incluem dígitos: [${preActiveModalities.join(', ')}]`);
       }
 
       // Para digit_differs a direção é irrelevante — o trade é puramente sobre qual dígito NÃO aparece
@@ -989,10 +1006,14 @@ export class AutoTradingScheduler {
           console.log(`🛑 [${operationId}] Máximo diário atingido (${operationsToday}/${limits.max})`);
           return { success: false, error: `Máximo de operações diárias atingido para modo ${config.mode}` };
         }
-        console.log(`✅ [${operationId}] 🎯 EXECUTANDO: dígito frio=${digitQuality.barrier} | edge=+${digitQuality.edge.toFixed(1)}% | winRate=${digitQuality.winRate.toFixed(1)}%`);
+        if (hasDigitModalities) {
+          console.log(`✅ [${operationId}] 🎯 EXECUTANDO: dígito frio=${digitQuality.barrier} | edge=+${digitQuality.edge.toFixed(1)}% | winRate=${digitQuality.winRate.toFixed(1)}%`);
+        }
       } else {
-        console.log(`🚀 [${operationId}] MODO ${config.mode} - Executando com análise de dígitos`);
-        console.log(`✅ [${operationId}] 🎯 EXECUTANDO: dígito frio=${digitQuality.barrier} | edge=+${digitQuality.edge.toFixed(1)}% | winRate=${digitQuality.winRate.toFixed(1)}%`);
+        console.log(`🚀 [${operationId}] MODO ${config.mode} - Modalidades: [${preActiveModalities.join(', ')}]`);
+        if (hasDigitModalities) {
+          console.log(`✅ [${operationId}] 🎯 Análise de dígitos: barreira=${digitQuality.barrier} | edge=+${digitQuality.edge.toFixed(1)}% | winRate=${digitQuality.winRate.toFixed(1)}%`);
+        }
       }
 
       // 🔴 VERIFICAR FLAG DE PAUSA CENTRALIZADA - Todos os remixes respeita m
