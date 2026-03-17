@@ -1023,6 +1023,28 @@ export class AutoTradingScheduler {
         return { success: false, error: 'Erro de conexão com Deriv' };
       }
 
+      // ✅ SALDO REAL: Buscar saldo atual da conta Deriv e sincronizar com o banco
+      // Garante que o stake e as proteções sejam calculados sobre o saldo real
+      try {
+        const realBalance = await derivAPI.getBalance();
+        if (realBalance && realBalance.balance >= 0) {
+          const rb = realBalance.balance;
+          console.log(`💳 [${operationId}] Saldo REAL Deriv: $${rb} ${realBalance.currency} (conta: ${realBalance.loginid})`);
+          // Sempre sincroniza currentBalance E openingBalance com o saldo real da Deriv.
+          // Isso garante que o sistema de proteção use o saldo atual como referência,
+          // nunca um valor obsoleto do banco de dados.
+          await storage.createOrUpdateDailyPnL(config.userId, {
+            currentBalance: rb,
+            openingBalance: rb,
+          });
+          console.log(`🔄 [${operationId}] Saldo sincronizado com Deriv: currentBalance=$${rb} | openingBalance=$${rb}`);
+        } else {
+          console.log(`⚠️ [${operationId}] Saldo da Deriv não disponível — usando saldo do banco`);
+        }
+      } catch (balErr: any) {
+        console.log(`⚠️ [${operationId}] Erro ao buscar saldo real: ${balErr?.message} — usando saldo do banco`);
+      }
+
       try {
         // Determinar parâmetros do trade baseado no modo e banca
         // 🔥 SISTEMA DE RECUPERAÇÃO INTELIGENTE DE PERDAS
