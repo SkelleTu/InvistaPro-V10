@@ -436,8 +436,8 @@ class MetaTraderBridge extends EventEmitter {
 
   /**
    * Verifica se o mercado B3 está aberto para futuros (WIN/WDO).
-   * Horário B3 (BRT = UTC-3): segunda a sexta, 09:00 – 18:00.
-   * O servidor usa UTC, por isso: 12:00–21:00 UTC.
+   * Horário B3 (BRT = UTC-3): segunda a sexta, 09:00 – 18:30.
+   * O servidor usa UTC, por isso: 12:00–21:30 UTC.
    */
   private isB3MarketOpen(): boolean {
     const now = new Date();
@@ -450,8 +450,8 @@ class MetaTraderBridge extends EventEmitter {
     if (utcDay === 0 || utcDay === 6) return false;
 
     // 09:00 BRT = 12:00 UTC → 720 min
-    // 18:00 BRT = 21:00 UTC → 1260 min
-    return utcTime >= 720 && utcTime < 1260;
+    // 18:30 BRT = 21:30 UTC → 1290 min
+    return utcTime >= 720 && utcTime < 1290;
   }
 
   /**
