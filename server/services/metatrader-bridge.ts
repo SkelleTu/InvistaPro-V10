@@ -1832,6 +1832,48 @@ class MetaTraderBridge extends EventEmitter {
                          * (position.type === 'BUY' ? 1 : -1);
     base.currentPnLPct = pnlPct;
 
+    // ══════════════════════════════════════════════════════════════════
+    // PROTEÇÃO PRIORITÁRIA — Estas regras rodam ANTES de qualquer outra
+    // análise e garantem que capital não seja destruído nem oportunidades
+    // de recuperação sejam desperdiçadas.
+    // ══════════════════════════════════════════════════════════════════
+
+    const profitDollars = position.profit ?? 0;
+
+    // ── REGRA 0a: Limite de perda máxima por posição ──
+    // Para Crash/Boom sem SL/TP, o monitor é a ÚNICA defesa.
+    // Sem esse limite, uma posição errada pode acumular perdas enormes
+    // enquanto o monitor fica em HOLD esperando um padrão que nunca vem.
+    // Padrão: -$20 por lote aberto. Criticamente urgente.
+    const hardStopDollars = -(20 * Math.max(position.lots || 1, 1));
+    if (profitDollars < hardStopDollars) {
+      console.log(`[MT5Bridge] 🛑 HARD STOP #${position.ticket}: $${profitDollars.toFixed(2)} < limite $${hardStopDollars.toFixed(2)}`);
+      return {
+        ...base,
+        action:   'CLOSE_LOSS_PREVENTION',
+        urgency:  'critical',
+        reason:   `🛑 Limite de perda atingido: $${profitDollars.toFixed(2)} (limite: $${hardStopDollars.toFixed(2)})`,
+        narrative: `Posição ${position.type} #${position.ticket} em ${symbol} ultrapassou o limite de perda por lote. Fechando para proteger capital. Perda atual: $${profitDollars.toFixed(2)}`
+      };
+    }
+
+    // ── REGRA 0b: Captura de recuperação pós-spike ──
+    // Se a posição está em lucro (seja qual for o valor), fechar IMEDIATAMENTE.
+    // Contexto: posições mal-entradas que ficaram profundamente negativas
+    // podem ser resgatadas por um spike que passa. Essa janela é de segundos.
+    // Não esperar por "mais lucro" — qualquer lucro positivo é um resgate.
+    // Isso é especialmente crítico em Crash/Boom onde o spike reverte rápido.
+    if (profitDollars > 0) {
+      console.log(`[MT5Bridge] 🎯 RECUPERAÇÃO #${position.ticket}: +$${profitDollars.toFixed(2)} — capturando janela de spike`);
+      return {
+        ...base,
+        action:   'CLOSE_PROFIT',
+        urgency:  'critical',
+        reason:   `🎯 Recuperação de lucro: +$${profitDollars.toFixed(2)} — janela de spike capturada`,
+        narrative: `Posição ${position.type} #${position.ticket} reverteu para positivo. Realizando lucro imediatamente — spikes são temporários e revertem em segundos.`
+      };
+    }
+
     // ── 1. Crash / Boom spike check (prioritário) ──
     if (this.isSpikeIndex(symbol)) {
       const spike = this.detectSpikePattern(marketData, symbol);
