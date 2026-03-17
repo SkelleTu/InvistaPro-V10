@@ -114,12 +114,13 @@ export class DerivTradeSync {
       );
 
       // Trades expiradas sem resultado confirmado (podem ter perdido — precisamos checar)
+      // Inclui profit===null (novo padrão) E profit===0 com deriv_status='expired_unresolved' (legado)
       const now = Date.now();
       const twoHoursAgo = now - 2 * 60 * 60 * 1000;
       const expiredUnconfirmed = operations.filter(op =>
         op.status === 'expired' &&
         op.derivContractId &&
-        op.profit === null &&
+        (op.profit === null || op.profit === undefined || (op.profit === 0 && op.derivStatus === 'expired_unresolved')) &&
         op.createdAt &&
         new Date(op.createdAt).getTime() > twoHoursAgo
       );

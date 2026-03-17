@@ -1704,7 +1704,7 @@ export class DatabaseStorage implements IStorage {
     const result = await db.run(
       sql`UPDATE trade_operations 
           SET status = 'expired', 
-              profit = 0, 
+              profit = NULL, 
               deriv_status = 'expired_unresolved',
               last_sync_at = ${now},
               completed_at = ${now}
