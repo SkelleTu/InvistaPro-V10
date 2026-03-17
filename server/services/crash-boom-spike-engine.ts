@@ -252,6 +252,33 @@ export function getExternalGirassolPivots(symbol: string): ExternalGirassolPivot
 // FUNÇÕES AUXILIARES
 // ══════════════════════════════════════════════════════════════════════════════
 
+/**
+ * Conta quantos mínimos recentes (lows) estão dentro de uma banda percentual
+ * do preço atual — detecta zonas de suporte testadas múltiplas vezes.
+ *
+ * Ex: se 2+ lows ficaram dentro de 0.3% do preço atual → zona de suporte forte.
+ * Isso indica que os vendedores falharam repetidamente em romper esse nível.
+ * Entrar SELL nessa zona é extremamente arriscado.
+ */
+function countNearLows(candles: any[], currentPrice: number, bandPct: number): number {
+  if (candles.length < 10) return 0;
+  const lows = candles.slice(-80).map((c: any) => c.low || c.close * 0.999);
+  const band = currentPrice * bandPct;
+  // Contar apenas lows que são ABAIXO ou no nível do preço atual (suporte real)
+  return lows.filter(l => l <= currentPrice + band && l >= currentPrice - band).length;
+}
+
+/**
+ * Conta quantos máximos recentes (highs) estão dentro de uma banda percentual
+ * do preço atual — detecta zonas de resistência testadas múltiplas vezes.
+ */
+function countNearHighs(candles: any[], currentPrice: number, bandPct: number): number {
+  if (candles.length < 10) return 0;
+  const highs = candles.slice(-80).map((c: any) => c.high || c.close * 1.001);
+  const band = currentPrice * bandPct;
+  return highs.filter(h => h >= currentPrice - band && h <= currentPrice + band).length;
+}
+
 function getAvgInterval(symbol: string): number {
   for (const [key, val] of Object.entries(AVG_SPIKE_INTERVALS)) {
     if (symbol.includes(key)) return val;
@@ -580,7 +607,7 @@ function calcAutoFib(
     const label = `${(ratio * 100).toFixed(1)}%`;
     return {
       label, price, pct: ratio, distancePct,
-      layer: 'meso',
+      layer: 'meso' as const,
       significance: FIB_SIGNIFICANCE[ratio] || 'minor',
     };
   }).filter(l => l.distancePct < 4.0).sort((a, b) => a.distancePct - b.distancePct);
@@ -799,8 +826,40 @@ export function analyzeCrashBoomSpike(
   const externalPivots = getExternalGirassolPivots(sym);
   const girassolSystem = runGirassolSystem(candles, spikeType, allFibLevels, externalPivots);
 
-  // Direção final determinada pelo padrão detectado (bidirecional)
-  const spikeDirection: 'down' | 'up' = girassolSystem.detectedDirection;
+  // ── VERIFICAÇÃO DE ZONA DE SUPORTE / RESISTÊNCIA ──
+  // Antes de aceitar a direção do Girassol, verificamos se o preço está
+  // numa zona de suporte ou resistência já testada.
+  //
+  // Se o preço está em SUPORTE testado (2+ toques de mínimos próximos):
+  //   → SELL é proibido (vendedores já falharam repetidamente)
+  //   → Direção é forçada para UP (BUY), pois o suporte deve segurar
+  //
+  // Se o preço está em RESISTÊNCIA testada (2+ toques de máximos próximos):
+  //   → BUY é proibido (compradores já falharam repetidamente)
+  //   → Direção é forçada para DOWN (SELL), pois a resistência deve rejeitar
+  const supportTouches    = countNearLows(candles, currentPrice, 0.003);   // 0.3% band
+  const resistanceTouches = countNearHighs(candles, currentPrice, 0.003);  // 0.3% band
+
+  const atTestedSupport    = supportTouches >= 2;
+  const atTestedResistance = resistanceTouches >= 2;
+
+  let effectiveSpikeDirection: 'down' | 'up' = girassolSystem.detectedDirection;
+  let structuralOverrideAlert = '';
+
+  if (atTestedSupport && effectiveSpikeDirection === 'down') {
+    // Fundo Duplo/Triplo confirmado estruturalmente — forçar BUY
+    effectiveSpikeDirection = 'up';
+    structuralOverrideAlert = `🛡️ SUPORTE TESTADO ${supportTouches}× nos últimos candles — SELL bloqueado pelo contexto estrutural. Direção corrigida para BUY (spike de subida esperado).`;
+    console.log(`[SpikeEngine] ${structuralOverrideAlert}`);
+  } else if (atTestedResistance && effectiveSpikeDirection === 'up') {
+    // Topo Duplo/Triplo confirmado estruturalmente — forçar SELL
+    effectiveSpikeDirection = 'down';
+    structuralOverrideAlert = `🧱 RESISTÊNCIA TESTADA ${resistanceTouches}× nos últimos candles — BUY bloqueado pelo contexto estrutural. Direção corrigida para SELL (spike de queda esperado).`;
+    console.log(`[SpikeEngine] ${structuralOverrideAlert}`);
+  }
+
+  // Direção final determinada pelo padrão detectado (bidirecional) + correção estrutural
+  const spikeDirection: 'down' | 'up' = effectiveSpikeDirection;
 
   // ── MÓDULO 2: Auto Fibonacci a partir dos pivôs ──
   const autoFib = calcAutoFib(candles, girassolSystem, currentPrice);
@@ -885,6 +944,11 @@ export function analyzeCrashBoomSpike(
 
   // ── Alertas ordenados por prioridade ──
   const alerts: string[] = [];
+
+  // Alerta de correção estrutural (suporte/resistência testados)
+  if (structuralOverrideAlert) {
+    alerts.push(structuralOverrideAlert);
+  }
 
   if (girassolSystem.tripleBothMarked) {
     alerts.push(`🌟 DUPLA MARCAÇÃO GIRASSOL TRIPLA — 3/3 grupos com marcadores nos 2 pivôs — REVERSÃO QUASE CERTA`);

@@ -454,6 +454,13 @@ class MetaTraderBridge extends EventEmitter {
     if (this.isGeneratingSignal) return null;
     if (!this.config.enabled) return null;
 
+    // Bloquear novo sinal se já há posição aberta para o símbolo (evita empilhamento)
+    const hasOpenPositionForSymbol = Array.from(this.openPositions.values()).some(p => p.symbol === symbol);
+    if (hasOpenPositionForSymbol) {
+      console.log(`[MT5Bridge] 🔒 generateSignal bloqueado — posição aberta em ${symbol}`);
+      return null;
+    }
+
     const entryId = `analysis_${Date.now()}_${symbol}`;
 
     // Circuit breaker
@@ -1344,7 +1351,9 @@ class MetaTraderBridge extends EventEmitter {
   addMarketData(symbol: string, candles: any[]): void {
     this.marketDataCache.set(symbol, candles);
     const hasPending = !!this.getPendingSignal(symbol);
-    if (!hasPending && this.config.enabled) {
+    // Bloquear geração de sinal se já há posição aberta para este símbolo
+    const hasOpenPositionForSymbol = Array.from(this.openPositions.values()).some(p => p.symbol === symbol);
+    if (!hasPending && !hasOpenPositionForSymbol && this.config.enabled) {
       setImmediate(() => {
         this.generateSignal(symbol).then(signal => {
           if (signal && signal.action !== 'HOLD') {
@@ -1352,6 +1361,8 @@ class MetaTraderBridge extends EventEmitter {
           }
         }).catch(() => {});
       });
+    } else if (hasOpenPositionForSymbol) {
+      console.log(`[MT5Bridge] 🔒 ${symbol}: posição já aberta — sinal bloqueado`);
     }
   }
 
