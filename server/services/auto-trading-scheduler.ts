@@ -1494,6 +1494,32 @@ export class AutoTradingScheduler {
 
         } else if (selectedModality === 'accumulator') {
           // ── Contratos Acumuladores (ACCU) ──
+
+          // 🛡️ FILTRO DE SEGURANÇA ACCU — aprendizado com as 3 perdas recentes
+          // Indicadores em valores padrão (RSI=50, MACD=0, BB=0.5) significam que a análise técnica
+          // real não estava disponível, tornando a entrada extremamente arriscada.
+          const rsiIsDefault   = !aiConsensus.rsi       || aiConsensus.rsi      === 50;
+          const macdIsDefault  = aiConsensus.macd       === undefined || aiConsensus.macd === null || aiConsensus.macd === 0;
+          const bbIsDefault    = !aiConsensus.bbPosition || aiConsensus.bbPosition === 0.5;
+          const regimeUnknown  = !aiConsensus.marketRegime || aiConsensus.marketRegime === 'unknown';
+          const supremeUnknown = !supremeAnalysis || supremeAnalysis.regime === 'unknown' || supremeAnalysis.regime === 'neutral';
+          const indicatorsAllDefault = rsiIsDefault && macdIsDefault && bbIsDefault;
+
+          if (indicatorsAllDefault && regimeUnknown && supremeUnknown) {
+            console.warn(`⛔ [${operationId}] ACCU BLOQUEADO: Indicadores técnicos em valores padrão (RSI=50, MACD=0, BB=0.5) E regime desconhecido. Análise insuficiente para acumulador — entrada negada.`);
+            this.setPhase('AGUARDANDO', `⛔ ACCU bloqueado em ${selectedSymbol}: indicadores sem dados reais (RSI=50/MACD=0/BB=0.5 + regime desconhecido)`, 'warning');
+            return { success: false, error: `ACCU: Indicadores técnicos insuficientes + regime desconhecido — entrada bloqueada para proteger capital` };
+          }
+
+          // Volatilidade extrema: R_75 e R_100 têm volatilidade inerentemente alta — 
+          // só entrar se o regime for CONFIRMADO (não 'unknown')
+          const isHighVolSymbol = /R_75|R_100|1HZ75V|1HZ100V/.test(selectedSymbol);
+          if (isHighVolSymbol && regimeUnknown) {
+            console.warn(`⛔ [${operationId}] ACCU BLOQUEADO: ${selectedSymbol} tem alta volatilidade nativa e regime desconhecido — risco de knockout elevado.`);
+            this.setPhase('AGUARDANDO', `⛔ ACCU bloqueado: ${selectedSymbol} é de alta volatilidade e regime está desconhecido`, 'warning');
+            return { success: false, error: `ACCU: ${selectedSymbol} (alta volatilidade) com regime desconhecido — bloqueado por segurança` };
+          }
+
           // 🧠 ACCU usa o mesmo stake amplificado pela IA (tradeParams.amount já inclui AI amplifier).
           // Apenas aplica o mínimo da Deriv ($1.00). Sem teto fixo — a IA decide o tamanho.
           const accuStake = Math.max(1.00, Math.round(tradeParams.amount * 100) / 100);

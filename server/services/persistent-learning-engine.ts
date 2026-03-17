@@ -165,6 +165,19 @@ class PersistentLearningEngine {
 
     this.pendingContexts.delete(result.contractId);
 
+    // 🛠️ CORREÇÃO: status 'open' com profit negativo = contrato foi nocauteado (accumulator knockout)
+    // O Deriv às vezes retorna status='open' mesmo quando o acumulador é encerrado por perda.
+    // Normalizar para garantir que o aprendizado reflita o resultado real.
+    const normalizedStatus: string =
+      result.status === 'open' && result.profit < 0 ? 'lost' :
+      result.status === 'open' && result.profit > 0 ? 'won' :
+      result.status;
+
+    if (normalizedStatus !== result.status) {
+      console.log(`🔄 [LEARNING] Status normalizado: '${result.status}' → '${normalizedStatus}' (profit: ${result.profit}) para contrato ${result.contractId}`);
+      result = { ...result, status: normalizedStatus as any };
+    }
+
     try {
       const reward = this.calculateReward(result);
       const updatedWeights: Record<string, number> = {};
