@@ -195,6 +195,478 @@ router.get('/config', (_req: Request, res: Response) => {
   }
 });
 
+/**
+ * GET /api/mt5/download-ea
+ * Gera e retorna o EA (.mq5) com ServerURL e ApiToken pré-preenchidos.
+ */
+router.get('/download-ea', (req: Request, res: Response) => {
+  try {
+    const config = metaTraderBridge.getConfig();
+    const replitDomain = process.env.REPLIT_DEV_DOMAIN;
+    const serverUrl = replitDomain
+      ? `https://${replitDomain}`
+      : `${req.protocol}://${req.get('host')}`;
+    const token = config.apiToken || '';
+
+    const content = generateEAContent(serverUrl, token, config);
+
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="InvistaPRO_EA.mq5"');
+    res.send(content);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+function generateEAContent(serverUrl: string, token: string, config: any): string {
+  const lotSize        = config.defaultLotSize    ?? 0.01;
+  const stopLoss       = config.stopLossPips       ?? 30;
+  const takeProfit     = config.takeProfitPips     ?? 60;
+  const maxPositions   = config.maxOpenPositions   ?? 5;
+  const maxDailyLoss   = config.maxDailyLoss       ?? 100;
+  const maxDailyProfit = config.maxDailyProfit     ?? 500;
+  const useAISL        = config.useAIStopLoss      ? 'true' : 'false';
+  const useTrailing    = config.useTrailingStop    ? 'true' : 'false';
+  const trailingPips   = config.trailingStopPips   ?? 15;
+  const signalTimeout  = config.signalTimeoutSeconds ?? 60;
+
+  return `//+------------------------------------------------------------------+
+//|                                              InvistaPRO_EA.mq5   |
+//|                        Copyright 2025, InvistaPRO Systems        |
+//|                     Powered by 5 AI Systems + MetaTrader Bridge  |
+//+------------------------------------------------------------------+
+#property copyright "InvistaPRO Systems"
+#property link      "${serverUrl}"
+#property version   "2.00"
+#property strict
+
+#include <Trade\\Trade.mqh>
+#include <Trade\\PositionInfo.mqh>
+
+//--- Input Parameters
+input string   ServerURL       = "${serverUrl}";
+input string   ApiToken        = "${token}";
+input string   TradingSymbol   = "";  // Vazio = par atual
+input double   LotSize         = ${lotSize};
+input int      StopLoss        = ${stopLoss};
+input int      TakeProfit      = ${takeProfit};
+input int      MaxPositions    = ${maxPositions};
+input double   MaxDailyLoss    = ${maxDailyLoss};
+input double   MaxDailyProfit  = ${maxDailyProfit};
+input bool     UseAIStopLoss   = ${useAISL};
+input bool     UseTrailing     = ${useTrailing};
+input int      TrailingPips    = ${trailingPips};
+input int      SignalTimeout   = ${signalTimeout};
+input int      PollIntervalSec = 5;
+input int      HeartbeatSec    = 15;
+input int      CandlesHistory  = 200;
+
+//--- Global Variables
+CTrade         trade;
+CPositionInfo  posInfo;
+datetime       lastSignalCheck  = 0;
+datetime       lastHeartbeat    = 0;
+datetime       lastDataUpload   = 0;
+double         dailyProfit      = 0;
+double         dailyLoss        = 0;
+double         startDayBalance  = 0;   // saldo no início do dia
+datetime       lastDayReset     = 0;   // último reset diário
+string         lastSignalId     = "";
+string         accountId        = "";
+
+//+------------------------------------------------------------------+
+//| Expert initialization                                            |
+//+------------------------------------------------------------------+
+int OnInit() {
+   accountId = IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN));
+   trade.SetExpertMagicNumber(20250101);
+   trade.SetDeviationInPoints(10);
+   
+   if(!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED)) {
+      Alert("⚠️ AlgoTrading não está habilitado! Habilite nas configurações do MetaTrader.");
+      return INIT_FAILED;
+   }
+   
+   // Capturar saldo inicial do dia
+   startDayBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+   lastDayReset    = TimeCurrent();
+   
+   Print("✅ InvistaPRO EA iniciado | Servidor: ", ServerURL);
+   Print("📡 Conta: ", accountId, " | Par: ", GetSymbol());
+   Print("💰 Saldo inicial do dia: $", DoubleToString(startDayBalance, 2));
+   
+   SendHeartbeat();
+   return INIT_SUCCEEDED;
+}
+
+//+------------------------------------------------------------------+
+//| Expert deinitialization                                          |
+//+------------------------------------------------------------------+
+void OnDeinit(const int reason) {
+   Print("⏹️ InvistaPRO EA finalizado. Razão: ", reason);
+}
+
+//+------------------------------------------------------------------+
+//| Expert tick function                                             |
+//+------------------------------------------------------------------+
+void OnTick() {
+   datetime now = TimeCurrent();
+   
+   // Reset diário à meia-noite (novo dia de trading)
+   MqlDateTime tmNow, tmLast;
+   TimeToStruct(now, tmNow);
+   TimeToStruct(lastDayReset, tmLast);
+   if(tmNow.day != tmLast.day || tmNow.mon != tmLast.mon) {
+      startDayBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+      dailyProfit     = 0;
+      dailyLoss       = 0;
+      lastDayReset    = now;
+      Print("🔄 Novo dia — saldo inicial resetado: $", DoubleToString(startDayBalance, 2));
+   }
+   
+   // Heartbeat
+   if(now - lastHeartbeat >= HeartbeatSec) {
+      SendHeartbeat();
+      lastHeartbeat = now;
+   }
+   
+   // Upload de dados de mercado
+   if(now - lastDataUpload >= 60) {
+      UploadMarketData();
+      lastDataUpload = now;
+   }
+   
+   // Atualizar posições abertas
+   UpdateOpenPositions();
+   
+   // Verificar trailing stop
+   if(UseTrailing) ManageTrailingStop();
+   
+   // Checar limites diários
+   if(!CheckDailyLimits()) return;
+   
+   // Verificar sinal das IAs
+   if(now - lastSignalCheck >= PollIntervalSec) {
+      CheckAndExecuteSignal();
+      lastSignalCheck = now;
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Envia heartbeat para o servidor                                  |
+//+------------------------------------------------------------------+
+void SendHeartbeat() {
+   string symbol   = GetSymbol();
+   double balance  = AccountInfoDouble(ACCOUNT_BALANCE);
+   double equity   = AccountInfoDouble(ACCOUNT_EQUITY);
+   double margin   = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
+   string broker   = AccountInfoString(ACCOUNT_COMPANY);
+   int    platform = (int)TerminalInfoInteger(TERMINAL_BUILD);
+   int    open     = CountOpenPositions();
+   
+   string body = StringFormat(
+      "{\\\"accountId\\\":\\\"%s\\\",\\\"broker\\\":\\\"%s\\\","
+      "\\\"balance\\\":%.2f,\\\"equity\\\":%.2f,\\\"freeMargin\\\":%.2f,"
+      "\\\"openPositions\\\":%d,\\\"platform\\\":%d}",
+      accountId, broker, balance, equity, margin, open, platform
+   );
+   
+   char   req[];
+   char   res[];
+   string headers = "Content-Type: application/json\\r\\n";
+   StringToCharArray(body, req, 0, StringLen(body));
+   
+   int result = WebRequest("POST", ServerURL + "/api/mt5/heartbeat", headers, 5000, req, res, headers);
+   if(result == 200) Print("💚 Heartbeat OK | Balance: $", DoubleToString(balance, 2));
+   else              Print("⚠️ Heartbeat falhou: ", result);
+}
+
+//+------------------------------------------------------------------+
+//| Upload dados de mercado para as IAs                              |
+//+------------------------------------------------------------------+
+void UploadMarketData() {
+   string symbol = GetSymbol();
+   MqlRates rates[];
+   int copied = CopyRates(symbol, PERIOD_H1, 0, CandlesHistory, rates);
+   if(copied <= 0) return;
+   
+   string candlesJson = "[";
+   for(int i = 0; i < MathMin(copied, 100); i++) {
+      if(i > 0) candlesJson += ",";
+      candlesJson += StringFormat(
+         "{\\\"open\\\":%.5f,\\\"high\\\":%.5f,\\\"low\\\":%.5f,\\\"close\\\":%.5f,\\\"volume\\\":%d,\\\"time\\\":%d}",
+         rates[i].open, rates[i].high, rates[i].low, rates[i].close, (int)rates[i].tick_volume, (int)rates[i].time
+      );
+   }
+   candlesJson += "]";
+   
+   string body = StringFormat("{\\\"symbol\\\":\\\"%s\\\",\\\"candles\\\":%s}", symbol, candlesJson);
+   char req[], res[];
+   string headers = "Content-Type: application/json\\r\\n";
+   StringToCharArray(body, req, 0, StringLen(body));
+   WebRequest("POST", ServerURL + "/api/mt5/market-data", headers, 10000, req, res, headers);
+   Print("📊 Dados enviados: ", copied, " candles de ", symbol);
+}
+
+//+------------------------------------------------------------------+
+//| Consulta e executa sinal das IAs                                 |
+//+------------------------------------------------------------------+
+void CheckAndExecuteSignal() {
+   if(CountOpenPositions() >= MaxPositions) return;
+   
+   string symbol  = GetSymbol();
+   string url     = ServerURL + "/api/mt5/signal?symbol=" + symbol + "&token=" + ApiToken;
+   char   req[], res[];
+   string headers = "";
+   
+   int code = WebRequest("GET", url, headers, 8000, req, res, headers);
+   if(code != 200) { Print("⚠️ Falha ao buscar sinal: HTTP ", code); return; }
+   
+   string response = CharArrayToString(res);
+   
+   string action     = ExtractJsonString(response, "action");
+   string signalId   = ExtractJsonString(response, "id");
+   double confidence = ExtractJsonDouble(response, "confidence");
+   double slPrice    = ExtractJsonDouble(response, "stopLoss");
+   double tpPrice    = ExtractJsonDouble(response, "takeProfit");
+   double lotSize    = ExtractJsonDouble(response, "lotSize");
+   string reason     = ExtractJsonString(response, "reason");
+   
+   if(signalId == lastSignalId || action == "HOLD" || action == "") return;
+   
+   Print("🔔 Sinal recebido: ", action, " ", symbol, " | Confiança: ", DoubleToString(confidence * 100, 1), "% | ", reason);
+   
+   double entryPrice = (action == "BUY") ? SymbolInfoDouble(symbol, SYMBOL_ASK) : SymbolInfoDouble(symbol, SYMBOL_BID);
+   double point      = SymbolInfoDouble(symbol, SYMBOL_POINT);
+   int    digits     = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
+   
+   //--- Crash/Boom: spikes pulam stops — operar sem SL e TP
+   string symUp = symbol;
+   StringToUpper(symUp);
+   bool isSpikeIdx = (StringFind(symUp, "CRASH") >= 0 || StringFind(symUp, "BOOM") >= 0);
+
+   if(isSpikeIdx)
+   {
+      slPrice = 0;
+      tpPrice = 0;
+      Print("ℹ️ Crash/Boom — sem SL/TP");
+   }
+   else
+   {
+      if(!UseAIStopLoss || slPrice <= 0) {
+         slPrice = (action == "BUY") ? entryPrice - StopLoss * point : entryPrice + StopLoss * point;
+      }
+      if(!UseAIStopLoss || tpPrice <= 0) {
+         tpPrice = (action == "BUY") ? entryPrice + TakeProfit * point : entryPrice - TakeProfit * point;
+      }
+      //--- Garantir distância mínima exigida pelo broker
+      long   stopsLevel = SymbolInfoInteger(symbol, SYMBOL_TRADE_STOPS_LEVEL);
+      double minDist    = MathMax((double)stopsLevel * point, (SymbolInfoDouble(symbol, SYMBOL_ASK) - SymbolInfoDouble(symbol, SYMBOL_BID)) * 3.0);
+      if(minDist > 0)
+      {
+         if(action == "BUY")
+         {
+            if((entryPrice - slPrice) < minDist) slPrice = NormalizeDouble(entryPrice - minDist, digits);
+            if((tpPrice - entryPrice) < minDist) tpPrice = NormalizeDouble(entryPrice + minDist, digits);
+         }
+         else
+         {
+            if((slPrice - entryPrice) < minDist) slPrice = NormalizeDouble(entryPrice + minDist, digits);
+            if((entryPrice - tpPrice) < minDist) tpPrice = NormalizeDouble(entryPrice - minDist, digits);
+         }
+      }
+      slPrice = NormalizeDouble(slPrice, digits);
+      tpPrice = NormalizeDouble(tpPrice, digits);
+   }
+   if(lotSize <= 0) lotSize = LotSize;
+
+   bool ok = false;
+   if(action == "BUY")  ok = trade.Buy(lotSize, symbol, entryPrice, slPrice, tpPrice, "InvistaPRO_" + signalId);
+   if(action == "SELL") ok = trade.Sell(lotSize, symbol, entryPrice, slPrice, tpPrice, "InvistaPRO_" + signalId);
+   
+   if(ok) {
+      lastSignalId = signalId;
+      ulong ticket = trade.ResultOrder();
+      Print("✅ Ordem executada: #", ticket, " ", action, " @ ", entryPrice);
+      ReportTradeOpen(ticket, signalId, symbol, action, lotSize, entryPrice, slPrice, tpPrice);
+   } else {
+      Print("❌ Erro ao executar ordem: ", trade.ResultRetcode(), " - ", trade.ResultRetcodeDescription());
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Reporta abertura de trade para o servidor                        |
+//+------------------------------------------------------------------+
+void ReportTradeOpen(ulong ticket, string signalId, string symbol, string type, double lots, double openPrice, double sl, double tp) {
+   string body = StringFormat(
+      "{\\\"ticket\\\":%llu,\\\"signalId\\\":\\\"%s\\\",\\\"symbol\\\":\\\"%s\\\","
+      "\\\"type\\\":\\\"%s\\\",\\\"lots\\\":%.2f,\\\"openPrice\\\":%.5f,"
+      "\\\"stopLoss\\\":%.5f,\\\"takeProfit\\\":%.5f,\\\"openTime\\\":%d}",
+      ticket, signalId, symbol, type, lots, openPrice, sl, tp, (int)TimeCurrent()
+   );
+   char req[], res[];
+   string headers = "Content-Type: application/json\\r\\n";
+   StringToCharArray(body, req, 0, StringLen(body));
+   WebRequest("POST", ServerURL + "/api/mt5/trade/open", headers, 5000, req, res, headers);
+}
+
+//+------------------------------------------------------------------+
+//| Atualiza posições abertas                                        |
+//+------------------------------------------------------------------+
+void UpdateOpenPositions() {
+   // Calcular P&L líquido do dia (saldo atual vs saldo do início do dia)
+   double currentBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+   double floatingPL     = 0;
+   
+   for(int i = PositionsTotal() - 1; i >= 0; i--) {
+      if(!posInfo.SelectByIndex(i)) continue;
+      if(posInfo.Magic() != 20250101) continue;
+      floatingPL += posInfo.Profit();
+   }
+   
+   double netDayPL = (currentBalance + floatingPL) - startDayBalance;
+   
+   // Atualizar variáveis diárias com P&L líquido real
+   if(netDayPL >= 0) {
+      dailyProfit = netDayPL;
+      dailyLoss   = 0;
+   } else {
+      dailyLoss   = MathAbs(netDayPL);
+      dailyProfit = 0;
+   }
+   
+   // Fechar posições se limites atingidos
+   for(int i = PositionsTotal() - 1; i >= 0; i--) {
+      if(!posInfo.SelectByIndex(i)) continue;
+      if(posInfo.Magic() != 20250101) continue;
+      
+      ulong  ticket  = posInfo.Ticket();
+      double profit  = posInfo.Profit();
+      double current = posInfo.PriceCurrent();
+      
+      string closeReason = "";
+      if(dailyLoss >= MaxDailyLoss)     closeReason = "SL";
+      if(dailyProfit >= MaxDailyProfit) closeReason = "TP";
+      
+      if(closeReason != "") {
+         trade.PositionClose(ticket);
+         ReportTradeClose(ticket, posInfo.Symbol(), posInfo.TypeDescription(),
+                          posInfo.Volume(), posInfo.PriceOpen(), current,
+                          profit, closeReason);
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Trailing stop                                                    |
+//+------------------------------------------------------------------+
+void ManageTrailingStop() {
+   double point = SymbolInfoDouble(GetSymbol(), SYMBOL_POINT);
+   for(int i = PositionsTotal() - 1; i >= 0; i--) {
+      if(!posInfo.SelectByIndex(i)) continue;
+      if(posInfo.Magic() != 20250101) continue;
+      double newSL = 0;
+      if(posInfo.PositionType() == POSITION_TYPE_BUY) {
+         newSL = posInfo.PriceCurrent() - TrailingPips * point;
+         if(newSL > posInfo.StopLoss() + point)
+            trade.PositionModify(posInfo.Ticket(), newSL, posInfo.TakeProfit());
+      } else {
+         newSL = posInfo.PriceCurrent() + TrailingPips * point;
+         if(newSL < posInfo.StopLoss() - point || posInfo.StopLoss() == 0)
+            trade.PositionModify(posInfo.Ticket(), newSL, posInfo.TakeProfit());
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Reporta fechamento de trade                                      |
+//+------------------------------------------------------------------+
+void ReportTradeClose(ulong ticket, string symbol, string type, double lots, double openPrice, double closePrice, double profit, string closeReason) {
+   double pips = MathAbs(closePrice - openPrice) / SymbolInfoDouble(symbol, SYMBOL_POINT) / 10;
+   string body = StringFormat(
+      "{\\\"ticket\\\":%llu,\\\"symbol\\\":\\\"%s\\\",\\\"type\\\":\\\"%s\\\","
+      "\\\"lots\\\":%.2f,\\\"openPrice\\\":%.5f,\\\"closePrice\\\":%.5f,"
+      "\\\"profit\\\":%.2f,\\\"pips\\\":%.1f,\\\"closeTime\\\":%d,\\\"closeReason\\\":\\\"%s\\\"}",
+      ticket, symbol, type, lots, openPrice, closePrice, profit, pips, (int)TimeCurrent(), closeReason
+   );
+   char req[], res[];
+   string headers = "Content-Type: application/json\\r\\n";
+   StringToCharArray(body, req, 0, StringLen(body));
+   WebRequest("POST", ServerURL + "/api/mt5/trade/close", headers, 5000, req, res, headers);
+   Print("📋 Fechamento reportado: #", ticket, " | P&L: $", DoubleToString(profit, 2));
+}
+
+//+------------------------------------------------------------------+
+//| Verifica limites diários                                         |
+//+------------------------------------------------------------------+
+bool CheckDailyLimits() {
+   double currentBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+   double netDayPL       = currentBalance - startDayBalance;
+   double netDayLoss     = netDayPL < 0 ? MathAbs(netDayPL) : 0;
+   double netDayProfit   = netDayPL > 0 ? netDayPL          : 0;
+   
+   if(netDayLoss >= MaxDailyLoss) {
+      Print("🛑 Limite diário de PERDA LÍQUIDA atingido: -$", DoubleToString(netDayLoss, 2),
+            " | Início: $", DoubleToString(startDayBalance, 2),
+            " | Atual: $",  DoubleToString(currentBalance, 2),
+            " | Limite: $", DoubleToString(MaxDailyLoss, 2));
+      return false;
+   }
+   if(netDayProfit >= MaxDailyProfit) {
+      Print("🎯 Meta diária de LUCRO LÍQUIDO atingida: +$", DoubleToString(netDayProfit, 2),
+            " | Limite: $", DoubleToString(MaxDailyProfit, 2));
+      return false;
+   }
+   return true;
+}
+
+//+------------------------------------------------------------------+
+//| Conta posições abertas deste EA                                  |
+//+------------------------------------------------------------------+
+int CountOpenPositions() {
+   int count = 0;
+   for(int i = PositionsTotal() - 1; i >= 0; i--) {
+      if(posInfo.SelectByIndex(i) && posInfo.Magic() == 20250101) count++;
+   }
+   return count;
+}
+
+//+------------------------------------------------------------------+
+//| Obtém símbolo a usar                                             |
+//+------------------------------------------------------------------+
+string GetSymbol() {
+   return (TradingSymbol == "" || TradingSymbol == NULL) ? Symbol() : TradingSymbol;
+}
+
+//+------------------------------------------------------------------+
+//| Extrai string de JSON simples                                    |
+//+------------------------------------------------------------------+
+string ExtractJsonString(string json, string key) {
+   string search = "\\"" + key + "\\":\\"";
+   int start = StringFind(json, search);
+   if(start < 0) return "";
+   start += StringLen(search);
+   int end = StringFind(json, "\\"", start);
+   if(end < 0) return "";
+   return StringSubstr(json, start, end - start);
+}
+
+//+------------------------------------------------------------------+
+//| Extrai double de JSON simples                                    |
+//+------------------------------------------------------------------+
+double ExtractJsonDouble(string json, string key) {
+   string search = "\\"" + key + "\\":";
+   int start = StringFind(json, search);
+   if(start < 0) return 0;
+   start += StringLen(search);
+   int end = start;
+   while(end < StringLen(json) && StringGetCharacter(json, end) != ',' && StringGetCharacter(json, end) != '}') end++;
+   string val = StringSubstr(json, start, end - start);
+   return StringToDouble(val);
+}
+`;
+}
+
 router.post('/config', (req: Request, res: Response) => {
   try {
     const updates = req.body;
