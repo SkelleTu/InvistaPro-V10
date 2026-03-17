@@ -2177,8 +2177,19 @@ export default function TradingSystemPage() {
                       const profitPctOfTarget = ai ? Math.min(100, (contract.profitPct / ai.profitTarget) * 100) : 0;
                       const barrierDangerPct = (barrierPct !== null && ai) ? Math.min(100, (ai.barrierDanger / barrierPct) * 100) : 0;
 
+                      const isClosedContract = contract.status === 'closed';
+                      const isWonContract = contract.finalResult === 'won';
+                      const isLostContract = contract.finalResult === 'lost';
                       return (
-                        <div key={contract.contractId} className="border rounded-xl p-4 space-y-4 bg-card" data-testid={`live-contract-${contract.contractId}`}>
+                        <div key={contract.contractId} className={`border rounded-xl p-4 space-y-4 ${isClosedContract ? (isWonContract ? 'border-green-500/40 bg-green-500/5' : 'border-red-500/40 bg-red-500/5') : 'bg-card'}`} data-testid={`live-contract-${contract.contractId}`}>
+
+                          {/* Banner de resultado para contratos fechados */}
+                          {isClosedContract && (
+                            <div className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm font-bold ${isWonContract ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                              <span>{isWonContract ? '✅ OPERAÇÃO GANHOU' : '❌ OPERAÇÃO PERDEU'}</span>
+                              <span>{isWonContract ? '+' : ''}{contract.finalProfit?.toFixed(2) ?? contract.profit?.toFixed(2) ?? '0.00'} USD</span>
+                            </div>
+                          )}
 
                           {/* Cabeçalho da operação */}
                           <div className="flex items-start justify-between gap-2">
@@ -2186,7 +2197,7 @@ export default function TradingSystemPage() {
                               <div className="flex items-center gap-2 flex-wrap">
                                 <Badge variant="outline" className="font-mono text-xs">{contract.contractType}</Badge>
                                 <span className="font-bold text-sm">{contract.symbol}</span>
-                                {ai && (
+                                {!isClosedContract && ai && (
                                   <span className={`text-xs px-2 py-0.5 rounded-full border ${regimeColor[ai.regime] || 'bg-muted text-muted-foreground border-muted'}`}>
                                     {regimeLabel[ai.regime] || ai.regime}
                                   </span>
@@ -2474,20 +2485,28 @@ export default function TradingSystemPage() {
                 {(monitorData as any)?.contracts?.length > 0 ? (
                   <div className="space-y-4">
                     {(monitorData as any).contracts.map((contract: any) => {
+                      const isClosed = contract.status === 'closed';
+                      const isWon = contract.finalResult === 'won';
+                      const isLost = contract.finalResult === 'lost';
                       const profitColor = contract.profit > 0 ? "text-green-500" : contract.profit < 0 ? "text-red-500" : "text-muted-foreground";
                       const ageMin = (contract.ageMs / 60000).toFixed(1);
                       const profitPct = contract.profitPct?.toFixed(2) ?? "0.00";
                       const profitSign = contract.profit >= 0 ? "+" : "";
+                      const borderColor = isClosed
+                        ? isWon ? "border-green-500/40 bg-green-500/5"
+                        : isLost ? "border-red-500/40 bg-red-500/5"
+                        : "border-gray-500/20 bg-background"
+                        : "border-blue-500/20 bg-background";
                       return (
                         <div
                           key={contract.contractId}
                           data-testid={`monitor-contract-${contract.contractId}`}
-                          className="p-4 border-2 border-blue-500/20 rounded-xl space-y-3 bg-background"
+                          className={`p-4 border-2 rounded-xl space-y-3 ${borderColor}`}
                         >
                           {/* Cabeçalho do contrato */}
                           <div className="flex items-center justify-between">
                             <div className="flex items-center space-x-2">
-                              <Activity className="h-4 w-4 text-blue-500 animate-pulse" />
+                              <Activity className={`h-4 w-4 ${isClosed ? (isWon ? 'text-green-500' : 'text-red-500') : 'text-blue-500 animate-pulse'}`} />
                               <span className="font-bold text-sm" data-testid={`monitor-symbol-${contract.contractId}`}>
                                 {contract.symbol}
                               </span>
@@ -2508,10 +2527,14 @@ export default function TradingSystemPage() {
                               <span className="text-xs text-muted-foreground">{ageMin}min</span>
                               <Badge
                                 variant={contract.status === 'monitoring' ? 'default' : 'secondary'}
-                                className="text-xs"
+                                className={`text-xs ${isClosed && isWon ? 'bg-green-600 text-white' : isClosed && isLost ? 'bg-red-600 text-white' : ''}`}
                                 data-testid={`monitor-status-${contract.contractId}`}
                               >
-                                {contract.status === 'monitoring' ? '🔭 Monitorando' : contract.status === 'closing' ? '⚡ Fechando' : '✅ Fechado'}
+                                {contract.status === 'monitoring' ? '🔭 Monitorando'
+                                  : contract.status === 'closing' ? '⚡ Fechando'
+                                  : isWon ? '✅ Ganhou'
+                                  : isLost ? '❌ Perdeu'
+                                  : '💰 Encerrado'}
                               </Badge>
                             </div>
                           </div>

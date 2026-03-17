@@ -6,14 +6,14 @@ const router = Router();
 
 router.get('/status', isAuthenticated, (req: Request, res: Response) => {
   const contracts = contractMonitor.getMonitoredContracts();
-  const mapped = contracts.map(({ contractId, state }) => ({
+  const mapped = contracts.map(({ contractId, state, finalResult, finalProfit, closedAt }) => ({
     contractId,
     contractType: state.input.contractType,
     symbol: state.input.symbol,
     direction: state.input.direction,
     buyPrice: state.input.buyPrice,
     bidPrice: state.bidPrice,
-    profit: state.profit,
+    profit: finalProfit ?? state.profit,
     profitPct: state.profitPct,
     peakProfit: state.peakProfit,
     currentSpot: state.currentSpot,
@@ -24,10 +24,15 @@ router.get('/status', isAuthenticated, (req: Request, res: Response) => {
     status: state.status,
     ageMs: Date.now() - state.input.openedAt,
     lastUpdate: state.lastUpdate,
+    finalResult,
+    finalProfit,
+    closedAt,
   }));
 
+  const activeContracts = mapped.filter(c => c.status !== 'closed').length;
+
   res.json({
-    activeContracts: mapped.length,
+    activeContracts,
     contracts: mapped,
     timestamp: Date.now(),
   });

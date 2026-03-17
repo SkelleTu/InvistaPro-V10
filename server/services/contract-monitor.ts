@@ -513,8 +513,16 @@ function getAdaptiveThresholds(base: ExitThresholds, symbol: string, currentProf
 
 // ─────────────────── Classe principal ───────────────────
 
+interface RecentlyClosedEntry {
+  state: ContractState;
+  closedAt: number;
+  finalResult: 'won' | 'lost' | 'sold';
+  finalProfit: number;
+}
+
 class UniversalContractMonitor extends EventEmitter {
   private monitored = new Map<number, ContractState>();
+  private recentlyClosed = new Map<number, RecentlyClosedEntry>();
   private ws: WebSocket | null = null;
   private apiToken: string | null = null;
   private connected = false;
@@ -523,6 +531,7 @@ class UniversalContractMonitor extends EventEmitter {
   private reqIdCounter = 1000000;
   private pendingSubAcks = new Map<number, number>(); // reqId → contractId
   private isShuttingDown = false;
+  private readonly RECENTLY_CLOSED_TTL_MS = 20000; // 20 seconds
 
   constructor() {
     super();
@@ -588,8 +597,16 @@ class UniversalContractMonitor extends EventEmitter {
     console.log(`🔭 [MONITOR] Monitoramento encerrado: ${contractId} | Status: ${state.status}`);
   }
 
-  getMonitoredContracts(): Array<{ contractId: number; state: ContractState }> {
-    return Array.from(this.monitored.entries()).map(([id, s]) => ({ contractId: id, state: s }));
+  getMonitoredContracts(): Array<{ contractId: number; state: ContractState; finalResult?: string; finalProfit?: number; closedAt?: number }> {
+    const active = Array.from(this.monitored.entries()).map(([id, s]) => ({ contractId: id, state: s }));
+    const recent = Array.from(this.recentlyClosed.entries()).map(([id, entry]) => ({
+      contractId: id,
+      state: entry.state,
+      finalResult: entry.finalResult,
+      finalProfit: entry.finalProfit,
+      closedAt: entry.closedAt,
+    }));
+    return [...active, ...recent];
   }
 
   getContractState(contractId: number): ContractState | undefined {
@@ -1073,12 +1090,32 @@ class UniversalContractMonitor extends EventEmitter {
 
   private handleContractClosed(state: ContractState, raw: any): void {
     const contractId = state.input.contractId;
-    const result = raw.status === 'won' ? '✅ WON' : raw.status === 'sold' ? '💰 SOLD' : '❌ LOST';
+    const finalResult: 'won' | 'lost' | 'sold' = raw.status === 'won' ? 'won' : raw.status === 'sold' ? 'sold' : 'lost';
+    const result = finalResult === 'won' ? '✅ WON' : finalResult === 'sold' ? '💰 SOLD' : '❌ LOST';
     const finalProfit = parseFloat(raw.profit) || state.profit;
 
     console.log(`\n📊 [MONITOR] Contrato FECHADO: ${contractId} (${state.input.contractType})`);
     console.log(`   Resultado: ${result} | Lucro final: $${finalProfit.toFixed(4)}`);
     console.log(`   Ticks monitorados: ${state.tickCount} | Duração: ${((Date.now() - state.input.openedAt) / 60000).toFixed(1)}min`);
+
+    // Atualizar estado final antes de mover para buffer
+    state.status = 'closed';
+    state.profit = finalProfit;
+    state.lastUpdate = Date.now();
+
+    // Mover para buffer "recentemente fechados" para exibição por 20s
+    const closedEntry: RecentlyClosedEntry = {
+      state,
+      closedAt: Date.now(),
+      finalResult,
+      finalProfit,
+    };
+    this.recentlyClosed.set(contractId, closedEntry);
+
+    // Agendar remoção do buffer após TTL
+    setTimeout(() => {
+      this.recentlyClosed.delete(contractId);
+    }, this.RECENTLY_CLOSED_TTL_MS);
 
     this.emit('contract_closed', {
       contractId,
@@ -1163,10 +1200,14 @@ class UniversalContractMonitor extends EventEmitter {
     status: string;
     openReason?: string;
     aiSnapshot?: AITickSnapshot;
+    finalResult?: string;
+    finalProfit?: number;
+    closedAt?: number;
   }> {
     const result = [];
+
+    // Contratos ativos (em monitoramento)
     for (const [contractId, state] of Array.from(this.monitored.entries())) {
-      if (state.status === 'closed') continue;
       result.push({
         contractId,
         contractType: state.input.contractType,
@@ -1188,6 +1229,35 @@ class UniversalContractMonitor extends EventEmitter {
         aiSnapshot: state.aiSnapshot,
       });
     }
+
+    // Contratos recentemente fechados (visíveis por 20s)
+    for (const [contractId, entry] of Array.from(this.recentlyClosed.entries())) {
+      const state = entry.state;
+      result.push({
+        contractId,
+        contractType: state.input.contractType,
+        symbol: state.input.symbol,
+        openedAt: state.input.openedAt,
+        ageMin: parseFloat(((Date.now() - state.input.openedAt) / 60000).toFixed(1)),
+        tickCount: state.tickCount,
+        buyPrice: state.input.buyPrice,
+        currentSpot: state.currentSpot,
+        entrySpot: state.entrySpot,
+        bidPrice: state.bidPrice,
+        profit: entry.finalProfit,
+        profitPct: parseFloat(state.profitPct.toFixed(2)),
+        peakProfit: state.peakProfit,
+        barrierDistance: state.barrierDistance,
+        barrierValue: state.barrierValue,
+        status: 'closed',
+        openReason: state.openReason,
+        aiSnapshot: state.aiSnapshot,
+        finalResult: entry.finalResult,
+        finalProfit: entry.finalProfit,
+        closedAt: entry.closedAt,
+      });
+    }
+
     return result;
   }
 
