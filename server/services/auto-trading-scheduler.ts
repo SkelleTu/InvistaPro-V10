@@ -1442,33 +1442,31 @@ export class AutoTradingScheduler {
             multiplier: adaptiveMult,
           });
           if (!contract) {
-            console.warn(`⚠️ [${operationId}] Multiplier rejeitado pela Deriv → fallback DIGITDIFF`);
-            const fallback = { contract_type: 'DIGITDIFF' as const, symbol: selectedSymbol, duration: tradeParams.duration, duration_unit: 't' as const, barrier: tradeParams.barrier, amount: tradeParams.amount, currency: 'USD' };
-            contract = await derivAPI.buyDigitDifferContract(fallback);
-            resolvedTradeType = 'digitdiff';
-          } else {
-            resolvedTradeType = selectedModality;
+            console.warn(`⚠️ [${operationId}] Multiplier rejeitado pela Deriv — operação cancelada (sem fallback)`);
+            return { success: false, error: `Multiplier (${contractType}) rejeitado pela Deriv para ${selectedSymbol}` };
           }
+          resolvedTradeType = selectedModality;
 
         } else if (selectedModality === 'accumulator') {
           // ── Contratos Acumuladores (ACCU) ──
           // 🧠 ACCU tem risco binário (knock-out = perda total): stake INDEPENDENTE e conservador
           // NÃO usa o AI amplifier do DIGITDIFF — o ACCU já compõe internamente a 2%/tick
-          let accuStake = tradeParams.amount; // fallback ao stake base
+          // Mínimo Deriv para ACCU: $1.00
+          let accuStake = Math.max(1.00, tradeParams.amount);
           try {
             const balanceAnalysis = await storage.getBalanceAnalysis(userId);
             if (balanceAnalysis?.currentBalance > 0) {
               const bk = balanceAnalysis.currentBalance;
-              // ACCU: 0.1% da banca, mínimo $0.35, máximo $10 (independente do tamanho da banca)
+              // ACCU: 1% da banca, mínimo $1.00 (mínimo Deriv), máximo $10
               // Razão: knock-out perde 100% do stake — risco deve ser mínimo por trade
-              accuStake = Math.max(0.35, Math.min(bk * 0.001, 10));
+              accuStake = Math.max(1.00, Math.min(bk * 0.01, 10));
               accuStake = Math.round(accuStake * 100) / 100;
             }
           } catch {}
           // 🧠 SUPREMO: growth_rate adaptativo por volatilidade e regime do mercado
           const adaptiveGrowth = supremeAnalysis?.adaptiveParams?.accumulator?.growthRate ?? 0.02;
           const accuRisk = supremeAnalysis?.adaptiveParams?.accumulator?.riskLevel ?? 'medium';
-          console.log(`📊 [${operationId}] ACCU: stake=$${accuStake} (0.1% banca, sem amplificador) | growth_rate=${(adaptiveGrowth*100).toFixed(1)}%${supremeAnalysis ? ` ADAPTATIVO (regime=${supremeAnalysis.regime} | risco=${accuRisk} | hurst=${supremeAnalysis.statistics.hurstExponent.toFixed(2)})` : ' padrão'} | Symbol: ${selectedSymbol}`);
+          console.log(`📊 [${operationId}] ACCU: stake=$${accuStake} (1% banca, mín $1.00) | growth_rate=${(adaptiveGrowth*100).toFixed(1)}%${supremeAnalysis ? ` ADAPTATIVO (regime=${supremeAnalysis.regime} | risco=${accuRisk} | hurst=${supremeAnalysis.statistics.hurstExponent.toFixed(2)})` : ' padrão'} | Symbol: ${selectedSymbol}`);
           contract = await derivAPI.buyFlexibleContract({
             contract_type: 'ACCU',
             symbol: selectedSymbol,
@@ -1476,13 +1474,10 @@ export class AutoTradingScheduler {
             growth_rate: adaptiveGrowth,
           });
           if (!contract) {
-            console.warn(`⚠️ [${operationId}] Accumulator rejeitado pela Deriv → fallback DIGITDIFF`);
-            const fallback = { contract_type: 'DIGITDIFF' as const, symbol: selectedSymbol, duration: tradeParams.duration, duration_unit: 't' as const, barrier: tradeParams.barrier, amount: tradeParams.amount, currency: 'USD' };
-            contract = await derivAPI.buyDigitDifferContract(fallback);
-            resolvedTradeType = 'digitdiff';
-          } else {
-            resolvedTradeType = 'accumulator';
+            console.warn(`⚠️ [${operationId}] Accumulator rejeitado pela Deriv — operação cancelada (sem fallback)`);
+            return { success: false, error: `Accumulator rejeitado pela Deriv para ${selectedSymbol}` };
           }
+          resolvedTradeType = 'accumulator';
 
         } else if (TURBO_TYPES[selectedModality]) {
           // ── Contratos Turbos/Knockouts (TURBOSLONG, TURBOSSHORT) ──
@@ -1490,36 +1485,30 @@ export class AutoTradingScheduler {
           const currentPrice = await derivAPI.getCurrentPrice(selectedSymbol);
 
           if (!currentPrice || currentPrice <= 0) {
-            console.warn(`⚠️ [${operationId}] Turbo sem preço válido para ${selectedSymbol} → fallback DIGITDIFF`);
-            const fallback = { contract_type: 'DIGITDIFF' as const, symbol: selectedSymbol, duration: tradeParams.duration, duration_unit: 't' as const, barrier: tradeParams.barrier, amount: tradeParams.amount, currency: 'USD' };
-            contract = await derivAPI.buyDigitDifferContract(fallback);
-            resolvedTradeType = 'digitdiff';
-          } else {
-            // 🧠 SUPREMO: knockout adaptativo por volatilidade real
-            const adaptiveTurboPct = supremeAnalysis?.adaptiveParams?.turbo?.knockoutOffsetPct ?? 0.015;
-            const adaptiveTurboDur = supremeAnalysis?.adaptiveParams?.turbo?.durationMin ?? 15;
-            const knockoutOffset = currentPrice * adaptiveTurboPct;
-            const barrier = selectedModality === 'turbo_up'
-              ? (currentPrice - knockoutOffset).toFixed(4)
-              : (currentPrice + knockoutOffset).toFixed(4);
-            const dateExpiry = Math.floor(Date.now() / 1000) + (adaptiveTurboDur * 60);
-            console.log(`📊 [${operationId}] ${contractType}: barrier=${barrier} (${(adaptiveTurboPct*100).toFixed(2)}%${supremeAnalysis ? ' ADAPTATIVO' : ' padrão'}), expiry=${adaptiveTurboDur}min | Symbol: ${selectedSymbol}`);
-            contract = await derivAPI.buyFlexibleContract({
-              contract_type: contractType,
-              symbol: selectedSymbol,
-              amount: tradeParams.amount,
-              barrier,
-              date_expiry: dateExpiry,
-            });
-            if (!contract) {
-              console.warn(`⚠️ [${operationId}] Turbo rejeitado pela Deriv → fallback DIGITDIFF`);
-              const fallback = { contract_type: 'DIGITDIFF' as const, symbol: selectedSymbol, duration: tradeParams.duration, duration_unit: 't' as const, barrier: tradeParams.barrier, amount: tradeParams.amount, currency: 'USD' };
-              contract = await derivAPI.buyDigitDifferContract(fallback);
-              resolvedTradeType = 'digitdiff';
-            } else {
-              resolvedTradeType = selectedModality;
-            }
+            console.warn(`⚠️ [${operationId}] Turbo sem preço válido para ${selectedSymbol} — operação cancelada`);
+            return { success: false, error: `Preço indisponível para Turbo em ${selectedSymbol}` };
           }
+          // 🧠 SUPREMO: knockout adaptativo por volatilidade real
+          const adaptiveTurboPct = supremeAnalysis?.adaptiveParams?.turbo?.knockoutOffsetPct ?? 0.015;
+          const adaptiveTurboDur = supremeAnalysis?.adaptiveParams?.turbo?.durationMin ?? 15;
+          const knockoutOffset = currentPrice * adaptiveTurboPct;
+          const barrier = selectedModality === 'turbo_up'
+            ? (currentPrice - knockoutOffset).toFixed(4)
+            : (currentPrice + knockoutOffset).toFixed(4);
+          const dateExpiry = Math.floor(Date.now() / 1000) + (adaptiveTurboDur * 60);
+          console.log(`📊 [${operationId}] ${contractType}: barrier=${barrier} (${(adaptiveTurboPct*100).toFixed(2)}%${supremeAnalysis ? ' ADAPTATIVO' : ' padrão'}), expiry=${adaptiveTurboDur}min | Symbol: ${selectedSymbol}`);
+          contract = await derivAPI.buyFlexibleContract({
+            contract_type: contractType,
+            symbol: selectedSymbol,
+            amount: tradeParams.amount,
+            barrier,
+            date_expiry: dateExpiry,
+          });
+          if (!contract) {
+            console.warn(`⚠️ [${operationId}] Turbo rejeitado pela Deriv — operação cancelada (sem fallback)`);
+            return { success: false, error: `Turbo (${contractType}) rejeitado pela Deriv para ${selectedSymbol}` };
+          }
+          resolvedTradeType = selectedModality;
 
         } else if (VANILLA_TYPES[selectedModality]) {
           // ── Contratos Vanilla Options (VANILLALONGCALL, VANILLALONGPUT) ──
@@ -1527,36 +1516,30 @@ export class AutoTradingScheduler {
           const currentPrice = await derivAPI.getCurrentPrice(selectedSymbol);
 
           if (!currentPrice || currentPrice <= 0) {
-            console.warn(`⚠️ [${operationId}] Vanilla sem preço válido para ${selectedSymbol} → fallback DIGITDIFF`);
-            const fallback = { contract_type: 'DIGITDIFF' as const, symbol: selectedSymbol, duration: tradeParams.duration, duration_unit: 't' as const, barrier: tradeParams.barrier, amount: tradeParams.amount, currency: 'USD' };
-            contract = await derivAPI.buyDigitDifferContract(fallback);
-            resolvedTradeType = 'digitdiff';
-          } else {
-            // 🧠 SUPREMO: strike adaptativo por momentum real do mercado
-            const adaptiveVanillaPct = supremeAnalysis?.adaptiveParams?.vanilla?.strikeOffsetPct ?? 0.005;
-            const adaptiveVanillaDur = supremeAnalysis?.adaptiveParams?.vanilla?.durationMin ?? 15;
-            const strikeOffset = currentPrice * adaptiveVanillaPct;
-            const strike = selectedModality === 'vanilla_call'
-              ? (currentPrice + strikeOffset).toFixed(4)
-              : (currentPrice - strikeOffset).toFixed(4);
-            const dateExpiry = Math.floor(Date.now() / 1000) + (adaptiveVanillaDur * 60);
-            console.log(`📊 [${operationId}] ${contractType}: strike=${strike} (${(adaptiveVanillaPct*100).toFixed(2)}%${supremeAnalysis ? ' ADAPTATIVO' : ' padrão'}), expiry=${adaptiveVanillaDur}min | Symbol: ${selectedSymbol}`);
-            contract = await derivAPI.buyFlexibleContract({
-              contract_type: contractType,
-              symbol: selectedSymbol,
-              amount: tradeParams.amount,
-              barrier: strike,
-              date_expiry: dateExpiry,
-            });
-            if (!contract) {
-              console.warn(`⚠️ [${operationId}] Vanilla rejeitado pela Deriv → fallback DIGITDIFF`);
-              const fallback = { contract_type: 'DIGITDIFF' as const, symbol: selectedSymbol, duration: tradeParams.duration, duration_unit: 't' as const, barrier: tradeParams.barrier, amount: tradeParams.amount, currency: 'USD' };
-              contract = await derivAPI.buyDigitDifferContract(fallback);
-              resolvedTradeType = 'digitdiff';
-            } else {
-              resolvedTradeType = selectedModality;
-            }
+            console.warn(`⚠️ [${operationId}] Vanilla sem preço válido para ${selectedSymbol} — operação cancelada`);
+            return { success: false, error: `Preço indisponível para Vanilla em ${selectedSymbol}` };
           }
+          // 🧠 SUPREMO: strike adaptativo por momentum real do mercado
+          const adaptiveVanillaPct = supremeAnalysis?.adaptiveParams?.vanilla?.strikeOffsetPct ?? 0.005;
+          const adaptiveVanillaDur = supremeAnalysis?.adaptiveParams?.vanilla?.durationMin ?? 15;
+          const strikeOffset = currentPrice * adaptiveVanillaPct;
+          const strike = selectedModality === 'vanilla_call'
+            ? (currentPrice + strikeOffset).toFixed(4)
+            : (currentPrice - strikeOffset).toFixed(4);
+          const dateExpiry = Math.floor(Date.now() / 1000) + (adaptiveVanillaDur * 60);
+          console.log(`📊 [${operationId}] ${contractType}: strike=${strike} (${(adaptiveVanillaPct*100).toFixed(2)}%${supremeAnalysis ? ' ADAPTATIVO' : ' padrão'}), expiry=${adaptiveVanillaDur}min | Symbol: ${selectedSymbol}`);
+          contract = await derivAPI.buyFlexibleContract({
+            contract_type: contractType,
+            symbol: selectedSymbol,
+            amount: tradeParams.amount,
+            barrier: strike,
+            date_expiry: dateExpiry,
+          });
+          if (!contract) {
+            console.warn(`⚠️ [${operationId}] Vanilla rejeitado pela Deriv — operação cancelada (sem fallback)`);
+            return { success: false, error: `Vanilla (${contractType}) rejeitado pela Deriv para ${selectedSymbol}` };
+          }
+          resolvedTradeType = selectedModality;
 
         } else if (LOOKBACK_TYPES[selectedModality]) {
           // ── Contratos Lookback (LBFLOATPUT, LBFLOATCALL, LBHIGHLOW) ──
@@ -1571,27 +1554,15 @@ export class AutoTradingScheduler {
             duration_unit: 'm',
           });
           if (!contract) {
-            console.warn(`⚠️ [${operationId}] Lookback rejeitado pela Deriv (conta demo?) → fallback DIGITDIFF`);
-            const fallback = { contract_type: 'DIGITDIFF' as const, symbol: selectedSymbol, duration: tradeParams.duration, duration_unit: 't' as const, barrier: tradeParams.barrier, amount: tradeParams.amount, currency: 'USD' };
-            contract = await derivAPI.buyDigitDifferContract(fallback);
-            resolvedTradeType = 'digitdiff';
-          } else {
-            resolvedTradeType = selectedModality;
+            console.warn(`⚠️ [${operationId}] Lookback rejeitado pela Deriv — operação cancelada (sem fallback)`);
+            return { success: false, error: `Lookback (${contractType}) rejeitado pela Deriv para ${selectedSymbol}` };
           }
+          resolvedTradeType = selectedModality;
 
         } else {
-          // Fallback: sempre executar DIGITDIFF
-          const fallbackContract = {
-            contract_type: 'DIGITDIFF' as const,
-            symbol: selectedSymbol,
-            duration: tradeParams.duration,
-            duration_unit: 't' as const,
-            barrier: tradeParams.barrier,
-            amount: tradeParams.amount,
-            currency: 'USD'
-          };
-          contract = await derivAPI.buyDigitDifferContract(fallbackContract);
-          resolvedTradeType = 'digitdiff';
+          // Modalidade desconhecida — cancelar operação sem fallback
+          console.error(`❌ [${operationId}] Modalidade desconhecida: ${selectedModality} — operação cancelada`);
+          return { success: false, error: `Modalidade não reconhecida: ${selectedModality}` };
         }
 
         if (!contract) {
