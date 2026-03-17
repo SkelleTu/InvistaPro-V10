@@ -965,6 +965,60 @@ export default function MetaTraderPage() {
                     </div>
                   </div>
 
+                  {/* ── PADRÃO GIRASSOL (ESTRATÉGIA PRIMÁRIA) ── */}
+                  {analysis.girassolPattern?.detected ? (
+                    <div className={`rounded-md border-2 p-3 space-y-2 ${
+                      analysis.girassolPattern.fibAlignment
+                        ? 'border-yellow-400 bg-yellow-400/10'
+                        : 'border-amber-500/70 bg-amber-500/10'
+                    }`} data-testid={`card-girassol-${i}`}>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 font-bold text-sm text-yellow-400">
+                          <span className="text-base">🌻</span>
+                          GIRASSOL — {analysis.girassolPattern.patternType === 'double_top' ? 'DUPLO TOPO' : 'DUPLO FUNDO'} DETECTADO
+                        </div>
+                        <Badge className={`text-xs font-bold ${
+                          analysis.girassolPattern.confirmationScore >= 90
+                            ? 'bg-red-600'
+                            : analysis.girassolPattern.confirmationScore >= 75
+                            ? 'bg-orange-500'
+                            : 'bg-yellow-600'
+                        }`}>
+                          Score {analysis.girassolPattern.confirmationScore}/100
+                        </Badge>
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                        <div className="bg-background/40 rounded px-2 py-1">
+                          <p className="text-muted-foreground">Pivô 1</p>
+                          <p className="font-mono font-bold text-foreground">{analysis.girassolPattern.firstPivotPrice?.toFixed(4)}</p>
+                        </div>
+                        <div className="bg-background/40 rounded px-2 py-1">
+                          <p className="text-muted-foreground">Pivô 2</p>
+                          <p className="font-mono font-bold text-foreground">{analysis.girassolPattern.secondPivotPrice?.toFixed(4)}</p>
+                        </div>
+                        <div className="bg-background/40 rounded px-2 py-1">
+                          <p className="text-muted-foreground">Divergência</p>
+                          <p className="font-bold text-foreground">{analysis.girassolPattern.priceDivergencePct?.toFixed(2)}%</p>
+                        </div>
+                        <div className="bg-background/40 rounded px-2 py-1">
+                          <p className="text-muted-foreground">Candles entre pivôs</p>
+                          <p className="font-bold text-foreground">{analysis.girassolPattern.candlesBetween}</p>
+                        </div>
+                      </div>
+                      {analysis.girassolPattern.fibAlignment && (
+                        <div className="flex items-center gap-1.5 text-xs text-yellow-300 font-semibold">
+                          <span>✨</span>
+                          <span>CONFLUÊNCIA COM FIBONACCI — sinal de máxima força</span>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 p-2 rounded-md border border-dashed border-border text-xs text-muted-foreground" data-testid={`card-girassol-absent-${i}`}>
+                      <span>🌻</span>
+                      <span>Padrão Girassol não identificado — aguardando duplo pivô</span>
+                    </div>
+                  )}
+
                   {/* Indicadores */}
                   <div className="grid grid-cols-3 gap-2">
                     <div className={`flex items-center gap-2 p-2 rounded-md border text-xs ${analysis.momentumConfirms ? 'border-orange-400/50 bg-orange-400/10 text-orange-400' : 'border-border text-muted-foreground'}`} data-testid={`badge-momentum-${i}`}>
@@ -1065,11 +1119,12 @@ export default function MetaTraderPage() {
                 <div className="flex items-start gap-3">
                   <Info className="h-4 w-4 text-blue-400 shrink-0 mt-0.5" />
                   <div className="space-y-1 text-xs text-muted-foreground">
-                    <p className="font-semibold text-foreground">Estratégia Dupla Crash/Boom</p>
-                    <p>1. <strong>Continuidade:</strong> IA opera na tendência e acumula pips enquanto o mercado se move suavemente.</p>
-                    <p>2. <strong>Detecção de Spike:</strong> Motor analisa Fibonacci + contagem de candles + momentum + compressão de volatilidade.</p>
-                    <p>3. <strong>Transição:</strong> Quando a janela pré-spike abre, a IA fecha a posição de continuidade e abre na direção do spike.</p>
-                    <p>4. <strong>Saída rápida:</strong> Após o spike, a IA fecha a posição de spike e aguarda a próxima oportunidade de continuidade.</p>
+                    <p className="font-semibold text-foreground">🌻 Estratégia Girassol + Fibonacci — Crash/Boom</p>
+                    <p>1. <strong>Padrão Girassol (primário):</strong> Dois pivôs consecutivos (duplo topo ou duplo fundo) formam o gatilho principal. Quando o segundo pivô confirma o nível, o spike é iminente.</p>
+                    <p>2. <strong>Confluência Fibonacci:</strong> Se o duplo pivô ocorre em zona Fibonacci crítica (0%, 50%, 61.8%, 100%), a força do sinal se multiplica — sinal de máxima prioridade.</p>
+                    <p>3. <strong>Filtros secundários:</strong> Contagem de candles desde último spike + momentum pré-spike + compressão de volatilidade reforçam o sinal Girassol.</p>
+                    <p>4. <strong>Transição:</strong> Com o sinal ativo, a IA fecha a posição de continuidade e entra imediatamente na direção do spike.</p>
+                    <p>5. <strong>Saída rápida:</strong> Após o spike, a IA fecha a posição e aguarda a próxima oportunidade.</p>
                   </div>
                 </div>
               </CardContent>
