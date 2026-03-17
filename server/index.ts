@@ -263,7 +263,7 @@ app.use((req, res, next) => {
       derivTradeSync.startAutoSync();
       console.log('✅ Sincronização de trades ATIVA - recebendo resultados em tempo real!');
 
-      // 📊 INICIALIZAR STATS REAIS DO BANCO
+      // 📊 INICIALIZAR STATS REAIS DO BANCO + RESTAURAR ESTADO DE RECUPERAÇÃO
       try {
         const allUsers = await storage.getAllUsers();
         let totalWon = 0, totalLost = 0, totalProfit = 0;
@@ -275,6 +275,24 @@ app.use((req, res, next) => {
           totalProfit += resolved.reduce((sum: number, op: any) => sum + (op.profit || 0), 0);
         }
         realStatsTracker.initializeFromDB(totalWon, totalLost, totalProfit);
+
+        // 🔄 RESTAURAR estado de recuperação persistido (sobrevive a reinícios)
+        try {
+          const savedRecovery = await storage.getSystemHeartbeat('recovery_tracker');
+          if (savedRecovery?.metadata) {
+            const recoveryState = JSON.parse(savedRecovery.metadata);
+            realStatsTracker.restoreRecoveryState(recoveryState);
+          }
+        } catch (recoveryErr: any) {
+          console.log(`⚠️ [RECOVERY] Não foi possível restaurar estado de recuperação: ${recoveryErr?.message}`);
+        }
+
+        // 💾 REGISTRAR callback de persistência — salva estado após cada win/loss
+        realStatsTracker.registerPersistCallback((state) => {
+          storage.updateSystemHeartbeat('recovery_tracker', 'active', state)
+            .catch((e: any) => console.warn(`⚠️ [RECOVERY] Falha ao persistir estado: ${e?.message}`));
+        });
+
       } catch (statsErr: any) {
         console.log(`⚠️ [REAL STATS] Não foi possível inicializar do banco: ${statsErr?.message}`);
       }

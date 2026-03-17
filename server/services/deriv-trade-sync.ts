@@ -288,7 +288,7 @@ export class DerivTradeSync {
               if (updates.status === 'won') {
                 realStatsTracker.recordWin(profit);
               } else if (updates.status === 'lost') {
-                realStatsTracker.recordLoss(profit);
+                realStatsTracker.recordLoss(profit, operation.symbol);
               }
             }
           } else if (contractInfo.status === 'open') {

@@ -1093,11 +1093,11 @@ export class QuantumNeuralSystem {
   /**
    * Registra resultado real de um trade (chamado pelo sync após resolução na Deriv)
    */
-  recordRealTradeResult(won: boolean, profit: number): void {
+  recordRealTradeResult(won: boolean, profit: number, symbol: string = ''): void {
     if (won) {
       realStatsTracker.recordWin(profit);
     } else {
-      realStatsTracker.recordLoss(profit);
+      realStatsTracker.recordLoss(profit, symbol);
     }
     const stats = realStatsTracker.getStats();
     this.winRate = stats.winRate / 100;

@@ -38,6 +38,17 @@ const CIRCUIT_BREAKER_PAUSE_MS: Record<number, number> = {
   3: 20 * 60 * 1000, // 3+ perdas → 20 minutos
 };
 
+export interface PersistedRecoveryState {
+  consecutiveLosses: number;
+  circuitBreakerUntil: number;
+  postLossMode: boolean;
+  lastKnownBalance: number;
+  balanceToRecover: number;
+  blockedAsset: string;
+  assetBlockedUntil: number;
+  savedAt: number;
+}
+
 class RealStatsTracker {
   private wonTrades: number = 0;
   private lostTrades: number = 0;
@@ -58,6 +69,9 @@ class RealStatsTracker {
   private blockedAsset: string = '';          // ativo que causou a perda
   private assetBlockedUntil: number = 0;      // timestamp até quando o ativo está bloqueado
 
+  // 🔄 Callback de persistência — chamado após cada win/loss para salvar estado no BD
+  private persistCallback?: (state: PersistedRecoveryState) => void;
+
   get winRate(): number {
     const total = this.wonTrades + this.lostTrades;
     return total > 0 ? (this.wonTrades / total) * 100 : 0;
@@ -72,6 +86,78 @@ class RealStatsTracker {
     if (this.consecutiveLosses <= 0) return 0;
     const level = Math.min(this.consecutiveLosses, 3);
     return RECOVERY_CONSENSUS_BY_STREAK[level] ?? 95;
+  }
+
+  /**
+   * Registra um callback que será chamado sempre que o estado de recuperação mudar.
+   * Use para persistir o estado no banco e sobreviver a reinícios do servidor.
+   */
+  registerPersistCallback(cb: (state: PersistedRecoveryState) => void): void {
+    this.persistCallback = cb;
+  }
+
+  /**
+   * Retorna o estado de recuperação atual para persistência.
+   */
+  getRecoveryStateToSave(): PersistedRecoveryState {
+    return {
+      consecutiveLosses: this.consecutiveLosses,
+      circuitBreakerUntil: this.circuitBreakerUntil,
+      postLossMode: this.postLossMode,
+      lastKnownBalance: this.lastKnownBalance,
+      balanceToRecover: this.balanceToRecover,
+      blockedAsset: this.blockedAsset,
+      assetBlockedUntil: this.assetBlockedUntil,
+      savedAt: Date.now(),
+    };
+  }
+
+  /**
+   * Restaura o estado de recuperação a partir de dados persistidos.
+   * Chamado na inicialização para sobreviver a reinícios do servidor.
+   */
+  restoreRecoveryState(state: PersistedRecoveryState): void {
+    const now = Date.now();
+    // Só restaurar se salvo nas últimas 3 horas (estados muito antigos não são relevantes)
+    const maxAgeMs = 3 * 60 * 60 * 1000;
+    if (now - state.savedAt > maxAgeMs) {
+      console.log(`⏩ [RECOVERY] Estado salvo muito antigo (${Math.round((now - state.savedAt) / 60000)} min) — ignorando`);
+      return;
+    }
+
+    this.consecutiveLosses = state.consecutiveLosses || 0;
+    this.circuitBreakerUntil = state.circuitBreakerUntil || 0;
+    this.postLossMode = state.postLossMode || false;
+    this.lastKnownBalance = state.lastKnownBalance || 0;
+    this.balanceToRecover = state.balanceToRecover || 0;
+    this.blockedAsset = state.blockedAsset || '';
+    this.assetBlockedUntil = state.assetBlockedUntil || 0;
+
+    if (this.postLossMode) {
+      const remainingBlock = Math.max(0, this.assetBlockedUntil - now);
+      const remainingBreaker = Math.max(0, this.circuitBreakerUntil - now);
+      console.log(`🔄 [RECOVERY] Estado restaurado após reinício:`);
+      console.log(`   • Perdas consecutivas: ${this.consecutiveLosses}`);
+      console.log(`   • Ativo bloqueado: ${this.blockedAsset || 'N/A'} (${Math.round(remainingBlock / 60000)} min restantes)`);
+      console.log(`   • Saldo alvo: $${this.balanceToRecover.toFixed(2)}`);
+      console.log(`   • Consenso mínimo exigido: ${this.recoveryMinConsensus}%`);
+      if (remainingBreaker > 0) {
+        console.log(`   • 🔴 Circuit Breaker: ${Math.round(remainingBreaker / 60000)} min restantes`);
+      }
+    } else {
+      console.log(`✅ [RECOVERY] Estado restaurado — modo NORMAL (sem perdas consecutivas ativas)`);
+    }
+  }
+
+  /** Dispara o callback de persistência se registrado */
+  private triggerPersist(): void {
+    if (this.persistCallback) {
+      try {
+        this.persistCallback(this.getRecoveryStateToSave());
+      } catch (e) {
+        // Silencia erros de persistência — nunca bloquear o fluxo principal
+      }
+    }
   }
 
   initializeFromDB(wonTrades: number, lostTrades: number, totalProfit: number): void {
@@ -103,6 +189,7 @@ class RealStatsTracker {
     this.assetBlockedUntil = 0;
     this.consecutiveLosses = 0;
     this.circuitBreakerUntil = 0;
+    this.triggerPersist();
   }
 
   /**
@@ -207,7 +294,10 @@ class RealStatsTracker {
       } else {
         const deficit = this.balanceToRecover - this.lastKnownBalance;
         console.log(`🔄 [RECOVERY] Ganho ajudou! Saldo estimado: $${this.lastKnownBalance.toFixed(2)} | Falta: $${deficit.toFixed(2)} para recuperar`);
+        this.triggerPersist();
       }
+    } else {
+      this.triggerPersist();
     }
   }
 
@@ -248,6 +338,9 @@ class RealStatsTracker {
     if (breakerPauseMs > 0) {
       console.log(`   • Circuit Breaker (CAMADA 3): ${Math.round(breakerPauseMs / 60000)} min de pausa ativa`);
     }
+
+    // 💾 Persistir estado para sobreviver a reinícios do servidor
+    this.triggerPersist();
   }
 
   getStats() {
@@ -297,6 +390,7 @@ class RealStatsTracker {
     this.blockedAsset = '';
     this.assetBlockedUntil = 0;
     this.lastTradedAssetByUser.delete(userId);
+    this.triggerPersist();
     console.log(`🧹 [REAL STATS] Memória em tempo real resetada para usuário ${userId}`);
   }
 }
