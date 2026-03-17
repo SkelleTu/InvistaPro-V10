@@ -64,7 +64,8 @@ export class MarketDataCollector extends EventEmitter {
     }, this.SAVE_INTERVAL_MS);
 
     // Heartbeat para ResilienceSupervisor (a cada 30s)
-    this.heartbeatInterval = setInterval(async () => {
+    // Envia heartbeat imediato na inicialização para evitar falso-alarme do supervisor
+    const sendHeartbeat = async () => {
       try {
         await storage.updateSystemHeartbeat('market_collector', 'healthy', {
           isCollecting: this.isCollecting,
@@ -72,7 +73,9 @@ export class MarketDataCollector extends EventEmitter {
           timestamp: new Date().toISOString()
         });
       } catch {}
-    }, 30000);
+    };
+    sendHeartbeat(); // imediato
+    this.heartbeatInterval = setInterval(sendHeartbeat, 30000);
   }
 
   /**

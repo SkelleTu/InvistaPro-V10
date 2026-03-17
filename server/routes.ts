@@ -38,7 +38,7 @@ import {
   blockedAssets
 } from "@shared/schema";
 import { and } from "drizzle-orm";
-import { derivAPI } from './services/deriv-api';
+import { derivAPI, DerivAPIService } from './services/deriv-api';
 import { huggingFaceAI } from './services/huggingface-ai';
 import { autoTradingScheduler } from './services/auto-trading-scheduler';
 import { realStatsTracker } from './services/real-stats-tracker';
@@ -2936,14 +2936,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  const _liveBalanceCache = new Map<string, { balance: number; currency: string; loginid: string; fetchedAt: number }>();
+  const LIVE_BALANCE_TTL_MS = 15000;
+  const _liveBalanceFetching = new Set<string>();
+
   app.get('/api/trading/live-balance', isAuthenticated, isTradingAuthorized, async (req, res) => {
     try {
       if (!req.user?.id) {
         return res.status(401).json({ message: 'Usuário não autenticado' });
       }
       const userId = req.user.id;
+
+      const cached = _liveBalanceCache.get(userId);
+      if (cached && Date.now() - cached.fetchedAt < LIVE_BALANCE_TTL_MS) {
+        return res.json({
+          balance: cached.balance,
+          currency: cached.currency,
+          loginid: cached.loginid,
+          connected: true,
+          lastUpdate: new Date(cached.fetchedAt).toISOString(),
+          cached: true
+        });
+      }
+
+      if (_liveBalanceFetching.has(userId)) {
+        const stale = _liveBalanceCache.get(userId);
+        return res.json({
+          balance: stale?.balance || 0,
+          currency: stale?.currency || 'USD',
+          loginid: stale?.loginid || 'N/A',
+          connected: !!stale,
+          lastUpdate: stale ? new Date(stale.fetchedAt).toISOString() : new Date().toISOString(),
+          cached: true
+        });
+      }
+
       const tokenData = await dbStorage.getUserDerivToken(userId);
-      
       if (!tokenData) {
         return res.status(400).json({ 
           message: 'Token Deriv não configurado',
@@ -2952,33 +2980,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
+      _liveBalanceFetching.add(userId);
       try {
-        const connected = await derivAPI.connect(tokenData.token, tokenData.accountType as "demo" | "real");
+        const balanceDerivAPI = new DerivAPIService();
+        const connected = await balanceDerivAPI.connect(tokenData.token, tokenData.accountType as "demo" | "real");
         if (!connected) {
-          return res.json({ 
-            balance: 0,
-            connected: false,
-            error: 'Conexão falhada'
-          });
+          _liveBalanceFetching.delete(userId);
+          return res.json({ balance: 0, connected: false, error: 'Conexão falhada' });
         }
 
-        const balance = await derivAPI.getBalance();
-        
-        await derivAPI.disconnect();
-        
-        res.json({
+        const balance = await balanceDerivAPI.getBalance();
+        await balanceDerivAPI.disconnect();
+
+        const entry = {
           balance: balance?.balance || 0,
           currency: balance?.currency || 'USD',
           loginid: balance?.loginid || 'N/A',
+          fetchedAt: Date.now()
+        };
+        _liveBalanceCache.set(userId, entry);
+        _liveBalanceFetching.delete(userId);
+
+        res.json({
+          balance: entry.balance,
+          currency: entry.currency,
+          loginid: entry.loginid,
           connected: true,
-          lastUpdate: new Date().toISOString()
+          lastUpdate: new Date(entry.fetchedAt).toISOString()
         });
 
       } catch (apiError) {
-        console.error('❌ Erro de API Deriv:', apiError);
+        _liveBalanceFetching.delete(userId);
+        console.error('❌ Erro de API Deriv (live-balance):', apiError);
+        const stale = _liveBalanceCache.get(userId);
         res.json({
-          balance: 0,
-          connected: false,
+          balance: stale?.balance || 0,
+          connected: !!stale,
           error: 'Erro de conexão com Deriv'
         });
       }

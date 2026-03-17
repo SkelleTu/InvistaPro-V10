@@ -11,6 +11,7 @@ import cron from "node-cron";
 import fetch from "node-fetch";
 import { autoTradingScheduler } from "./services/auto-trading-scheduler";
 import { resilienceSupervisor } from "./services/resilience-supervisor";
+import { marketDataCollector } from "./services/market-data-collector";
 import { derivAPI } from "./services/deriv-api";
 import { createDatabaseBackup } from "./database-backup";
 import { dualStorage as storage } from "./storage-dual";
@@ -184,8 +185,19 @@ app.use((req, res, next) => {
   
   resilienceSupervisor.on('restart_websocket', async () => {
     console.log('🔄 Reiniciando WebSocket por solicitação do ResilienceSupervisor...');
-    // O DerivAPI já tem reconexão automática, apenas logar
     console.log('ℹ️ WebSocket tem reconexão automática integrada');
+  });
+
+  resilienceSupervisor.on('restart_market_collector', async () => {
+    console.log('🔄 Reiniciando MarketDataCollector por solicitação do ResilienceSupervisor...');
+    try {
+      await marketDataCollector.stopCollection();
+      const symbols = marketDataCollector.getSupportedSymbols();
+      await marketDataCollector.startCollection(symbols.length > 0 ? symbols : undefined);
+      console.log('✅ MarketDataCollector reiniciado com sucesso');
+    } catch (error) {
+      console.error('❌ Erro ao reiniciar MarketDataCollector:', error);
+    }
   });
   
   console.log('✅ ResilienceSupervisor ativo e monitorando componentes');
