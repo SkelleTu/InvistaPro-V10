@@ -412,12 +412,77 @@ class MetaTraderBridge extends EventEmitter {
   }
 
   /**
+   * Detecta futuros da B3: Mini Índice (WIN) e Mini Dólar (WDO).
+   * Aceita formatos: WIN, WDO, WIN$N, WDO$N, WINJ25, WDOG25, etc.
+   */
+  private isB3Future(symbol: string): boolean {
+    const sym = symbol.toUpperCase();
+    return sym.startsWith('WIN') || sym.startsWith('WDO');
+  }
+
+  /**
+   * Detecta se é Mini Índice (WIN) especificamente.
+   */
+  private isWIN(symbol: string): boolean {
+    return symbol.toUpperCase().startsWith('WIN');
+  }
+
+  /**
+   * Detecta se é Mini Dólar (WDO) especificamente.
+   */
+  private isWDO(symbol: string): boolean {
+    return symbol.toUpperCase().startsWith('WDO');
+  }
+
+  /**
+   * Verifica se o mercado B3 está aberto para futuros (WIN/WDO).
+   * Horário B3 (BRT = UTC-3): segunda a sexta, 09:00 – 18:00.
+   * O servidor usa UTC, por isso: 12:00–21:00 UTC.
+   */
+  private isB3MarketOpen(): boolean {
+    const now = new Date();
+    const utcDay  = now.getUTCDay();   // 0=Dom, 6=Sáb
+    const utcHour = now.getUTCHours();
+    const utcMin  = now.getUTCMinutes();
+    const utcTime = utcHour * 60 + utcMin;
+
+    // Apenas dias úteis
+    if (utcDay === 0 || utcDay === 6) return false;
+
+    // 09:00 BRT = 12:00 UTC → 720 min
+    // 18:00 BRT = 21:00 UTC → 1260 min
+    return utcTime >= 720 && utcTime < 1260;
+  }
+
+  /**
+   * Retorna o tamanho do pip/ponto correto para cada tipo de ativo.
+   * WIN (mini índice B3): mínimo de variação = 5 pontos.
+   * WDO (mini dólar B3):  mínimo de variação = 0.5 pontos.
+   * Forex:                 0.0001 (4 casas decimais).
+   * Outros (índices, crypto, metais): 1 ponto.
+   */
+  private getPipSize(symbol: string, lastPrice: number): number {
+    if (this.isWIN(symbol)) return 5;      // WIN: tick mínimo = 5 pts
+    if (this.isWDO(symbol)) return 0.5;    // WDO: tick mínimo = 0.5 pts
+    if (lastPrice < 1000) return 0.0001;   // Forex padrão
+    return 1;                              // Outros
+  }
+
+  /**
    * Retorna o lote mínimo correto para cada tipo de símbolo.
-   * Índices sintéticos da Deriv (Crash/Boom) exigem lote mínimo de 1.0.
-   * Índices de Volatilidade aceitam 0.01. Forex aceita 0.01.
+   * Futuros B3 (WIN/WDO): mínimo 1 contrato.
+   * Crash/Boom Deriv: mínimo 1.0.
+   * Índices de Volatilidade: 0.01.
+   * Forex: 0.01.
    */
   private getValidLotSize(symbol: string): number {
     const sym = symbol.toUpperCase();
+
+    // Mini Índice B3 (WINJ25, WIN$N, WIN...) — mínimo 1 contrato
+    if (this.isWIN(symbol)) return Math.max(this.config.defaultLotSize, 1.0);
+
+    // Mini Dólar B3 (WDOG25, WDO$N, WDO...) — mínimo 1 contrato
+    if (this.isWDO(symbol)) return Math.max(this.config.defaultLotSize, 1.0);
 
     // Crash Index (Crash 1000, Crash 500, Crash 300) — mínimo 1.0
     if (sym.includes('CRASH')) return Math.max(this.config.defaultLotSize, 1.0);
@@ -578,6 +643,14 @@ class MetaTraderBridge extends EventEmitter {
     }
 
     const entryId = `analysis_${Date.now()}_${symbol}`;
+
+    // Verificação de horário de mercado B3 (WIN/WDO)
+    if (this.isB3Future(symbol) && !this.isB3MarketOpen()) {
+      const brtHour = (new Date().getUTCHours() - 3 + 24) % 24;
+      const brtMin  = new Date().getUTCMinutes();
+      console.log(`[MT5Bridge] 🕐 ${symbol} fora do horário B3 — ${brtHour.toString().padStart(2,'0')}:${brtMin.toString().padStart(2,'0')} BRT (mercado: 09:00–18:00 dias úteis)`);
+      return null;
+    }
 
     // Circuit breaker
     if (Date.now() < this.circuitBreakerUntil) {
@@ -964,8 +1037,7 @@ class MetaTraderBridge extends EventEmitter {
     const lastPrice = prices[prices.length - 1];
     const atr = indicators.atr || lastPrice * 0.001;
 
-    const isForex = lastPrice < 1000;
-    const pipSize = isForex ? 0.0001 : 1;
+    const pipSize = this.getPipSize(symbol, lastPrice);
 
     // Fibonacci-aware SL/TP: place SL beyond the nearest Fibonacci level
     const fib = indicators.fibonacci;
