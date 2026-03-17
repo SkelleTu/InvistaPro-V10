@@ -44,6 +44,7 @@ import { autoTradingScheduler } from './services/auto-trading-scheduler';
 import { realStatsTracker } from './services/real-stats-tracker';
 import { isAuthorizedEmail, ACCESS_DENIED_MESSAGE } from './config/access';
 import { errorTracker } from './services/error-tracker';
+import { contractMonitor } from './services/contract-monitor';
 import { asyncErrorHandler } from './middleware/error-handler';
 import { tpmSystem } from './services/tpm-system';
 import { getRegistryInfo } from './services/url-registry';
@@ -2748,6 +2749,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error('❌ Erro ao buscar logs IA:', error);
       const errorMessage = error instanceof Error ? error.message : String(error);
       res.status(500).json({ message: 'Erro interno do servidor', error: errorMessage });
+    }
+  });
+
+  // =========================== LIVE CONTRACT ANALYSIS ===========================
+
+  app.get('/api/trading/live-analysis', isAuthenticated, isTradingAuthorized, async (req, res) => {
+    try {
+      const liveData = contractMonitor.getLiveAnalysis();
+      res.json({ contracts: liveData, ts: Date.now() });
+    } catch (error) {
+      res.json({ contracts: [], ts: Date.now() });
     }
   });
 

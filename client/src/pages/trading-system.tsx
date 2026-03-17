@@ -821,9 +821,15 @@ export default function TradingSystemPage() {
   const { data: aiLogs = [] } = useQuery<AILog[]>({
     queryKey: ["/api/trading/ai-logs"],
     enabled: hasAccess,
-    refetchInterval: 2000, // Atualiza a cada 2 segundos para ver novas análises
+    refetchInterval: 2000,
   });
 
+  const { data: liveAnalysisData } = useQuery<{ contracts: any[]; ts: number }>({
+    queryKey: ["/api/trading/live-analysis"],
+    enabled: hasAccess,
+    refetchInterval: 1000,
+  });
+  const liveContracts = liveAnalysisData?.contracts ?? [];
 
   // Queries em tempo real para atualizações automáticas
   const { data: realTimeData } = useQuery({
@@ -2117,56 +2123,287 @@ export default function TradingSystemPage() {
           </TabsContent>
 
           {/* IA e Análises Tab */}
-          <TabsContent value="ai-analysis" className="space-y-6">
+          <TabsContent value="ai-analysis" className="space-y-4">
+
+            {/* MICROSCÓPIO DE OPERAÇÕES AO VIVO */}
+            <Card data-testid="card-live-analysis">
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Microscope className="h-5 w-5 text-purple-500" />
+                  <span>Microscópio de Operações — Tempo Real</span>
+                  <Badge className="animate-pulse bg-green-500 text-white ml-auto text-xs px-2">
+                    <span className="w-1.5 h-1.5 bg-white rounded-full inline-block mr-1"></span>
+                    AO VIVO
+                  </Badge>
+                </CardTitle>
+                <CardDescription className="text-xs">
+                  O que as IAs estão vendo e decidindo tick a tick em cada operação aberta
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {liveContracts.length === 0 ? (
+                  <div className="text-center py-10 space-y-3">
+                    <Activity className="h-10 w-10 text-muted-foreground mx-auto animate-pulse" />
+                    <p className="text-muted-foreground text-sm">Nenhuma operação aberta sendo monitorada no momento.</p>
+                    <p className="text-xs text-muted-foreground">Quando o sistema abrir operações, você verá aqui o raciocínio das IAs em tempo real tick a tick.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {liveContracts.map((contract: any) => {
+                      const ai = contract.aiSnapshot;
+                      const profitColor = contract.profitPct >= 0 ? 'text-green-500' : 'text-red-500';
+                      const regimeColor: Record<string, string> = {
+                        strong_trend: 'bg-green-500/20 text-green-400 border-green-500/30',
+                        weak_trend: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+                        ranging: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
+                        chaotic: 'bg-red-500/20 text-red-400 border-red-500/30',
+                        calm: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
+                      };
+                      const decisionColor: Record<string, string> = {
+                        'MONITORANDO': 'bg-blue-500/20 text-blue-400',
+                        'AGUARDANDO': 'bg-green-500/20 text-green-400',
+                        'ALERTA_REVERSÃO': 'bg-orange-500/20 text-orange-400',
+                        'EMERGÊNCIA': 'bg-red-500/20 text-red-400',
+                      };
+                      const urgencyIcon: Record<string, string> = {
+                        low: '🟢', medium: '🟡', high: '🟠', emergency: '🔴',
+                      };
+                      const regimeLabel: Record<string, string> = {
+                        strong_trend: 'Tendência Forte', weak_trend: 'Tendência Fraca',
+                        ranging: 'Oscilação', chaotic: 'Caótico', calm: 'Calmo', unknown: 'Analisando...',
+                      };
+                      const barrierPct = contract.barrierDistance ?? null;
+                      const profitPctOfTarget = ai ? Math.min(100, (contract.profitPct / ai.profitTarget) * 100) : 0;
+                      const barrierDangerPct = (barrierPct !== null && ai) ? Math.min(100, (ai.barrierDanger / barrierPct) * 100) : 0;
+
+                      return (
+                        <div key={contract.contractId} className="border rounded-xl p-4 space-y-4 bg-card" data-testid={`live-contract-${contract.contractId}`}>
+
+                          {/* Cabeçalho da operação */}
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <Badge variant="outline" className="font-mono text-xs">{contract.contractType}</Badge>
+                                <span className="font-bold text-sm">{contract.symbol}</span>
+                                {ai && (
+                                  <span className={`text-xs px-2 py-0.5 rounded-full border ${regimeColor[ai.regime] || 'bg-muted text-muted-foreground border-muted'}`}>
+                                    {regimeLabel[ai.regime] || ai.regime}
+                                  </span>
+                                )}
+                                <span className="text-xs text-muted-foreground">
+                                  <Clock className="inline h-3 w-3 mr-0.5" />{contract.ageMin}min • Tick #{contract.tickCount}
+                                </span>
+                              </div>
+                              {contract.openReason && (
+                                <p className="text-xs text-muted-foreground flex items-start gap-1">
+                                  <Info className="h-3 w-3 mt-0.5 shrink-0 text-blue-400" />
+                                  <span><strong className="text-blue-400">Por que abriu:</strong> {contract.openReason}</span>
+                                </p>
+                              )}
+                            </div>
+                            <div className="text-right shrink-0">
+                              <p className={`text-lg font-bold ${profitColor}`} data-testid={`live-profit-${contract.contractId}`}>
+                                {contract.profitPct >= 0 ? '+' : ''}{contract.profitPct.toFixed(2)}%
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                ${contract.profit >= 0 ? '+' : ''}{contract.profit.toFixed(4)}
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Métricas em tempo real */}
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                            <div className="bg-muted/50 rounded-lg p-2 text-center">
+                              <p className="text-muted-foreground mb-0.5">Entrada</p>
+                              <p className="font-mono font-medium">{contract.entrySpot?.toFixed(3) ?? '—'}</p>
+                            </div>
+                            <div className="bg-muted/50 rounded-lg p-2 text-center">
+                              <p className="text-muted-foreground mb-0.5">Atual</p>
+                              <p className="font-mono font-medium">{contract.currentSpot?.toFixed(3) ?? '—'}</p>
+                            </div>
+                            <div className="bg-muted/50 rounded-lg p-2 text-center">
+                              <p className="text-muted-foreground mb-0.5">Pico Lucro</p>
+                              <p className="font-mono font-medium text-green-400">${contract.peakProfit?.toFixed(4) ?? '0.0000'}</p>
+                            </div>
+                            <div className="bg-muted/50 rounded-lg p-2 text-center">
+                              <p className="text-muted-foreground mb-0.5">Bid Price</p>
+                              <p className="font-mono font-medium">${contract.bidPrice?.toFixed(4) ?? '—'}</p>
+                            </div>
+                          </div>
+
+                          {/* O que a IA está vendo */}
+                          {ai && (
+                            <div className="space-y-3">
+                              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1">
+                                <Brain className="h-3 w-3" /> O que as IAs estão enxergando agora
+                              </p>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                                {/* Hurst Exponent */}
+                                <div className="space-y-1">
+                                  <div className="flex justify-between">
+                                    <span className="text-muted-foreground">Hurst (tendência)</span>
+                                    <span className={`font-mono font-bold ${ai.hurst > 0.6 ? 'text-green-400' : ai.hurst < 0.4 ? 'text-orange-400' : 'text-yellow-400'}`}>
+                                      {ai.hurst.toFixed(3)} {ai.hurst > 0.6 ? '↗ trending' : ai.hurst < 0.4 ? '↩ reversão' : '→ neutro'}
+                                    </span>
+                                  </div>
+                                  <Progress value={ai.hurst * 100} className="h-1.5" />
+                                </div>
+
+                                {/* Entropia */}
+                                <div className="space-y-1">
+                                  <div className="flex justify-between">
+                                    <span className="text-muted-foreground">Entropia (previsib.)</span>
+                                    <span className={`font-mono font-bold ${ai.entropy < 0.35 ? 'text-green-400' : ai.entropy > 0.7 ? 'text-red-400' : 'text-yellow-400'}`}>
+                                      {ai.entropy.toFixed(3)} {ai.entropy < 0.35 ? '✓ previsível' : ai.entropy > 0.7 ? '⚠ caótico' : '~ moderado'}
+                                    </span>
+                                  </div>
+                                  <Progress value={ai.entropy * 100} className="h-1.5" />
+                                </div>
+
+                                {/* Convergência das IAs */}
+                                <div className="space-y-1">
+                                  <div className="flex justify-between">
+                                    <span className="text-muted-foreground">Consenso das IAs</span>
+                                    <span className={`font-mono font-bold ${ai.convergence > 70 ? 'text-green-400' : ai.convergence > 45 ? 'text-yellow-400' : 'text-red-400'}`}>
+                                      {ai.convergence.toFixed(0)}%
+                                    </span>
+                                  </div>
+                                  <Progress value={ai.convergence} className="h-1.5" />
+                                </div>
+
+                                {/* Força de reversão */}
+                                <div className="space-y-1">
+                                  <div className="flex justify-between">
+                                    <span className="text-muted-foreground">Sinal de reversão</span>
+                                    <span className={`font-mono font-bold ${ai.strength > 70 ? 'text-red-400' : ai.strength > 45 ? 'text-orange-400' : 'text-green-400'}`}>
+                                      {ai.strength.toFixed(0)}% {ai.reversalDetected ? '⚡ DETECTADA' : ''}
+                                    </span>
+                                  </div>
+                                  <Progress value={ai.strength} className="h-1.5" />
+                                </div>
+                              </div>
+
+                              {/* Progresso para alvo de lucro */}
+                              <div className="space-y-1">
+                                <div className="flex justify-between text-xs">
+                                  <span className="text-muted-foreground">Progresso para alvo de lucro</span>
+                                  <span className="font-mono">{contract.profitPct.toFixed(1)}% / {ai.profitTarget.toFixed(0)}%</span>
+                                </div>
+                                <Progress value={Math.max(0, profitPctOfTarget)} className="h-2" />
+                              </div>
+
+                              {/* Distância da barreira */}
+                              {barrierPct !== null && (
+                                <div className="space-y-1">
+                                  <div className="flex justify-between text-xs">
+                                    <span className="text-muted-foreground">Distância da barreira knock-out</span>
+                                    <span className={`font-mono font-bold ${barrierPct < ai.barrierDanger * 1.5 ? 'text-red-400' : barrierPct < ai.barrierDanger * 3 ? 'text-orange-400' : 'text-green-400'}`}>
+                                      {barrierPct.toFixed(3)}% {barrierPct < ai.barrierDanger * 1.5 ? '⚠ PERIGO!' : '✓ seguro'}
+                                    </span>
+                                  </div>
+                                  <Progress value={Math.min(100, barrierDangerPct)} className="h-2" />
+                                </div>
+                              )}
+
+                              {/* Decisão atual da IA */}
+                              <div className={`rounded-lg p-3 space-y-1 ${decisionColor[ai.currentDecision] || 'bg-muted/50'}`}>
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs font-bold uppercase tracking-wide flex items-center gap-1">
+                                    <Zap className="h-3 w-3" />
+                                    Decisão atual: {ai.currentDecision}
+                                    {ai.urgency && <span className="ml-1">{urgencyIcon[ai.urgency]}</span>}
+                                  </span>
+                                  {ai.holdSignal && <Badge className="text-xs bg-green-600 text-white">HOLD — segurando</Badge>}
+                                  {ai.confirmedReversal && <Badge className="text-xs bg-red-600 text-white">REVERSÃO CONFIRMADA</Badge>}
+                                </div>
+                                <p className="text-xs opacity-90 leading-relaxed">{ai.decisionReason}</p>
+                                {ai.exitReason && (
+                                  <p className="text-xs opacity-70 italic">
+                                    <Target className="inline h-3 w-3 mr-0.5" /> {ai.exitReason}
+                                  </p>
+                                )}
+                              </div>
+
+                              {/* Quando deve fechar */}
+                              <div className="bg-muted/30 rounded-lg p-2 text-xs space-y-1">
+                                <p className="font-semibold text-muted-foreground uppercase tracking-wide text-[10px]">Vai fechar quando...</p>
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-1 text-muted-foreground">
+                                  <span>📈 Lucro ≥ <strong className="text-foreground">{ai.profitTarget.toFixed(0)}%</strong></span>
+                                  <span>📉 Trailing ≥ <strong className="text-foreground">{ai.trailingStop.toFixed(0)}%</strong> do pico</span>
+                                  {barrierPct !== null && <span>🚨 Barreira &lt; <strong className="text-foreground">{ai.barrierDanger.toFixed(2)}%</strong></span>}
+                                </div>
+                              </div>
+
+                              <p className="text-[10px] text-muted-foreground text-right">
+                                Última atualização: {new Date(ai.ts).toLocaleTimeString('pt-BR')}
+                              </p>
+                            </div>
+                          )}
+
+                          {!ai && (
+                            <div className="text-center py-2 text-xs text-muted-foreground">
+                              <Loader2 className="inline h-3 w-3 animate-spin mr-1" />
+                              Aguardando análise da IA... (mín. {contract.tickCount} ticks coletados)
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* LOGS DAS IAs (histórico) */}
             <Card data-testid="card-ai-logs">
-              <CardHeader>
-                <CardTitle className="flex items-center space-x-2">
-                  <Brain className="h-5 w-5" />
-                  <span>Análises de Inteligência Artificial</span>
-                  <Badge variant="outline" className="animate-pulse">
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Bot className="h-5 w-5 text-blue-500" />
+                  <span>Logs das IAs Cooperativas</span>
+                  <Badge variant="outline" className="animate-pulse ml-auto">
                     <span className="w-2 h-2 bg-blue-500 rounded-full inline-block mr-1"></span>
                     Live
                   </Badge>
                 </CardTitle>
-                <CardDescription>
-                  Atualização automática a cada 2 segundos - Logs detalhados das IAs cooperativas
+                <CardDescription className="text-xs">
+                  Histórico de análises das IAs — atualizado a cada 2 segundos
                 </CardDescription>
               </CardHeader>
               <CardContent>
                 {aiLogs.length > 0 ? (
-                  <div className="space-y-4">
-                    {aiLogs.slice(0, 10).map((log: any) => (
-                      <div key={log.id} className="p-4 border rounded-lg space-y-2 transition-all hover:border-blue-500" data-testid={`ai-log-${log.id}`}>
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center space-x-2">
-                            <Bot className="h-4 w-4 text-blue-500" />
-                            <span className="font-medium" data-testid={`ai-log-model-${log.id}`}>{log.modelName}</span>
-                            <Badge variant="outline" data-testid={`ai-log-confidence-${log.id}`}>
-                              {(log.confidence * 100).toFixed(1)}% confiança
+                  <div className="space-y-3">
+                    {aiLogs.slice(0, 8).map((log: any) => (
+                      <div key={log.id} className="p-3 border rounded-lg space-y-2 hover:border-blue-500 transition-colors" data-testid={`ai-log-${log.id}`}>
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <div className="flex items-center gap-2">
+                            <Bot className="h-4 w-4 text-blue-500 shrink-0" />
+                            <span className="font-medium text-sm" data-testid={`ai-log-model-${log.id}`}>{log.modelName}</span>
+                            <Badge variant="outline" className="text-xs" data-testid={`ai-log-confidence-${log.id}`}>
+                              {typeof log.confidence === 'number' ? log.confidence.toFixed(1) : log.confidence}% confiança
                             </Badge>
                           </div>
                           <span className="text-xs text-muted-foreground" data-testid={`ai-log-time-${log.id}`}>
-                            {new Date(log.createdAt).toLocaleString('pt-BR')}
+                            {new Date(log.createdAt).toLocaleTimeString('pt-BR')}
                           </span>
                         </div>
-                        
-                        <div className="space-y-1">
-                          <p className="text-sm"><strong>Decisão:</strong> <span data-testid={`ai-log-decision-${log.id}`}>{log.decision}</span></p>
-                          <p className="text-sm"><strong>Análise:</strong></p>
-                          <div className="text-sm text-muted-foreground bg-muted p-3 rounded" data-testid={`ai-log-analysis-${log.id}`}>
-                            {JSON.stringify(JSON.parse(log.analysis), null, 2)}
-                          </div>
-                        </div>
+                        <p className="text-xs"><strong>Decisão:</strong> <span data-testid={`ai-log-decision-${log.id}`}>{log.decision}</span></p>
+                        {log.analysis && (
+                          <details className="text-xs">
+                            <summary className="cursor-pointer text-muted-foreground hover:text-foreground">Ver análise completa</summary>
+                            <pre className="mt-1 text-muted-foreground bg-muted p-2 rounded text-[10px] overflow-auto max-h-32" data-testid={`ai-log-analysis-${log.id}`}>
+                              {typeof log.analysis === 'string' ? (() => { try { return JSON.stringify(JSON.parse(log.analysis), null, 2); } catch { return log.analysis; } })() : JSON.stringify(log.analysis, null, 2)}
+                            </pre>
+                          </details>
+                        )}
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <div className="text-center py-8">
-                    <Brain className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                    <p className="text-muted-foreground">Nenhuma análise de IA encontrada.</p>
-                    <p className="text-sm text-muted-foreground mt-1">
-                      Os logs das IAs aparecerão aqui quando o sistema estiver ativo.
-                    </p>
+                  <div className="text-center py-6">
+                    <Brain className="h-10 w-10 text-muted-foreground mx-auto mb-3" />
+                    <p className="text-muted-foreground text-sm">Nenhuma análise de IA encontrada.</p>
+                    <p className="text-xs text-muted-foreground mt-1">Os logs aparecerão quando o sistema estiver ativo.</p>
                   </div>
                 )}
               </CardContent>

@@ -39,6 +39,27 @@ export interface MonitoredContractInput {
   dateExpiry?: number;        // timestamp unix para contratos com prazo
 }
 
+interface AITickSnapshot {
+  regime: string;
+  hurst: number;
+  entropy: number;
+  volatilityZ: number;
+  convergence: number;
+  strength: number;
+  trend: string;
+  holdSignal: boolean;
+  exitReason: string;
+  urgency: string;
+  reversalDetected: boolean;
+  profitTarget: number;
+  trailingStop: number;
+  barrierDanger: number;
+  currentDecision: string;
+  decisionReason: string;
+  confirmedReversal: boolean;
+  ts: number;
+}
+
 interface ContractState {
   input: MonitoredContractInput;
   bidPrice: number;
@@ -58,6 +79,8 @@ interface ContractState {
   peakProfit: number;         // maior lucro já visto
   peakBidPrice: number;
   status: 'monitoring' | 'closing' | 'closed';
+  aiSnapshot?: AITickSnapshot;
+  openReason?: string;
 }
 
 interface SellDecision {
@@ -851,6 +874,34 @@ class UniversalContractMonitor extends EventEmitter {
     // (só bloqueia se o lucro estiver crescendo, para não segurar numa perda)
     const supremeHold = supreme.holdSignal && state.profitPct > 0;
 
+    // ── SNAPSHOT DE IA: salva estado atual para análise ao vivo ──
+    const baseThresholdsSnap = getThresholds(ct);
+    const thresholdsSnap = getAdaptiveThresholds(baseThresholdsSnap, symbol, state.profitPct);
+    state.aiSnapshot = {
+      regime: supreme.regime,
+      hurst: supreme.hurst,
+      entropy: (supreme as any).statistics?.shannonEntropy ?? (supreme as any).entropy ?? 0,
+      volatilityZ: (supreme as any).statistics?.zScoreVolatility ?? (supreme as any).volatilityZ ?? 0,
+      convergence: supreme.convergence,
+      strength: supreme.strength,
+      trend: supreme.trend,
+      holdSignal: supreme.holdSignal,
+      exitReason: supreme.exitReason || '',
+      urgency: supreme.urgency,
+      reversalDetected: supreme.reversalDetected,
+      profitTarget: thresholdsSnap.profitTargetPct,
+      trailingStop: thresholdsSnap.trailingStopPct,
+      barrierDanger: thresholdsSnap.barrierDangerPct,
+      currentDecision: supremeHold ? 'AGUARDANDO' : (supreme.reversalDetected ? 'ALERTA_REVERSÃO' : 'MONITORANDO'),
+      decisionReason: supreme.holdSignal
+        ? `Tendência forte (H=${supreme.hurst.toFixed(2)}) → IA segurando posição`
+        : supreme.reversalDetected
+          ? `Reversão detectada: ${supreme.exitReason || 'sinal de saída'}`
+          : `Mercado ${supreme.regime} — lucro ${state.profitPct.toFixed(1)}% / alvo ${thresholdsSnap.profitTargetPct.toFixed(0)}%`,
+      confirmedReversal,
+      ts: Date.now(),
+    };
+
     // ── 3. EMERGÊNCIA SUPREMA: sinal urgente → fechar imediatamente ──
     if (supreme.urgency === 'emergency' && supreme.reversalDetected && !supremeHold && state.profitPct > 0) {
       return {
@@ -1091,6 +1142,58 @@ class UniversalContractMonitor extends EventEmitter {
       clearInterval(this.keepAliveTimer);
       this.keepAliveTimer = null;
     }
+  }
+
+  getLiveAnalysis(): Array<{
+    contractId: number;
+    contractType: string;
+    symbol: string;
+    openedAt: number;
+    ageMin: number;
+    tickCount: number;
+    buyPrice: number;
+    currentSpot: number;
+    entrySpot: number;
+    bidPrice: number;
+    profit: number;
+    profitPct: number;
+    peakProfit: number;
+    barrierDistance?: number;
+    barrierValue?: number;
+    status: string;
+    openReason?: string;
+    aiSnapshot?: AITickSnapshot;
+  }> {
+    const result = [];
+    for (const [contractId, state] of Array.from(this.monitored.entries())) {
+      if (state.status === 'closed') continue;
+      result.push({
+        contractId,
+        contractType: state.input.contractType,
+        symbol: state.input.symbol,
+        openedAt: state.input.openedAt,
+        ageMin: parseFloat(((Date.now() - state.input.openedAt) / 60000).toFixed(1)),
+        tickCount: state.tickCount,
+        buyPrice: state.input.buyPrice,
+        currentSpot: state.currentSpot,
+        entrySpot: state.entrySpot,
+        bidPrice: state.bidPrice,
+        profit: state.profit,
+        profitPct: parseFloat(state.profitPct.toFixed(2)),
+        peakProfit: state.peakProfit,
+        barrierDistance: state.barrierDistance,
+        barrierValue: state.barrierValue,
+        status: state.status,
+        openReason: state.openReason,
+        aiSnapshot: state.aiSnapshot,
+      });
+    }
+    return result;
+  }
+
+  setOpenReason(contractId: number, reason: string): void {
+    const state = this.monitored.get(contractId);
+    if (state) state.openReason = reason;
   }
 
   shutdown(): void {
