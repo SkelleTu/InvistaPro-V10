@@ -439,11 +439,22 @@ function runGirassolSystem(
   fibLevels: FibLevel[],
   externalPivots: ExternalGirassolPivot[]
 ): GirassolSystemResult & { detectedDirection: 'down' | 'up' } {
-  // Rodar análise para AMBOS os padrões (topo duplo e fundo duplo)
+  // ══════════════════════════════════════════════════════════════════════
+  // ANÁLISE BIDIRECIONAL — DETECTA DUPLO TOPO E DUPLO FUNDO
+  //
+  // O bot analisa os DOIS lados e escolhe o padrão que o Girassol
+  // realmente identificou com maior força.
+  //
+  // Duplo Topo detectado  → SELL (spike de queda)
+  // Duplo Fundo detectado → BUY  (spike de subida)
+  //
+  // Isso é válido tanto para Crash quanto para Boom, pois qualquer
+  // um dos dois pode ter spikes para cima OU para baixo dependendo
+  // do momento. O que importa é o padrão REAL formado no gráfico.
+  // ══════════════════════════════════════════════════════════════════════
   const topResult    = scoreGirassolGroups(candles, 'high', fibLevels);
   const bottomResult = scoreGirassolGroups(candles, 'low',  fibLevels);
 
-  // Escolher o padrão com maior score; empate → default do ativo
   let groups: GirassolGroupResult[];
   let dominantPattern: 'double_top' | 'double_bottom' | null;
   let detectedDirection: 'down' | 'up';
@@ -840,10 +851,22 @@ export function analyzeCrashBoomSpike(
 
   const overallConfidence = Math.min(98, Math.round(cooperativeScore));
 
-  // Thresholds adaptativos (mais baixos quando Girassol detectou algo)
-  const imminenceThreshold  = girassolSystem.activeGroups >= 2 ? 20 : girassolSystem.activeGroups === 1 ? 35 : 60;
-  const confidenceThreshold = girassolSystem.activeGroups >= 2 ? 30 : 45;
-  const spikeExpected = imminencePercent >= imminenceThreshold && overallConfidence >= confidenceThreshold;
+  // ══════════════════════════════════════════════════════════════════════
+  // REGRA CRÍTICA: O GIRASSOL É OBRIGATÓRIO PARA ABRIR OPERAÇÃO
+  //
+  // O bot SÓ pode operar quando o indicador Girassol detectar de verdade
+  // um Duplo Topo (Crash) ou Duplo Fundo (Boom) — activeGroups >= 1.
+  // Sem padrão Girassol confirmado = SEM OPERAÇÃO, não importa o score.
+  //
+  // Thresholds de iminência e confiança são elevados para exigir
+  // confirmação real do padrão antes de qualquer entrada.
+  // ══════════════════════════════════════════════════════════════════════
+  const girassolObrigatorio = girassolSystem.activeGroups >= 1;
+  const imminenceThreshold  = girassolSystem.activeGroups >= 2 ? 30 : girassolSystem.activeGroups === 1 ? 45 : 999;
+  const confidenceThreshold = girassolSystem.activeGroups >= 2 ? 50 : girassolSystem.activeGroups === 1 ? 60 : 999;
+  const spikeExpected = girassolObrigatorio &&
+                        imminencePercent >= imminenceThreshold &&
+                        overallConfidence >= confidenceThreshold;
 
   // Score de timing de entrada
   const girassolTimingBoost = girassolSystem.totalGirassolScore * 0.4;
