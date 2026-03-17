@@ -1078,18 +1078,25 @@ export class AutoTradingScheduler {
         
         // ─── SELEÇÃO DE MODALIDADE ───────────────────────────────────────
         // Ler modalidades configuradas pelo usuário no banco de dados.
-        let activeModalities: string[] = ['digit_differs'];
+        // IMPORTANTE: array vazio = nenhuma modalidade selecionada = nenhum trade.
+        let activeModalities: string[] = [];
         if (config.selectedModalities) {
           try {
             const parsed = JSON.parse(config.selectedModalities);
-            if (Array.isArray(parsed) && parsed.length > 0) {
-              activeModalities = parsed;
+            if (Array.isArray(parsed)) {
+              activeModalities = parsed; // respeita array vazio — significa sem operação
             }
           } catch {
             const split = config.selectedModalities.split(',').map((s: string) => s.trim()).filter(Boolean);
-            if (split.length > 0) activeModalities = split;
+            activeModalities = split;
           }
         }
+
+        if (activeModalities.length === 0) {
+          console.log(`⛔ [${operationId}] Nenhuma modalidade selecionada pelo usuário — operação cancelada.`);
+          return { success: false, reason: 'no_modalities' };
+        }
+
         console.log(`🎯 [${operationId}] Modalidades ativas do usuário: ${activeModalities.join(', ')}`);
 
         // Escolher modalidade por rotação: pega baseado na hora atual para distribuir
@@ -1184,15 +1191,20 @@ export class AutoTradingScheduler {
         // Determinar modalidades compatíveis com o símbolo selecionado
         const symbolCompatible = new Set<string>(SYMBOL_COMPAT[selectedSymbol] ?? [...DIGIT_KEYS, ...RISFALL_KEYS]);
 
-        // Filtrar modalidades: suportadas pela plataforma E compatíveis com o símbolo
-        const supportedModalities = activeModalities.filter(m => ALL_SUPPORTED.has(m) && symbolCompatible.has(m));
+        // Filtrar apenas modalidades compatíveis com o símbolo — SEM fallback automático.
+        // Se nenhuma das modalidades selecionadas pelo usuário for compatível com o símbolo,
+        // a operação é cancelada. Nunca substituir a escolha do usuário por digit_differs.
+        const compatibleModalities = activeModalities.filter(m => ALL_SUPPORTED.has(m) && symbolCompatible.has(m));
 
-        // Se nenhuma ativa for compatível, usar dígitos como fallback universal
-        const finalModalities = supportedModalities.length > 0 ? supportedModalities : DIGIT_KEYS.filter(k => activeModalities.includes(k));
-        const compatibleModalities = finalModalities.length > 0 ? finalModalities : ['digit_differs'];
+        if (compatibleModalities.length === 0) {
+          const knownUnsupported = activeModalities.filter(m => ALL_SUPPORTED.has(m) && !symbolCompatible.has(m));
+          const unknown = activeModalities.filter(m => !ALL_SUPPORTED.has(m));
+          console.log(`⛔ [${operationId}] Modalidades selecionadas (${activeModalities.join(', ')}) incompatíveis com ${selectedSymbol}${knownUnsupported.length ? ` [incompatíveis: ${knownUnsupported.join(', ')}]` : ''}${unknown.length ? ` [desconhecidas: ${unknown.join(', ')}]` : ''} — operação cancelada.`);
+          return { success: false, reason: 'no_compatible_modalities' };
+        }
 
-        if (supportedModalities.length < activeModalities.filter(m => ALL_SUPPORTED.has(m)).length) {
-          const dropped = activeModalities.filter(m => ALL_SUPPORTED.has(m) && !symbolCompatible.has(m));
+        const dropped = activeModalities.filter(m => ALL_SUPPORTED.has(m) && !symbolCompatible.has(m));
+        if (dropped.length > 0) {
           console.log(`🔄 [${operationId}] Compatibilidade: ${dropped.join(', ')} não disponível em ${selectedSymbol} → usando: ${compatibleModalities.join(', ')}`);
         }
 
