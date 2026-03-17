@@ -934,6 +934,28 @@ export class AutoTradingScheduler {
         selectedSymbol,
         aiConsensus.finalDecision
       );
+
+      // 📝 GRAVAR LOGS DAS IAs COOPERATIVAS NO BANCO DE DADOS (para exibição em tempo real)
+      if (aiConsensus.analyses && aiConsensus.analyses.length > 0) {
+        const aiLogPromises = aiConsensus.analyses.map((analysis: any) =>
+          storage.createAiLog({
+            userId: config.userId,
+            modelName: analysis.modelName,
+            analysis: JSON.stringify({
+              prediction: analysis.prediction,
+              reasoning: analysis.reasoning || aiConsensus.reasoning || '',
+              confidence: analysis.confidence,
+              symbol: selectedSymbol,
+              consensusStrength: aiConsensus.consensusStrength,
+              finalDecision: aiConsensus.finalDecision,
+            }),
+            decision: analysis.prediction,
+            confidence: analysis.confidence / 100,
+            marketData: JSON.stringify({ symbol: selectedSymbol, consensusStrength: aiConsensus.consensusStrength })
+          }).catch(() => {})
+        );
+        Promise.all(aiLogPromises).catch(() => {});
+      }
       
       // 🎯 SISTEMA DE DECISÃO BASEADO EM ANÁLISE DE DÍGITOS (vantagem matemática real)
       const isProductionMode = config.mode.includes('production');
@@ -1890,6 +1912,28 @@ export class AutoTradingScheduler {
           
           // Executar análise de IA (sentimento geral de mercado)
           const aiConsensus = await huggingFaceAI.analyzeMarketData(tickData, symbol, userId);
+
+          // 📝 GRAVAR LOGS DAS IAs COOPERATIVAS NO BANCO DE DADOS (CRASH/BOOM)
+          if (aiConsensus.analyses && aiConsensus.analyses.length > 0) {
+            const cbLogPromises = aiConsensus.analyses.map((analysis: any) =>
+              storage.createAiLog({
+                userId,
+                modelName: analysis.modelName,
+                analysis: JSON.stringify({
+                  prediction: analysis.prediction,
+                  reasoning: analysis.reasoning || aiConsensus.reasoning || '',
+                  confidence: analysis.confidence,
+                  symbol,
+                  consensusStrength: aiConsensus.consensusStrength,
+                  finalDecision: aiConsensus.finalDecision,
+                }),
+                decision: analysis.prediction,
+                confidence: analysis.confidence / 100,
+                marketData: JSON.stringify({ symbol, consensusStrength: aiConsensus.consensusStrength })
+              }).catch(() => {})
+            );
+            Promise.all(cbLogPromises).catch(() => {});
+          }
 
           // 🌻 MOTOR GIRASSOL + AUTOFIB: integrar para símbolos CRASH/BOOM
           // O motor cooperativo tripartite (Girassol + AutoFib + IA) é o cérebro especializado
