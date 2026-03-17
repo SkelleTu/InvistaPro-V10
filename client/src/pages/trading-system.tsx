@@ -933,6 +933,18 @@ export default function TradingSystemPage() {
     refetchInterval: 2000, // Atualização a cada 2 segundos
   });
 
+  // ⏱️ Countdown até próximo ciclo de análise
+  const [nextCycleCountdown, setNextCycleCountdown] = useState<number>(0);
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const nextCycleAt = (schedulerStatus as any)?.schedulerStatus?.nextCycleAt ?? 0;
+      if (nextCycleAt > 0) {
+        const remaining = Math.max(0, Math.round((nextCycleAt - Date.now()) / 1000));
+        setNextCycleCountdown(remaining);
+      }
+    }, 500);
+    return () => clearInterval(timer);
+  }, [schedulerStatus]);
 
   // Mutations
   const updateConfigMutation = useMutation({
@@ -1216,6 +1228,74 @@ export default function TradingSystemPage() {
                     <p className="text-2xl font-bold">{(schedulerStatus as any)?.activeConfigsCount ?? 0}</p>
                   </div>
                 </div>
+
+                {/* 📡 Painel de Atividade em Tempo Real */}
+                {(schedulerStatus as any)?.schedulerActive && (
+                  <div className="rounded-lg border border-border/60 bg-muted/30 p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className={`inline-flex h-2 w-2 rounded-full ${
+                          (schedulerStatus as any)?.schedulerStatus?.currentPhase === 'EXECUTANDO'
+                            ? 'bg-yellow-400 animate-ping'
+                            : (schedulerStatus as any)?.schedulerStatus?.currentPhase === 'ANALISANDO' || (schedulerStatus as any)?.schedulerStatus?.currentPhase === 'SELECIONADO'
+                            ? 'bg-blue-400 animate-pulse'
+                            : 'bg-green-400 animate-pulse'
+                        }`} />
+                        <span className="text-sm font-semibold text-foreground">
+                          {(schedulerStatus as any)?.schedulerStatus?.currentPhase ?? 'AGUARDANDO'}
+                        </span>
+                      </div>
+                      {nextCycleCountdown > 0 && (schedulerStatus as any)?.schedulerStatus?.currentPhase === 'AGUARDANDO' && (
+                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                          <Clock className="h-3.5 w-3.5" />
+                          <span>Próximo ciclo em <span className="font-mono font-bold text-foreground">{nextCycleCountdown}s</span></span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Barra de progresso do ciclo */}
+                    {(schedulerStatus as any)?.schedulerStatus?.nextCycleAt > 0 && (
+                      <div className="space-y-1">
+                        <Progress
+                          value={Math.min(100, Math.max(0,
+                            ((60000 - Math.max(0, (schedulerStatus as any)?.schedulerStatus?.nextCycleAt - Date.now())) / 60000) * 100
+                          ))}
+                          className="h-1.5"
+                        />
+                      </div>
+                    )}
+
+                    {/* Última mensagem de atividade */}
+                    <p className="text-xs text-muted-foreground leading-relaxed" data-testid="text-current-activity">
+                      {(schedulerStatus as any)?.schedulerStatus?.currentPhaseDetail ?? 'Aguardando...'}
+                    </p>
+
+                    {/* Log de atividade recente */}
+                    {((schedulerStatus as any)?.schedulerStatus?.activityLog?.length ?? 0) > 0 && (
+                      <div className="space-y-1 pt-1 border-t border-border/40">
+                        <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">Atividade Recente</p>
+                        <div className="space-y-1 max-h-36 overflow-y-auto">
+                          {((schedulerStatus as any)?.schedulerStatus?.activityLog ?? []).slice(0, 8).map((entry: any, idx: number) => (
+                            <div key={idx} className="flex items-start gap-2 text-xs">
+                              <span className="text-muted-foreground/60 font-mono shrink-0 mt-0.5">
+                                {new Date(entry.time).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                              </span>
+                              <span className={
+                                entry.type === 'success' ? 'text-green-500' :
+                                entry.type === 'warning' ? 'text-yellow-500' :
+                                entry.type === 'trade' ? 'text-blue-400 font-medium' :
+                                'text-foreground/80'
+                              }>
+                                {entry.message}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="flex">
                   {(schedulerStatus as any)?.schedulerActive ? (
                     <Button

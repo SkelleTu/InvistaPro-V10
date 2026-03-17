@@ -52,6 +52,21 @@ export class AutoTradingScheduler {
   private lastOperationId: string | null = null;
   private lastOperationStartTime: number = 0;
   private readonly OPERATION_TIMEOUT_MS = 90000; // 90 segundos máximo por ciclo
+
+  // 📊 RASTREAMENTO DE FASE — exibido na interface para o usuário
+  private currentPhase: string = 'INICIALIZANDO';
+  private currentPhaseDetail: string = 'Sistema inicializando...';
+  private lastCycleStartedAt: number = 0;
+  private nextCycleAt: number = 0;
+  private readonly CYCLE_INTERVAL_MS = 60000;
+  private activityLog: Array<{ time: number; message: string; type: 'info' | 'success' | 'warning' | 'trade' }> = [];
+
+  private setPhase(phase: string, detail: string, type: 'info' | 'success' | 'warning' | 'trade' = 'info'): void {
+    this.currentPhase = phase;
+    this.currentPhaseDetail = detail;
+    this.activityLog.unshift({ time: Date.now(), message: detail, type });
+    if (this.activityLog.length > 20) this.activityLog.pop();
+  }
   
       // 🎯 SISTEMA DE DIVERSIFICAÇÃO DINÂMICA - "PERDA ZERO"
       // Com 120+ ativos, cada um pode ter cool-off mais curto
@@ -359,6 +374,10 @@ export class AutoTradingScheduler {
     await this.cleanupStaleSessions();
     
     this.schedulerRunning = true;
+    this.lastCycleStartedAt = Date.now();
+    this.nextCycleAt = this.lastCycleStartedAt + this.CYCLE_INTERVAL_MS;
+    this.setPhase('ANALISANDO', '🔍 Iniciando ciclo de análise de mercado...', 'info');
+
     const operationId = `ANALISE_NATURAL_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
     this.lastOperationId = operationId;
     this.lastOperationStartTime = Date.now();
@@ -375,6 +394,7 @@ export class AutoTradingScheduler {
       // Buscar todas as configurações ativas
       let activeConfigs = await storage.getActiveTradeConfigurations();
       
+      this.setPhase('ANALISANDO', '🤖 Executando análise de IA em múltiplos ativos...', 'info');
       console.log(`🎯 [${operationId}] Sistema Análise natural continua de IA - Análise microscópica ativa...`);
       console.log(`📊 [${operationId}] Configurações ativas encontradas: ${activeConfigs.length}`);
       
@@ -448,6 +468,10 @@ export class AutoTradingScheduler {
       
     } finally {
       this.schedulerRunning = false;
+      const secsUntilNext = Math.round((this.nextCycleAt - Date.now()) / 1000);
+      if (secsUntilNext > 0) {
+        this.setPhase('AGUARDANDO', `⏳ Próximo ciclo de análise em ${secsUntilNext}s`, 'info');
+      }
     }
   }
 
@@ -542,6 +566,7 @@ export class AutoTradingScheduler {
         return { success: false, error: 'Token Deriv não configurado' };
       }
       
+      this.setPhase('EXECUTANDO', `⚡ Executando operação #${session.executedOperations + 1} (${session.mode})...`, 'trade');
       console.log(`🚀 [${operationId}] Executando trade Análise natural continua de IA: ${session.executedOperations + 1}/${session.operationsCount} (${session.mode})`);
       
       // Executar trade com argumentos corretos
@@ -555,11 +580,13 @@ export class AutoTradingScheduler {
         // Persistir atualização da sessão no banco de dados
         await this.persistSession(sessionKey, session);
         
+        this.setPhase('AGUARDANDO', `✅ Operação #${session.executedOperations} enviada — aguardando resultado...`, 'success');
         console.log(`✅ [${operationId}] Trade Análise natural continua de IA executado com sucesso: ${session.executedOperations}/${session.operationsCount}`);
         
         // Salvar resultado para tracking (será processado async)
         this.trackTradeOutcome(userId, result, config);
       } else {
+        this.setPhase('AGUARDANDO', `⚠️ Operação rejeitada: ${result.error?.substring(0, 60) ?? 'erro desconhecido'}`, 'warning');
         console.log(`⚠️ [${operationId}] Trade Análise natural continua de IA falhou: ${result.error} - Sessão mantida ativa`);
       }
       
@@ -823,6 +850,7 @@ export class AutoTradingScheduler {
         }
       }
 
+      this.setPhase('SELECIONADO', `🎯 Ativo selecionado: ${selectedSymbol} | Consenso IA: ${aiConsensusPreCalculated.consensusStrength}%`, 'info');
       console.log(`✅ [${operationId}] Melhor símbolo selecionado: ${selectedSymbol} (Consenso: ${aiConsensusPreCalculated.consensusStrength}%)`);
       console.log(`📊 [${operationId}] Analisados ${bestSymbolResult.totalAnalyzed} símbolos | TOP 5: ${bestSymbolResult.top5Symbols.join(', ')}`);
       
@@ -2792,12 +2820,29 @@ export class AutoTradingScheduler {
     };
   }
 
-  getSchedulerStatus(): { isRunning: boolean, hasActiveSessions: boolean, emergencyStop: boolean, isInitialized: boolean } {
+  getSchedulerStatus(): {
+    isRunning: boolean;
+    hasActiveSessions: boolean;
+    emergencyStop: boolean;
+    isInitialized: boolean;
+    currentPhase: string;
+    currentPhaseDetail: string;
+    lastCycleStartedAt: number;
+    nextCycleAt: number;
+    cycleIntervalMs: number;
+    activityLog: Array<{ time: number; message: string; type: string }>;
+  } {
     return {
       isRunning: !!this.cronJob,
       hasActiveSessions: this.activeSessions.size > 0,
       emergencyStop: this.emergencyStop,
-      isInitialized: this.isInitialized
+      isInitialized: this.isInitialized,
+      currentPhase: this.currentPhase,
+      currentPhaseDetail: this.currentPhaseDetail,
+      lastCycleStartedAt: this.lastCycleStartedAt,
+      nextCycleAt: this.nextCycleAt,
+      cycleIntervalMs: this.CYCLE_INTERVAL_MS,
+      activityLog: this.activityLog.slice(0, 10)
     };
   }
 
