@@ -680,9 +680,11 @@ export class SupremeMarketAnalyzer extends EventEmitter {
                         : regime === 'weak_trend'   ? 10
                         : 6;
 
-    // ── Multiplicador: fator por força da tendência ──
+    // ── Multiplicador: fator por força da tendência (dinâmico — Deriv aceita 5,10,20,50,100) ──
     const trendStrength = mtf.tf30s.strength;
-    const multFactor = trendStrength > 70 ? 20
+    const multFactor = trendStrength > 90 ? 100
+                     : trendStrength > 80 ? 50
+                     : trendStrength > 70 ? 20
                      : trendStrength > 40 ? 10
                      : 5;
     const multDir: 'up' | 'down' = oppDir === 'neutral' ? 
@@ -697,9 +699,12 @@ export class SupremeMarketAnalyzer extends EventEmitter {
     const turboPct = Math.max(0.008, Math.min(0.025, baseVol * 4));
     const turboDur = regime === 'strong_trend' ? 20 : 10;
 
-    // ── Vanilla: strike por momentum ──
+    // ── Vanilla: strike por momentum, duração por regime ──
     const vanillaPct = Math.max(0.003, Math.min(0.015, baseVol * 2));
-    const vanillaDur = 15;
+    const vanillaDur = regime === 'strong_trend' ? 25
+                     : regime === 'weak_trend'   ? 15
+                     : regime === 'calm'         ? 20
+                     : 10; // ranging/chaotic: expira mais rápido
 
     // ── Rise/Fall: duração por regime ──
     const rfTicks = regime === 'strong_trend' ? 10

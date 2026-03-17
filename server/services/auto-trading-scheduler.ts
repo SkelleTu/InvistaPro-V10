@@ -707,10 +707,25 @@ export class AutoTradingScheduler {
         };
       }
 
+      // 🎯 PRÉ-LEITURA DAS MODALIDADES: Para filtrar símbolos compatíveis antes de selecionar o melhor ativo
+      let earlyActiveModalities: string[] = [];
+      try {
+        if (config.selectedModalities) {
+          try {
+            const parsed = JSON.parse(config.selectedModalities);
+            if (Array.isArray(parsed)) earlyActiveModalities = parsed;
+            else earlyActiveModalities = config.selectedModalities.split(',').map((s: string) => s.trim()).filter(Boolean);
+          } catch {
+            earlyActiveModalities = config.selectedModalities.split(',').map((s: string) => s.trim()).filter(Boolean);
+          }
+        }
+      } catch {}
+
       // 🔥 NOVA LÓGICA: Analisar TODOS os símbolos disponíveis e escolher o melhor
-      console.log(`🔍 [${operationId}] Iniciando análise de TODOS os símbolos disponíveis...`);
+      // Filtra SOMENTE ativos compatíveis com as modalidades do usuário antes de rankear
+      console.log(`🔍 [${operationId}] Iniciando análise de TODOS os símbolos disponíveis (modalidades: [${earlyActiveModalities.join(', ') || 'todas'}])...`);
       
-      const bestSymbolResult = await this.analyzeBestSymbolFromAll(config.userId, operationId);
+      const bestSymbolResult = await this.analyzeBestSymbolFromAll(config.userId, operationId, earlyActiveModalities.length > 0 ? earlyActiveModalities : undefined);
       
       if (!bestSymbolResult.success || !bestSymbolResult.symbol) {
         return { 
@@ -1356,14 +1371,15 @@ export class AutoTradingScheduler {
           const offsetPct = (selectedModality === 'ends_outside' || selectedModality === 'goes_outside') ? 0.008 : 0.005;
 
           if (isExpiry && currentPrice && currentPrice > 0) {
-            // EXPIRYRANGE / EXPIRYMISS: barriers absolutas + date_expiry (15 min)
-            // Deriv API: barrier = upper, barrier2 = lower (máximo 2 casas decimais)
-            const offset = currentPrice * offsetPct;
+            // EXPIRYRANGE / EXPIRYMISS: barriers absolutas + date_expiry dinâmico via IA
+            const adaptiveExpiryMin = supremeAnalysis?.adaptiveParams?.vanilla?.durationMin ?? 15;
+            const adaptiveOffsetPct = supremeAnalysis?.adaptiveParams?.touch?.barrierOffsetPct ?? offsetPct;
+            const offset = currentPrice * adaptiveOffsetPct;
             const upperBarrier = (currentPrice + offset).toFixed(2);
             const lowerBarrier  = (currentPrice - offset).toFixed(2);
-            const dateExpiry  = Math.floor(Date.now() / 1000) + 900; // 15 min
+            const dateExpiry  = Math.floor(Date.now() / 1000) + (adaptiveExpiryMin * 60);
 
-            console.log(`📊 [${operationId}] ${contractType}: barrier=${upperBarrier}, barrier2=${lowerBarrier}, expiry=15min | Symbol: ${selectedSymbol}`);
+            console.log(`📊 [${operationId}] ${contractType}: barrier=${upperBarrier}, barrier2=${lowerBarrier}, expiry=${adaptiveExpiryMin}min ADAPTATIVO (regime=${supremeAnalysis?.regime ?? 'padrão'}) | Symbol: ${selectedSymbol}`);
             contract = await derivAPI.buyFlexibleContract({
               contract_type: contractType,
               symbol: selectedSymbol,
@@ -1373,20 +1389,21 @@ export class AutoTradingScheduler {
               date_expiry: dateExpiry,
             });
           } else {
-            // RANGE / UPORDOWN: barriers relativas + duration
-            // Deriv API: barrier = upper (+offset), barrier2 = lower (-offset)
+            // RANGE / UPORDOWN: barriers relativas + duration dinâmica via IA
+            const adaptiveRangeDurMin = supremeAnalysis?.adaptiveParams?.turbo?.durationMin ?? 5;
+            const adaptiveRangeOffsetPct = supremeAnalysis?.adaptiveParams?.touch?.barrierOffsetPct ?? offsetPct;
             const offset = currentPrice && currentPrice > 0
-              ? parseFloat((currentPrice * offsetPct).toFixed(2))
+              ? parseFloat((currentPrice * adaptiveRangeOffsetPct).toFixed(2))
               : 0.5;
             const upperBarrier = '+' + offset;
             const lowerBarrier  = '-' + offset;
 
-            console.log(`📊 [${operationId}] ${contractType}: barrier=${upperBarrier}, barrier2=${lowerBarrier}, 5m | Symbol: ${selectedSymbol}`);
+            console.log(`📊 [${operationId}] ${contractType}: barrier=${upperBarrier}, barrier2=${lowerBarrier}, ${adaptiveRangeDurMin}m ADAPTATIVO (regime=${supremeAnalysis?.regime ?? 'padrão'}) | Symbol: ${selectedSymbol}`);
             contract = await derivAPI.buyFlexibleContract({
               contract_type: contractType,
               symbol: selectedSymbol,
               amount: tradeParams.amount,
-              duration: 5,
+              duration: adaptiveRangeDurMin,
               duration_unit: 'm',
               barrier: upperBarrier,
               barrier2: lowerBarrier,
@@ -1449,24 +1466,14 @@ export class AutoTradingScheduler {
 
         } else if (selectedModality === 'accumulator') {
           // ── Contratos Acumuladores (ACCU) ──
-          // 🧠 ACCU tem risco binário (knock-out = perda total): stake INDEPENDENTE e conservador
-          // NÃO usa o AI amplifier do DIGITDIFF — o ACCU já compõe internamente a 2%/tick
-          // Mínimo Deriv para ACCU: $1.00
-          let accuStake = Math.max(1.00, tradeParams.amount);
-          try {
-            const balanceAnalysis = await storage.getBalanceAnalysis(userId);
-            if (balanceAnalysis?.currentBalance > 0) {
-              const bk = balanceAnalysis.currentBalance;
-              // ACCU: 1% da banca, mínimo $1.00 (mínimo Deriv), máximo $10
-              // Razão: knock-out perde 100% do stake — risco deve ser mínimo por trade
-              accuStake = Math.max(1.00, Math.min(bk * 0.01, 10));
-              accuStake = Math.round(accuStake * 100) / 100;
-            }
-          } catch {}
+          // 🧠 ACCU usa o mesmo stake amplificado pela IA (tradeParams.amount já inclui AI amplifier).
+          // Apenas aplica o mínimo da Deriv ($1.00). Sem teto fixo — a IA decide o tamanho.
+          const accuStake = Math.max(1.00, Math.round(tradeParams.amount * 100) / 100);
           // 🧠 SUPREMO: growth_rate adaptativo por volatilidade e regime do mercado
           const adaptiveGrowth = supremeAnalysis?.adaptiveParams?.accumulator?.growthRate ?? 0.02;
           const accuRisk = supremeAnalysis?.adaptiveParams?.accumulator?.riskLevel ?? 'medium';
-          console.log(`📊 [${operationId}] ACCU: stake=$${accuStake} (1% banca, mín $1.00) | growth_rate=${(adaptiveGrowth*100).toFixed(1)}%${supremeAnalysis ? ` ADAPTATIVO (regime=${supremeAnalysis.regime} | risco=${accuRisk} | hurst=${supremeAnalysis.statistics.hurstExponent.toFixed(2)})` : ' padrão'} | Symbol: ${selectedSymbol}`);
+          const accuTicks = supremeAnalysis?.adaptiveParams?.accumulator?.expectedTicks ?? 10;
+          console.log(`📊 [${operationId}] ACCU: stake=$${accuStake} (IA-amplificado, mín Deriv $1.00) | growth_rate=${(adaptiveGrowth*100).toFixed(1)}% | ticks_alvo=${accuTicks}${supremeAnalysis ? ` ADAPTATIVO (regime=${supremeAnalysis.regime} | risco=${accuRisk} | hurst=${supremeAnalysis.statistics.hurstExponent.toFixed(2)})` : ' padrão'} | Symbol: ${selectedSymbol}`);
           contract = await derivAPI.buyFlexibleContract({
             contract_type: 'ACCU',
             symbol: selectedSymbol,
@@ -1545,12 +1552,17 @@ export class AutoTradingScheduler {
           // ── Contratos Lookback (LBFLOATPUT, LBFLOATCALL, LBHIGHLOW) ──
           // Lookback usa "amount" como multiplicador e NÃO aceita o campo "basis"
           const contractType = LOOKBACK_TYPES[selectedModality];
-          console.log(`📊 [${operationId}] ${contractType}: multiplier=${tradeParams.amount} | Symbol: ${selectedSymbol}`);
+          // Duração adaptativa: tendências fortes → mais tempo para capturar amplitude máxima
+          const lbDurMin = supremeAnalysis?.regime === 'strong_trend' ? 10
+                         : supremeAnalysis?.regime === 'weak_trend'   ? 7
+                         : supremeAnalysis?.regime === 'calm'         ? 8
+                         : 5; // ranging/chaotic: mais curto
+          console.log(`📊 [${operationId}] ${contractType}: multiplier=${Math.max(1, Math.round(tradeParams.amount))} | duration=${lbDurMin}min ADAPTATIVO (regime=${supremeAnalysis?.regime ?? 'padrão'}) | Symbol: ${selectedSymbol}`);
           contract = await derivAPI.buyFlexibleContract({
             contract_type: contractType,
             symbol: selectedSymbol,
             amount: Math.max(1, Math.round(tradeParams.amount)), // multiplier deve ser inteiro >= 1
-            duration: 5,
+            duration: lbDurMin,
             duration_unit: 'm',
           });
           if (!contract) {
@@ -1845,7 +1857,7 @@ export class AutoTradingScheduler {
   /**
    * 🔥 NOVA FUNÇÃO: Analisar TODOS os símbolos disponíveis e escolher o melhor baseado no consenso de IA
    */
-  private async analyzeBestSymbolFromAll(userId: string, operationId: string): Promise<{
+  private async analyzeBestSymbolFromAll(userId: string, operationId: string, activeModalities?: string[]): Promise<{
     success: boolean;
     symbol?: string;
     aiConsensus?: any;
@@ -1865,24 +1877,62 @@ export class AutoTradingScheduler {
           top5Symbols: [] 
         };
       }
+
+      // ── Mapa de compatibilidade símbolo × modalidade (espelhado da lógica de execução) ──
+      // Permite que a seleção de símbolo SOMENTE considere ativos onde as modalidades do usuário funcionam.
+      const _DIGIT_K   = ['digit_differs','digit_match','digit_over','digit_under','digit_odd','digit_even'];
+      const _RF_K      = ['rise','fall','higher','lower'];
+      const _INOUT_K   = ['ends_between','ends_outside','goes_between','goes_outside'];
+      const _TOUCH_K   = ['touch','no_touch'];
+      const _MULT_K    = ['multiplier_up','multiplier_down'];
+      const _ACCU_K    = ['accumulator'];
+      const _TURBO_K   = ['turbo_up','turbo_down'];
+      const _VANILLA_K = ['vanilla_call','vanilla_put'];
+      const _LB_K      = ['lookback_high_close','lookback_close_low','lookback_high_low'];
+      const _VOL_BASE  = [..._DIGIT_K, ..._RF_K, ..._INOUT_K, ..._TOUCH_K, ..._MULT_K, ..._ACCU_K, ..._LB_K];
+      const _HZ_FULL   = [..._DIGIT_K, ..._RF_K, ..._INOUT_K, ..._TOUCH_K, ..._MULT_K, ..._ACCU_K];
+      const _HZ_BASIC  = [..._DIGIT_K, ..._RF_K, ..._INOUT_K, ..._TOUCH_K];
+      const _JUMP_OK   = [..._DIGIT_K, ..._RF_K];
+      const _RDB_OK    = [..._DIGIT_K, ..._RF_K];
+      const _VOL_100   = [..._VOL_BASE, ..._TURBO_K, ..._VANILLA_K];
+      const _COMPAT: Record<string, string[]> = {
+        'R_10': _VOL_BASE,  'R_25': _VOL_BASE,   'R_50': _VOL_BASE,
+        'R_75': _VOL_BASE,  'R_100': _VOL_100,
+        '1HZ10V': _HZ_FULL, '1HZ25V': _HZ_FULL,  '1HZ50V': _HZ_FULL,
+        '1HZ75V': _HZ_FULL, '1HZ100V': _HZ_FULL,
+        '1HZ15V': _HZ_BASIC,'1HZ30V': _HZ_BASIC, '1HZ90V': _HZ_BASIC,
+        'JD10': _JUMP_OK,   'JD25': _JUMP_OK,    'JD50': _JUMP_OK,
+        'JD75': _JUMP_OK,   'JD100': _JUMP_OK,
+        'RDBULL': _RDB_OK,  'RDBEAR': _RDB_OK,
+      };
+
+      // Se o usuário tem modalidades ativas, pré-filtrar símbolos compatíveis com PELO MENOS UMA.
+      // Símbolos não mapeados aceitam dígitos e rise/fall — são descartados se o usuário só tem ACCU/MULT/etc.
+      const modalityFilter = activeModalities && activeModalities.length > 0 ? new Set(activeModalities) : null;
+      const isSymbolCompatibleWithModalities = (sym: string): boolean => {
+        if (!modalityFilter) return true;
+        const supported = _COMPAT[sym] ?? [..._DIGIT_K, ..._RF_K]; // default: dígitos + rise/fall
+        return [...modalityFilter].some(m => supported.includes(m));
+      };
       
       // 🔥 EXPANSÃO MASSIVA: Usar TODOS os 120+ ativos disponíveis na Deriv
-      // Foram expandidos de 5 → 120+ para máxima diversificação e cobertura de lucro
       // 🚫 BLOQUEIO TOTAL: Filtrar 100% os ativos com "(1s)" - CAUSADORES DE LOSS
+      // 🎯 FILTRO DE MODALIDADE: Ignorar ativos incompatíveis com as modalidades do usuário
       
       const filteredSymbolsData = allSymbolsData.filter((symbolData: any) => {
         const symbol = symbolData.symbol;
         
         // 🚫 BLOQUEIO TOTAL: Ignorar ativos com "(1s)" no nome
         if (AutoTradingScheduler.BLOCKED_SYMBOLS_PATTERN.test(symbol)) {
-          return false; // BLOQUEADO 100%
+          return false;
+        }
+
+        // 🎯 FILTRO DE MODALIDADE: Ignorar ativos incompatíveis com as modalidades do usuário
+        if (!isSymbolCompatibleWithModalities(symbol)) {
+          return false;
         }
         
-        // ✅ ACEITAR demais os símbolos com dados de mercado disponíveis
-        // Qualquer ativo que Deriv permite para DIGITDIFF será analisado
-        // Isso inclui: Forex, Commodities, Crypto, Stocks, Indices, etc
-        
-        return true; // ✅ Deixar TODOS passarem (exceto os bloqueados) - expansão de 5 para 120+ ativos
+        return true;
       });
       
       if (filteredSymbolsData.length === 0) {
