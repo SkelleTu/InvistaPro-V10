@@ -58,6 +58,10 @@ export class AutoTradingScheduler {
   private currentPhaseDetail: string = 'Sistema inicializando...';
   private lastCycleStartedAt: number = 0;
   private nextCycleAt: number = 0;
+
+  // 📉 Qualidade de mercado detectada no último scan (0-100)
+  // Baixa = muitos ativos com consenso ruim simultaneamente → modo defensivo
+  private lastScanMarketQuality: number = 100;
   private readonly CYCLE_INTERVAL_MS = 60000;
   private activityLog: Array<{ time: number; message: string; type: 'info' | 'success' | 'warning' | 'trade' }> = [];
 
@@ -2209,6 +2213,19 @@ export class AutoTradingScheduler {
       // TOP 5 símbolos
       const top5 = validResults.slice(0, 5);
       const top5Symbols = top5.map(r => `${r!.symbol}(${r!.consensus.toFixed(1)}%)`);
+
+      // 📉 DETECÇÃO DE MERCADO RUIM: contar quantos ativos do top5 têm consenso < 65%
+      // Se a maioria dos ativos está fraca simultaneamente, o mercado está globalmente ruim
+      const POOR_CONSENSUS_THRESHOLD = 65;
+      const poorAssets = top5.filter(r => r!.consensus < POOR_CONSENSUS_THRESHOLD).length;
+      // Qualidade = % de ativos bons no top5 (0-100)
+      const scanQuality = top5.length > 0
+        ? Math.round(((top5.length - poorAssets) / top5.length) * 100)
+        : 100;
+      this.lastScanMarketQuality = scanQuality;
+      if (scanQuality <= 40) {
+        console.log(`⚠️ [MERCADO RUIM] ${poorAssets}/${top5.length} ativos com consenso < ${POOR_CONSENSUS_THRESHOLD}% → qualidade=${scanQuality}% → modo defensivo ativo`);
+      }
       
       // Melhor símbolo
       const best = validResults[0];
@@ -2273,116 +2290,97 @@ export class AutoTradingScheduler {
    * - Consenso baixo (<50%) → Stake menor (proteção)
    */
   private calculateDynamicStake(baseAmount: number, consensoStrength: number, volatility: number = 0.5): number {
-    // 🧠 PAPEL DAS 5 IAs: Amplificar stake quando o mercado está favorável
-    // Consensus alto = mercado estável e favorável = aumentar stake para maximizar ganhos.
-    // Consensus baixo = mercado incerto = stake base ou reduzido = proteção da banca.
+    // 🧠 PAPEL DAS 5 IAs: Amplificar stake quando o mercado está favorável.
+    //   Consensus alto = mercado estável = aumentar stake para maximizar ganhos.
+    //   Consensus baixo = mercado incerto = stake base ou reduzido = proteção da banca.
     //
-    // 🛡️ MODO ALMOFADA DE LUCRO (Cushion Mode):
-    //   Em momentos de consenso excepcional (≥90%), o stake é elevado estrategicamente
-    //   para que o lucro gerado pré-cubra N perdas futuras ao valor base.
+    // 🛡️ MODO ALMOFADA DE LUCRO (Cushion Mode) — SOMENTE em mercado normal:
+    //   Consenso ≥90% → stake elevado para que o lucro pré-cubra N perdas futuras.
     //   Fórmula: lucro_cushion = stake × payout_ratio → deve cobrir N × stake_base
     //   Payout típico Digit Differs = ~95% do stake
     //
-    // 🔴 MODO RECUPERAÇÃO: quando há perda(s) consecutiva(s) não recuperada(s),
-    //   o stake é REDUZIDO (não amplificado) para proteger o capital residual.
-    //   Camada independente: aplica dampener DEPOIS de calcular o multiplier normal.
-    //   1 perda → ×0.60 (60% do stake normal)
-    //   2 perdas → ×0.40 (40% — modo muito conservador)
-    //   3+ perdas → ×0.25 (25% — modo mínimo, preservação de capital)
-    
-    const DIGIT_DIFFERS_PAYOUT_RATIO = 0.95; // payout médio por dólar de stake
+    // ⚠️ MODO MERCADO RUIM — Defensivo (NOVO):
+    //   Quando 3+ de 5 ativos simultaneamente têm consenso < 65%, o mercado está
+    //   globalmente desfavorável. Aplicar dampener de 0.60 para proteger capital.
+    //   NÃO é modo recovery — é proteção preventiva contra fases ruins do mercado.
+    //
+    // ✅ MODO RECOVERY — veja getTradeParamsForMode():
+    //   O stake de recuperação é calculado ANTES de entrar aqui, baseado no déficit.
+    //   Esta função apenas aplica o AI multiplier (sem cushion) sobre ele.
 
-    // ─── VERIFICAR MODO RECUPERAÇÃO (in-memory, sem Turso) ───────────────────
+    const DIGIT_DIFFERS_PAYOUT_RATIO = 0.95;
+
+    // ─── MODO MERCADO RUIM: dampener defensivo quando mercado está globalmente fraco ───
+    const isBadMarket = this.lastScanMarketQuality <= 40;
+    if (isBadMarket) {
+      const dampened = Math.round(baseAmount * 0.60 * 100) / 100;
+      console.log(`📉 [MERCADO RUIM] Qualidade=${this.lastScanMarketQuality}% → stake defensivo ×0.60: $${baseAmount} → $${dampened}`);
+      return dampened;
+    }
+
+    // ─── MODO RECOVERY: sem cushion — retorna baseAmount com leve ajuste por consenso ───
+    // O stake base já foi calculado para cobrir o déficit em getTradeParamsForMode()
     const inRecoveryMode = realStatsTracker.isPostLossMode();
-    let recoveryDampener = 1.0;
-    let recoveryLabel = '';
     if (inRecoveryMode) {
-      const reqs = realStatsTracker.getRecoveryRequirements();
-      const losses = reqs.consecutiveLosses;
-      if (losses >= 3) {
-        recoveryDampener = 0.25;
-        recoveryLabel = `🔴 [RECOVERY MÍNIMO] ${losses} perdas → stake ×0.25 (preservação capital)`;
-      } else if (losses >= 2) {
-        recoveryDampener = 0.40;
-        recoveryLabel = `🟠 [RECOVERY CONSERVADOR] ${losses} perdas → stake ×0.40`;
-      } else {
-        recoveryDampener = 0.60;
-        recoveryLabel = `🟡 [RECOVERY PROTEÇÃO] ${losses} perda → stake ×0.60`;
+      // Sem amplificação em recovery — o stake de recuperação já está calibrado para o déficit.
+      // Permitir no máximo ×1.0 (nenhum cushion). Volatilidade ainda reduz levemente.
+      let volAdj = 1.0;
+      if (volatility > 0.8) {
+        volAdj = 0.95;
+        console.log(`⚡ [RECOVERY+VOL] Volatilidade alta → stake ×0.95`);
       }
+      const recoveryStake = Math.round(baseAmount * volAdj * 100) / 100;
+      console.log(`🔺 [RECOVERY STAKE] Stake calibrado: $${recoveryStake} (sem cushion — déficit já embutido)`);
+      return recoveryStake;
     }
-    
+
+    // ─── MODO NORMAL: cushion mode ativo ─────────────────────────────────────────────
     let aiMultiplier = 1.0;
-    let cushionCoverage = 0; // quantas perdas futuras este trade pré-cobre
+    let cushionCoverage = 0;
 
-    if (inRecoveryMode) {
-      // Em recovery mode: sem cushion, sem amplificação — stake conservador plano
-      if (consensoStrength >= 95) {
-        aiMultiplier = 1.0; // consenso máximo em recovery → stake base (sem amplificação)
-        console.log(`🛡️ [RECOVERY AMPLIFIER] Consensus ${consensoStrength}% ≥ 95% → stake ×1.0 (recovery ativo — sem cushion)`);
-      } else if (consensoStrength >= 90) {
-        aiMultiplier = 1.0;
-        console.log(`🛡️ [RECOVERY AMPLIFIER] Consensus ${consensoStrength}% ≥ 90% → stake ×1.0 (recovery ativo)`);
-      } else if (consensoStrength >= 80) {
-        aiMultiplier = 0.9;
-        console.log(`🛡️ [RECOVERY AMPLIFIER] Consensus ${consensoStrength}% ≥ 80% → stake ×0.9 (recovery ativo)`);
-      } else {
-        aiMultiplier = 0.80;
-        console.log(`🛡️ [RECOVERY AMPLIFIER] Consensus ${consensoStrength}% → stake ×0.80 (recovery ativo)`);
-      }
+    if (consensoStrength >= 95) {
+      aiMultiplier = 3.0;
+      cushionCoverage = Math.floor((baseAmount * aiMultiplier * DIGIT_DIFFERS_PAYOUT_RATIO) / baseAmount);
+      console.log(`🚀🚀 [CUSHION ULTRA] Consensus ${consensoStrength}% ≥ 95% → stake ×3.0 | Lucro pré-cobre ~${cushionCoverage} perdas futuras`);
+    } else if (consensoStrength >= 90) {
+      aiMultiplier = 2.2;
+      cushionCoverage = Math.floor((baseAmount * aiMultiplier * DIGIT_DIFFERS_PAYOUT_RATIO) / baseAmount);
+      console.log(`💎 [CUSHION MODE] Consensus ${consensoStrength}% ≥ 90% → stake ×2.2 | Lucro pré-cobre ~${cushionCoverage} perda(s) futura(s)`);
+    } else if (consensoStrength >= 80) {
+      aiMultiplier = 1.6;
+      cushionCoverage = Math.floor((baseAmount * aiMultiplier * DIGIT_DIFFERS_PAYOUT_RATIO) / baseAmount);
+      console.log(`🔥 [AI AMPLIFIER] Consensus FORTE+ (${consensoStrength}%) ≥ 80% → stake ×1.6 | Almofada: ~${cushionCoverage} perda(s)`);
+    } else if (consensoStrength >= 70) {
+      aiMultiplier = 1.3;
+      console.log(`🔥 [AI AMPLIFIER] Consensus FORTE (${consensoStrength}%) → stake ×1.3`);
+    } else if (consensoStrength >= 55) {
+      aiMultiplier = 1.15;
+      console.log(`✅ [AI AMPLIFIER] Consensus MODERADO (${consensoStrength}%) → stake ×1.15`);
+    } else if (consensoStrength >= 40) {
+      aiMultiplier = 1.0;
+      console.log(`➡️ [AI AMPLIFIER] Consensus NEUTRO (${consensoStrength}%) → stake ×1.0`);
     } else {
-      // Modo normal: cushion mode completo ativo
-      if (consensoStrength >= 95) {
-        // 🚀 ULTRA CUSHION: consenso máximo — stake 3× base
-        aiMultiplier = 3.0;
-        cushionCoverage = Math.floor((baseAmount * aiMultiplier * DIGIT_DIFFERS_PAYOUT_RATIO) / baseAmount);
-        console.log(`🚀🚀 [CUSHION ULTRA] Consensus ${consensoStrength}% ≥ 95% → stake ×3.0 | Lucro pré-cobre ~${cushionCoverage} perdas futuras`);
-      } else if (consensoStrength >= 90) {
-        // 💎 CUSHION MODE: consenso excepcional — stake 2.2× base
-        aiMultiplier = 2.2;
-        cushionCoverage = Math.floor((baseAmount * aiMultiplier * DIGIT_DIFFERS_PAYOUT_RATIO) / baseAmount);
-        console.log(`💎 [CUSHION MODE] Consensus ${consensoStrength}% ≥ 90% → stake ×2.2 | Lucro pré-cobre ~${cushionCoverage} perda(s) futura(s)`);
-      } else if (consensoStrength >= 80) {
-        // 🔥 ELEVADO: consenso forte — stake 1.6× base
-        aiMultiplier = 1.6;
-        cushionCoverage = Math.floor((baseAmount * aiMultiplier * DIGIT_DIFFERS_PAYOUT_RATIO) / baseAmount);
-        console.log(`🔥 [AI AMPLIFIER] Consensus FORTE+ (${consensoStrength}%) ≥ 80% → stake ×1.6 | Almofada: ~${cushionCoverage} perda(s)`);
-      } else if (consensoStrength >= 70) {
-        aiMultiplier = 1.3;
-        console.log(`🔥 [AI AMPLIFIER] Consensus FORTE (${consensoStrength}%) → stake ×1.3`);
-      } else if (consensoStrength >= 55) {
-        aiMultiplier = 1.15;
-        console.log(`✅ [AI AMPLIFIER] Consensus MODERADO (${consensoStrength}%) → stake ×1.15`);
-      } else if (consensoStrength >= 40) {
-        aiMultiplier = 1.0;
-        console.log(`➡️ [AI AMPLIFIER] Consensus NEUTRO (${consensoStrength}%) → stake ×1.0`);
-      } else {
-        aiMultiplier = 0.85;
-        console.log(`⚠️ [AI AMPLIFIER] Consensus FRACO (${consensoStrength}%) → stake ×0.85`);
-      }
+      aiMultiplier = 0.85;
+      console.log(`⚠️ [AI AMPLIFIER] Consensus FRACO (${consensoStrength}%) → stake ×0.85`);
     }
 
-    // Redução adicional apenas em volatilidade extrema (proteção de risco)
+    // Redução adicional em volatilidade extrema
     let volMultiplier = 1.0;
     if (volatility > 0.8) {
       volMultiplier = 0.9;
-      console.log(`⚡ [VOL GUARD] Volatilidade alta (${(volatility*100).toFixed(0)}%) → stake ×0.9`);
+      console.log(`⚡ [VOL GUARD] Volatilidade alta (${(volatility * 100).toFixed(0)}%) → stake ×0.9`);
     }
 
-    // Aplicar dampener de recovery DEPOIS de tudo (camada de segurança final)
-    const finalMultiplier = aiMultiplier * volMultiplier * recoveryDampener;
+    const finalMultiplier = aiMultiplier * volMultiplier;
     const dynamicStake = Math.round(baseAmount * finalMultiplier * 100) / 100;
-
-    if (recoveryLabel) {
-      console.log(recoveryLabel);
-    }
 
     if (cushionCoverage > 0) {
       const estimatedProfit = dynamicStake * DIGIT_DIFFERS_PAYOUT_RATIO;
       console.log(`💰 [CUSHION STAKE] Base: $${baseAmount} × ${finalMultiplier.toFixed(2)} = $${dynamicStake} | Lucro estimado: +$${estimatedProfit.toFixed(2)} → pré-cobre ${cushionCoverage} perda(s) de $${baseAmount.toFixed(2)}`);
     } else {
-      console.log(`💰 [DYNAMIC STAKE] Base: $${baseAmount} × ${finalMultiplier.toFixed(2)} (IAs: ×${aiMultiplier}, recovery: ×${recoveryDampener}, vol: ×${volMultiplier}) = $${dynamicStake}`);
+      console.log(`💰 [DYNAMIC STAKE] Base: $${baseAmount} × ${finalMultiplier.toFixed(2)} (IAs: ×${aiMultiplier}, vol: ×${volMultiplier}) = $${dynamicStake}`);
     }
-    
+
     return dynamicStake;
   }
 
@@ -2808,15 +2806,43 @@ export class AutoTradingScheduler {
           console.log(`💰 [STAKE] Banca muito grande ($${bankSize.toFixed(2)}): stake $${amount.toFixed(2)} (${(amount/bankSize*100).toFixed(2)}% — teto=$${dynamicMax.toFixed(2)})`);
         }
         
+        // 🔺 RECOVERY STAKE — calcular stake baseado no déficit a recuperar
+        // Objetivo: um único trade bem-sucedido cobre o déficit + 15% de lucro extra.
+        // Não é sequencial: o sistema aguarda sinal com consenso ≥ minConsensus antes de operar.
+        if (realStatsTracker.isPostLossMode()) {
+          const deficit = realStatsTracker.getLossDeficit();
+          if (deficit > 0) {
+            // Stake ideal: déficit / payout_ratio × 1.15 (recupera tudo + 15% extra de lucro)
+            // Exemplo: déficit $1.00 → stake = $1.00/0.95×1.15 = $1.21 → lucro = $1.15 → net +$0.15
+            const RECOVERY_PAYOUT = 0.95;
+            const idealRecoveryStake = (deficit / RECOVERY_PAYOUT) * 1.15;
+            // Teto em recovery: 5% da banca (mais generoso que 3% normal para recuperar mais rápido)
+            const maxRecoveryStake = Math.max(bankSize * 0.05, amount);
+            // Não usar menos que o stake base da banca
+            amount = Math.max(Math.min(idealRecoveryStake, maxRecoveryStake), amount);
+            const reqs = realStatsTracker.getRecoveryRequirements();
+            const expectedProfit = amount * RECOVERY_PAYOUT;
+            const profitAfterRecovery = expectedProfit - deficit;
+            console.log(`🔺 [RECOVERY STAKE] Déficit: $${deficit.toFixed(2)} | Stake calculado: $${amount.toFixed(2)}`);
+            console.log(`   → 1 win esperado: +$${expectedProfit.toFixed(2)} | Recupera déficit + ganho extra: +$${profitAfterRecovery.toFixed(2)}`);
+            console.log(`   → Consenso mínimo exigido: ${reqs.minConsensus}% (${reqs.consecutiveLosses} perda(s) consecutiva(s))`);
+          } else {
+            console.log(`✅ [RECOVERY] Déficit = $0 (saldo quase recuperado) → stake normal`);
+          }
+        }
+
         // 🚀 APLICAR FLEXIBILIDADE DINÂMICA (se consenso fornecido)
+        // Em recovery: sem cushion amplification (calculateDynamicStake detecta o modo)
         if (consensoStrength !== undefined) {
           amount = this.calculateDynamicStake(amount, consensoStrength, volatility || 0.5);
         }
 
-        // 🛡️ SAFETY CAP: nunca arriscar mais de 3% da banca por trade (protege em qualquer modo)
-        const maxSafeStake = Math.max(0.35, bankSize * 0.03);
+        // 🛡️ SAFETY CAP — em recovery permite até 5% da banca; normal: 3%
+        const inRecovery = realStatsTracker.isPostLossMode();
+        const capPct = inRecovery ? 0.05 : 0.03;
+        const maxSafeStake = Math.max(0.35, bankSize * capPct);
         if (amount > maxSafeStake) {
-          console.log(`🛡️ [SAFETY CAP] Stake $${amount.toFixed(2)} > 3% da banca ($${maxSafeStake.toFixed(2)}) → limitado a $${maxSafeStake.toFixed(2)}`);
+          console.log(`🛡️ [SAFETY CAP] Stake $${amount.toFixed(2)} > ${(capPct * 100).toFixed(0)}% da banca ($${maxSafeStake.toFixed(2)}) → limitado a $${maxSafeStake.toFixed(2)}`);
           amount = maxSafeStake;
         }
 

@@ -237,6 +237,16 @@ class RealStatsTracker {
   }
 
   /**
+   * Retorna o déficit de capital a recuperar (quanto falta para voltar ao saldo pré-perda).
+   * Retorna 0 se não estiver em modo recovery ou se o saldo já superou o alvo.
+   */
+  getLossDeficit(): number {
+    if (!this.postLossMode) return 0;
+    if (this.lastKnownBalance <= 0) return 0;
+    return Math.max(0, this.balanceToRecover - this.lastKnownBalance);
+  }
+
+  /**
    * Retorna os requisitos completos do modo de recuperação.
    */
   getRecoveryRequirements(): {
