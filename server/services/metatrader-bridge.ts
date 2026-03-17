@@ -1568,7 +1568,9 @@ class MetaTraderBridge extends EventEmitter {
     console.log('[MT5Bridge] 🚀 Iniciando geração automática de sinais');
     this.signalGenerationInterval = setInterval(() => {
       if (!this.config.enabled) return;
-      const symbols = this.config.symbols.slice(0, 3);
+      // Prioriza símbolos reais do EA (WIN/WDO via MT5); se não houver, usa os da config (Deriv)
+      const ea = this.getCachedSymbols();
+      const symbols = ea.length > 0 ? ea : this.config.symbols.slice(0, 3);
       symbols.forEach((symbol, i) => {
         setTimeout(() => {
           setImmediate(() => {
