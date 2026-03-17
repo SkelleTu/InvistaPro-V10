@@ -54,6 +54,32 @@ export interface AIConsensus {
   participatingModels: number;
   analyses: MarketAnalysis[];
   reasoning: string;
+
+  // Campos estendidos — preenchidos pelo HybridOrchestrator e motores cooperativos
+  quantumPrediction?: 'up' | 'down' | 'neutral' | null;
+  microscopicPrediction?: 'up' | 'down' | 'neutral' | null;
+  huggingFacePrediction?: 'up' | 'down' | 'neutral';
+  quantumConfidence?: number;
+  microscopicConfidence?: number;
+  volatility?: number;
+  marketRegime?: string;
+  rsi?: number;
+  macd?: number;
+  bbPosition?: number;
+
+  // Campos preenchidos pelo scheduler após análise multidimensional
+  digitFrequencySignal?: 'up' | 'down' | 'neutral';
+  digitEdge?: number;
+  assetGrade?: string;
+  patternSignal?: 'up' | 'down' | 'neutral' | null;
+  patternConfidence?: number;
+
+  // Campos preenchidos pelo motor Girassol/AutoFib para CRASH/BOOM
+  girassolScore?: number;
+  autoFibScore?: number;
+  spikeExpected?: boolean;
+  spikeImminence?: number;
+  spikeConfluence?: string;
 }
 
 export interface DigitDifferAnalysis {
@@ -432,12 +458,39 @@ export class HuggingFaceAIService {
       console.log(`📊 [CONSENSUS] Concordância entre sistemas: ${(agreementRatio * 100).toFixed(0)}% | Conf média: ${weightedConf.toFixed(0)}% | Consenso final: ${finalConsensus}%`);
       console.log(`🎯 [PER-MODEL] ${perModelAnalyses.map(a => `${a.modelName.split(' ')[0]}:${a.prediction}(${a.confidence}%)`).join(' | ')}`);
 
+      // Calcular volatilidade dos ticks para popular o campo
+      const tickPrices = tickData.map(t => t.quote);
+      let volatilityVal = 0;
+      if (tickPrices.length > 5) {
+        const returns = tickPrices.slice(1).map((p, i) => (p - tickPrices[i]) / (tickPrices[i] || 1));
+        const avg = returns.reduce((a, b) => a + b, 0) / returns.length;
+        const variance = returns.reduce((s, r) => s + (r - avg) ** 2, 0) / returns.length;
+        volatilityVal = Math.sqrt(variance);
+      }
+
+      // upScore/downScore/neutralScore derivados da direção final e força do sinal
+      const upScoreVal = finalDir === 'up' ? adjustedConsensus : finalDir === 'neutral' ? 30 : 100 - adjustedConsensus;
+      const downScoreVal = finalDir === 'down' ? adjustedConsensus : finalDir === 'neutral' ? 30 : 100 - adjustedConsensus;
+      const neutralScoreVal = finalDir === 'neutral' ? adjustedConsensus : Math.max(0, 50 - adjustedConsensus / 2);
+
       const hybridConsensus: AIConsensus = {
         finalDecision: hybridResult.prediction,
         consensusStrength: adjustedConsensus,
-        participatingModels: models.length + (hybridResult.systems.quantum ? 1 : 0),
+        upScore: upScoreVal,
+        downScore: downScoreVal,
+        neutralScore: neutralScoreVal,
+        participatingModels: models.length + (hybridResult.systems.quantum ? 1 : 0) + (hybridResult.systems.microscopic ? 1 : 0),
         analyses: perModelAnalyses,
-        reasoning: `🌌 HÍBRIDO: ${hybridResult.reasoning} | Concordância: ${(agreementRatio * 100).toFixed(0)}% | Consenso: ${finalConsensus}%`
+        reasoning: `🌌 HÍBRIDO: ${hybridResult.reasoning} | Concordância: ${(agreementRatio * 100).toFixed(0)}% | Consenso: ${finalConsensus}%`,
+
+        // Campos dos motores cooperativos
+        quantumPrediction: (hybridResult.systems.quantum?.prediction as 'up' | 'down' | 'neutral') ?? null,
+        microscopicPrediction: (hybridResult.systems.microscopic?.cooperativeSignal?.technicalDirection as 'up' | 'down' | 'neutral') ?? null,
+        huggingFacePrediction: hybridResult.prediction,
+        quantumConfidence: hybridResult.systems.quantum?.confidence ?? undefined,
+        microscopicConfidence: hybridResult.systems.microscopic?.cooperativeSignal?.confidence ?? undefined,
+        volatility: volatilityVal,
+        marketRegime: hybridResult.systems.hybrid?.mode || 'unknown',
       };
       
       console.log(`🎉 [HYBRID SUCCESS] Consenso híbrido: ${hybridConsensus.finalDecision} (${hybridConsensus.consensusStrength}%)`);

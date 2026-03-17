@@ -13,6 +13,7 @@ import { realStatsTracker } from './real-stats-tracker';
 import { contractMonitor } from './contract-monitor';
 import { persistentLearningEngine } from './persistent-learning-engine';
 import { supremeAnalyzer, SupremeAnalysis } from './supreme-market-analyzer';
+import { analyzeCrashBoomSpike } from './crash-boom-spike-engine';
 
 export interface ActiveTradeSession {
   userId: string;
@@ -59,11 +60,8 @@ export class AutoTradingScheduler {
       private assetLastUsedTime: Map<string, number> = new Map(); // ✅ FIX: Guardar TEMPO REAL, não índice
       private assetCooldownMinutes: number = 0; // ⚡ DESATIVADO PARA TESTE: 0 segundos
       
-      // 🧬 SISTEMA ADAPTATIVO - Breathing Room dinâmico
-  // Se asset ganhando: permite IMEDIATAMENTE (rotation rápido em ganhadores)
-  // Se asset perdendo: aumenta cool-off automaticamente (force diversificação)
-  private getBreathingRoom(symbol: string): number {
-    return 0; // 🔥 SEMPRE 0 PARA TESTE
+  private getBreathingRoom(_symbol: string): number {
+    return 0;
   }
   
   // 🎯 SISTEMA DE OPERAÇÕES CONSERVADORAS DIÁRIAS (persistido no banco)
@@ -417,19 +415,13 @@ export class AutoTradingScheduler {
         console.log(`🔍 [DEBUG] Config ${c.id}: userId=${c.userId}, mode=${c.mode}, isActive=${c.isActive}`);
       });
 
-      // ⚡ INTELIGÊNCIA PURA: Sem limites de stagger quando oportunidade forte
-      // IAs decidem quantidade de trades simultâneos baseado em consenso
-      // Consenso forte (>70%): SEM stagger - burst completo de trades
-      // Consenso médio (40-70%): stagger leve para distribuir
-      // Consenso fraco (<40%): operações normais
+      // ⚡ Execução paralela de configurações ativas com stagger escalonado
       const analisePromises = activeConfigs.map(async (config, index) => {
         try {
-      // ⚡ CONTROLE DE BURST: Aplicar stagger mínimo para evitar avalanche
-          // Isto evita abrir múltiplos trades simultaneamente
-          // Delay: 1 segundo entre cada trade para manter controle
-          const staggerDelay = 1000; // 1 segundo mínimo entre trades
-          if (staggerDelay > 0) {
-            await new Promise(resolve => setTimeout(resolve, staggerDelay * index));
+          // ⚡ STAGGER: 500ms entre cada config para evitar avalanche simultânea de trades
+          // Fixo por design — análise ocorre em paralelo mas execução é escalonada
+          if (index > 0) {
+            await new Promise(resolve => setTimeout(resolve, 500 * index));
           }
           
           return await this.processAnaliseNaturalConfiguration(config, operationId);
@@ -1879,6 +1871,42 @@ export class AutoTradingScheduler {
           // Executar análise de IA (sentimento geral de mercado)
           const aiConsensus = await huggingFaceAI.analyzeMarketData(tickData, symbol, userId);
 
+          // 🌻 MOTOR GIRASSOL + AUTOFIB: integrar para símbolos CRASH/BOOM
+          // O motor cooperativo tripartite (Girassol + AutoFib + IA) é o cérebro especializado
+          // para esses índices sintéticos — amplifica o consenso quando detecta spike iminente
+          const symUpper = symbol.toUpperCase();
+          const isSpikeSymbol = symUpper.includes('CRASH') || symUpper.includes('BOOM');
+          if (isSpikeSymbol && priceHistory.length >= 50) {
+            try {
+              const candles = priceHistory.slice(-200).map((price: number, idx: number, arr: number[]) => ({
+                close: price,
+                high:  price * 1.001,
+                low:   price * 0.999,
+                open:  arr[Math.max(0, idx - 1)] || price,
+              }));
+              const spikeResult = analyzeCrashBoomSpike(symbol, candles);
+              if (spikeResult.isSpikeIndex) {
+                aiConsensus.girassolScore   = spikeResult.girassolSystem.totalGirassolScore;
+                aiConsensus.autoFibScore    = spikeResult.autoFib.nearestLevel
+                  ? Math.min(100, (spikeResult.autoFib.spikeMultiplier - 1) * 80 + spikeResult.autoFib.confluenceCount * 20)
+                  : 0;
+                aiConsensus.spikeExpected   = spikeResult.spikeExpected;
+                aiConsensus.spikeImminence  = spikeResult.imminencePercent;
+                aiConsensus.spikeConfluence = spikeResult.girassolSystem.confluenceLabel;
+
+                // Ampliar consenso se Girassol detectou confluência forte
+                if (spikeResult.overallConfidence > 40) {
+                  const boost = spikeResult.girassolSystem.triConfluence ? 1.4
+                    : spikeResult.girassolSystem.dualConfluence ? 1.25 : 1.10;
+                  aiConsensus.consensusStrength = Math.min(95, Math.round(aiConsensus.consensusStrength * boost));
+                  console.log(`🌻 [GIRASSOL+AUTOFIB] ${symbol}: score=${spikeResult.overallConfidence}% | confluência=${spikeResult.girassolSystem.confluenceLabel} | iminência=${spikeResult.imminencePercent}% | boost=${boost}x → consenso=${aiConsensus.consensusStrength}%`);
+                }
+              }
+            } catch (spikeErr) {
+              console.warn(`⚠️ [GIRASSOL] Erro na análise de spike para ${symbol}: ${spikeErr}`);
+            }
+          }
+
           // 🎯 DIGIT FREQUENCY: Alimentar analisador com histórico do ativo
           const recentDigits = priceHistory.slice(-500).map((price: number) => {
             const priceStr = price.toString();
@@ -1948,7 +1976,16 @@ export class AutoTradingScheduler {
             return null; // Ativo bloqueado — descartar
           }
 
-          const enrichedConsensus = { ...aiConsensus, consensusStrength: scoreResult.finalScore };
+          const digitFreqResult = digitFrequencyAnalyzer.getBestBarrier(symbol);
+          const enrichedConsensus = {
+            ...aiConsensus,
+            consensusStrength: scoreResult.finalScore,
+            digitFrequencySignal: (digitFreqResult.edge > 0 ? aiConsensus.finalDecision : 'neutral') as 'up' | 'down' | 'neutral',
+            digitEdge: digitFreqResult.edge,
+            assetGrade: scoreResult.grade,
+            patternSignal: aiConsensus.finalDecision !== 'neutral' ? aiConsensus.finalDecision : null,
+            patternConfidence: aiConsensus.consensusStrength,
+          };
           
           return {
             symbol,
