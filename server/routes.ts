@@ -888,6 +888,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Development only: Auto-login as admin for agent screenshot access
+  app.get('/dev-login', async (req: any, res) => {
+    if (process.env.NODE_ENV !== 'development') {
+      return res.status(404).send('Not found');
+    }
+    try {
+      const allUsers = await dbStorage.getAllUsers();
+      const admin = allUsers.find((u: any) => u.isAdmin) || allUsers[0];
+      if (!admin) {
+        return res.status(404).send('Nenhum usuário encontrado. Crie um admin primeiro.');
+      }
+      req.logIn(admin, (err: any) => {
+        if (err) {
+          console.error('[DEV-LOGIN] Erro ao fazer login:', err);
+          return res.status(500).send('Erro ao criar sessão: ' + err.message);
+        }
+        console.log(`[DEV-LOGIN] Login automático como: ${admin.email} (admin: ${admin.isAdmin})`);
+        res.redirect('/dashboard');
+      });
+    } catch (error: any) {
+      console.error('[DEV-LOGIN] Erro:', error);
+      res.status(500).send('Erro: ' + error.message);
+    }
+  });
+
   // Development only: Reset user data for testing
   app.post('/api/dev/reset-user', async (req, res) => {
     // Only allow in development

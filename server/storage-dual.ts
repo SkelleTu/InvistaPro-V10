@@ -66,10 +66,38 @@ export class DualStorage implements IStorage {
     }
   }
 
-  async getUser(id: string) { return this.primaryRead(() => this.postgres!.getUser(id), () => this.sqlite.getUser(id), 'getUser'); }
-  async getUserByEmail(email: string) { return this.primaryRead(() => this.postgres!.getUserByEmail(email), () => this.sqlite.getUserByEmail(email), 'getUserByEmail'); }
-  async getUserByCpf(cpf: string) { return this.primaryRead(() => this.postgres!.getUserByCpf(cpf), () => this.sqlite.getUserByCpf(cpf), 'getUserByCpf'); }
-  async getAllUsers() { return this.primaryRead(() => this.postgres!.getAllUsers(), () => this.sqlite.getAllUsers(), 'getAllUsers'); }
+  async getUser(id: string) {
+    if (!this.isDualMode || !this.postgres) return await this.sqlite.getUser(id);
+    try {
+      const r = await this.postgres.getUser(id);
+      if (r) return r;
+      return await this.sqlite.getUser(id);
+    } catch { return await this.sqlite.getUser(id); }
+  }
+  async getUserByEmail(email: string) {
+    if (!this.isDualMode || !this.postgres) return await this.sqlite.getUserByEmail(email);
+    try {
+      const r = await this.postgres.getUserByEmail(email);
+      if (r) return r;
+      return await this.sqlite.getUserByEmail(email);
+    } catch { return await this.sqlite.getUserByEmail(email); }
+  }
+  async getUserByCpf(cpf: string) {
+    if (!this.isDualMode || !this.postgres) return await this.sqlite.getUserByCpf(cpf);
+    try {
+      const r = await this.postgres.getUserByCpf(cpf);
+      if (r) return r;
+      return await this.sqlite.getUserByCpf(cpf);
+    } catch { return await this.sqlite.getUserByCpf(cpf); }
+  }
+  async getAllUsers() {
+    if (!this.isDualMode || !this.postgres) return await this.sqlite.getAllUsers();
+    try {
+      const pgUsers = await this.postgres.getAllUsers();
+      if (pgUsers.length > 0) return pgUsers;
+      return await this.sqlite.getAllUsers();
+    } catch { return await this.sqlite.getAllUsers(); }
+  }
   async createUser(user: InsertUser) { return this.primaryWrite(() => this.postgres!.createUser(user), () => this.sqlite.createUser(user), 'createUser'); }
   async updateUser(id: string, data: UpdateUser) { return this.primaryWrite(() => this.postgres!.updateUser(id, data), () => this.sqlite.updateUser(id, data), 'updateUser'); }
   async updateVerificationCode(userId: string, code: string, expiresAt: Date) { return this.primaryWrite(() => this.postgres!.updateVerificationCode(userId, code, expiresAt), () => this.sqlite.updateVerificationCode(userId, code, expiresAt), 'updateVerificationCode'); }
