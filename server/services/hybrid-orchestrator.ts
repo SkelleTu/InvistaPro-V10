@@ -45,8 +45,48 @@ export class HybridOrchestrator {
   private initializationInProgress = false;
   private latestMicroscopicAnalysis: Map<string, MicroscopicAnalysis> = new Map();
 
+  private systemAccuracy = {
+    advanced: { correct: 0, total: 0 },
+    quantum: { correct: 0, total: 0 },
+    microscopic: { correct: 0, total: 0 },
+  };
+
   constructor(config: HybridConfig) {
     this.config = config;
+  }
+
+  recordOutcome(systems: { advanced?: string; quantum?: string; microscopic?: string }, actualDirection: string) {
+    if (systems.advanced) {
+      this.systemAccuracy.advanced.total++;
+      if (systems.advanced === actualDirection) this.systemAccuracy.advanced.correct++;
+    }
+    if (systems.quantum) {
+      this.systemAccuracy.quantum.total++;
+      if (systems.quantum === actualDirection) this.systemAccuracy.quantum.correct++;
+    }
+    if (systems.microscopic) {
+      this.systemAccuracy.microscopic.total++;
+      if (systems.microscopic === actualDirection) this.systemAccuracy.microscopic.correct++;
+    }
+  }
+
+  private getAdaptiveWeights(): { advanced: number; quantum: number; microscopic: number } {
+    const accAdvanced = this.systemAccuracy.advanced.total >= 10
+      ? this.systemAccuracy.advanced.correct / this.systemAccuracy.advanced.total
+      : 0.5;
+    const accQuantum = this.systemAccuracy.quantum.total >= 10
+      ? this.systemAccuracy.quantum.correct / this.systemAccuracy.quantum.total
+      : 0.55;
+    const accMicroscopic = this.systemAccuracy.microscopic.total >= 10
+      ? this.systemAccuracy.microscopic.correct / this.systemAccuracy.microscopic.total
+      : 0.45;
+
+    const total = accAdvanced + accQuantum + accMicroscopic;
+    return {
+      advanced: accAdvanced / total,
+      quantum: accQuantum / total,
+      microscopic: accMicroscopic / total,
+    };
   }
 
   /**
@@ -207,20 +247,26 @@ export class HybridOrchestrator {
     
     console.log(`🌌 [HYBRID FUSION] Fusionando Sistema Avançado + ${availableSystems.join(' + ')}`);
     
-    // Pesos dinâmicos baseados nos sistemas disponíveis
-    // CORREÇÃO: Priorizar sistema quântico quando disponível
-    let advancedWeight = 0.3;
-    let quantumWeight = quantumResult ? 0.5 : 0;
-    let microscopicWeight = hasMicroscopic ? 0.2 : 0;
-    
-    // Se algum sistema não está disponível, redistribuir pesos
-    if (!quantumResult && hasMicroscopic) {
-      advancedWeight = 0.7;
-      microscopicWeight = 0.3;
+    // Pesos adaptativos baseados na performance real de cada sistema
+    const adaptiveWeights = this.getAdaptiveWeights();
+    let advancedWeight = adaptiveWeights.advanced;
+    let quantumWeight = quantumResult ? adaptiveWeights.quantum : 0;
+    let microscopicWeight = hasMicroscopic ? adaptiveWeights.microscopic : 0;
+
+    // Se algum sistema não está disponível, redistribuir pesos proporcionalmente
+    if (!quantumResult && !hasMicroscopic) {
+      advancedWeight = 1.0;
+    } else if (!quantumResult && hasMicroscopic) {
+      const total = adaptiveWeights.advanced + adaptiveWeights.microscopic;
+      advancedWeight = adaptiveWeights.advanced / total;
+      microscopicWeight = adaptiveWeights.microscopic / total;
     } else if (quantumResult && !hasMicroscopic) {
-      advancedWeight = 0.3;
-      quantumWeight = 0.7; // Dar mais peso ao quântico
+      const total = adaptiveWeights.advanced + adaptiveWeights.quantum;
+      advancedWeight = adaptiveWeights.advanced / total;
+      quantumWeight = adaptiveWeights.quantum / total;
     }
+
+    console.log(`⚖️ [HYBRID WEIGHTS] Avançado=${(advancedWeight*100).toFixed(0)}% | Quântico=${(quantumWeight*100).toFixed(0)}% | Microscópico=${(microscopicWeight*100).toFixed(0)}% (baseado em ${this.systemAccuracy.advanced.total + this.systemAccuracy.quantum.total + this.systemAccuracy.microscopic.total} amostras)`);
     
     // Sanitizar confidence inputs para prevenir NaN propagation
     const safeAdvancedConfidence = isFinite(advancedResult.confidence) && advancedResult.confidence >= 0 ? 

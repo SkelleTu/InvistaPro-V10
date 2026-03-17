@@ -1249,8 +1249,16 @@ export class AutoTradingScheduler {
           const needsBarrier = ['DIGITDIFF', 'DIGITMATCH', 'DIGITOVER', 'DIGITUNDER'].includes(contractType);
           
           let barrier: string | undefined = tradeParams.barrier;
-          if (contractType === 'DIGITOVER') barrier = '4';
-          if (contractType === 'DIGITUNDER') barrier = '5';
+          if (contractType === 'DIGITOVER') {
+            const smartBarrier = this.selectDigitBarrierForOverUnder(selectedSymbol, 'over');
+            barrier = smartBarrier.barrier;
+            console.log(`🎯 [DIGITOVER] ${selectedSymbol}: barreira inteligente=${barrier} | winRate≈${smartBarrier.winRateEst}% | ${smartBarrier.reason}`);
+          }
+          if (contractType === 'DIGITUNDER') {
+            const smartBarrier = this.selectDigitBarrierForOverUnder(selectedSymbol, 'under');
+            barrier = smartBarrier.barrier;
+            console.log(`🎯 [DIGITUNDER] ${selectedSymbol}: barreira inteligente=${barrier} | winRate≈${smartBarrier.winRateEst}% | ${smartBarrier.reason}`);
+          }
           if (!needsBarrier) barrier = undefined;
 
           contract = await derivAPI.buyGenericDigitContract({
