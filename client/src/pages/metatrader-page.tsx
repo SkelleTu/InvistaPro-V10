@@ -37,6 +37,7 @@ interface MT5Status {
   activeSignal: any;
   recentTrades: any[];
   systemHealth: 'excellent' | 'good' | 'warning' | 'critical';
+  cachedSymbols: string[];
 }
 
 interface MT5Config {
@@ -836,25 +837,35 @@ export default function MetaTraderPage() {
                   Forçar Análise Manual
                 </CardTitle>
                 <CardDescription>
-                  Força as IAs a analisar um par agora com os dados em cache
+                  {status?.cachedSymbols?.length
+                    ? `Ativos ativos no EA da corretora ${status.broker || 'conectada'}`
+                    : 'Aguardando dados do EA — conecte o MetaTrader para ver os ativos disponíveis'}
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-                  {(config?.symbols || ['EURUSD', 'GBPUSD', 'XAUUSD', 'USDJPY', 'BTCUSD']).map((sym: string) => (
-                    <Button
-                      key={sym}
-                      variant="outline"
-                      onClick={() => generateSignalMutation.mutate(sym)}
-                      disabled={generateSignalMutation.isPending}
-                      data-testid={`button-signal-${sym}`}
-                      className="gap-1"
-                    >
-                      <Zap className="h-3 w-3" />
-                      {sym}
-                    </Button>
-                  ))}
-                </div>
+                {status?.cachedSymbols?.length ? (
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+                    {status.cachedSymbols.map((sym: string) => (
+                      <Button
+                        key={sym}
+                        variant="outline"
+                        onClick={() => generateSignalMutation.mutate(sym)}
+                        disabled={generateSignalMutation.isPending}
+                        data-testid={`button-signal-${sym}`}
+                        className="gap-1"
+                      >
+                        <Zap className="h-3 w-3" />
+                        {sym}
+                      </Button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-8 text-muted-foreground gap-2">
+                    <Cpu className="h-8 w-8 opacity-30" />
+                    <p className="text-sm">Nenhum ativo recebido do EA ainda</p>
+                    <p className="text-xs">O EA envia os ativos automaticamente ao se conectar</p>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>

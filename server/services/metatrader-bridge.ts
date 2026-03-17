@@ -534,7 +534,8 @@ class MetaTraderBridge extends EventEmitter {
       systemHealth: health,
       activeSignal: this.getLatestActiveSignal(),
       recentTrades: this.recentTrades.slice(-20),
-      openPositions: this.openPositions.size
+      openPositions: this.openPositions.size,
+      cachedSymbols: this.getCachedSymbols()
     };
   }
 
