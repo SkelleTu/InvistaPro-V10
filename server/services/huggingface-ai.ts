@@ -5,6 +5,7 @@ import { AdvancedLearningSystem, DEFAULT_ADVANCED_CONFIG, MarketState, ModelPerf
 import { HybridOrchestrator } from './hybrid-orchestrator';
 import { QuantumNeuralSystem, QuantumNeuralConfig } from './quantum-neural-system';
 import { dynamicThresholdTracker } from './dynamic-threshold-tracker';
+import { realStatsTracker } from './real-stats-tracker';
 
 // Shared helper function for digit extraction preserving trailing zeros
 function extractLastDigit(tickData: DerivTickData): number {
@@ -284,21 +285,23 @@ export class HuggingFaceAIService {
     console.log(`🎯 OBJETIVO: Todas devem ter as mesmas conclusões para as operações`);
     
     // 🔥 SISTEMA DE RECUPERAÇÃO - Verificar se precisa de cooperação intensificada
+    // Usa realStatsTracker (in-memory) em vez de Turso (bloqueado por limitação de plano)
     let isRecoveryMode = false;
-    let recoveryThreshold = 0.65; // Ajustado para 65% - permite mais operações conservadoras
-    
-    if (userId) {
-      try {
-        isRecoveryMode = await storage.shouldActivateRecovery(userId);
-        if (isRecoveryMode) {
-          recoveryThreshold = await storage.getRecoveryThresholdRecommendation(userId);
-          console.log('🔥 MODO RECUPERAÇÃO DETECTADO - Cooperação IA intensificada!');
-          console.log(`📊 Threshold elevado para: ${Math.round(recoveryThreshold * 100)}%`);
-          console.log('🧠 IAs ajustando estratégia para máxima precisão');
-        }
-      } catch (error) {
-        console.log(`⚠️ Erro ao verificar modo recuperação: ${error}`);
+    let recoveryThreshold = 0.65; // threshold padrão conservador
+
+    try {
+      isRecoveryMode = realStatsTracker.isPostLossMode();
+      if (isRecoveryMode) {
+        const reqs = realStatsTracker.getRecoveryRequirements();
+        // minConsensus já está em % (ex: 85, 90, 95) — converter para ratio 0-1
+        recoveryThreshold = reqs.minConsensus / 100;
+        console.log('🔥 MODO RECUPERAÇÃO DETECTADO (in-memory) - Cooperação IA intensificada!');
+        console.log(`📊 Threshold elevado para: ${reqs.minConsensus}% (${reqs.consecutiveLosses} perda(s) consecutiva(s))`);
+        console.log(`💰 Saldo alvo para sair do recovery: $${reqs.balanceToRecover.toFixed(2)}`);
+        console.log('🧠 IAs ajustando estratégia para máxima precisão — stake conservador ativo');
       }
+    } catch (error) {
+      console.log(`⚠️ Erro ao verificar modo recuperação (in-memory): ${error}`);
     }
     
     console.log(`🌌 Iniciando ANÁLISE HÍBRIDA SUPREMA com ${this.activeModels.length} modelos coordenados`);

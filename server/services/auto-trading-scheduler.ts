@@ -2282,42 +2282,83 @@ export class AutoTradingScheduler {
     //   para que o lucro gerado pré-cubra N perdas futuras ao valor base.
     //   Fórmula: lucro_cushion = stake × payout_ratio → deve cobrir N × stake_base
     //   Payout típico Digit Differs = ~95% do stake
+    //
+    // 🔴 MODO RECUPERAÇÃO: quando há perda(s) consecutiva(s) não recuperada(s),
+    //   o stake é REDUZIDO (não amplificado) para proteger o capital residual.
+    //   Camada independente: aplica dampener DEPOIS de calcular o multiplier normal.
+    //   1 perda → ×0.60 (60% do stake normal)
+    //   2 perdas → ×0.40 (40% — modo muito conservador)
+    //   3+ perdas → ×0.25 (25% — modo mínimo, preservação de capital)
     
     const DIGIT_DIFFERS_PAYOUT_RATIO = 0.95; // payout médio por dólar de stake
+
+    // ─── VERIFICAR MODO RECUPERAÇÃO (in-memory, sem Turso) ───────────────────
+    const inRecoveryMode = realStatsTracker.isPostLossMode();
+    let recoveryDampener = 1.0;
+    let recoveryLabel = '';
+    if (inRecoveryMode) {
+      const reqs = realStatsTracker.getRecoveryRequirements();
+      const losses = reqs.consecutiveLosses;
+      if (losses >= 3) {
+        recoveryDampener = 0.25;
+        recoveryLabel = `🔴 [RECOVERY MÍNIMO] ${losses} perdas → stake ×0.25 (preservação capital)`;
+      } else if (losses >= 2) {
+        recoveryDampener = 0.40;
+        recoveryLabel = `🟠 [RECOVERY CONSERVADOR] ${losses} perdas → stake ×0.40`;
+      } else {
+        recoveryDampener = 0.60;
+        recoveryLabel = `🟡 [RECOVERY PROTEÇÃO] ${losses} perda → stake ×0.60`;
+      }
+    }
     
     let aiMultiplier = 1.0;
     let cushionCoverage = 0; // quantas perdas futuras este trade pré-cobre
 
-    if (consensoStrength >= 95) {
-      // 🚀 ULTRA CUSHION: consenso máximo — stake 3× base
-      // Lucro ≈ 3 × base × 0.95 ≈ 2.85 × base → cobre ~2 perdas futuras ao valor base
-      aiMultiplier = 3.0;
-      cushionCoverage = Math.floor((baseAmount * aiMultiplier * DIGIT_DIFFERS_PAYOUT_RATIO) / baseAmount);
-      console.log(`🚀🚀 [CUSHION ULTRA] Consensus ${consensoStrength}% ≥ 95% → stake ×3.0 | Lucro pré-cobre ~${cushionCoverage} perdas futuras`);
-    } else if (consensoStrength >= 90) {
-      // 💎 CUSHION MODE: consenso excepcional — stake 2.2× base
-      // Lucro ≈ 2.2 × base × 0.95 ≈ 2.09 × base → cobre ~2 perdas futuras ao valor base
-      aiMultiplier = 2.2;
-      cushionCoverage = Math.floor((baseAmount * aiMultiplier * DIGIT_DIFFERS_PAYOUT_RATIO) / baseAmount);
-      console.log(`💎 [CUSHION MODE] Consensus ${consensoStrength}% ≥ 90% → stake ×2.2 | Lucro pré-cobre ~${cushionCoverage} perda(s) futura(s)`);
-    } else if (consensoStrength >= 80) {
-      // 🔥 ELEVADO: consenso forte — stake 1.6× base
-      // Lucro ≈ 1.6 × base × 0.95 ≈ 1.52 × base → cobre ~1 perda futura ao valor base
-      aiMultiplier = 1.6;
-      cushionCoverage = Math.floor((baseAmount * aiMultiplier * DIGIT_DIFFERS_PAYOUT_RATIO) / baseAmount);
-      console.log(`🔥 [AI AMPLIFIER] Consensus FORTE+ (${consensoStrength}%) ≥ 80% → stake ×1.6 | Almofada: ~${cushionCoverage} perda(s)`);
-    } else if (consensoStrength >= 70) {
-      aiMultiplier = 1.3;
-      console.log(`🔥 [AI AMPLIFIER] Consensus FORTE (${consensoStrength}%) → stake ×1.3`);
-    } else if (consensoStrength >= 55) {
-      aiMultiplier = 1.15;
-      console.log(`✅ [AI AMPLIFIER] Consensus MODERADO (${consensoStrength}%) → stake ×1.15`);
-    } else if (consensoStrength >= 40) {
-      aiMultiplier = 1.0;
-      console.log(`➡️ [AI AMPLIFIER] Consensus NEUTRO (${consensoStrength}%) → stake ×1.0`);
+    if (inRecoveryMode) {
+      // Em recovery mode: sem cushion, sem amplificação — stake conservador plano
+      if (consensoStrength >= 95) {
+        aiMultiplier = 1.0; // consenso máximo em recovery → stake base (sem amplificação)
+        console.log(`🛡️ [RECOVERY AMPLIFIER] Consensus ${consensoStrength}% ≥ 95% → stake ×1.0 (recovery ativo — sem cushion)`);
+      } else if (consensoStrength >= 90) {
+        aiMultiplier = 1.0;
+        console.log(`🛡️ [RECOVERY AMPLIFIER] Consensus ${consensoStrength}% ≥ 90% → stake ×1.0 (recovery ativo)`);
+      } else if (consensoStrength >= 80) {
+        aiMultiplier = 0.9;
+        console.log(`🛡️ [RECOVERY AMPLIFIER] Consensus ${consensoStrength}% ≥ 80% → stake ×0.9 (recovery ativo)`);
+      } else {
+        aiMultiplier = 0.80;
+        console.log(`🛡️ [RECOVERY AMPLIFIER] Consensus ${consensoStrength}% → stake ×0.80 (recovery ativo)`);
+      }
     } else {
-      aiMultiplier = 0.85;
-      console.log(`⚠️ [AI AMPLIFIER] Consensus FRACO (${consensoStrength}%) → stake ×0.85`);
+      // Modo normal: cushion mode completo ativo
+      if (consensoStrength >= 95) {
+        // 🚀 ULTRA CUSHION: consenso máximo — stake 3× base
+        aiMultiplier = 3.0;
+        cushionCoverage = Math.floor((baseAmount * aiMultiplier * DIGIT_DIFFERS_PAYOUT_RATIO) / baseAmount);
+        console.log(`🚀🚀 [CUSHION ULTRA] Consensus ${consensoStrength}% ≥ 95% → stake ×3.0 | Lucro pré-cobre ~${cushionCoverage} perdas futuras`);
+      } else if (consensoStrength >= 90) {
+        // 💎 CUSHION MODE: consenso excepcional — stake 2.2× base
+        aiMultiplier = 2.2;
+        cushionCoverage = Math.floor((baseAmount * aiMultiplier * DIGIT_DIFFERS_PAYOUT_RATIO) / baseAmount);
+        console.log(`💎 [CUSHION MODE] Consensus ${consensoStrength}% ≥ 90% → stake ×2.2 | Lucro pré-cobre ~${cushionCoverage} perda(s) futura(s)`);
+      } else if (consensoStrength >= 80) {
+        // 🔥 ELEVADO: consenso forte — stake 1.6× base
+        aiMultiplier = 1.6;
+        cushionCoverage = Math.floor((baseAmount * aiMultiplier * DIGIT_DIFFERS_PAYOUT_RATIO) / baseAmount);
+        console.log(`🔥 [AI AMPLIFIER] Consensus FORTE+ (${consensoStrength}%) ≥ 80% → stake ×1.6 | Almofada: ~${cushionCoverage} perda(s)`);
+      } else if (consensoStrength >= 70) {
+        aiMultiplier = 1.3;
+        console.log(`🔥 [AI AMPLIFIER] Consensus FORTE (${consensoStrength}%) → stake ×1.3`);
+      } else if (consensoStrength >= 55) {
+        aiMultiplier = 1.15;
+        console.log(`✅ [AI AMPLIFIER] Consensus MODERADO (${consensoStrength}%) → stake ×1.15`);
+      } else if (consensoStrength >= 40) {
+        aiMultiplier = 1.0;
+        console.log(`➡️ [AI AMPLIFIER] Consensus NEUTRO (${consensoStrength}%) → stake ×1.0`);
+      } else {
+        aiMultiplier = 0.85;
+        console.log(`⚠️ [AI AMPLIFIER] Consensus FRACO (${consensoStrength}%) → stake ×0.85`);
+      }
     }
 
     // Redução adicional apenas em volatilidade extrema (proteção de risco)
@@ -2327,14 +2368,19 @@ export class AutoTradingScheduler {
       console.log(`⚡ [VOL GUARD] Volatilidade alta (${(volatility*100).toFixed(0)}%) → stake ×0.9`);
     }
 
-    const finalMultiplier = aiMultiplier * volMultiplier;
+    // Aplicar dampener de recovery DEPOIS de tudo (camada de segurança final)
+    const finalMultiplier = aiMultiplier * volMultiplier * recoveryDampener;
     const dynamicStake = Math.round(baseAmount * finalMultiplier * 100) / 100;
+
+    if (recoveryLabel) {
+      console.log(recoveryLabel);
+    }
 
     if (cushionCoverage > 0) {
       const estimatedProfit = dynamicStake * DIGIT_DIFFERS_PAYOUT_RATIO;
       console.log(`💰 [CUSHION STAKE] Base: $${baseAmount} × ${finalMultiplier.toFixed(2)} = $${dynamicStake} | Lucro estimado: +$${estimatedProfit.toFixed(2)} → pré-cobre ${cushionCoverage} perda(s) de $${baseAmount.toFixed(2)}`);
     } else {
-      console.log(`💰 [DYNAMIC STAKE] Base: $${baseAmount} × ${finalMultiplier.toFixed(2)} (IAs: ×${aiMultiplier}, vol: ×${volMultiplier}) = $${dynamicStake}`);
+      console.log(`💰 [DYNAMIC STAKE] Base: $${baseAmount} × ${finalMultiplier.toFixed(2)} (IAs: ×${aiMultiplier}, recovery: ×${recoveryDampener}, vol: ×${volMultiplier}) = $${dynamicStake}`);
     }
     
     return dynamicStake;
