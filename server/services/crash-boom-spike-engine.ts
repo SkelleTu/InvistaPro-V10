@@ -113,6 +113,8 @@ export interface GirassolGroupResult {
   fibAlignment: boolean;
   fibLevel: string | null;
   groupScore: number;
+  /** Ambos os pivôs do padrão têm marcação Girassol confirmada (sinal de reversão de alta confiança) */
+  bothPivotsMarked: boolean;
 }
 
 /** Resultado completo do sistema Girassol (3 grupos) */
@@ -127,6 +129,10 @@ export interface GirassolSystemResult {
   fibAlignedGroups: number;
   confluenceLabel: 'nenhuma' | 'fraca' | 'moderada' | 'forte' | 'crítica';
   description: string;
+  /** Grupos onde ambos os pivôs do padrão têm marcação Girassol dupla confirmada */
+  bothMarkedGroups: number;
+  /** Todos os 3 grupos têm dupla marcação Girassol — reversão de certeza máxima */
+  tripleBothMarked: boolean;
   /** Pivôs externos enviados diretamente pelo EA com o Girassol carregado */
   externalPivots?: ExternalGirassolPivot[];
 }
@@ -320,7 +326,7 @@ function analyzeGirassolGroup(
   candles: any[],
   groupNum: 1 | 2 | 3,
   params: { period: number; deviation: number; backstep: number },
-  spikeType: 'crash' | 'boom',
+  pivotType: 'high' | 'low',
   fibLevels: FibLevel[]
 ): GirassolGroupResult {
   const groupLabel = groupNum === 1 ? 'micro' : groupNum === 2 ? 'meso' : 'macro';
@@ -330,24 +336,19 @@ function analyzeGirassolGroup(
     period: params.period, deviation: params.deviation, backstep: params.backstep,
     pivotsFound: 0, doublePatternDetected: false, patternType: null,
     pivot1Price: 0, pivot2Price: 0, divergencePct: 0, candlesBetween: 0,
-    fibAlignment: false, fibLevel: null, groupScore: 0,
+    fibAlignment: false, fibLevel: null, groupScore: 0, bothPivotsMarked: false,
   };
 
-  // Para Crash: procurar duplo topo (dois topos → SELL spike)
-  // Para Boom:  procurar duplo fundo (dois fundos → BUY spike)
-  const pivotType = spikeType === 'crash' ? 'high' : 'low';
   const pivots = detectGirassolPivots(candles, params.period, params.deviation, params.backstep, pivotType);
 
   if (pivots.length < 2) return { ...empty, pivotsFound: pivots.length };
 
-  // Pegar os dois pivôs mais recentes
   const p1 = pivots[pivots.length - 2];
   const p2 = pivots[pivots.length - 1];
   const divergencePct = Math.abs(p1.price - p2.price) / p1.price * 100;
   const candlesBetween = p2.idx - p1.idx;
 
-  // Tolerância de preço aumenta com o período (grupos maiores = pivôs mais distantes)
-  const priceTolerance = 0.4 + params.period * 0.02; // ~0.5% micro, ~0.66% meso, ~1.08% macro
+  const priceTolerance = 0.4 + params.period * 0.02;
   const minCandlesBetween = params.backstep;
   const maxCandlesBetween = params.period * 5;
 
@@ -357,18 +358,25 @@ function analyzeGirassolGroup(
 
   if (!doubleDetected) return { ...empty, pivotsFound: pivots.length };
 
-  const patternType = spikeType === 'crash' ? 'double_top' : 'double_bottom';
+  const patternType: 'double_top' | 'double_bottom' = pivotType === 'high' ? 'double_top' : 'double_bottom';
   const avgPivotPrice = (p1.price + p2.price) / 2;
 
-  // Verificar alinhamento com Fibonacci
   const nearestFib = fibLevels.find(f => Math.abs(f.price - avgPivotPrice) / avgPivotPrice * 100 < 0.6);
   const fibAlignment = !!nearestFib;
 
-  // Score do grupo
+  // Dupla Marcação Girassol: ambos os pivôs são de alta qualidade
+  // — divergência muito estreita (< 30% da tolerância) e timing ideal (dentro de period*2)
+  const bothPivotsMarked =
+    divergencePct <= priceTolerance * 0.3 &&
+    candlesBetween >= params.backstep &&
+    candlesBetween <= params.period * 2;
+
   let groupScore = 60;
-  if (divergencePct <= priceTolerance * 0.4) groupScore += 15; // muito próximos
-  if (candlesBetween <= params.period)       groupScore += 10; // pivôs próximos no tempo
-  if (fibAlignment)                           groupScore += 20; // alinhado com Fibonacci
+  if (divergencePct <= priceTolerance * 0.4) groupScore += 15;
+  if (candlesBetween <= params.period)       groupScore += 10;
+  if (fibAlignment)                           groupScore += 20;
+  // Boost significativo quando ambos os pivôs têm marcação Girassol confirmada
+  if (bothPivotsMarked)                       groupScore += 25;
   groupScore = Math.min(100, groupScore);
 
   return {
@@ -384,6 +392,7 @@ function analyzeGirassolGroup(
     fibAlignment,
     fibLevel: nearestFib?.label || null,
     groupScore,
+    bothPivotsMarked,
   };
 }
 
@@ -391,44 +400,82 @@ function analyzeGirassolGroup(
 // MÓDULO 2: SISTEMA GIRASSOL COMPLETO (3 grupos cooperando)
 // ══════════════════════════════════════════════════════════════════════════════
 
-function runGirassolSystem(
+function scoreGirassolGroups(
   candles: any[],
-  spikeType: 'crash' | 'boom',
-  fibLevels: FibLevel[],
-  externalPivots: ExternalGirassolPivot[]
-): GirassolSystemResult {
-  const g1 = analyzeGirassolGroup(candles, 1, GIRASSOL_PARAMS.group1, spikeType, fibLevels);
-  const g2 = analyzeGirassolGroup(candles, 2, GIRASSOL_PARAMS.group2, spikeType, fibLevels);
-  const g3 = analyzeGirassolGroup(candles, 3, GIRASSOL_PARAMS.group3, spikeType, fibLevels);
-
+  pivotType: 'high' | 'low',
+  fibLevels: FibLevel[]
+): { groups: GirassolGroupResult[]; totalScore: number; bothMarkedCount: number } {
+  const g1 = analyzeGirassolGroup(candles, 1, GIRASSOL_PARAMS.group1, pivotType, fibLevels);
+  const g2 = analyzeGirassolGroup(candles, 2, GIRASSOL_PARAMS.group2, pivotType, fibLevels);
+  const g3 = analyzeGirassolGroup(candles, 3, GIRASSOL_PARAMS.group3, pivotType, fibLevels);
   const groups = [g1, g2, g3];
+  const weights = [0.25, 0.35, 0.40];
+  let totalScore = 0;
+  groups.forEach((g, idx) => {
+    if (g.doublePatternDetected) totalScore += g.groupScore * weights[idx];
+  });
   const activeGroups = groups.filter(g => g.doublePatternDetected).length;
   const fibAlignedGroups = groups.filter(g => g.fibAlignment).length;
+  const bothMarkedCount = groups.filter(g => g.bothPivotsMarked).length;
+
+  if (activeGroups === 3) totalScore *= 1.6;
+  else if (activeGroups === 2) totalScore *= 1.25;
+  if (fibAlignedGroups >= 2) totalScore *= 1.3;
+  else if (fibAlignedGroups === 1) totalScore *= 1.15;
+
+  // Boost de Dupla Marcação Girassol: quando ambos os pivôs têm marcadores confirmados
+  // é praticamente certeza de reversão — peso muito maior
+  if (bothMarkedCount === 3) totalScore *= 1.8;       // todos 3 grupos marcados — máxima certeza
+  else if (bothMarkedCount === 2) totalScore *= 1.45;  // 2 grupos marcados — alta certeza
+  else if (bothMarkedCount === 1) totalScore *= 1.2;   // 1 grupo marcado — certeza moderada
+
+  totalScore = Math.min(100, Math.round(totalScore));
+  return { groups, totalScore, bothMarkedCount };
+}
+
+function runGirassolSystem(
+  candles: any[],
+  defaultSpikeType: 'crash' | 'boom',
+  fibLevels: FibLevel[],
+  externalPivots: ExternalGirassolPivot[]
+): GirassolSystemResult & { detectedDirection: 'down' | 'up' } {
+  // Rodar análise para AMBOS os padrões (topo duplo e fundo duplo)
+  const topResult    = scoreGirassolGroups(candles, 'high', fibLevels);
+  const bottomResult = scoreGirassolGroups(candles, 'low',  fibLevels);
+
+  // Escolher o padrão com maior score; empate → default do ativo
+  let groups: GirassolGroupResult[];
+  let dominantPattern: 'double_top' | 'double_bottom' | null;
+  let detectedDirection: 'down' | 'up';
+  let bothMarkedGroups: number;
+
+  if (topResult.totalScore >= bottomResult.totalScore && topResult.totalScore > 0) {
+    groups = topResult.groups;
+    dominantPattern = 'double_top';
+    detectedDirection = 'down';
+    bothMarkedGroups = topResult.bothMarkedCount;
+  } else if (bottomResult.totalScore > 0) {
+    groups = bottomResult.groups;
+    dominantPattern = 'double_bottom';
+    detectedDirection = 'up';
+    bothMarkedGroups = bottomResult.bothMarkedCount;
+  } else {
+    groups = topResult.groups;
+    dominantPattern = null;
+    detectedDirection = defaultSpikeType === 'crash' ? 'down' : 'up';
+    bothMarkedGroups = 0;
+  }
+
+  const activeGroups = groups.filter(g => g.doublePatternDetected).length;
+  const fibAlignedGroups = groups.filter(g => g.fibAlignment).length;
+  const tripleBothMarked = bothMarkedGroups === 3;
 
   const triConfluence = activeGroups === 3;
   const dualConfluence = activeGroups === 2;
   const singleSignal = activeGroups === 1;
 
-  const dominantPattern = activeGroups > 0
-    ? (spikeType === 'crash' ? 'double_top' : 'double_bottom')
-    : null;
-
-  // Score total ponderado (grupos macro têm mais peso)
-  const weights = [0.25, 0.35, 0.40]; // micro=25%, meso=35%, macro=40%
-  let totalScore = 0;
-  groups.forEach((g, idx) => {
-    if (g.doublePatternDetected) totalScore += g.groupScore * weights[idx];
-  });
-
-  // Boost por confluência
-  if (triConfluence)  totalScore *= 1.6;
-  else if (dualConfluence) totalScore *= 1.25;
-
-  // Boost adicional por alinhamento Fibonacci
-  if (fibAlignedGroups >= 2) totalScore *= 1.3;
-  else if (fibAlignedGroups === 1) totalScore *= 1.15;
-
-  totalScore = Math.min(100, Math.round(totalScore));
+  // Score final (já calculado dentro de scoreGirassolGroups)
+  const totalScore = dominantPattern === 'double_top' ? topResult.totalScore : bottomResult.totalScore;
 
   // Boost por pivôs externos do EA (indicador real rodando no MT5)
   const externalBonus = externalPivots.length > 0 ? 10 : 0;
@@ -458,7 +505,10 @@ function runGirassolSystem(
     fibAlignedGroups,
     confluenceLabel,
     description,
+    bothMarkedGroups,
+    tripleBothMarked,
     externalPivots: externalPivots.length > 0 ? externalPivots : undefined,
+    detectedDirection,
   };
 }
 
@@ -539,7 +589,7 @@ function calcAutoFib(
 
 function runAIBrainAnalysis(
   candles: any[],
-  spikeType: 'crash' | 'boom',
+  detectedDirection: 'down' | 'up',
   imminencePercent: number,
   girassolScore: number
 ): AIBrainAnalysis {
@@ -557,8 +607,9 @@ function runAIBrainAnalysis(
   }
   const rs = losses === 0 ? 100 : gains / losses;
   const rsi = 100 - 100 / (1 + rs);
-  // Crash: RSI alto (>65) = tensão de queda; Boom: RSI baixo (<35) = tensão de subida
-  const impliedRsiScore = spikeType === 'crash'
+  // Queda esperada (SELL): RSI alto (>50) = tensão de queda
+  // Subida esperada (BUY): RSI baixo (<50) = tensão de alta
+  const impliedRsiScore = detectedDirection === 'down'
     ? Math.max(0, (rsi - 50) * 2)
     : Math.max(0, (50 - rsi) * 2);
 
@@ -567,8 +618,10 @@ function runAIBrainAnalysis(
   const momentumValue = recent6.length > 1
     ? (recent6[recent6.length - 1] - recent6[0]) / recent6[0] * 100
     : 0;
-  const momentumConfirms = (spikeType === 'crash' && momentumValue > 0.008) ||
-                           (spikeType === 'boom'  && momentumValue < -0.008);
+  // Pré-spike de queda: momentum positivo (subida antes da queda)
+  // Pré-spike de subida: momentum negativo (queda antes da recuperação)
+  const momentumConfirms = (detectedDirection === 'down' && momentumValue > 0.008) ||
+                           (detectedDirection === 'up'   && momentumValue < -0.008);
   const momentumScore = momentumConfirms ? Math.min(100, Math.abs(momentumValue) * 5000) : 0;
 
   // ── Compressão de volatilidade (Bollinger squeeze implícito) ──
@@ -598,11 +651,12 @@ function runAIBrainAnalysis(
   const atrNormalized = atr / currentPrice * 100;
 
   // ── Exaustão de tendência ──
-  // Sequência de candles todos na mesma direção = exaustão
+  // Pré-spike de queda: candles subindo consecutivamente = exaustão
+  // Pré-spike de subida: candles caindo consecutivamente = exaustão
   let consecutiveSameDir = 0;
   for (let i = closes.length - 1; i > closes.length - 8 && i > 0; i--) {
     const dir = closes[i] > closes[i - 1] ? 'up' : 'down';
-    const expected = spikeType === 'crash' ? 'up' : 'down';
+    const expected = detectedDirection === 'down' ? 'up' : 'down';
     if (dir === expected) consecutiveSameDir++;
     else break;
   }
@@ -622,8 +676,8 @@ function runAIBrainAnalysis(
   ));
 
   const signals: string[] = [];
-  if (impliedRsiScore > 40)         signals.push(`📊 RSI implícito: ${rsi.toFixed(1)} — pressão ${spikeType === 'crash' ? 'de queda' : 'de alta'}`);
-  if (momentumConfirms)             signals.push(`📈 Momentum ${spikeType === 'crash' ? '+' : '-'}${Math.abs(momentumValue).toFixed(3)}% — confirmando pré-spike`);
+  if (impliedRsiScore > 40)         signals.push(`📊 RSI implícito: ${rsi.toFixed(1)} — pressão ${detectedDirection === 'down' ? 'de queda' : 'de alta'}`);
+  if (momentumConfirms)             signals.push(`📈 Momentum ${detectedDirection === 'down' ? '+' : '-'}${Math.abs(momentumValue).toFixed(3)}% — confirmando pré-spike`);
   if (volatilityCompressed)         signals.push(`🗜️ Volatilidade comprimida ${bollingerSqueezeScore}% — tensão acumulada (Bollinger squeeze)`);
   if (trendExhaustionScore >= 30)   signals.push(`🔄 ${consecutiveSameDir} candles consecutivos na direção pré-spike — exaustão de tendência`);
   if (atrNormalized < 0.1)          signals.push(`📏 ATR mínimo (${atrNormalized.toFixed(3)}%) — mercado parado antes do spike`);
@@ -667,12 +721,13 @@ export function analyzeCrashBoomSpike(
   const isBoom  = sym.includes('BOOM');
   const isSpikeIndex = isCrash || isBoom;
   const spikeType = isCrash ? 'crash' : 'boom';
-  const spikeDirection = isCrash ? 'down' : 'up';
+  // spikeDirection será determinado pelo padrão detectado pelo Girassol (bidirecional)
 
   const emptyGirassol: GirassolSystemResult = {
     groupResults: [], activeGroups: 0, triConfluence: false, dualConfluence: false,
     singleSignal: false, dominantPattern: null, totalGirassolScore: 0,
     fibAlignedGroups: 0, confluenceLabel: 'nenhuma', description: 'Símbolo não é Crash/Boom.',
+    bothMarkedGroups: 0, tripleBothMarked: false,
   };
   const emptyAutoFib: AutoFibResult = {
     source: 'candle_range', swingHigh: 0, swingLow: 0, levels: [],
@@ -729,15 +784,18 @@ export function analyzeCrashBoomSpike(
     bestFibZone = { level: nearest.label, layer: nearest.layer, distancePct: nearest.distancePct, significance: nearest.significance, spikeMultiplier: multiplier };
   }
 
-  // ── MÓDULO 1: Sistema Girassol (3 grupos Fibonacci) ──
+  // ── MÓDULO 1: Sistema Girassol (3 grupos Fibonacci) — BIDIRECIONAL ──
   const externalPivots = getExternalGirassolPivots(sym);
   const girassolSystem = runGirassolSystem(candles, spikeType, allFibLevels, externalPivots);
+
+  // Direção final determinada pelo padrão detectado (bidirecional)
+  const spikeDirection: 'down' | 'up' = girassolSystem.detectedDirection;
 
   // ── MÓDULO 2: Auto Fibonacci a partir dos pivôs ──
   const autoFib = calcAutoFib(candles, girassolSystem, currentPrice);
 
   // ── MÓDULO 3: IA Cooperativa (cérebro operacional) ──
-  const aiBrain = runAIBrainAnalysis(candles, spikeType, imminencePercent, girassolSystem.totalGirassolScore);
+  const aiBrain = runAIBrainAnalysis(candles, spikeDirection, imminencePercent, girassolSystem.totalGirassolScore);
   const momentumConfirms = aiBrain.momentumScore > 20;
   const volatilityCompressed = aiBrain.volatilityScore > 30;
   const momentumValue = candles.slice(-6).length > 1
@@ -774,6 +832,12 @@ export function analyzeCrashBoomSpike(
   // Boost adicional se Girassol + AutoFib alinhados
   if (girassolSystem.fibAlignedGroups >= 2 && autoFib.nearestLevel) cooperativeScore *= 1.15;
 
+  // ── Boost de Dupla Marcação Girassol ──
+  // Quando ambos os pivôs têm marcadores Girassol confirmados, a reversão é de alta certeza
+  if (girassolSystem.tripleBothMarked)          cooperativeScore *= 1.5;  // 3/3 grupos com dupla marcação — certeza máxima
+  else if (girassolSystem.bothMarkedGroups >= 2) cooperativeScore *= 1.3;  // 2/3 grupos com dupla marcação — alta certeza
+  else if (girassolSystem.bothMarkedGroups === 1) cooperativeScore *= 1.15; // 1 grupo marcado — certeza moderada
+
   const overallConfidence = Math.min(98, Math.round(cooperativeScore));
 
   // Thresholds adaptativos (mais baixos quando Girassol detectou algo)
@@ -798,6 +862,15 @@ export function analyzeCrashBoomSpike(
 
   // ── Alertas ordenados por prioridade ──
   const alerts: string[] = [];
+
+  if (girassolSystem.tripleBothMarked) {
+    alerts.push(`🌟 DUPLA MARCAÇÃO GIRASSOL TRIPLA — 3/3 grupos com marcadores nos 2 pivôs — REVERSÃO QUASE CERTA`);
+  } else if (girassolSystem.bothMarkedGroups >= 2) {
+    alerts.push(`⭐ DUPLA MARCAÇÃO GIRASSOL — ${girassolSystem.bothMarkedGroups}/3 grupos com marcadores nos 2 pivôs — reversão de alta certeza`);
+  } else if (girassolSystem.bothMarkedGroups === 1) {
+    const markedGroup = girassolSystem.groupResults.find(g => g.bothPivotsMarked);
+    alerts.push(`🌻 Marcação dupla Girassol no grupo ${markedGroup?.groupLabel || ''} — reversão com suporte`);
+  }
 
   if (girassolSystem.triConfluence) {
     alerts.push(`🚨 GIRASSOL TRI-CONFLUÊNCIA — 3/3 grupos Fibonacci confirmam ${girassolSystem.dominantPattern === 'double_top' ? 'Duplo Topo' : 'Duplo Fundo'} — SINAL CRÍTICO`);
