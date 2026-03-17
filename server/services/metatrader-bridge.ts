@@ -239,6 +239,32 @@ export interface ConnectionDiagnostics {
   events: ConnectionEvent[];
 }
 
+/**
+ * Contexto completo de uma posição — persiste entre chamadas do monitor.
+ * Permite decisões baseadas em histórico, não apenas no snapshot atual.
+ */
+export interface PositionContext {
+  ticket: number;
+  symbol: string;
+  type: 'BUY' | 'SELL';
+  entryPrice: number;
+  entryTime: number;               // Timestamp da 1ª vez que o monitor viu esta posição
+  entryBalance: number;            // Saldo da conta no momento da entrada
+  lots: number;
+  maxAdverseExcursion: number;     // Pior perda em $ (MAE — mais negativo já visto)
+  maxFavorableExcursion: number;   // Melhor lucro em $ (MFE)
+  wasEverNegative: boolean;        // Ficou negativa em algum momento
+  wasEverPositive: boolean;        // Ficou positiva em algum momento
+  lowestProfit: number;            // Menor lucro registrado
+  highestProfit: number;           // Maior lucro registrado
+  lastProfit: number;              // Último lucro registrado
+  monitorCycles: number;           // Número de ciclos de monitoramento
+  lossAccelerationCycles: number;  // Ciclos consecutivos de piora
+  profitTrailing: number;          // Melhor lucro desde que entrou em território positivo
+  signalId: string;
+  closeReason?: string;            // Preenchido quando decidido fechar
+}
+
 export interface AIModelResult {
   model: string;
   prediction: 'up' | 'down' | 'neutral';
@@ -285,6 +311,14 @@ class MetaTraderBridge extends EventEmitter {
   private signalGenerationInterval: NodeJS.Timeout | null = null;
   private marketDataCache: Map<string, any[]> = new Map();
   private isGeneratingSignal = false;
+
+  // ── Memória de Contexto de Posições ──
+  // Persiste estado entre cada chamada do monitor — a IA "lembra" de tudo
+  private positionContexts: Map<number, PositionContext> = new Map();
+
+  // Saldo e equity em tempo real (atualizado a cada heartbeat do EA)
+  private currentBalance = 0;
+  private currentEquity = 0;
 
   // Log de análises em tempo real
   private analysisLog: AIAnalysisEntry[] = [];
@@ -443,10 +477,92 @@ class MetaTraderBridge extends EventEmitter {
     this.status.lastHeartbeat = Date.now();
     this.status.accountId = accountData.accountId;
     this.status.broker = accountData.broker;
+    // Salvar saldo em tempo real — usado pela memória de contexto de posições
+    if (accountData.balance > 0) this.currentBalance = accountData.balance;
+    if (accountData.equity > 0) this.currentEquity = accountData.equity;
     if (!this.config.enabled) {
       this.config.enabled = true;
       this.startSignalGeneration();
       console.log(`[MT5Bridge] ✅ Sistema auto-habilitado via heartbeat do EA (${accountData.broker})`);
+    }
+  }
+
+  /**
+   * Retorna o contexto completo de todas as posições monitoradas.
+   * Usado pela interface para exibir memória em tempo real.
+   */
+  getPositionContexts(): PositionContext[] {
+    return Array.from(this.positionContexts.values());
+  }
+
+  /**
+   * Atualiza ou cria o contexto de uma posição a cada ciclo do monitor.
+   * É aqui que a IA "aprende" o histórico de cada posição.
+   */
+  private updatePositionContext(position: MT5Position): PositionContext {
+    const ticket = position.ticket;
+    const profit = position.profit ?? 0;
+
+    const existing = this.positionContexts.get(ticket);
+    if (!existing) {
+      // Primeira vez que o monitor vê esta posição — registrar estado inicial
+      const ctx: PositionContext = {
+        ticket,
+        symbol: position.symbol,
+        type: position.type,
+        entryPrice: position.openPrice,
+        entryTime: Date.now(),
+        entryBalance: this.currentBalance || 9900,
+        lots: position.lots,
+        maxAdverseExcursion: Math.min(profit, 0),
+        maxFavorableExcursion: Math.max(profit, 0),
+        wasEverNegative: profit < 0,
+        wasEverPositive: profit > 0,
+        lowestProfit: profit,
+        highestProfit: profit,
+        lastProfit: profit,
+        monitorCycles: 1,
+        lossAccelerationCycles: 0,
+        profitTrailing: profit > 0 ? profit : 0,
+        signalId: position.signalId || `${position.type}_${ticket}`
+      };
+      this.positionContexts.set(ticket, ctx);
+      console.log(`[CONTEXT] 🆕 Posição #${ticket} (${position.type} ${position.symbol}) registrada na memória | Saldo: $${ctx.entryBalance.toFixed(2)}`);
+      return ctx;
+    }
+
+    // Atualizar contexto existente
+    const wasProfitWorse = profit < existing.lastProfit;
+    const lossAccelCycles = wasProfitWorse ? existing.lossAccelerationCycles + 1 : 0;
+    const wasNeg = existing.wasEverNegative || profit < 0;
+    const wasPos = existing.wasEverPositive || profit > 0;
+    const newTrailing = (profit > 0 && profit > existing.profitTrailing)
+      ? profit : existing.profitTrailing;
+
+    const updated: PositionContext = {
+      ...existing,
+      maxAdverseExcursion: Math.min(existing.maxAdverseExcursion, profit),
+      maxFavorableExcursion: Math.max(existing.maxFavorableExcursion, profit),
+      wasEverNegative: wasNeg,
+      wasEverPositive: wasPos,
+      lowestProfit: Math.min(existing.lowestProfit, profit),
+      highestProfit: Math.max(existing.highestProfit, profit),
+      lastProfit: profit,
+      monitorCycles: existing.monitorCycles + 1,
+      lossAccelerationCycles: lossAccelCycles,
+      profitTrailing: newTrailing,
+    };
+    this.positionContexts.set(ticket, updated);
+    return updated;
+  }
+
+  /** Remove o contexto de uma posição após ser fechada. */
+  private clearPositionContext(ticket: number): void {
+    const ctx = this.positionContexts.get(ticket);
+    if (ctx) {
+      const durationMin = ((Date.now() - ctx.entryTime) / 60000).toFixed(1);
+      console.log(`[CONTEXT] 🗑️ Contexto #${ticket} removido | Duração: ${durationMin}min | MAE: $${ctx.maxAdverseExcursion.toFixed(2)} | MFE: $${ctx.maxFavorableExcursion.toFixed(2)}`);
+      this.positionContexts.delete(ticket);
     }
   }
 
@@ -1314,6 +1430,7 @@ class MetaTraderBridge extends EventEmitter {
 
   confirmTradeClose(result: MT5TradeResult): void {
     this.openPositions.delete(result.ticket);
+    this.clearPositionContext(result.ticket); // Limpar memória desta posição
     this.recentTrades.unshift(result);
     if (this.recentTrades.length > 100) this.recentTrades.pop();
 
@@ -1806,13 +1923,25 @@ class MetaTraderBridge extends EventEmitter {
   }
 
   // ============================================================
-  // MONITOR DE OPERAÇÕES EM TEMPO REAL
+  // MONITOR DE OPERAÇÕES EM TEMPO REAL — COM MEMÓRIA DE CONTEXTO
   // ============================================================
 
   /**
-   * Called on every market data update while a position is open.
-   * Evaluates Fibonacci zone behavior and spike risk to decide:
-   * HOLD | CLOSE_PROFIT | CLOSE_LOSS_PREVENTION | CLOSE_SPIKE_EXIT
+   * Monitor central de posições abertas. Chamado pelo EA a cada 2s.
+   *
+   * Diferente da versão anterior (que só via o snapshot atual), este monitor
+   * acumula o histórico completo de cada posição em memória — MAE, MFE, se já
+   * foi negativa, se a perda está acelerando, tempo aberto — e toma decisões
+   * baseadas em TODA a vida da posição, não apenas no tick mais recente.
+   *
+   * Fluxo de decisão (em ordem de prioridade):
+   *  1. Hard stop baseado em saldo real (% da banca) ou limite fixo por lote
+   *  2. Aceleração de perda (stop antecipado antes do hard stop)
+   *  3. Captura de recuperação pós-spike (qualquer positivo após negativo)
+   *  4. Trailing stop de lucro (proteger ganhos acumulados)
+   *  5. Timeout de posição (posição velha sem resolução)
+   *  6. Detecção de spike iminente (Crash/Boom específico)
+   *  7. Análise de zonas de Fibonacci
    */
   monitorOpenPosition(position: MT5Position, marketData: any[], symbol: string): PositionMonitorResult {
     const base: PositionMonitorResult = {
@@ -1821,10 +1950,13 @@ class MetaTraderBridge extends EventEmitter {
     };
 
     if (!marketData || marketData.length < 5) {
-      base.reason = 'Dados insuficientes para monitoramento em tempo real.';
+      base.reason = 'Dados insuficientes para monitoramento.';
       base.narrative = base.reason;
       return base;
     }
+
+    // ── Atualizar memória de contexto desta posição ──
+    const ctx = this.updatePositionContext(position);
 
     const closes       = marketData.map(d => d.close);
     const currentPrice = closes[closes.length - 1];
@@ -1832,49 +1964,105 @@ class MetaTraderBridge extends EventEmitter {
                          * (position.type === 'BUY' ? 1 : -1);
     base.currentPnLPct = pnlPct;
 
-    // ══════════════════════════════════════════════════════════════════
-    // PROTEÇÃO PRIORITÁRIA — Estas regras rodam ANTES de qualquer outra
-    // análise e garantem que capital não seja destruído nem oportunidades
-    // de recuperação sejam desperdiçadas.
-    // ══════════════════════════════════════════════════════════════════
+    const profit         = position.profit ?? 0;
+    const ageMinutes     = (Date.now() - ctx.entryTime) / 60000;
+    const lots           = Math.max(position.lots || 1, 1);
 
-    const profitDollars = position.profit ?? 0;
+    // Hard stop: máximo entre $20/lote e 0.25% do saldo da conta
+    // (para bancas maiores, o limite escala com a banca)
+    const balanceBasedStop = ctx.entryBalance > 0 ? -(ctx.entryBalance * 0.0025) : -20;
+    const lotBasedStop     = -(20 * lots);
+    const hardStopDollars  = Math.max(balanceBasedStop, lotBasedStop); // usa o mais restritivo (menos negativo)
 
-    // ── REGRA 0a: Limite de perda máxima por posição ──
-    // Para Crash/Boom sem SL/TP, o monitor é a ÚNICA defesa.
-    // Sem esse limite, uma posição errada pode acumular perdas enormes
-    // enquanto o monitor fica em HOLD esperando um padrão que nunca vem.
-    // Padrão: -$20 por lote aberto. Criticamente urgente.
-    const hardStopDollars = -(20 * Math.max(position.lots || 1, 1));
-    if (profitDollars < hardStopDollars) {
-      console.log(`[MT5Bridge] 🛑 HARD STOP #${position.ticket}: $${profitDollars.toFixed(2)} < limite $${hardStopDollars.toFixed(2)}`);
+    // ══════════════════════════════════════════════════════════════════
+    // PRIORIDADE 1 — HARD STOP (perda máxima absoluta)
+    // Corte imediato. Não importa o que a análise diz.
+    // ══════════════════════════════════════════════════════════════════
+    if (profit < hardStopDollars) {
+      console.log(`[MONITOR] 🛑 HARD STOP #${position.ticket}: $${profit.toFixed(2)} | Limite: $${hardStopDollars.toFixed(2)} | MAE pior já foi: $${ctx.maxAdverseExcursion.toFixed(2)} | ${ageMinutes.toFixed(1)}min aberto`);
       return {
         ...base,
-        action:   'CLOSE_LOSS_PREVENTION',
-        urgency:  'critical',
-        reason:   `🛑 Limite de perda atingido: $${profitDollars.toFixed(2)} (limite: $${hardStopDollars.toFixed(2)})`,
-        narrative: `Posição ${position.type} #${position.ticket} em ${symbol} ultrapassou o limite de perda por lote. Fechando para proteger capital. Perda atual: $${profitDollars.toFixed(2)}`
+        action:    'CLOSE_LOSS_PREVENTION',
+        urgency:   'critical',
+        reason:    `🛑 HARD STOP: perda $${profit.toFixed(2)} ultrapassou limite $${hardStopDollars.toFixed(2)}`,
+        narrative: `Posição ${position.type} #${position.ticket} aberta há ${ageMinutes.toFixed(1)}min. Pior perda histórica: $${ctx.maxAdverseExcursion.toFixed(2)}. Perda atual $${profit.toFixed(2)} ultrapassou o limite configurado de $${hardStopDollars.toFixed(2)} (0.25% do saldo $${ctx.entryBalance.toFixed(2)}). Fechando para preservar capital.`
       };
     }
 
-    // ── REGRA 0b: Captura de recuperação pós-spike ──
-    // Se a posição está em lucro (seja qual for o valor), fechar IMEDIATAMENTE.
-    // Contexto: posições mal-entradas que ficaram profundamente negativas
-    // podem ser resgatadas por um spike que passa. Essa janela é de segundos.
-    // Não esperar por "mais lucro" — qualquer lucro positivo é um resgate.
-    // Isso é especialmente crítico em Crash/Boom onde o spike reverte rápido.
-    if (profitDollars > 0) {
-      console.log(`[MT5Bridge] 🎯 RECUPERAÇÃO #${position.ticket}: +$${profitDollars.toFixed(2)} — capturando janela de spike`);
+    // ══════════════════════════════════════════════════════════════════
+    // PRIORIDADE 2 — ACELERAÇÃO DE PERDA (stop antecipado)
+    // Se a perda piorou em 8+ ciclos consecutivos E já passou de 60% do
+    // hard stop, fechar antes de chegar no limite — não esperar o colapso.
+    // ══════════════════════════════════════════════════════════════════
+    const sixtyPctOfStop = hardStopDollars * 0.6;
+    if (ctx.lossAccelerationCycles >= 8 && profit < sixtyPctOfStop) {
+      console.log(`[MONITOR] ⚡ ACELERAÇÃO DE PERDA #${position.ticket}: ${ctx.lossAccelerationCycles} ciclos seguidos piorando | $${profit.toFixed(2)} | 60% do stop: $${sixtyPctOfStop.toFixed(2)}`);
       return {
         ...base,
-        action:   'CLOSE_PROFIT',
-        urgency:  'critical',
-        reason:   `🎯 Recuperação de lucro: +$${profitDollars.toFixed(2)} — janela de spike capturada`,
-        narrative: `Posição ${position.type} #${position.ticket} reverteu para positivo. Realizando lucro imediatamente — spikes são temporários e revertem em segundos.`
+        action:    'CLOSE_LOSS_PREVENTION',
+        urgency:   'critical',
+        reason:    `⚡ Aceleração de perda: ${ctx.lossAccelerationCycles} ciclos consecutivos piorando ($${profit.toFixed(2)})`,
+        narrative: `Posição ${position.type} #${position.ticket} piorou em ${ctx.lossAccelerationCycles} leituras seguidas sem reverter. Perda atual $${profit.toFixed(2)} atingiu 60% do limite de $${hardStopDollars.toFixed(2)}. Fechando preventivamente antes do hard stop.`
       };
     }
 
-    // ── 1. Crash / Boom spike check (prioritário) ──
+    // ══════════════════════════════════════════════════════════════════
+    // PRIORIDADE 3 — CAPTURA DE RECUPERAÇÃO PÓS-SPIKE
+    // Posição que esteve negativa e agora está positiva = spike resgatou.
+    // Essa janela dura segundos — fechar IMEDIATAMENTE antes de reverter.
+    // ══════════════════════════════════════════════════════════════════
+    if (profit > 0 && ctx.wasEverNegative) {
+      console.log(`[MONITOR] 🎯 RECUPERAÇÃO #${position.ticket}: +$${profit.toFixed(2)} após pior de $${ctx.maxAdverseExcursion.toFixed(2)} | ${ctx.monitorCycles} ciclos | ${ageMinutes.toFixed(1)}min`);
+      return {
+        ...base,
+        action:    'CLOSE_PROFIT',
+        urgency:   'critical',
+        reason:    `🎯 Recuperação pós-spike: +$${profit.toFixed(2)} (pior foi $${ctx.maxAdverseExcursion.toFixed(2)})`,
+        narrative: `Spike resgatou a posição ${position.type} #${position.ticket}. Estava em $${ctx.maxAdverseExcursion.toFixed(2)} de perda e reverteu para +$${profit.toFixed(2)} positivo após ${ageMinutes.toFixed(1)}min. Realizando lucro de recuperação antes do spike reverter.`
+      };
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // PRIORIDADE 4 — TRAILING STOP DE LUCRO
+    // Se o lucro já chegou a um pico e recuou mais de 40% desse pico,
+    // fechar para não devolver tudo. Ex: chegou a +$10, recuou para +$6.
+    // ══════════════════════════════════════════════════════════════════
+    if (ctx.profitTrailing > 2 && profit > 0) {
+      const retreatPct = (ctx.profitTrailing - profit) / ctx.profitTrailing;
+      if (retreatPct >= 0.40) {
+        console.log(`[MONITOR] 📉 TRAILING STOP #${position.ticket}: pico $${ctx.profitTrailing.toFixed(2)} → atual $${profit.toFixed(2)} (recuo ${(retreatPct*100).toFixed(0)}%)`);
+        return {
+          ...base,
+          action:    'CLOSE_PROFIT',
+          urgency:   'high',
+          reason:    `📉 Trailing stop: recuou ${(retreatPct*100).toFixed(0)}% do pico +$${ctx.profitTrailing.toFixed(2)}`,
+          narrative: `Posição #${position.ticket} atingiu pico de +$${ctx.profitTrailing.toFixed(2)} e recuou para +$${profit.toFixed(2)} (${(retreatPct*100).toFixed(0)}% de retração). Ativando trailing stop para preservar lucro antes de virar perda.`
+        };
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // PRIORIDADE 5 — TIMEOUT DE POSIÇÃO (posição velha, sem resolução)
+    // Posição com mais de 20min no negativo = padrão original falhou.
+    // Fechar quando der qualquer oportunidade positiva, ou forçar ao atingir
+    // 80% do hard stop (timeout é menos restritivo que o hard stop normal).
+    // ══════════════════════════════════════════════════════════════════
+    const isOldPosition = ageMinutes > 20;
+    const eightyPctStop = hardStopDollars * 0.8;
+    if (isOldPosition && profit < 0 && profit < eightyPctStop) {
+      console.log(`[MONITOR] ⏰ TIMEOUT #${position.ticket}: ${ageMinutes.toFixed(1)}min aberto | $${profit.toFixed(2)} | 80% do stop: $${eightyPctStop.toFixed(2)}`);
+      return {
+        ...base,
+        action:    'CLOSE_LOSS_PREVENTION',
+        urgency:   'high',
+        reason:    `⏰ Timeout: posição ${ageMinutes.toFixed(0)}min no negativo ($${profit.toFixed(2)})`,
+        narrative: `Posição ${position.type} #${position.ticket} está aberta há ${ageMinutes.toFixed(1)}min sem resolver. Com $${profit.toFixed(2)} de perda e padrão provavelmente inválido. Fechando para liberar margem e evitar perda maior.`
+      };
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // PRIORIDADE 6 — SPIKE IMINENTE (Crash/Boom)
+    // ══════════════════════════════════════════════════════════════════
     if (this.isSpikeIndex(symbol)) {
       const spike = this.detectSpikePattern(marketData, symbol);
       base.spikeRisk = spike.confidence;
@@ -1885,28 +2073,28 @@ class MetaTraderBridge extends EventEmitter {
           ...base,
           action:   'CLOSE_SPIKE_EXIT',
           urgency:  isCritical ? 'critical' : 'high',
-          reason:   `⚡ SAÍDA EMERGENCIAL: spike ${spike.direction?.toUpperCase()} iminente (${spike.imminencePercent}% iminerência, ${spike.confidence}% confiança)`,
-          narrative: `Posição ${position.type} em ${symbol} DEVE SER FECHADA IMEDIATAMENTE. ` +
-            `${spike.candlesSinceLastSpike} candles desde o último spike (média: ${spike.avgCandleInterval}). ` +
-            (spike.momentumConfirms ? 'Momentum confirma o spike.' : 'Aguardando momentum de confirmação.') +
-            (spike.preEntryWindow ? ' Janela pré-spike ativa.' : '')
+          reason:   `⚡ Spike ${spike.direction?.toUpperCase()} iminente (${spike.imminencePercent}% iminência) — saída emergencial`,
+          narrative: `Posição ${position.type} #${position.ticket} em risco de spike adverso. ${spike.candlesSinceLastSpike} candles desde último spike (média: ${spike.avgCandleInterval}). ` +
+            (spike.momentumConfirms ? 'Momentum confirma.' : '') +
+            ` MAE desta posição: $${ctx.maxAdverseExcursion.toFixed(2)}.`
         };
       }
 
       if (spike.imminencePercent >= 60) {
-        base.narrative += `⚠️ Alerta spike ${spike.direction?.toUpperCase()} (${spike.imminencePercent}% de iminência). `;
+        base.narrative += `⚠️ Spike ${spike.direction?.toUpperCase()} ${spike.imminencePercent}% iminente. `;
         base.urgency = 'high';
       }
     }
 
-    // ── 2. Fibonacci zone analysis ──
+    // ══════════════════════════════════════════════════════════════════
+    // PRIORIDADE 7 — ANÁLISE DE FIBONACCI (saída por zona técnica)
+    // ══════════════════════════════════════════════════════════════════
     const fib = this.calcMultiLayerFibonacci(marketData, currentPrice);
 
-    // Check nested Fibonacci zones for precision exit points
     if (fib.nestedZones.length > 0) {
       const activeNested = fib.nestedZones.find(z => z.nearestNestedLevel && z.nearestNestedLevel.distancePct < 0.05);
       if (activeNested?.nearestNestedLevel) {
-        base.narrative += `📐 Nano-Fib: nível ${activeNested.nearestNestedLevel.level} dentro de [${activeNested.parentLevel1}–${activeNested.parentLevel2}] (${activeNested.parentLayer}) a ${(activeNested.nearestNestedLevel.distancePct * 10).toFixed(1)}‰. `;
+        base.narrative += `📐 Nano-Fib: ${activeNested.nearestNestedLevel.level} em [${activeNested.parentLevel1}–${activeNested.parentLevel2}]. `;
       }
     }
 
@@ -1923,33 +2111,34 @@ class MetaTraderBridge extends EventEmitter {
         (position.type === 'BUY'  && currentPrice > position.openPrice) ||
         (position.type === 'SELL' && currentPrice < position.openPrice)
       );
-      const highConfluence = fib.confluenceScore >= 50;
 
-      if (isAdverse && highConfluence) {
+      if (isAdverse && fib.confluenceScore >= 50) {
         return {
           ...base,
-          action:  'CLOSE_PROFIT',
-          urgency: fib.confluenceScore >= 70 ? 'high' : 'normal',
-          reason:  `Zona Fib ${zone.level} (${zone.layer}) com ${zone.type === 'resistance' ? 'RESISTÊNCIA' : 'SUPORTE'} confirmado contra a posição`,
-          narrative: `${behavior.narrative} Confluência multi-camada: ${fib.confluenceScore}. ${fib.confluenceNarrative}`
+          action:    'CLOSE_PROFIT',
+          urgency:   fib.confluenceScore >= 70 ? 'high' : 'normal',
+          reason:    `Fib ${zone.level} (${zone.layer}) confirmado contra posição | Confluência ${fib.confluenceScore}`,
+          narrative: `${behavior.narrative} MAE: $${ctx.maxAdverseExcursion.toFixed(2)} | MFE: $${ctx.maxFavorableExcursion.toFixed(2)} | ${fib.confluenceNarrative}`
         };
       }
 
-      if (isProfitTarget && behavior.confirmation === 'reversal' && pnlPct > 0.05) {
+      if (isProfitTarget && behavior.confirmation === 'reversal' && profit > 0.01) {
         return {
           ...base,
-          action:  'CLOSE_PROFIT',
-          urgency: 'normal',
-          reason:  `Alvo de lucro Fibonacci ${zone.level} atingido com sinal de reversão`,
-          narrative: `${behavior.narrative}`
+          action:    'CLOSE_PROFIT',
+          urgency:   'normal',
+          reason:    `Alvo Fib ${zone.level} atingido com reversão confirmada`,
+          narrative: `${behavior.narrative} Lucro atual: +$${profit.toFixed(2)} (pico foi +$${ctx.maxFavorableExcursion.toFixed(2)}).`
         };
       }
 
-      base.narrative += `Zona Fib mais próxima: ${zone.level} (${zone.layer}). ${behavior.narrative} `;
-      base.narrative += `P&L: ${pnlPct > 0 ? '+' : ''}${pnlPct.toFixed(3)}%.`;
-    } else {
-      base.narrative += `P&L: ${pnlPct > 0 ? '+' : ''}${pnlPct.toFixed(3)}%. ${fib.confluenceNarrative}`;
+      base.narrative += `Fib ${zone.level} (${zone.layer}). ${behavior.narrative} `;
     }
+
+    // Narrativa de contexto completo para o HOLD
+    base.narrative += `P&L: ${profit >= 0 ? '+' : ''}$${profit.toFixed(2)} | ` +
+      `MAE: $${ctx.maxAdverseExcursion.toFixed(2)} | MFE: +$${ctx.maxFavorableExcursion.toFixed(2)} | ` +
+      `${ageMinutes.toFixed(1)}min aberto | Ciclos: ${ctx.monitorCycles}`;
 
     return base;
   }
