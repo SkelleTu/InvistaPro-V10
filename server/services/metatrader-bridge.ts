@@ -644,14 +644,6 @@ class MetaTraderBridge extends EventEmitter {
 
     const entryId = `analysis_${Date.now()}_${symbol}`;
 
-    // Verificação de horário de mercado B3 (WIN/WDO)
-    if (this.isB3Future(symbol) && !this.isB3MarketOpen()) {
-      const brtHour = (new Date().getUTCHours() - 3 + 24) % 24;
-      const brtMin  = new Date().getUTCMinutes();
-      console.log(`[MT5Bridge] 🕐 ${symbol} fora do horário B3 — ${brtHour.toString().padStart(2,'0')}:${brtMin.toString().padStart(2,'0')} BRT (mercado: 09:00–18:00 dias úteis)`);
-      return null;
-    }
-
     // Circuit breaker
     if (Date.now() < this.circuitBreakerUntil) {
       const remaining = Math.ceil((this.circuitBreakerUntil - Date.now()) / 60000);
