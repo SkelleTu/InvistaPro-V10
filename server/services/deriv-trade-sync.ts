@@ -5,7 +5,7 @@
  */
 
 import { dualStorage as storage } from '../storage-dual';
-import { derivAPI } from './deriv-api';
+import { DerivAPIService } from './deriv-api';
 import { errorTracker } from './error-tracker';
 import { realStatsTracker } from './real-stats-tracker';
 
@@ -27,6 +27,7 @@ export class DerivTradeSync {
   private syncInProgress: Set<string> = new Set(); // userId
   private readonly SYNC_INTERVAL_MS = 15000; // 🔄 ACELERADO: Sincroniza a cada 15 segundos
   private readonly CACHE_DURATION_MS = 10000; // Cache reduzido para 10 segundos (mais real-time)
+  private syncApi: DerivAPIService = new DerivAPIService(); // Instância própria para não interferir com o scheduler
 
   constructor() {
     console.log('🔄 [DERIV SYNC] Sistema de sincronização de trades inicializado');
@@ -141,10 +142,10 @@ export class DerivTradeSync {
 
       // Conectar à Deriv para sincronização se não estiver conectado
       let connectedForSync = false;
-      if (!derivAPI.isApiConnected()) {
+      if (!this.syncApi.isApiConnected()) {
         try {
           const accountType = derivToken.accountType === 'real' ? 'real' : 'demo';
-          const connected = await derivAPI.connect(derivToken.token, accountType, `SYNC_${userId}_${Date.now()}`);
+          const connected = await this.syncApi.connect(derivToken.token, accountType, `SYNC_${userId}_${Date.now()}`);
           if (connected) {
             connectedForSync = true;
             // Aguardar estabilização da conexão
@@ -164,7 +165,7 @@ export class DerivTradeSync {
       // Buscar tabela de lucro (contratos fechados) em lote - muito mais eficiente
       let profitTableMap: Map<string, any> = new Map();
       try {
-        const profitTableEntries = await derivAPI.getProfitTable(200);
+        const profitTableEntries = await this.syncApi.getProfitTable(200);
         if (profitTableEntries.length > 0) {
           for (const entry of profitTableEntries) {
             if (entry.contract_id) {
@@ -231,7 +232,7 @@ export class DerivTradeSync {
             continue;
           }
 
-          const contractInfo = await derivAPI.getContractInfo(Number(operation.derivContractId));
+          const contractInfo = await this.syncApi.getContractInfo(Number(operation.derivContractId));
           if (!contractInfo) {
             // Contrato não encontrado em nenhum lugar - pode ter expirado antes de ser registrado
             // Marcar como expirado após 30 tentativas de sync (>7.5 min)
@@ -330,8 +331,8 @@ export class DerivTradeSync {
       console.log(`✅ [DERIV SYNC] Sincronização concluída para ${userId}: ${result.synced} verificados, ${result.updated} atualizados`);
       } finally {
         // Desconectar se conectamos especificamente para sync
-        if (connectedForSync && derivAPI.isApiConnected()) {
-          await derivAPI.disconnect();
+        if (connectedForSync && this.syncApi.isApiConnected()) {
+          await this.syncApi.disconnect();
           console.log(`🔌 [DERIV SYNC] Conexão de sync encerrada`);
         }
       }
