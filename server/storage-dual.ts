@@ -292,9 +292,9 @@ export class DualStorage implements IStorage {
   async updateTradeOperation(id: string, updates: Partial<TradeOperation>) { return this.primaryWrite(() => this.postgres!.updateTradeOperation(id, updates), () => this.sqlite.updateTradeOperation(id, updates), 'updateTradeOperation'); }
   async getActiveTradeOperations(userId: string) { return this.primaryRead(() => this.postgres!.getActiveTradeOperations(userId), () => this.sqlite.getActiveTradeOperations(userId), 'getActiveTradeOperations'); }
 
-  async createAiLog(log: InsertAiLog) { return this.primaryWrite(() => this.postgres!.createAiLog(log), () => this.sqlite.createAiLog(log), 'createAiLog'); }
-  async getUserAiLogs(userId: string, limit?: number) { return this.primaryRead(() => this.postgres!.getUserAiLogs(userId, limit), () => this.sqlite.getUserAiLogs(userId, limit), 'getUserAiLogs'); }
-  async getLatestAiAnalysis(userId: string) { return this.primaryRead(() => this.postgres!.getLatestAiAnalysis(userId), () => this.sqlite.getLatestAiAnalysis(userId), 'getLatestAiAnalysis'); }
+  async createAiLog(log: InsertAiLog) { return this.sqlite.createAiLog(log); }
+  async getUserAiLogs(userId: string, limit?: number) { return this.sqlite.getUserAiLogs(userId, limit); }
+  async getLatestAiAnalysis(userId: string) { return this.sqlite.getLatestAiAnalysis(userId); }
 
   async upsertMarketData(data: InsertMarketData) { return this.sqlite.upsertMarketData(data); }
   async getMarketData(symbol: string) { return this.sqlite.getMarketData(symbol); }
