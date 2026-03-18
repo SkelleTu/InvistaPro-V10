@@ -214,11 +214,11 @@ export class DerivTradeSync {
             if (operation.status !== 'won' && operation.status !== 'lost') {
               result.updated++;
               console.log(`✅ [DERIV SYNC] [profit_table] ${operation.symbol} ${updates.status}: Profit=$${profit.toFixed(2)} | Buy=$${ptEntry.buy_price} | Sell=$${ptEntry.sell_price || 0}`);
-              // Registrar resultado REAL nas estatísticas
+              // Registrar resultado REAL nas estatísticas (contractId previne duplo registro)
               if (updates.status === 'won') {
-                realStatsTracker.recordWin(profit);
+                realStatsTracker.recordWin(profit, contractIdStr);
               } else if (updates.status === 'lost') {
-                realStatsTracker.recordLoss(profit, operation.symbol);
+                realStatsTracker.recordLoss(profit, operation.symbol, contractIdStr);
               }
             }
 
@@ -286,11 +286,11 @@ export class DerivTradeSync {
 
               console.log(`✅ [DERIV SYNC] ${operation.symbol} ${updates.status}: Profit=$${profit.toFixed(2)} | Buy=$${contractInfo.buy_price} | Sell=$${contractInfo.sell_price || 0} | Payout=$${contractInfo.payout || 0}`);
 
-              // Registrar resultado REAL nas estatísticas
+              // Registrar resultado REAL nas estatísticas (contractId previne duplo registro)
               if (updates.status === 'won') {
-                realStatsTracker.recordWin(profit);
+                realStatsTracker.recordWin(profit, contractIdStr);
               } else if (updates.status === 'lost') {
-                realStatsTracker.recordLoss(profit, operation.symbol);
+                realStatsTracker.recordLoss(profit, operation.symbol, contractIdStr);
               }
             }
           } else if (contractInfo.status === 'open') {

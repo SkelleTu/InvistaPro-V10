@@ -256,12 +256,13 @@ export class AutoTradingScheduler {
       try {
         const finalProfit = data.finalProfit ?? 0;
         const symbol = data.symbol || '';
+        const contractIdStr = data.contractId ? String(data.contractId) : undefined;
         if (finalProfit > 0) {
-          realStatsTracker.recordWin(finalProfit);
+          realStatsTracker.recordWin(finalProfit, contractIdStr);
           console.log(`🏆 [CONTRACT CLOSED] WIN registrado imediatamente: +$${finalProfit.toFixed(4)} | ${symbol}`);
         } else if (finalProfit < 0 || data.status === 'lost') {
           const lossAmount = finalProfit < 0 ? finalProfit : -1;
-          realStatsTracker.recordLoss(lossAmount, symbol);
+          realStatsTracker.recordLoss(lossAmount, symbol, contractIdStr);
           console.log(`❌ [CONTRACT CLOSED] LOSS registrado imediatamente: $${lossAmount.toFixed(4)} | ${symbol} | Recovery Mode: ATIVADO`);
         }
       } catch (statsErr) {

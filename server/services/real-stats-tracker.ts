@@ -74,6 +74,10 @@ class RealStatsTracker {
   // 🔄 Callback de persistência — chamado após cada win/loss para salvar estado no BD
   private persistCallback?: (state: PersistedRecoveryState) => void;
 
+  // 🚫 Anti-duplo-registro: controla contratos já processados nas estatísticas
+  private processedContracts: Map<string, number> = new Map(); // contractId → timestamp
+  private readonly PROCESSED_CONTRACT_TTL_MS = 10 * 60 * 1000; // 10 minutos
+
   get winRate(): number {
     const total = this.wonTrades + this.lostTrades;
     return total > 0 ? (this.wonTrades / total) * 100 : 0;
@@ -283,7 +287,29 @@ class RealStatsTracker {
     return Date.now() < this.assetBlockedUntil;
   }
 
-  recordWin(profit: number): void {
+  private isContractAlreadyProcessed(contractId?: string): boolean {
+    if (!contractId) return false;
+    const now = Date.now();
+    // Limpar entradas antigas do mapa
+    for (const [id, ts] of this.processedContracts) {
+      if (now - ts > this.PROCESSED_CONTRACT_TTL_MS) {
+        this.processedContracts.delete(id);
+      }
+    }
+    return this.processedContracts.has(contractId);
+  }
+
+  private markContractProcessed(contractId?: string): void {
+    if (!contractId) return;
+    this.processedContracts.set(contractId, Date.now());
+  }
+
+  recordWin(profit: number, contractId?: string): void {
+    if (contractId && this.isContractAlreadyProcessed(contractId)) {
+      console.log(`⚠️ [REAL STATS] Contrato ${contractId} já registrado — ignorando win duplicado`);
+      return;
+    }
+    this.markContractProcessed(contractId);
     this.wonTrades++;
     this.totalProfit += profit;
     this.lastKnownBalance += Math.abs(profit);
@@ -313,7 +339,12 @@ class RealStatsTracker {
     }
   }
 
-  recordLoss(loss: number, symbol: string = ''): void {
+  recordLoss(loss: number, symbol: string = '', contractId?: string): void {
+    if (contractId && this.isContractAlreadyProcessed(contractId)) {
+      console.log(`⚠️ [REAL STATS] Contrato ${contractId} já registrado — ignorando loss duplicado`);
+      return;
+    }
+    this.markContractProcessed(contractId);
     this.lostTrades++;
     this.totalProfit += loss; // loss é negativo
 
