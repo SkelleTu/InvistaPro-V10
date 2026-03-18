@@ -182,7 +182,65 @@ export class DualStorage implements IStorage {
   async deactivateTradeConfiguration(id: string) { return this.primaryWrite(() => this.postgres!.deactivateTradeConfiguration(id), () => this.sqlite.deactivateTradeConfiguration(id), 'deactivateTradeConfiguration'); }
 
   async createTradeOperation(op: InsertTradeOperation) { return this.primaryWrite(() => this.postgres!.createTradeOperation(op), () => this.sqlite.createTradeOperation(op), 'createTradeOperation'); }
-  async getUserTradeOperations(userId: string, limit?: number) { return this.primaryRead(() => this.postgres!.getUserTradeOperations(userId, limit), () => this.sqlite.getUserTradeOperations(userId, limit), 'getUserTradeOperations'); }
+
+  // 🔧 FIX: Merge inteligente Neon + SQLite.
+  // Neon tem status "pending" para operações cujos updates falharam.
+  // SQLite tem os resultados corretos (won/lost). O merge prefere SQLite
+  // quando Neon ainda mostra "pending"/"active" mas SQLite tem status terminal.
+  async getUserTradeOperations(userId: string, limit?: number) {
+    if (!this.isDualMode || !this.postgres) {
+      return await this.sqlite.getUserTradeOperations(userId, limit);
+    }
+    try {
+      const [neonOps, sqliteOps] = await Promise.all([
+        this.postgres.getUserTradeOperations(userId, limit).catch(() => [] as TradeOperation[]),
+        this.sqlite.getUserTradeOperations(userId, limit).catch(() => [] as TradeOperation[]),
+      ]);
+
+      // Indexar SQLite por ID para merge rápido
+      const sqliteById = new Map<string, TradeOperation>();
+      for (const op of sqliteOps) sqliteById.set(op.id, op);
+
+      const TERMINAL = new Set(['won', 'lost', 'sold', 'expired', 'closed']);
+
+      // Neon é a fonte principal (tem todos os registros via createTradeOperation).
+      // Para cada operação, se Neon está em status não-terminal mas SQLite tem
+      // um status terminal → usar profit/status/completedAt do SQLite.
+      const merged = neonOps.map(neonOp => {
+        const sqliteOp = sqliteById.get(neonOp.id);
+        if (!sqliteOp) return neonOp;
+
+        const neonTerminal = TERMINAL.has(neonOp.status || '');
+        const sqliteTerminal = TERMINAL.has(sqliteOp.status || '');
+
+        if (!neonTerminal && sqliteTerminal) {
+          // SQLite tem dado mais atualizado — mesclar campos de resultado
+          return {
+            ...neonOp,
+            status: sqliteOp.status,
+            profit: sqliteOp.profit ?? neonOp.profit,
+            completedAt: sqliteOp.completedAt ?? neonOp.completedAt,
+            exitPrice: sqliteOp.exitPrice ?? neonOp.exitPrice,
+          };
+        }
+        return neonOp;
+      });
+
+      // Adicionar operações que existem apenas no SQLite (ex: criadas durante falha do Neon)
+      const neonIds = new Set(neonOps.map(o => o.id));
+      for (const sqliteOp of sqliteOps) {
+        if (!neonIds.has(sqliteOp.id)) merged.push(sqliteOp);
+      }
+
+      // Ordenar por createdAt desc e aplicar limit
+      merged.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+      return limit ? merged.slice(0, limit) : merged;
+    } catch (err: any) {
+      console.warn('⚠️ [DUAL] Merge getUserTradeOperations falhou, fallback SQLite:', err.message);
+      return await this.sqlite.getUserTradeOperations(userId, limit);
+    }
+  }
+
   async updateTradeOperation(id: string, updates: Partial<TradeOperation>) { return this.primaryWrite(() => this.postgres!.updateTradeOperation(id, updates), () => this.sqlite.updateTradeOperation(id, updates), 'updateTradeOperation'); }
   async getActiveTradeOperations(userId: string) { return this.primaryRead(() => this.postgres!.getActiveTradeOperations(userId), () => this.sqlite.getActiveTradeOperations(userId), 'getActiveTradeOperations'); }
 
@@ -194,7 +252,9 @@ export class DualStorage implements IStorage {
   async getMarketData(symbol: string) { return this.sqlite.getMarketData(symbol); }
   async getAllMarketData() { return this.sqlite.getAllMarketData(); }
 
-  async getTradingStats(userId: string) { return this.primaryRead(() => this.postgres!.getTradingStats(userId), () => this.sqlite.getTradingStats(userId), 'getTradingStats'); }
+  // 🔧 FIX: Usar SQLite para stats — Neon tem todas as operações como "pending"
+  // (updates falhavam devido ao bug toISOString). SQLite tem os dados corretos.
+  async getTradingStats(userId: string) { return this.sqlite.getTradingStats(userId); }
   async getActiveTradesCount(userId: string) { return this.primaryRead(() => this.postgres!.getActiveTradesCount(userId), () => this.sqlite.getActiveTradesCount(userId), 'getActiveTradesCount'); }
   async getDailyLossCount(userId: string, date: string) { return this.primaryRead(() => this.postgres!.getDailyLossCount(userId, date), () => this.sqlite.getDailyLossCount(userId, date), 'getDailyLossCount'); }
   async saveActiveTradeForTracking(tradeData: any) { return this.primaryWrite(() => this.postgres!.saveActiveTradeForTracking(tradeData), () => this.sqlite.saveActiveTradeForTracking(tradeData), 'saveActiveTradeForTracking'); }

@@ -84,6 +84,9 @@ const DATE_FIELDS = new Set([
   'last_update', 'expires_at', 'updated_at', 'closed_at',
 ]);
 
+// 🔧 FIX: Postgres/Drizzle precisa de objetos Date — NÃO strings ISO.
+// A versão anterior convertia Date→string, fazendo o postgres-js driver falhar
+// com "value.toISOString is not a function" ao tentar serializar para timestamp.
 function serializeDateFields(data: any): any {
   if (!data) return data;
   const out: any = {};
@@ -91,9 +94,13 @@ function serializeDateFields(data: any): any {
     const val = data[key];
     if (DATE_FIELDS.has(key) && val !== null && val !== undefined) {
       if (val instanceof Date) {
-        out[key] = val.toISOString();
+        out[key] = val; // Date → Date (Drizzle PG sabe serializar)
+      } else if (typeof val === 'string' && val.length > 0) {
+        // ISO string → Date object para Drizzle PG timestamp
+        const parsed = new Date(val);
+        out[key] = isNaN(parsed.getTime()) ? val : parsed;
       } else if (typeof val === 'object' && typeof val.toISOString === 'function') {
-        out[key] = val.toISOString();
+        out[key] = val; // Date-like → manter como Date
       } else {
         out[key] = val;
       }
@@ -485,7 +492,27 @@ export class PostgresStorage implements IStorage {
   }
 
   async updateTradeOperation(id: string, updates: Partial<TradeOperation>): Promise<TradeOperation> {
-    const safeUpdates = serializeDateFields(convertSQLiteDataToPostgres(updates));
+    // 🔧 FIX: Whitelist apenas colunas que existem na tabela Neon.
+    // Sem o whitelist, campos extras (syncCount, lastSyncAt, derivStatus, etc.)
+    // causam erro no Drizzle pois não existem no schema Postgres.
+    const NEON_ALLOWED = new Set([
+      'status', 'profit', 'entryPrice', 'exitPrice', 'derivContractId',
+      'completedAt', 'isRecoveryMode', 'recoveryMultiplier', 'isConservativeForced',
+    ]);
+    const filtered: any = {};
+    for (const [key, val] of Object.entries(updates)) {
+      if (NEON_ALLOWED.has(key)) filtered[key] = val;
+    }
+    if (Object.keys(filtered).length === 0) {
+      // Nenhum campo relevante — retornar o registro atual sem update
+      const [current] = await db
+        .select()
+        .from(pgSchema.tradeOperations)
+        .where(eq(pgSchema.tradeOperations.id, id))
+        .limit(1);
+      return (current || { id }) as TradeOperation;
+    }
+    const safeUpdates = serializeDateFields(convertSQLiteDataToPostgres(filtered));
     const [operation] = await db
       .update(pgSchema.tradeOperations)
       .set(safeUpdates)
