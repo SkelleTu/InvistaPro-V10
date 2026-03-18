@@ -293,6 +293,7 @@ export const tradeOperations = sqliteTable("trade_operations", {
   isRecoveryMode: integer("isRecoveryMode", { mode: 'boolean' }).default(false), // Trade feito em modo recuperação
   recoveryMultiplier: real("recovery_multiplier").default(1.0), // Multiplicador aplicado
   isConservativeForced: integer("is_conservative_forced", { mode: 'boolean' }).default(false), // Operação conservadora forçada
+  operationMode: text("operation_mode").default('Operação Ordinária'), // Label do modo da operação (Martingale, Recuperação, etc.)
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
   completedAt: text("completed_at"),
 });

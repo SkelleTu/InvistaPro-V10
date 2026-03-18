@@ -593,6 +593,18 @@ function OperationCard({ operation, compact = false }: { operation: any; compact
           <span className="text-xs text-muted-foreground">·</span>
           <span className="text-xs text-muted-foreground">{info.sublabel}</span>
         </div>
+        <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+          {operation.operationMode && (
+            <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${
+              operation.operationMode.includes('Martingale') ? 'bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300' :
+              operation.operationMode.includes('Recuperação') ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300' :
+              operation.operationMode.includes('Segurança') ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300' :
+              'bg-muted text-muted-foreground'
+            }`} data-testid={`operation-mode-${operation.id}`}>
+              {operation.operationMode}
+            </span>
+          )}
+        </div>
         {!compact && (
           <div className="flex items-center gap-1.5 mt-0.5">
             <Clock className="h-2.5 w-2.5 text-muted-foreground" />

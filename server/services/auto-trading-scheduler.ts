@@ -1904,7 +1904,8 @@ export class AutoTradingScheduler {
           status: 'pending',
           aiConsensus: JSON.stringify(aiConsensus),
           isRecoveryMode,
-          recoveryMultiplier
+          recoveryMultiplier,
+          operationMode: this.getCurrentOperationLabel(config.userId, config.mode)
         });
 
         // 🎯 Incrementar contador PERSISTENTE de operações conservadoras (só para modos de produção)

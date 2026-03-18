@@ -497,7 +497,7 @@ export class PostgresStorage implements IStorage {
     // causam erro no Drizzle pois não existem no schema Postgres.
     const NEON_ALLOWED = new Set([
       'status', 'profit', 'entryPrice', 'exitPrice', 'derivContractId',
-      'completedAt', 'isRecoveryMode', 'recoveryMultiplier', 'isConservativeForced',
+      'completedAt', 'isRecoveryMode', 'recoveryMultiplier', 'isConservativeForced', 'operationMode',
     ]);
     const filtered: any = {};
     for (const [key, val] of Object.entries(updates)) {

@@ -340,6 +340,19 @@ export function initializeDatabase() {
       console.error('⚠️ Erro ao adicionar coluna is_conservative_forced:', error);
     }
 
+    // Adicionar coluna operation_mode na tabela trade_operations
+    try {
+      const checkOpsModeCols = sqlite.prepare("PRAGMA table_info(trade_operations)").all();
+      const hasOperationMode = checkOpsModeCols.some((col: any) => col.name === 'operation_mode');
+      if (!hasOperationMode) {
+        console.log('🆕 Adicionando coluna operation_mode na tabela trade_operations');
+        sqlite.exec(`ALTER TABLE trade_operations ADD COLUMN operation_mode TEXT DEFAULT 'Operação Ordinária'`);
+        console.log('✅ Coluna operation_mode adicionada com sucesso');
+      }
+    } catch (error) {
+      console.error('⚠️ Erro ao adicionar coluna operation_mode:', error);
+    }
+
     // SISTEMA DE RESILIÊNCIA E AUTO-RESTART
 
     sqlite.exec(`

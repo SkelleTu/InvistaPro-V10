@@ -170,6 +170,7 @@ export const tradeOperations = pgTable("trade_operations", {
   isRecoveryMode: boolean("isRecoveryMode").default(false),
   recoveryMultiplier: real("recovery_multiplier").default(1.0),
   isConservativeForced: boolean("is_conservative_forced").default(false),
+  operationMode: varchar("operation_mode", { length: 100 }).default('Operação Ordinária'),
   createdAt: timestamp("created_at").defaultNow(),
   completedAt: timestamp("completed_at"),
 });

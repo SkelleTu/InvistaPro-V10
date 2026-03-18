@@ -151,6 +151,17 @@ async function migratePostgres() {
         console.error('Aviso ao adicionar selected_modalities no PG:', e.message);
       }
     }
+
+    // Migração: adicionar coluna operation_mode se não existir (PostgreSQL)
+    try {
+      await pgDb.execute(sql`
+        ALTER TABLE trade_operations ADD COLUMN IF NOT EXISTS operation_mode VARCHAR(100) DEFAULT 'Operação Ordinária'
+      `);
+    } catch (e: any) {
+      if (!e.message?.includes('already exists')) {
+        console.error('Aviso ao adicionar operation_mode no PG:', e.message);
+      }
+    }
     
     await pgDb.execute(sql`
       CREATE TABLE IF NOT EXISTS ai_logs (
