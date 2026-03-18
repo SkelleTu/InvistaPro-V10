@@ -26,15 +26,28 @@ import type {
   SystemHealthHeartbeat, TradingControl,
 } from "@shared/schema";
 
+const QUOTA_ERRORS = ['exceeded the data transfer quota', 'data transfer quota', 'upgrade your plan', 'exceeded.*quota'];
+
+function isQuotaError(msg: string): boolean {
+  const lower = msg.toLowerCase();
+  return QUOTA_ERRORS.some(pattern => {
+    try { return new RegExp(pattern, 'i').test(lower); } catch { return lower.includes(pattern); }
+  });
+}
+
 export class DualStorage implements IStorage {
   private sqlite: DatabaseStorage;
   private postgres: PostgresStorage | null;
   private isDualMode: boolean;
+  private neonDisabled: boolean = false;
+  private consecutiveFailures: number = 0;
+  private readonly MAX_FAILURES = 3;
 
   constructor() {
     this.sqlite = new DatabaseStorage();
     this.postgres = isPostgresAvailable ? new PostgresStorage() : null;
     this.isDualMode = isPostgresAvailable;
+    this.neonDisabled = false;
 
     if (this.isDualMode) {
       console.log('🚀 [NEON] Sistema Dual Database ATIVO - Neon PostgreSQL (primário) + SQLite (fallback)');
@@ -45,59 +58,96 @@ export class DualStorage implements IStorage {
     }
   }
 
+  private disableNeon(reason: string): void {
+    if (!this.neonDisabled) {
+      this.neonDisabled = true;
+      this.isDualMode = false;
+      console.warn(`🔌 [NEON] Circuit breaker ATIVADO — Neon desabilitado para esta sessão.`);
+      console.warn(`   Motivo: ${reason}`);
+      console.warn(`   ✅ Sistema continuará operando normalmente via SQLite local.`);
+    }
+  }
+
+  private handleNeonError(err: any, op: string): void {
+    const msg = err?.message || String(err);
+    if (isQuotaError(msg)) {
+      this.disableNeon(`Cota de transferência de dados excedida (${op})`);
+      return;
+    }
+    this.consecutiveFailures++;
+    if (this.consecutiveFailures >= this.MAX_FAILURES) {
+      this.disableNeon(`${this.MAX_FAILURES} falhas consecutivas (última em ${op}: ${msg})`);
+    }
+  }
+
+  private resetFailures(): void {
+    this.consecutiveFailures = 0;
+  }
+
   private async primaryWrite<T>(pgOp: () => Promise<T>, sqliteOp: () => Promise<T>, op: string): Promise<T> {
-    if (!this.isDualMode || !this.postgres) return await sqliteOp();
+    if (this.neonDisabled || !this.isDualMode || !this.postgres) return await sqliteOp();
     try {
       const result = await pgOp();
+      this.resetFailures();
       sqliteOp().catch(err => console.warn(`⚠️ [DUAL] SQLite sync falhou em ${op}:`, err.message));
       return result;
     } catch (err: any) {
-      console.error(`❌ [NEON] Falha em ${op}:`, err.message, '- fallback SQLite');
+      this.handleNeonError(err, op);
       return await sqliteOp();
     }
   }
 
   private async primaryRead<T>(pgOp: () => Promise<T>, sqliteOp: () => Promise<T>, op: string): Promise<T> {
-    if (!this.isDualMode || !this.postgres) return await sqliteOp();
+    if (this.neonDisabled || !this.isDualMode || !this.postgres) return await sqliteOp();
     try {
-      return await pgOp();
+      const result = await pgOp();
+      this.resetFailures();
+      return result;
     } catch (err: any) {
-      console.warn(`⚠️ [NEON] Leitura falhou em ${op}, fallback SQLite:`, err.message);
+      this.handleNeonError(err, op);
       return await sqliteOp();
     }
   }
 
+  private get neonActive(): boolean {
+    return !this.neonDisabled && this.isDualMode && this.postgres !== null;
+  }
+
   async getUser(id: string) {
-    if (!this.isDualMode || !this.postgres) return await this.sqlite.getUser(id);
+    if (!this.neonActive) return await this.sqlite.getUser(id);
     try {
-      const r = await this.postgres.getUser(id);
+      const r = await this.postgres!.getUser(id);
+      this.resetFailures();
       if (r) return r;
       return await this.sqlite.getUser(id);
-    } catch { return await this.sqlite.getUser(id); }
+    } catch (err: any) { this.handleNeonError(err, 'getUser'); return await this.sqlite.getUser(id); }
   }
   async getUserByEmail(email: string) {
-    if (!this.isDualMode || !this.postgres) return await this.sqlite.getUserByEmail(email);
+    if (!this.neonActive) return await this.sqlite.getUserByEmail(email);
     try {
-      const r = await this.postgres.getUserByEmail(email);
+      const r = await this.postgres!.getUserByEmail(email);
+      this.resetFailures();
       if (r) return r;
       return await this.sqlite.getUserByEmail(email);
-    } catch { return await this.sqlite.getUserByEmail(email); }
+    } catch (err: any) { this.handleNeonError(err, 'getUserByEmail'); return await this.sqlite.getUserByEmail(email); }
   }
   async getUserByCpf(cpf: string) {
-    if (!this.isDualMode || !this.postgres) return await this.sqlite.getUserByCpf(cpf);
+    if (!this.neonActive) return await this.sqlite.getUserByCpf(cpf);
     try {
-      const r = await this.postgres.getUserByCpf(cpf);
+      const r = await this.postgres!.getUserByCpf(cpf);
+      this.resetFailures();
       if (r) return r;
       return await this.sqlite.getUserByCpf(cpf);
-    } catch { return await this.sqlite.getUserByCpf(cpf); }
+    } catch (err: any) { this.handleNeonError(err, 'getUserByCpf'); return await this.sqlite.getUserByCpf(cpf); }
   }
   async getAllUsers() {
-    if (!this.isDualMode || !this.postgres) return await this.sqlite.getAllUsers();
+    if (!this.neonActive) return await this.sqlite.getAllUsers();
     try {
-      const pgUsers = await this.postgres.getAllUsers();
+      const pgUsers = await this.postgres!.getAllUsers();
+      this.resetFailures();
       if (pgUsers.length > 0) return pgUsers;
       return await this.sqlite.getAllUsers();
-    } catch { return await this.sqlite.getAllUsers(); }
+    } catch (err: any) { this.handleNeonError(err, 'getAllUsers'); return await this.sqlite.getAllUsers(); }
   }
   async createUser(user: InsertUser) { return this.primaryWrite(() => this.postgres!.createUser(user), () => this.sqlite.createUser(user), 'createUser'); }
   async updateUser(id: string, data: UpdateUser) { return this.primaryWrite(() => this.postgres!.updateUser(id, data), () => this.sqlite.updateUser(id, data), 'updateUser'); }
@@ -116,14 +166,14 @@ export class DualStorage implements IStorage {
   async createDerivToken(t: InsertDerivToken) { return this.primaryWrite(() => this.postgres!.createDerivToken(t), () => this.sqlite.createDerivToken(t), 'createDerivToken'); }
 
   async getUserDerivToken(userId: string): Promise<DerivToken | undefined> {
-    if (!this.isDualMode || !this.postgres) return await this.sqlite.getUserDerivToken(userId);
+    if (!this.neonActive) return await this.sqlite.getUserDerivToken(userId);
     try {
-      const pgResult = await this.postgres.getUserDerivToken(userId);
+      const pgResult = await this.postgres!.getUserDerivToken(userId);
+      this.resetFailures();
       if (pgResult) return pgResult;
-      const sqliteResult = await this.sqlite.getUserDerivToken(userId);
-      return sqliteResult;
+      return await this.sqlite.getUserDerivToken(userId);
     } catch (err: any) {
-      console.warn(`⚠️ [NEON] getUserDerivToken falhou, fallback SQLite:`, err.message);
+      this.handleNeonError(err, 'getUserDerivToken');
       return await this.sqlite.getUserDerivToken(userId);
     }
   }
@@ -141,37 +191,40 @@ export class DualStorage implements IStorage {
   async createTradeConfig(c: InsertTradeConfiguration) { return this.primaryWrite(() => this.postgres!.createTradeConfig(c), () => this.sqlite.createTradeConfig(c), 'createTradeConfig'); }
 
   async getUserTradeConfig(userId: string): Promise<TradeConfiguration | undefined> {
-    if (!this.isDualMode || !this.postgres) return await this.sqlite.getUserTradeConfig(userId);
+    if (!this.neonActive) return await this.sqlite.getUserTradeConfig(userId);
     try {
-      const pgResult = await this.postgres.getUserTradeConfig(userId);
+      const pgResult = await this.postgres!.getUserTradeConfig(userId);
+      this.resetFailures();
       if (pgResult) return pgResult;
       return await this.sqlite.getUserTradeConfig(userId);
     } catch (err: any) {
-      console.warn(`⚠️ [NEON] getUserTradeConfig falhou, fallback SQLite:`, err.message);
+      this.handleNeonError(err, 'getUserTradeConfig');
       return await this.sqlite.getUserTradeConfig(userId);
     }
   }
 
   async getAllTradeConfigurations(): Promise<TradeConfiguration[]> {
-    if (!this.isDualMode || !this.postgres) return await this.sqlite.getAllTradeConfigurations();
+    if (!this.neonActive) return await this.sqlite.getAllTradeConfigurations();
     try {
-      const pgResult = await this.postgres.getAllTradeConfigurations();
+      const pgResult = await this.postgres!.getAllTradeConfigurations();
+      this.resetFailures();
       if (pgResult.length > 0) return pgResult;
       return await this.sqlite.getAllTradeConfigurations();
     } catch (err: any) {
-      console.warn(`⚠️ [NEON] getAllTradeConfigurations falhou, fallback SQLite:`, err.message);
+      this.handleNeonError(err, 'getAllTradeConfigurations');
       return await this.sqlite.getAllTradeConfigurations();
     }
   }
 
   async getActiveTradeConfigurations(): Promise<TradeConfiguration[]> {
-    if (!this.isDualMode || !this.postgres) return await this.sqlite.getActiveTradeConfigurations();
+    if (!this.neonActive) return await this.sqlite.getActiveTradeConfigurations();
     try {
-      const pgResult = await this.postgres.getActiveTradeConfigurations();
+      const pgResult = await this.postgres!.getActiveTradeConfigurations();
+      this.resetFailures();
       if (pgResult.length > 0) return pgResult;
       return await this.sqlite.getActiveTradeConfigurations();
     } catch (err: any) {
-      console.warn(`⚠️ [NEON] getActiveTradeConfigurations falhou, fallback SQLite:`, err.message);
+      this.handleNeonError(err, 'getActiveTradeConfigurations');
       return await this.sqlite.getActiveTradeConfigurations();
     }
   }
@@ -188,18 +241,19 @@ export class DualStorage implements IStorage {
   async createTradeOperation(op: InsertTradeOperation): Promise<TradeOperation> {
     const sharedId = randomBytes(16).toString('hex').toUpperCase();
     const opWithId = { ...op, id: sharedId } as any;
-    if (!this.isDualMode || !this.postgres) {
+    if (!this.neonActive) {
       return await this.sqlite.createTradeOperation(opWithId);
     }
     try {
-      const result = await this.postgres.createTradeOperation(opWithId);
+      const result = await this.postgres!.createTradeOperation(opWithId);
+      this.resetFailures();
       // SQLite em background com o MESMO ID
       this.sqlite.createTradeOperation(opWithId).catch((err: any) =>
         console.warn('⚠️ [DUAL] SQLite sync falhou em createTradeOperation:', err.message)
       );
       return result;
     } catch (err: any) {
-      console.error('❌ [NEON] Falha em createTradeOperation:', err.message, '- fallback SQLite');
+      this.handleNeonError(err, 'createTradeOperation');
       return await this.sqlite.createTradeOperation(opWithId);
     }
   }
@@ -210,14 +264,14 @@ export class DualStorage implements IStorage {
   // quando Neon ainda mostra "pending"/"active" mas SQLite tem status terminal.
   // Também usa derivContractId como fallback para operações criadas antes do fix de IDs.
   async getUserTradeOperations(userId: string, limit?: number) {
-    if (!this.isDualMode || !this.postgres) {
+    if (!this.neonActive) {
       return await this.sqlite.getUserTradeOperations(userId, limit);
     }
     try {
       // Buscar mais registros do SQLite para garantir cobertura total no merge
       const fetchLimit = limit ? limit * 3 : 500;
       const [neonOps, sqliteOps] = await Promise.all([
-        this.postgres.getUserTradeOperations(userId, limit).catch(() => [] as TradeOperation[]),
+        this.postgres!.getUserTradeOperations(userId, limit).catch(() => [] as TradeOperation[]),
         this.sqlite.getUserTradeOperations(userId, fetchLimit).catch(() => [] as TradeOperation[]),
       ]);
 
@@ -284,7 +338,7 @@ export class DualStorage implements IStorage {
       merged.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
       return limit ? merged.slice(0, limit) : merged;
     } catch (err: any) {
-      console.warn('⚠️ [DUAL] Merge getUserTradeOperations falhou, fallback SQLite:', err.message);
+      this.handleNeonError(err, 'getUserTradeOperations');
       return await this.sqlite.getUserTradeOperations(userId, limit);
     }
   }
