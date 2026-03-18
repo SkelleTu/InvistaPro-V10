@@ -2742,13 +2742,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = req.user.id;
       const stats = await dbStorage.getTradingStats(userId);
       
+      // activeTrades = apenas pendentes/ativos (não contar expired)
+      const activeTrades = Math.max(0, stats.totalTrades - stats.wonTrades - stats.lostTrades - (stats.expiredTrades || 0));
       res.json({
         totalTrades: stats.totalTrades,
         wonTrades: stats.wonTrades,
         lostTrades: stats.lostTrades,
         totalProfit: stats.totalProfit,
         winRate: stats.winRate,
-        activeTrades: stats.totalTrades - stats.wonTrades - stats.lostTrades
+        activeTrades
       });
 
     } catch (error) {

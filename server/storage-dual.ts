@@ -5,6 +5,7 @@
  * SQLite local é fallback caso o PostgreSQL esteja indisponível.
  */
 
+import { randomBytes } from "crypto";
 import { DatabaseStorage } from "./storage";
 import { PostgresStorage } from "./storage-postgres";
 import { isPostgresAvailable } from "./db-postgres";
@@ -181,33 +182,66 @@ export class DualStorage implements IStorage {
   async reactivateTradeConfiguration(id: string) { return this.primaryWrite(() => this.postgres!.reactivateTradeConfiguration(id), () => this.sqlite.reactivateTradeConfiguration(id), 'reactivateTradeConfiguration'); }
   async deactivateTradeConfiguration(id: string) { return this.primaryWrite(() => this.postgres!.deactivateTradeConfiguration(id), () => this.sqlite.deactivateTradeConfiguration(id), 'deactivateTradeConfiguration'); }
 
-  async createTradeOperation(op: InsertTradeOperation) { return this.primaryWrite(() => this.postgres!.createTradeOperation(op), () => this.sqlite.createTradeOperation(op), 'createTradeOperation'); }
+  // 🔧 FIX CRÍTICO: Pré-gerar ID compartilhado entre Neon e SQLite.
+  // Antes, cada banco gerava seu próprio ID (Neon: lowercase uuid, SQLite: uppercase hex),
+  // impossibilitando o merge por ID → todas as ops ficavam como "pending" na UI.
+  async createTradeOperation(op: InsertTradeOperation): Promise<TradeOperation> {
+    const sharedId = randomBytes(16).toString('hex').toUpperCase();
+    const opWithId = { ...op, id: sharedId } as any;
+    if (!this.isDualMode || !this.postgres) {
+      return await this.sqlite.createTradeOperation(opWithId);
+    }
+    try {
+      const result = await this.postgres.createTradeOperation(opWithId);
+      // SQLite em background com o MESMO ID
+      this.sqlite.createTradeOperation(opWithId).catch((err: any) =>
+        console.warn('⚠️ [DUAL] SQLite sync falhou em createTradeOperation:', err.message)
+      );
+      return result;
+    } catch (err: any) {
+      console.error('❌ [NEON] Falha em createTradeOperation:', err.message, '- fallback SQLite');
+      return await this.sqlite.createTradeOperation(opWithId);
+    }
+  }
 
-  // 🔧 FIX: Merge inteligente Neon + SQLite.
-  // Neon tem status "pending" para operações cujos updates falharam.
+  // 🔧 FIX: Merge inteligente Neon + SQLite com correspondência por ID e derivContractId.
+  // Neon pode ter status "pending" para operações cujos updates falharam.
   // SQLite tem os resultados corretos (won/lost). O merge prefere SQLite
   // quando Neon ainda mostra "pending"/"active" mas SQLite tem status terminal.
+  // Também usa derivContractId como fallback para operações criadas antes do fix de IDs.
   async getUserTradeOperations(userId: string, limit?: number) {
     if (!this.isDualMode || !this.postgres) {
       return await this.sqlite.getUserTradeOperations(userId, limit);
     }
     try {
+      // Buscar mais registros do SQLite para garantir cobertura total no merge
+      const fetchLimit = limit ? limit * 3 : 500;
       const [neonOps, sqliteOps] = await Promise.all([
         this.postgres.getUserTradeOperations(userId, limit).catch(() => [] as TradeOperation[]),
-        this.sqlite.getUserTradeOperations(userId, limit).catch(() => [] as TradeOperation[]),
+        this.sqlite.getUserTradeOperations(userId, fetchLimit).catch(() => [] as TradeOperation[]),
       ]);
-
-      // Indexar SQLite por ID para merge rápido
-      const sqliteById = new Map<string, TradeOperation>();
-      for (const op of sqliteOps) sqliteById.set(op.id, op);
 
       const TERMINAL = new Set(['won', 'lost', 'sold', 'expired', 'closed']);
 
-      // Neon é a fonte principal (tem todos os registros via createTradeOperation).
-      // Para cada operação, se Neon está em status não-terminal mas SQLite tem
-      // um status terminal → usar profit/status/completedAt do SQLite.
+      // Indexar SQLite por ID e por derivContractId para merge duplo
+      const sqliteById = new Map<string, TradeOperation>();
+      const sqliteByContractId = new Map<string, TradeOperation>();
+      for (const op of sqliteOps) {
+        sqliteById.set(op.id, op);
+        // Normalizar ID para comparação case-insensitive (fix para IDs gerados antes do patch)
+        sqliteById.set(op.id.toLowerCase(), op);
+        if (op.derivContractId) sqliteByContractId.set(String(op.derivContractId), op);
+      }
+
+      // Neon é a fonte principal de lista. Para cada op do Neon,
+      // tentar encontrar correspondência no SQLite por ID (exato ou case-insensitive)
+      // ou por derivContractId (fallback para ops antigas com IDs diferentes).
       const merged = neonOps.map(neonOp => {
-        const sqliteOp = sqliteById.get(neonOp.id);
+        const sqliteOp =
+          sqliteById.get(neonOp.id) ||
+          sqliteById.get((neonOp.id || '').toLowerCase()) ||
+          (neonOp.derivContractId ? sqliteByContractId.get(String(neonOp.derivContractId)) : undefined);
+
         if (!sqliteOp) return neonOp;
 
         const neonTerminal = TERMINAL.has(neonOp.status || '');
@@ -226,10 +260,24 @@ export class DualStorage implements IStorage {
         return neonOp;
       });
 
-      // Adicionar operações que existem apenas no SQLite (ex: criadas durante falha do Neon)
-      const neonIds = new Set(neonOps.map(o => o.id));
+      // Rastrear derivContractIds já incluídos para evitar duplicatas
+      const includedContractIds = new Set<string>();
+      for (const op of merged) {
+        if (op.derivContractId) includedContractIds.add(String(op.derivContractId));
+      }
+
+      // Adicionar operações que existem APENAS no SQLite
+      // (criadas durante falha do Neon, ou com IDs diferentes que não bateram)
+      const neonIds = new Set(neonOps.map(o => o.id.toLowerCase()));
       for (const sqliteOp of sqliteOps) {
-        if (!neonIds.has(sqliteOp.id)) merged.push(sqliteOp);
+        const alreadyById = neonIds.has(sqliteOp.id.toLowerCase());
+        const alreadyByContract = sqliteOp.derivContractId
+          ? includedContractIds.has(String(sqliteOp.derivContractId))
+          : false;
+        if (!alreadyById && !alreadyByContract) {
+          merged.push(sqliteOp);
+          if (sqliteOp.derivContractId) includedContractIds.add(String(sqliteOp.derivContractId));
+        }
       }
 
       // Ordenar por createdAt desc e aplicar limit

@@ -193,6 +193,7 @@ export interface IStorage {
     totalTrades: number;
     wonTrades: number;
     lostTrades: number;
+    expiredTrades: number;
     totalProfit: number;
     winRate: number;
   }>;
@@ -839,6 +840,7 @@ export class DatabaseStorage implements IStorage {
     totalTrades: number;
     wonTrades: number;
     lostTrades: number;
+    expiredTrades: number;
     totalProfit: number;
     winRate: number;
   }> {
@@ -849,8 +851,11 @@ export class DatabaseStorage implements IStorage {
     
     const totalTrades = operations.length;
     
+    // Contar expiradas (sem resultado de lucro)
+    const expiredTrades = operations.filter(op => op.status === 'expired' || op.status === 'closed').length;
+    
     // Filter only completed trades (not pending and has profit value)
-    const completedTrades = operations.filter(op => op.status !== 'pending' && op.profit !== null && op.profit !== undefined);
+    const completedTrades = operations.filter(op => op.status !== 'pending' && op.status !== 'active' && op.profit !== null && op.profit !== undefined);
     
     // Count wins and losses based on PROFIT (not status)
     const wonTrades = completedTrades.filter(op => (op.profit || 0) > 0).length;
@@ -863,8 +868,9 @@ export class DatabaseStorage implements IStorage {
       totalTrades,
       wonTrades,
       lostTrades,
+      expiredTrades,
       totalProfit,
-      winRate: Math.round(winRate * 100) / 100, // Round to 2 decimal places
+      winRate: Math.round(winRate * 100) / 100,
     };
   }
 
