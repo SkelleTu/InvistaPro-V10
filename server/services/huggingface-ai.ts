@@ -1232,10 +1232,14 @@ COMPOSITE SIGNAL SCORE: ${overallSentiment > 0 ? '+' : ''}${overallSentiment}/6 
     // 🧠 SISTEMA COOPERATIVO AVANÇADO - Cross-Validation entre IAs
     const enhancedAnalyses = this.applyCrossValidation(analyses, isRecoveryMode);
     
-    // 🚀 SISTEMA DE APRENDIZADO AVANÇADO - Usa símbolo explícito para evitar contaminação cruzada
-    // CRÍTICO: NÃO usar analyses[0].marketData[0].symbol — pode ser de outro símbolo em análise paralela
-    const symbol = explicitSymbol || enhancedAnalyses[0]?.marketData?.[0]?.symbol || 'UNKNOWN';
-    const currentMarketState = this.extractMarketState(enhancedAnalyses);
+    // 🔧 FIX CRÍTICO: Sempre usar explicitSymbol — nunca derivar o símbolo do marketData
+    // analyses[0].marketData pode pertencer a outro símbolo em análise paralela (race condition)
+    const symbol = explicitSymbol || 'UNKNOWN';
+    if (!explicitSymbol) {
+      console.warn(`⚠️ [SYMBOL FIX] generateConsensus chamado sem explicitSymbol — símbolo pode estar errado!`);
+    }
+    // 🔧 FIX: Passar símbolo correto para extractMarketState em vez de usar analyses[0]
+    const currentMarketState = this.extractMarketStateForSymbol(enhancedAnalyses, symbol);
     const modelPerformances = this.calculateModelPerformances(enhancedAnalyses);
     
     // Otimizar pesos usando o sistema de aprendizado avançado
@@ -2233,6 +2237,45 @@ Os modelos identificaram padrões convergentes nos dados de mercado que indicam 
   /**
    * Extrai estado atual do mercado a partir das análises
    */
+  // 🔧 FIX: Versão com símbolo explícito para evitar contaminação cruzada em análises paralelas
+  private extractMarketStateForSymbol(analyses: MarketAnalysis[], explicitSymbol: string): MarketState {
+    // Tentar encontrar análise cujo marketData pertence ao símbolo correto
+    const matchingAnalysis = analyses.find(a =>
+      a.marketData && a.marketData.length > 0 && a.marketData[0]?.symbol === explicitSymbol
+    ) || analyses[0]; // fallback para primeira análise
+
+    if (!matchingAnalysis || !matchingAnalysis.marketData || matchingAnalysis.marketData.length === 0) {
+      return {
+        symbol: explicitSymbol,
+        price: 0,
+        volatility: 0,
+        momentum: 0,
+        marketRegime: 'ranging',
+        timeContext: Date.now()
+      };
+    }
+
+    const latestTick = matchingAnalysis.marketData[matchingAnalysis.marketData.length - 1];
+    const prices = matchingAnalysis.marketData.map((t: any) => t.quote);
+    const volatility = this.calculateVolatility(prices);
+    const momentum = prices.length >= 2 ?
+      ((prices[prices.length - 1] - prices[prices.length - 2]) / prices[prices.length - 2]) * 100 : 0;
+    let marketRegime: 'trending' | 'ranging' | 'volatile' | 'calm';
+    if (volatility > 0.01) marketRegime = 'volatile';
+    else if (Math.abs(momentum) > 0.5) marketRegime = 'trending';
+    else if (volatility < 0.001) marketRegime = 'calm';
+    else marketRegime = 'ranging';
+
+    return {
+      symbol: explicitSymbol, // sempre usar o símbolo explícito, não latestTick.symbol
+      price: latestTick.quote,
+      volatility,
+      momentum,
+      marketRegime,
+      timeContext: new Date(latestTick.epoch * 1000).getTime()
+    };
+  }
+
   private extractMarketState(analyses: MarketAnalysis[]): MarketState {
     if (analyses.length === 0 || !analyses[0].marketData || analyses[0].marketData.length === 0) {
       return {

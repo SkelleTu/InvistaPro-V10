@@ -142,6 +142,24 @@ export class AutoTradingScheduler {
       } catch (err) {
         console.error('❌ [LEARNING] Erro ao processar resultado de contrato:', err);
       }
+
+      // 🔧 FIX CRÍTICO: Registrar win/loss IMEDIATAMENTE no realStatsTracker
+      // Antes, só era chamado via deriv-trade-sync (com atraso de minutos),
+      // impedindo que o Recovery Mode e Circuit Breaker ativassem após ACCU knockout.
+      try {
+        const finalProfit = data.finalProfit ?? 0;
+        const symbol = data.symbol || '';
+        if (finalProfit > 0) {
+          realStatsTracker.recordWin(finalProfit);
+          console.log(`🏆 [CONTRACT CLOSED] WIN registrado imediatamente: +$${finalProfit.toFixed(4)} | ${symbol}`);
+        } else if (finalProfit < 0 || data.status === 'lost') {
+          const lossAmount = finalProfit < 0 ? finalProfit : -1;
+          realStatsTracker.recordLoss(lossAmount, symbol);
+          console.log(`❌ [CONTRACT CLOSED] LOSS registrado imediatamente: $${lossAmount.toFixed(4)} | ${symbol} | Recovery Mode: ATIVADO`);
+        }
+      } catch (statsErr) {
+        console.error('❌ [LEARNING] Erro ao registrar win/loss no realStatsTracker:', statsErr);
+      }
     });
     console.log('🧠 [LEARNING] Motor de aprendizado persistente conectado ao monitor de contratos');
   }
@@ -1528,7 +1546,8 @@ export class AutoTradingScheduler {
           // Apenas aplica o mínimo da Deriv ($1.00). Sem teto fixo — a IA decide o tamanho.
           const accuStake = Math.max(1.00, Math.round(tradeParams.amount * 100) / 100);
           // 🧠 SUPREMO: growth_rate adaptativo por volatilidade e regime do mercado
-          const rawAdaptiveGrowth = supremeAnalysis?.adaptiveParams?.accumulator?.growthRate ?? 0.02;
+          // 🔧 FIX: Fallback 0.01 (1%) em vez de 0.02 — mais conservador sem análise suprema
+          const rawAdaptiveGrowth = supremeAnalysis?.adaptiveParams?.accumulator?.growthRate ?? 0.01;
           // CRÍTICO: Deriv só aceita 0.01, 0.02, 0.03, 0.04, 0.05 — snap para o mais próximo
           const DERIV_VALID_GROWTH_RATES = [0.01, 0.02, 0.03, 0.04, 0.05] as const;
           const adaptiveGrowth = DERIV_VALID_GROWTH_RATES.reduce((prev, curr) =>

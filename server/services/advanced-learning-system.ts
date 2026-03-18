@@ -79,8 +79,12 @@ export class AdvancedLearningSystem {
   // THROTTLING & CONGESTION CONTROL
   private lastAnalysisTime: Map<string, number> = new Map();
   private readonly ANALYSIS_THROTTLE_MS = 500; // Min 500ms entre análises
+  private readonly CACHE_TTL_MS = 45000; // Cache expira em 45s — força reanálise real
   private analysisQueue: Array<{symbol: string, callback: () => Promise<any>}> = [];
   private isProcessingQueue = false;
+  // 🔧 FIX: Resolvers por símbolo para evitar race condition em análises paralelas
+  private pendingResolvers: Map<string, Array<{resolve: (v: any) => void, reject: (e: any) => void}>> = new Map();
+  private cacheTimestamps: Map<string, number> = new Map(); // TTL do cache por símbolo
   
   constructor(config: AdvancedLearningConfig) {
     this.config = config;
@@ -115,19 +119,25 @@ export class AdvancedLearningSystem {
     patterns: any[];
     weights: Record<string, number>;
   }> {
-    // THROTTLE: Check if symbol was recently analyzed
+    // THROTTLE: Retornar cache se válido (dentro do TTL e recente)
     const now = Date.now();
     const lastTime = this.lastAnalysisTime.get(symbol) || 0;
-    if (now - lastTime < this.ANALYSIS_THROTTLE_MS) {
-      // Return cached result if available
+    const cacheTs = this.cacheTimestamps.get(symbol) || 0;
+    const cacheAge = now - cacheTs;
+    if (now - lastTime < this.ANALYSIS_THROTTLE_MS && cacheAge < this.CACHE_TTL_MS) {
       const cachedResult = this.activeExperiments.get(symbol + '_cache');
       if (cachedResult) {
         return cachedResult as any;
       }
     }
     
-    // QUEUE: Add to processing queue
+    // 🔧 FIX: Queue com resolvers por símbolo — evita race condition em análises paralelas
     return new Promise((resolve, reject) => {
+      // Registrar resolver para ESTE símbolo específico
+      const resolvers = this.pendingResolvers.get(symbol) || [];
+      resolvers.push({ resolve, reject });
+      this.pendingResolvers.set(symbol, resolvers);
+
       this.analysisQueue.push({
         symbol,
         callback: async () => {
@@ -145,21 +155,30 @@ export class AdvancedLearningSystem {
 
           const result = await this.performAdvancedAnalysis(symbol, marketState, models);
           
-          // Cache result
+          // Cache result com timestamp para TTL
           this.activeExperiments.set(symbol + '_cache', result);
+          this.cacheTimestamps.set(symbol, Date.now());
+          
+          // 🔧 FIX: Resolver TODOS os waiters para este símbolo imediatamente
+          const pendingForSymbol = this.pendingResolvers.get(symbol) || [];
+          this.pendingResolvers.delete(symbol);
+          for (const { resolve: res } of pendingForSymbol) {
+            res(result);
+          }
           
           return result;
         }
       });
       
-      this.processQueue().then(() => {
-        const lastExperiment = this.activeExperiments.get(symbol + '_cache');
-        if (lastExperiment) {
-          resolve(lastExperiment as any);
-        } else {
-          reject(new Error('Failed to get analysis result'));
+      // Disparar processamento da fila (não espera — resolvers já foram registrados)
+      this.processQueue().catch((err) => {
+        // Se a fila falhou, rejeitar resolvers pendentes deste símbolo
+        const pending = this.pendingResolvers.get(symbol) || [];
+        this.pendingResolvers.delete(symbol);
+        for (const { reject: rej } of pending) {
+          rej(err);
         }
-      }).catch(reject);
+      });
     });
   }
 

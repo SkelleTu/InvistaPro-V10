@@ -33,7 +33,9 @@ const RECOVERY_CONSENSUS_BY_STREAK: Record<number, number> = {
 };
 
 // Pausa obrigatória entre trades por perdas consecutivas (em ms)
+// 🔧 FIX: Adicionado nível 1 (5 min) — previne 3 perdas em 29 min em símbolos diferentes
 const CIRCUIT_BREAKER_PAUSE_MS: Record<number, number> = {
+  1:  5 * 60 * 1000, // 1 perda  → 5 minutos  (proteção mínima pós-loss)
   2: 10 * 60 * 1000, // 2 perdas → 10 minutos
   3: 20 * 60 * 1000, // 3+ perdas → 20 minutos
 };
@@ -321,7 +323,7 @@ class RealStatsTracker {
     // 🛡️ CAMADA 2 - Incrementar streak de perdas consecutivas
     this.consecutiveLosses++;
 
-    // 🛡️ CAMADA 3 - Ativar Circuit Breaker se streak >= 2
+    // 🛡️ CAMADA 3 - Ativar Circuit Breaker (nível 1=5min, 2=10min, 3+=20min)
     const streakLevel = Math.min(this.consecutiveLosses, 3);
     const breakerPauseMs = CIRCUIT_BREAKER_PAUSE_MS[streakLevel] ?? 0;
     if (breakerPauseMs > 0) {
