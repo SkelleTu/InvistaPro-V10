@@ -311,3 +311,13 @@ export const performanceAnalytics = pgTable('performance_analytics', {
   confidence: real('confidence').notNull(),
   createdAt: timestamp('created_at').defaultNow()
 });
+
+export const tradingControl = pgTable('trading_control', {
+  id: varchar('id', { length: 32 }).primaryKey().default(sql`replace(gen_random_uuid()::text, '-', '')`),
+  isPaused: boolean('is_paused').default(false),
+  pausedBy: text('paused_by'),
+  pausedAt: timestamp('paused_at'),
+  pauseReason: text('pause_reason'),
+  resumedAt: timestamp('resumed_at'),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
