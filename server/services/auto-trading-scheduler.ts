@@ -65,6 +65,19 @@ export class AutoTradingScheduler {
   private readonly CYCLE_INTERVAL_MS = 60000;
   private activityLog: Array<{ time: number; message: string; type: 'info' | 'success' | 'warning' | 'trade' }> = [];
 
+  // 🎰 SISTEMA MARTINGALE TRIPLO — Gerenciado por IA de Alta Precisão
+  // Ativa apenas em momentos de consenso excepcional (≥92%), NUNCA em recovery/circuit breaker
+  private martingaleStates: Map<string, {
+    isActive: boolean;
+    currentPart: 1 | 2 | 3;
+    baseStake: number;
+    triggeredAt: number;
+    cooldownUntil: number;
+  }> = new Map();
+  private pendingMartingaleContracts: Map<string, { userId: string; part: number }> = new Map();
+  private readonly MARTINGALE_CONSENSUS_THRESHOLD = 92;
+  private readonly MARTINGALE_COOLDOWN_MS = 15 * 60 * 1000; // 15 min entre sequências
+
   private setPhase(phase: string, detail: string, type: 'info' | 'success' | 'warning' | 'trade' = 'info'): void {
     this.currentPhase = phase;
     this.currentPhaseDetail = detail;
@@ -82,7 +95,101 @@ export class AutoTradingScheduler {
   private getBreathingRoom(_symbol: string): number {
     return 0;
   }
-  
+
+  // ─── MARTINGALE HELPERS ───────────────────────────────────────────────────
+
+  private getMartingaleState(userId: string) {
+    if (!this.martingaleStates.has(userId)) {
+      this.martingaleStates.set(userId, {
+        isActive: false,
+        currentPart: 1,
+        baseStake: 0,
+        triggeredAt: 0,
+        cooldownUntil: 0,
+      });
+    }
+    return this.martingaleStates.get(userId)!;
+  }
+
+  /** Verifica se as condições de mercado permitem ativar martingale */
+  private isMartingaleEligible(userId: string, consensus: number): boolean {
+    if (realStatsTracker.isPostLossMode()) return false;
+    if (realStatsTracker.isCircuitBreakerActive()) return false;
+    const state = this.getMartingaleState(userId);
+    if (Date.now() < state.cooldownUntil) return false;
+    return consensus >= this.MARTINGALE_CONSENSUS_THRESHOLD;
+  }
+
+  /** Retorna label do modo atual para exibição nas mensagens de operação */
+  private getCurrentOperationLabel(userId: string, sessionMode: string): string {
+    const mg = this.getMartingaleState(userId);
+    if (mg.isActive) return `Em modo Martingale — Parte ${mg.currentPart}/3`;
+    if (realStatsTracker.isPostLossMode()) return 'Em modo de Recuperação';
+    if (realStatsTracker.isCircuitBreakerActive()) return 'Em modo de Segurança';
+    return sessionMode;
+  }
+
+  /**
+   * Aplica multiplicador de martingale ao stake base.
+   * Parte 1 → ×1.30 | Parte 2 → ×1.60 | Parte 3 → ×2.00
+   * Retorna o stake ajustado e ativa/avança o estado de martingale.
+   */
+  private applyMartingaleStake(userId: string, baseStake: number, consensus: number, operationId: string): number {
+    const state = this.getMartingaleState(userId);
+
+    if (!state.isActive) {
+      if (!this.isMartingaleEligible(userId, consensus)) return baseStake;
+      state.isActive = true;
+      state.currentPart = 1;
+      state.baseStake = baseStake;
+      state.triggeredAt = Date.now();
+      console.log(`🎰 [${operationId}] MARTINGALE ATIVADO — Parte 1/3 | Consenso: ${consensus}% ≥ ${this.MARTINGALE_CONSENSUS_THRESHOLD}%`);
+    } else {
+      console.log(`🎰 [${operationId}] MARTINGALE Parte ${state.currentPart}/3 em curso | Consenso: ${consensus}%`);
+    }
+
+    const multipliers: Record<number, number> = { 1: 1.30, 2: 1.60, 3: 2.00 };
+    const mult = multipliers[state.currentPart] ?? 1.0;
+    const adjustedStake = Math.round(baseStake * mult * 100) / 100;
+
+    console.log(`🎰 [${operationId}] Stake martingale Parte ${state.currentPart}/3: $${baseStake.toFixed(2)} × ${mult} = $${adjustedStake.toFixed(2)}`);
+    return adjustedStake;
+  }
+
+  /** Registra o resultado de um contrato que estava em modo martingale */
+  private processMartingaleContractResult(contractId: string, won: boolean): void {
+    const meta = this.pendingMartingaleContracts.get(contractId);
+    if (!meta) return;
+    this.pendingMartingaleContracts.delete(contractId);
+
+    const { userId, part } = meta;
+    const state = this.getMartingaleState(userId);
+
+    if (!state.isActive) return;
+
+    if (!won) {
+      console.log(`🎰 [MARTINGALE] Parte ${part}/3 PERDIDA — encerrando sequência. Cooldown de ${this.MARTINGALE_COOLDOWN_MS / 60000} min ativado.`);
+      state.isActive = false;
+      state.currentPart = 1;
+      state.cooldownUntil = Date.now() + this.MARTINGALE_COOLDOWN_MS;
+      return;
+    }
+
+    if (part >= 3) {
+      console.log(`🎰 [MARTINGALE] 🏆 Sequência COMPLETA (3/3 vitórias)! Cooldown de ${this.MARTINGALE_COOLDOWN_MS / 60000} min ativado.`);
+      state.isActive = false;
+      state.currentPart = 1;
+      state.cooldownUntil = Date.now() + this.MARTINGALE_COOLDOWN_MS;
+      return;
+    }
+
+    const nextPart = (part + 1) as 1 | 2 | 3;
+    state.currentPart = nextPart;
+    console.log(`🎰 [MARTINGALE] Parte ${part}/3 GANHA ✅ — avançando para Parte ${nextPart}/3`);
+  }
+
+  // ─── FIM MARTINGALE HELPERS ───────────────────────────────────────────────
+
   // 🎯 SISTEMA DE OPERAÇÕES CONSERVADORAS DIÁRIAS (persistido no banco)
   // Limites específicos por modo de operação
   private getOperationLimitsForMode(mode: string): { min: number; max: number } {
@@ -159,6 +266,18 @@ export class AutoTradingScheduler {
         }
       } catch (statsErr) {
         console.error('❌ [LEARNING] Erro ao registrar win/loss no realStatsTracker:', statsErr);
+      }
+
+      // 🎰 ATUALIZAR ESTADO DO MARTINGALE com base no resultado do contrato
+      try {
+        const contractIdStr = String(data.contractId);
+        if (this.pendingMartingaleContracts.has(contractIdStr)) {
+          const finalProfit = data.finalProfit ?? 0;
+          const won = finalProfit > 0 || data.status === 'won';
+          this.processMartingaleContractResult(contractIdStr, won);
+        }
+      } catch (mgErr) {
+        console.error('❌ [MARTINGALE] Erro ao processar resultado do contrato:', mgErr);
       }
     });
     console.log('🧠 [LEARNING] Motor de aprendizado persistente conectado ao monitor de contratos');
@@ -588,8 +707,9 @@ export class AutoTradingScheduler {
         return { success: false, error: 'Token Deriv não configurado' };
       }
       
-      this.setPhase('EXECUTANDO', `⚡ Executando operação #${session.executedOperations + 1} (${session.mode})...`, 'trade');
-      console.log(`🚀 [${operationId}] Executando trade Análise natural continua de IA: ${session.executedOperations + 1}/${session.operationsCount} (${session.mode})`);
+      const operationModeLabel = this.getCurrentOperationLabel(userId, session.mode);
+      this.setPhase('EXECUTANDO', `⚡ Executando operação #${session.executedOperations + 1} (${operationModeLabel})...`, 'trade');
+      console.log(`🚀 [${operationId}] Executando trade Análise natural continua de IA: ${session.executedOperations + 1}/${session.operationsCount} (${operationModeLabel})`);
       
       // Executar trade com argumentos corretos
       const result = await this.executeAutomaticTrade(config, tokenData, operationId);
@@ -1665,6 +1785,20 @@ export class AutoTradingScheduler {
         }
 
         console.log(`✅ [${operationId}] Contrato [${selectedModality}] comprado com sucesso: ${contract.contract_id}`);
+
+        // 🎰 REGISTRAR CONTRATO NO MARTINGALE (se estiver em sequência ativa)
+        try {
+          const mgState = this.getMartingaleState(config.userId);
+          if (mgState.isActive) {
+            this.pendingMartingaleContracts.set(String(contract.contract_id), {
+              userId: config.userId,
+              part: mgState.currentPart,
+            });
+            console.log(`🎰 [${operationId}] Contrato ${contract.contract_id} registrado como Martingale Parte ${mgState.currentPart}/3`);
+          }
+        } catch (mgRegErr) {
+          console.error(`❌ [MARTINGALE] Erro ao registrar contrato:`, mgRegErr);
+        }
 
         // 🔭 MONITOR UNIVERSAL IA — acompanhar contrato tick a tick
         try {
@@ -2878,7 +3012,16 @@ export class AutoTradingScheduler {
     } catch (error) {
       console.error(`❌ [STAKE] Erro ao calcular stake: ${error}, usando padrão $${amount}`);
     }
-    
+
+    // 🎰 APLICAR MARTINGALE — SOMENTE se consenso excepcional e sem recovery/circuit breaker
+    if (consensoStrength !== undefined && userId) {
+      try {
+        amount = this.applyMartingaleStake(userId, amount, consensoStrength, 'STAKE');
+      } catch (mgErr) {
+        console.error(`❌ [MARTINGALE] Erro ao aplicar stake: ${mgErr}`);
+      }
+    }
+
     // Extrair parâmetros do modo (ex: "production_3-4_24h", "test_4_1min")
     // Agora o amount vem do cálculo de banca, não do modo
     const modeParams = mode.split('_');
