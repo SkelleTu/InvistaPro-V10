@@ -126,7 +126,7 @@ export class AutoTradingScheduler {
     if (mg.isActive) return `Em modo Martingale — Parte ${mg.currentPart}/3`;
     if (realStatsTracker.isPostLossMode()) return 'Em modo de Recuperação';
     if (realStatsTracker.isCircuitBreakerActive()) return 'Em modo de Segurança';
-    return sessionMode;
+    return 'Operação Ordinária';
   }
 
   /**
