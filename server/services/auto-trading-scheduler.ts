@@ -1899,6 +1899,7 @@ export class AutoTradingScheduler {
           derivContractId: String(contract.contract_id),
           symbol: selectedSymbol,
           tradeType: resolvedTradeType,
+          contractType: contractTypeForMonitor,
           direction: safeDirection,
           amount: tradeParams.amount,
           duration: tradeParams.duration,
