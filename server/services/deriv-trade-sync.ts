@@ -8,6 +8,7 @@ import { dualStorage as storage } from '../storage-dual';
 import { DerivAPIService } from './deriv-api';
 import { errorTracker } from './error-tracker';
 import { realStatsTracker } from './real-stats-tracker';
+import { advancedLearningSystem } from './advanced-learning-system';
 
 interface DerivTradeData {
   contractId: number;

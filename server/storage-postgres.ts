@@ -76,10 +76,38 @@ class EncryptionService {
 }
 
 // Conversor de tipos SQLite para PostgreSQL
+// Campos de data conhecidos nas tabelas — serializados para string ISO antes de enviar ao Neon
+const DATE_FIELDS = new Set([
+  'createdAt', 'completedAt', 'statusChangedAt', 'lastSyncAt',
+  'lastUpdate', 'date', 'expiresAt', 'updatedAt', 'closedAt',
+  'created_at', 'completed_at', 'status_changed_at', 'last_sync_at',
+  'last_update', 'expires_at', 'updated_at', 'closed_at',
+]);
+
+function serializeDateFields(data: any): any {
+  if (!data) return data;
+  const out: any = {};
+  for (const key of Object.keys(data)) {
+    const val = data[key];
+    if (DATE_FIELDS.has(key) && val !== null && val !== undefined) {
+      if (val instanceof Date) {
+        out[key] = val.toISOString();
+      } else if (typeof val === 'object' && typeof val.toISOString === 'function') {
+        out[key] = val.toISOString();
+      } else {
+        out[key] = val;
+      }
+    } else {
+      out[key] = val;
+    }
+  }
+  return out;
+}
+
 function convertSQLiteDataToPostgres(data: any): any {
   if (!data) return data;
   
-  const converted = { ...data };
+  const converted = serializeDateFields({ ...data });
   
   // Converter booleanos (SQLite usa 0/1, PostgreSQL usa true/false)
   for (const key in converted) {
@@ -457,9 +485,10 @@ export class PostgresStorage implements IStorage {
   }
 
   async updateTradeOperation(id: string, updates: Partial<TradeOperation>): Promise<TradeOperation> {
+    const safeUpdates = serializeDateFields(convertSQLiteDataToPostgres(updates));
     const [operation] = await db
       .update(pgSchema.tradeOperations)
-      .set(updates)
+      .set(safeUpdates)
       .where(eq(pgSchema.tradeOperations.id, id))
       .returning();
     return operation as TradeOperation;

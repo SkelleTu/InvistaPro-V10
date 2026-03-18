@@ -669,13 +669,18 @@ export class SupremeMarketAnalyzer extends EventEmitter {
     const { modality, modalityScore } = this.selectBestModality(regime, stats, mtf, micro, oppScore, oppDir, isSymbolDigit);
 
     // ── Accumulator: crescimento dinâmico por volatilidade ──
+    // Deriv só aceita: 0.01, 0.02, 0.03, 0.04, 0.05 — NUNCA valores intermediários
     // Baixa vol → taxa menor (mais seguro, dura mais)
     // Alta vol → taxa menor também (para não ser derrubado por spike)
+    const VALID_GROWTH_RATES = [0.01, 0.02, 0.03, 0.04, 0.05] as const;
     const volLevel = Math.abs(stats.zScoreVolatility);
-    const growthRate = volLevel > 2 ? 0.01       // vol extrema: crescimento mínimo
-                     : volLevel > 1 ? 0.015      // vol alta: conservador
-                     : volLevel < -1 ? 0.03      // vol baixa: pode crescer mais
-                     : 0.02;                     // vol normal: padrão
+    const rawGrowthRate = volLevel > 2 ? 0.01    // vol extrema: crescimento mínimo
+                        : volLevel > 1 ? 0.01    // vol alta: conservador (era 0.015 — inválido!)
+                        : volLevel < -1 ? 0.03   // vol baixa: pode crescer mais
+                        : 0.02;                  // vol normal: padrão
+    const growthRate = VALID_GROWTH_RATES.reduce((prev, curr) =>
+      Math.abs(curr - rawGrowthRate) < Math.abs(prev - rawGrowthRate) ? curr : prev
+    );
     const expectedTicks = regime === 'strong_trend' ? 15
                         : regime === 'weak_trend'   ? 10
                         : 6;

@@ -1528,10 +1528,15 @@ export class AutoTradingScheduler {
           // Apenas aplica o mínimo da Deriv ($1.00). Sem teto fixo — a IA decide o tamanho.
           const accuStake = Math.max(1.00, Math.round(tradeParams.amount * 100) / 100);
           // 🧠 SUPREMO: growth_rate adaptativo por volatilidade e regime do mercado
-          const adaptiveGrowth = supremeAnalysis?.adaptiveParams?.accumulator?.growthRate ?? 0.02;
+          const rawAdaptiveGrowth = supremeAnalysis?.adaptiveParams?.accumulator?.growthRate ?? 0.02;
+          // CRÍTICO: Deriv só aceita 0.01, 0.02, 0.03, 0.04, 0.05 — snap para o mais próximo
+          const DERIV_VALID_GROWTH_RATES = [0.01, 0.02, 0.03, 0.04, 0.05] as const;
+          const adaptiveGrowth = DERIV_VALID_GROWTH_RATES.reduce((prev, curr) =>
+            Math.abs(curr - rawAdaptiveGrowth) < Math.abs(prev - rawAdaptiveGrowth) ? curr : prev
+          );
           const accuRisk = supremeAnalysis?.adaptiveParams?.accumulator?.riskLevel ?? 'medium';
           const accuTicks = supremeAnalysis?.adaptiveParams?.accumulator?.expectedTicks ?? 10;
-          console.log(`📊 [${operationId}] ACCU: stake=$${accuStake} (IA-amplificado, mín Deriv $1.00) | growth_rate=${(adaptiveGrowth*100).toFixed(1)}% | ticks_alvo=${accuTicks}${supremeAnalysis ? ` ADAPTATIVO (regime=${supremeAnalysis.regime} | risco=${accuRisk} | hurst=${supremeAnalysis.statistics.hurstExponent.toFixed(2)})` : ' padrão'} | Symbol: ${selectedSymbol}`);
+          console.log(`📊 [${operationId}] ACCU: stake=$${accuStake} (IA-amplificado, mín Deriv $1.00) | growth_rate=${(adaptiveGrowth*100).toFixed(0)}% (raw=${(rawAdaptiveGrowth*100).toFixed(1)}%) | ticks_alvo=${accuTicks}${supremeAnalysis ? ` ADAPTATIVO (regime=${supremeAnalysis.regime} | risco=${accuRisk} | hurst=${supremeAnalysis.statistics.hurstExponent.toFixed(2)})` : ' padrão'} | Symbol: ${selectedSymbol}`);
           contract = await derivAPI.buyFlexibleContract({
             contract_type: 'ACCU',
             symbol: selectedSymbol,

@@ -525,8 +525,8 @@ export class HuggingFaceAIService {
           }
         });
 
-        // Generate consensus from all analyses (with recovery parameters)
-        const consensus = await this.generateConsensus(analyses, isRecoveryMode, recoveryThreshold);
+        // Generate consensus from all analyses (com símbolo explícito para evitar contaminação cruzada)
+        const consensus = await this.generateConsensus(analyses, isRecoveryMode, recoveryThreshold, symbol);
         
         // Use AI consensus when available, fallback only when all AIs fail
         if (consensus.participatingModels > 0 && consensus.finalDecision !== 'neutral') {
@@ -1210,7 +1210,7 @@ COMPOSITE SIGNAL SCORE: ${overallSentiment > 0 ? '+' : ''}${overallSentiment}/6 
     }
   }
 
-  private async generateConsensus(analyses: MarketAnalysis[], isRecoveryMode = false, recoveryThreshold = 0.75): Promise<AIConsensus> {
+  private async generateConsensus(analyses: MarketAnalysis[], isRecoveryMode = false, recoveryThreshold = 0.75, explicitSymbol?: string): Promise<AIConsensus> {
     console.log(`🔍 [CONSENSUS DEBUG] Iniciando geração de consenso com ${analyses.length} análises`);
     
     if (isRecoveryMode) {
@@ -1232,8 +1232,9 @@ COMPOSITE SIGNAL SCORE: ${overallSentiment > 0 ? '+' : ''}${overallSentiment}/6 
     // 🧠 SISTEMA COOPERATIVO AVANÇADO - Cross-Validation entre IAs
     const enhancedAnalyses = this.applyCrossValidation(analyses, isRecoveryMode);
     
-    // 🚀 SISTEMA DE APRENDIZADO AVANÇADO - Otimização dinâmica de pesos
-    const symbol = enhancedAnalyses[0]?.marketData?.[0]?.symbol || 'UNKNOWN';
+    // 🚀 SISTEMA DE APRENDIZADO AVANÇADO - Usa símbolo explícito para evitar contaminação cruzada
+    // CRÍTICO: NÃO usar analyses[0].marketData[0].symbol — pode ser de outro símbolo em análise paralela
+    const symbol = explicitSymbol || enhancedAnalyses[0]?.marketData?.[0]?.symbol || 'UNKNOWN';
     const currentMarketState = this.extractMarketState(enhancedAnalyses);
     const modelPerformances = this.calculateModelPerformances(enhancedAnalyses);
     
@@ -1676,8 +1677,8 @@ Os modelos identificaram padrões convergentes nos dados de mercado que indicam 
       timestamp: new Date()
     });
     
-    // Generate consensus from technical analyses with enhanced strength
-    const consensus = await this.generateConsensus(analyses);
+    // Generate consensus from technical analyses with enhanced strength (símbolo correto)
+    const consensus = await this.generateConsensus(analyses, false, 0.75, symbol);
     
     // GARANTIR que nunca seja neutral - força decisão se necessário
     if (consensus.finalDecision === 'neutral' || consensus.consensusStrength < 60) {
