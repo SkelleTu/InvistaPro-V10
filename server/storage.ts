@@ -1304,9 +1304,9 @@ export class DatabaseStorage implements IStorage {
     // Verificar se é conta demo e aplicar margem de teste
     const tokenData = await this.getUserDerivToken(userId);
     if (tokenData && tokenData.accountType === 'demo') {
-      // Permitir até 5% de perda do saldo inicial em contas demo
-      const demoLossMargin = openingBalance * 0.05; // 5% de margem
-      minimumRequired = Math.max(minimumRequired - demoLossMargin, openingBalance * 0.95);
+      // Permitir até 15% de perda do saldo inicial em contas demo (margem ampla para recuperação)
+      const demoLossMargin = openingBalance * 0.15; // 15% de margem
+      minimumRequired = Math.max(minimumRequired - demoLossMargin, openingBalance * 0.85);
     }
     
     if (projectedBalance < minimumRequired) {

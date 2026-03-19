@@ -688,7 +688,7 @@ export class TursoStorage implements IStorage {
     let minimumRequired = Math.max(previousDayClosingBalance, todayPnL.openingBalance);
     const tokenData = await this.getUserDerivToken(userId);
     if (tokenData?.accountType === 'demo') {
-      minimumRequired = Math.max(minimumRequired - todayPnL.openingBalance * 0.05, todayPnL.openingBalance * 0.95);
+      minimumRequired = Math.max(minimumRequired - todayPnL.openingBalance * 0.15, todayPnL.openingBalance * 0.85);
     }
 
     const projectedBalance = todayPnL.currentBalance - potentialLoss;
