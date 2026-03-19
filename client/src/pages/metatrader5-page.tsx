@@ -140,56 +140,58 @@ export default function MetaTrader5Page() {
     setUploadProgress(0);
     setUploadInfo(`Preparando ${files.length} arquivos...`);
 
-    const CHUNK_SIZE = 200;
     const allFiles = Array.from(files);
     const totalFiles = allFiles.length;
     let uploaded = 0;
+    let isFirst = true;
 
-    // Send in chunks to avoid memory issues
-    for (let i = 0; i < allFiles.length; i += CHUNK_SIZE) {
-      const chunk = allFiles.slice(i, i + CHUNK_SIZE);
+    const sendBatch = async (batch: File[], firstBatch: boolean) => {
       const formData = new FormData();
-
-      for (const file of chunk) {
+      for (const file of batch) {
         const relativePath = (file as any).webkitRelativePath || file.name;
         formData.append("files", file, relativePath);
       }
+      formData.append("isFirst", String(firstBatch));
 
-      const isFirst = i === 0;
-      formData.append("chunkIndex", String(Math.floor(i / CHUNK_SIZE)));
-      formData.append("isFirst", String(isFirst));
+      const res = await fetch("/api/desktop/upload-mt5-folder", {
+        method: "POST",
+        body: formData,
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Erro no upload");
+      return data;
+    };
 
-      try {
-        const res = await fetch("/api/desktop/upload-mt5-folder", {
-          method: "POST",
-          body: formData,
-          credentials: "include",
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "Erro no upload");
+    // Separate large files (>5MB) from small ones — send large files one at a time
+    const largeFiles = allFiles.filter(f => f.size > 5 * 1024 * 1024);
+    const smallFiles = allFiles.filter(f => f.size <= 5 * 1024 * 1024);
+    const CHUNK_SIZE = 50;
 
-        uploaded += chunk.length;
+    // Build ordered batches: large files first (one per request), then small in chunks
+    const batches: File[][] = [];
+    for (const lf of largeFiles) batches.push([lf]);
+    for (let i = 0; i < smallFiles.length; i += CHUNK_SIZE) {
+      batches.push(smallFiles.slice(i, i + CHUNK_SIZE));
+    }
+
+    try {
+      for (const batch of batches) {
+        await sendBatch(batch, isFirst);
+        isFirst = false;
+        uploaded += batch.length;
         const pct = Math.round((uploaded / totalFiles) * 100);
         setUploadProgress(pct);
         setUploadInfo(`${uploaded} / ${totalFiles} arquivos enviados...`);
-
-        if (data.exeFound) {
-          setUploadInfo(`✅ Upload completo! Executável encontrado.`);
-          setUploadProgress(100);
-          queryClient.invalidateQueries({ queryKey: ["/api/desktop/status"] });
-          toast({ title: "Upload concluído!", description: `${uploaded} arquivos enviados. MT5 pronto para abrir.` });
-          break;
-        }
-      } catch (err: any) {
-        setUploadInfo(`Erro: ${err.message}`);
-        toast({ title: "Erro no upload", description: err.message, variant: "destructive" });
-        break;
       }
-    }
 
-    if (uploadProgress !== 100) {
       setUploadProgress(100);
+      setUploadInfo(`✅ Upload completo! ${totalFiles} arquivos enviados.`);
       queryClient.invalidateQueries({ queryKey: ["/api/desktop/status"] });
+      toast({ title: "Upload concluído!", description: `${totalFiles} arquivos enviados. MT5 pronto para abrir.` });
+    } catch (err: any) {
+      setUploadInfo(`Erro: ${err.message}`);
+      toast({ title: "Erro no upload", description: err.message, variant: "destructive" });
     }
 
     if (e.target) e.target.value = "";
