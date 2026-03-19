@@ -1682,21 +1682,57 @@ export class AutoTradingScheduler {
             return { success: false, error: `ACCU: ${selectedSymbol} (alta volatilidade) com regime desconhecido — bloqueado por segurança` };
           }
 
-          // 🧠 ACCU: stake DINÂMICO decidido pelas IAs (mínimo $1.00 Deriv)
-          const accuStake = Math.max(1.00, Math.round(tradeParams.amount * 100) / 100);
-          // 🧠 SUPREMO: growth_rate FIXO em 5% (modo operações) — IA decide QUANDO entrar
-          const adaptiveGrowth = 0.05; // 5% fixo — modo operações configurado pelo usuário
+          // 🧠 ACCU: stake inteligente — IA decide por operação (síncrono, zero latência)
+          // Usa apenas dados já calculados em memória: saldo em cache, consenso, regime, risco
           const accuRisk = supremeAnalysis?.adaptiveParams?.accumulator?.riskLevel ?? 'medium';
-          // ⚡ Ticks alvo: 1-2 — IA escolhe com base no regime. Contrato FECHA AUTOMATICAMENTE após N ticks
-          const accuTicks = supremeAnalysis?.adaptiveParams?.accumulator?.expectedTicks ?? 1;
-          accuTargetTicks = accuTicks; // expor para o startMonitoring (fora deste bloco)
-          console.log(`📊 [${operationId}] ACCU MODO-OPS: stake=$${accuStake} (IA-dinâmico) | growth_rate=${(adaptiveGrowth*100).toFixed(0)}% (FIXO) | ticks_alvo=${accuTicks} (AUTO-SELL)${supremeAnalysis ? ` | regime=${supremeAnalysis.regime} | risco=${accuRisk} | hurst=${supremeAnalysis.statistics.hurstExponent.toFixed(2)}` : ''} | Symbol: ${selectedSymbol}`);
-          contract = await derivAPI.buyFlexibleContract({
-            contract_type: 'ACCU',
-            symbol: selectedSymbol,
-            amount: accuStake,
-            growth_rate: adaptiveGrowth,
-          });
+          {
+            const bankBalance  = this.cachedBalance?.value ?? tradeParams.amount * 30;
+            const consensus    = aiConsensus.consensusStrength ?? 50;
+            const regime       = supremeAnalysis?.regime ?? 'unknown';
+
+            // Qualidade da oportunidade — totalmente síncrono, sem round-trip
+            type AccuQuality = 'exceptional' | 'good' | 'moderate' | 'minimum';
+            let opportunityQuality: AccuQuality = 'minimum';
+            if (consensus >= 90 && accuRisk === 'low' && (regime === 'strong_trend' || regime === 'calm')) {
+              opportunityQuality = 'exceptional'; // IA muito confiante + mercado ideal
+            } else if (consensus >= 80 && accuRisk !== 'high') {
+              opportunityQuality = 'good';        // Sinal forte, risco controlado
+            } else if (consensus >= 70 && accuRisk === 'low') {
+              opportunityQuality = 'moderate';    // Sinal razoável, baixo risco
+            }
+            // 'minimum' → consenso baixo ou risco alto → stake mínimo $1
+
+            // Teto pela banca: IA só arrisca mais quando a banca suporta
+            const pctByQuality: Record<AccuQuality, number> = {
+              exceptional: 0.030, // até 3% da banca
+              good:        0.020, // até 2%
+              moderate:    0.015, // até 1.5%
+              minimum:     0.000, // apenas $1 fixo
+            };
+            const maxByBank = Math.max(1.00, bankBalance * pctByQuality[opportunityQuality]);
+
+            // Stake alvo: cresce com a qualidade, sempre dentro do teto da banca
+            const targetByQuality: Record<AccuQuality, number> = {
+              exceptional: maxByBank,
+              good:        Math.min(maxByBank, Math.max(1.00, bankBalance * 0.015)),
+              moderate:    Math.min(maxByBank, Math.max(1.00, bankBalance * 0.010)),
+              minimum:     1.00,
+            };
+            const accuStake = Math.round(targetByQuality[opportunityQuality] * 100) / 100;
+
+            // 🧠 SUPREMO: growth_rate FIXO em 5% (modo operações) — IA decide QUANDO entrar
+            const adaptiveGrowth = 0.05; // 5% fixo — modo operações configurado pelo usuário
+            // ⚡ Ticks alvo: 1-2 — IA escolhe com base no regime. Contrato FECHA AUTOMATICAMENTE após N ticks
+            const accuTicks = supremeAnalysis?.adaptiveParams?.accumulator?.expectedTicks ?? 1;
+            accuTargetTicks = accuTicks;
+            console.log(`📊 [${operationId}] ACCU MODO-OPS: stake=$${accuStake} [${opportunityQuality}] (banca=$${bankBalance.toFixed(2)} | consenso=${consensus}% | risco=${accuRisk}) | growth=${(adaptiveGrowth*100).toFixed(0)}% FIXO | ticks=${accuTicks}${supremeAnalysis ? ` | regime=${regime} | hurst=${supremeAnalysis.statistics.hurstExponent.toFixed(2)}` : ''} | ${selectedSymbol}`);
+            contract = await derivAPI.buyFlexibleContract({
+              contract_type: 'ACCU',
+              symbol: selectedSymbol,
+              amount: accuStake,
+              growth_rate: adaptiveGrowth,
+            });
+          }
           if (!contract) {
             console.warn(`⚠️ [${operationId}] Accumulator rejeitado pela Deriv — operação cancelada (sem fallback)`);
             return { success: false, error: `Accumulator rejeitado pela Deriv para ${selectedSymbol}` };
