@@ -731,8 +731,8 @@ export class AutoTradingScheduler {
     this.setPhase('EXECUTANDO', `🚀 ALAVANCAGEM: ${best.symbol} $${leverageStake} (${exceptional.length} ativos alinhados)`, 'trade');
 
     try {
-      const derivAPI = new (await import('./deriv-api')).DerivAPIService(tokenData.token);
-      await derivAPI.connect();
+      const derivAPI = new (await import('./deriv-api')).DerivAPIService();
+      await derivAPI.connect(tokenData.token, (tokenData.accountType as 'demo' | 'real') || 'demo', levOpId);
       const contract = await derivAPI.buyFlexibleContract({
         contract_type: 'ACCU',
         symbol: best.symbol,
@@ -1856,10 +1856,10 @@ export class AutoTradingScheduler {
               opportunityQuality = 'exceptional'; // IA muito confiante + mercado ideal
             } else if (consensus >= 80 && accuRisk !== 'high') {
               opportunityQuality = 'good';        // Sinal forte, risco controlado
-            } else if (consensus >= 70 && accuRisk === 'low') {
-              opportunityQuality = 'moderate';    // Sinal razoável, baixo risco
+            } else if (consensus >= 65 && accuRisk !== 'high') {
+              opportunityQuality = 'moderate';    // Sinal razoável, risco não-alto (antes exigia 'low')
             }
-            // 'minimum' → consenso baixo ou risco alto → stake mínimo $1
+            // 'minimum' → consenso < 65% ou risco alto → stake mínimo $1
 
             // Teto pela banca: IA só arrisca mais quando a banca suporta
             const pctByQuality: Record<AccuQuality, number> = {
@@ -3236,9 +3236,11 @@ export class AutoTradingScheduler {
           amount = this.calculateDynamicStake(amount, consensoStrength, volatility || 0.5);
         }
 
-        // 🛡️ SAFETY CAP — em recovery permite até 20% da banca (para cobrir mínimo ACCU $1); normal: 3%
+        // 🛡️ SAFETY CAP — em recovery permite até 20% da banca (para cobrir mínimo ACCU $1); normal: 8%
+        // O cap de 8% (era 3%) permite que a amplificação dinâmica da IA tenha efeito real:
+        //   banca $10 → cap $0.80 → stake amplificado de $0.56 (×1.6) passa sem ser cortado
         const inRecovery = realStatsTracker.isPostLossMode();
-        const capPct = inRecovery ? 0.20 : 0.03;
+        const capPct = inRecovery ? 0.20 : 0.08;
         // Em recovery: mínimo de $1.00 (mínimo do ACCU); normal: $0.35
         const minFloor = inRecovery ? 1.00 : 0.35;
         const maxSafeStake = Math.max(minFloor, bankSize * capPct);
