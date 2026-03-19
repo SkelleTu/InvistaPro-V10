@@ -1672,16 +1672,14 @@ export class AutoTradingScheduler {
           // 🧠 ACCU usa o mesmo stake amplificado pela IA (tradeParams.amount já inclui AI amplifier).
           // Apenas aplica o mínimo da Deriv ($1.00). Sem teto fixo — a IA decide o tamanho.
           const accuStake = Math.max(1.00, Math.round(tradeParams.amount * 100) / 100);
-          // 🧠 SUPREMO: growth_rate adaptativo por volatilidade e regime do mercado
-          // 🔧 FIX: Fallback 0.01 (1%) em vez de 0.02 — mais conservador sem análise suprema
-          const rawAdaptiveGrowth = supremeAnalysis?.adaptiveParams?.accumulator?.growthRate ?? 0.01;
-          // CRÍTICO: Deriv só aceita 0.01, 0.02, 0.03, 0.04, 0.05 — snap para o mais próximo
-          const DERIV_VALID_GROWTH_RATES = [0.01, 0.02, 0.03, 0.04, 0.05] as const;
-          const adaptiveGrowth = DERIV_VALID_GROWTH_RATES.reduce((prev, curr) =>
-            Math.abs(curr - rawAdaptiveGrowth) < Math.abs(prev - rawAdaptiveGrowth) ? curr : prev
-          );
+          // 🧠 SUPREMO: growth_rate FIXO em 5% (modo operações) — IA decide QUANDO entrar
+          // 🔧 MODO OPERAÇÕES: 5% fixo + 1-2 ticks alvo
+          const rawAdaptiveGrowth = supremeAnalysis?.adaptiveParams?.accumulator?.growthRate ?? 0.05;
+          // CRÍTICO: Deriv só aceita 0.01, 0.02, 0.03, 0.04, 0.05 — growth_rate fixo 0.05
+          const adaptiveGrowth = 0.05; // 5% fixo — configurado pelo modo operações
           const accuRisk = supremeAnalysis?.adaptiveParams?.accumulator?.riskLevel ?? 'medium';
-          const accuTicks = supremeAnalysis?.adaptiveParams?.accumulator?.expectedTicks ?? 10;
+          // 🎯 Ticks alvo: 1-2 — IA escolhe com base no regime (strong_trend=2, demais=1)
+          const accuTicks = supremeAnalysis?.adaptiveParams?.accumulator?.expectedTicks ?? 1;
           console.log(`📊 [${operationId}] ACCU: stake=$${accuStake} (IA-amplificado, mín Deriv $1.00) | growth_rate=${(adaptiveGrowth*100).toFixed(0)}% (raw=${(rawAdaptiveGrowth*100).toFixed(1)}%) | ticks_alvo=${accuTicks}${supremeAnalysis ? ` ADAPTATIVO (regime=${supremeAnalysis.regime} | risco=${accuRisk} | hurst=${supremeAnalysis.statistics.hurstExponent.toFixed(2)})` : ' padrão'} | Symbol: ${selectedSymbol}`);
           contract = await derivAPI.buyFlexibleContract({
             contract_type: 'ACCU',
