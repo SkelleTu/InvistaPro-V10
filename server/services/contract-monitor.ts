@@ -37,6 +37,7 @@ export interface MonitoredContractInput {
   highBarrier?: string;
   lowBarrier?: string;
   dateExpiry?: number;        // timestamp unix para contratos com prazo
+  targetTicks?: number;       // ⚡ ACCU MODO-OPS: vender automaticamente após N ticks (1 ou 2)
 }
 
 interface AITickSnapshot {
@@ -787,6 +788,19 @@ class UniversalContractMonitor extends EventEmitter {
     // Atualizar pico
     if (state.profit > state.peakProfit) state.peakProfit = state.profit;
     if (state.bidPrice > state.peakBidPrice) state.peakBidPrice = state.bidPrice;
+
+    // ⚡ ACCU MODO-OPS: Venda automática após N ticks (1 ou 2) — sem delay de análise
+    if (
+      state.input.targetTicks !== undefined &&
+      state.tickCount >= state.input.targetTicks &&
+      state.isValidToSell &&
+      state.status === 'monitoring'
+    ) {
+      const gain = state.profitPct.toFixed(2);
+      console.log(`⚡ [ACCU-AUTOSELL] ${contractId} | Tick #${state.tickCount}/${state.input.targetTicks} atingido | lucro=${gain}% | Vendendo agora...`);
+      await this.executeSell(state, `ACCU-AUTOSELL: ${state.input.targetTicks} tick(s) alvo atingido | lucro=${gain}%`);
+      return;
+    }
 
     // Calcular distância da barreira (se houver)
     if (state.currentSpot > 0) {

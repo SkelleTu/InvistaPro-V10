@@ -1500,6 +1500,7 @@ export class AutoTradingScheduler {
         // ─── EXECUÇÃO POR MODALIDADE ─────────────────────────────────────
         let contract: any = null;
         let resolvedTradeType = 'digitdiff';
+        let accuTargetTicks: number | undefined = undefined; // ⚡ ACCU: ticks alvo para auto-sell
 
         const safeDirection: "up" | "down" = 
           (aiConsensus.finalDecision === 'up' || aiConsensus.finalDecision === 'down')
@@ -1681,15 +1682,15 @@ export class AutoTradingScheduler {
             return { success: false, error: `ACCU: ${selectedSymbol} (alta volatilidade) com regime desconhecido — bloqueado por segurança` };
           }
 
-          // 🎯 MODO OPERAÇÕES ACCU: stake FIXO $1.00 (mínimo Deriv) — sem variação por banca ou IA
-          // Stake fixo elimina variabilidade entre operações e reduz overhead de cálculo
-          const accuStake = 1.00;
+          // 🧠 ACCU: stake DINÂMICO decidido pelas IAs (mínimo $1.00 Deriv)
+          const accuStake = Math.max(1.00, Math.round(tradeParams.amount * 100) / 100);
           // 🧠 SUPREMO: growth_rate FIXO em 5% (modo operações) — IA decide QUANDO entrar
           const adaptiveGrowth = 0.05; // 5% fixo — modo operações configurado pelo usuário
           const accuRisk = supremeAnalysis?.adaptiveParams?.accumulator?.riskLevel ?? 'medium';
-          // 🎯 Ticks alvo: 1-2 — IA escolhe com base no regime (strong_trend=2, demais=1)
+          // ⚡ Ticks alvo: 1-2 — IA escolhe com base no regime. Contrato FECHA AUTOMATICAMENTE após N ticks
           const accuTicks = supremeAnalysis?.adaptiveParams?.accumulator?.expectedTicks ?? 1;
-          console.log(`📊 [${operationId}] ACCU MODO-OPS: stake=$${accuStake} (FIXO) | growth_rate=${(adaptiveGrowth*100).toFixed(0)}% (FIXO) | ticks_alvo=${accuTicks}${supremeAnalysis ? ` | regime=${supremeAnalysis.regime} | risco=${accuRisk} | hurst=${supremeAnalysis.statistics.hurstExponent.toFixed(2)}` : ''} | Symbol: ${selectedSymbol}`);
+          accuTargetTicks = accuTicks; // expor para o startMonitoring (fora deste bloco)
+          console.log(`📊 [${operationId}] ACCU MODO-OPS: stake=$${accuStake} (IA-dinâmico) | growth_rate=${(adaptiveGrowth*100).toFixed(0)}% (FIXO) | ticks_alvo=${accuTicks} (AUTO-SELL)${supremeAnalysis ? ` | regime=${supremeAnalysis.regime} | risco=${accuRisk} | hurst=${supremeAnalysis.statistics.hurstExponent.toFixed(2)}` : ''} | Symbol: ${selectedSymbol}`);
           contract = await derivAPI.buyFlexibleContract({
             contract_type: 'ACCU',
             symbol: selectedSymbol,
@@ -1844,6 +1845,8 @@ export class AutoTradingScheduler {
             userId: config.userId,
             openedAt: Date.now(),
             barrier: tradeParams.barrier,
+            // ⚡ ACCU MODO-OPS: auto-sell após N ticks (1 ou 2) decididos pela IA
+            ...(resolvedTradeType === 'accumulator' && accuTargetTicks !== undefined && { targetTicks: accuTargetTicks }),
           });
           console.log(`🔭 [MONITOR] Iniciado para contrato ${contract.contract_id} (${contractTypeForMonitor}) em ${selectedSymbol}`);
 
