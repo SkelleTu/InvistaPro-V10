@@ -1,0 +1,2 @@
+mt5-uploaded/MetaEditor64.exe filter=lfs diff=lfs merge=lfs -text
+mt5-uploaded/terminal64.exe filter=lfs diff=lfs merge=lfs -text
