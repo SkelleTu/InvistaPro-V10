@@ -72,6 +72,7 @@ interface ContractState {
   isExpired: boolean;
   barrierValue?: number;
   barrierDistance?: number;   // % distância do barrier ao spot
+  barrierDistanceHistory: number[]; // histórico de distância da barreira por tick
   tickCount: number;
   lastUpdate: number;
   subscriptionId?: string;
@@ -81,6 +82,7 @@ interface ContractState {
   status: 'monitoring' | 'closing' | 'closed';
   aiSnapshot?: AITickSnapshot;
   openReason?: string;
+  spotHistory: number[];      // histórico de spots do próprio contrato desde a entrada
 }
 
 interface SellDecision {
@@ -137,12 +139,12 @@ function getThresholds(contractType: string): ExitThresholds {
   switch (t) {
     case 'ACCU':
       return {
-        profitTargetPct: 40,      // 40% de lucro → fecha
-        trailingStopPct: 15,      // cair 15% do pico → fecha (trailing)
-        barrierDangerPct: 0.4,    // barreira a <0.4% → urgente
-        maxDurationMin: 15,       // máx 15 min
+        profitTargetPct: 15,      // 15% de lucro → fecha (barreira pode bater antes de chegar em 40%)
+        trailingStopPct: 5,       // cair 5% do pico → fecha (trailing agressivo para proteger ganhos)
+        barrierDangerPct: 0.8,    // barreira a <0.8% → urgente (margem maior de segurança)
+        maxDurationMin: 10,       // máx 10 min (menos tempo para reduzir risco de barreira)
         earlyLossExitPct: 999,    // ACCU não tem perda negativa (perde o stake se cruzar)
-        aiReversalStrength: 70,
+        aiReversalStrength: 60,   // sinal mais sensível para saída antecipada
         minTicksBeforeSell: 5,
       };
     case 'MULTUP':
@@ -569,6 +571,8 @@ class UniversalContractMonitor extends EventEmitter {
       peakProfit: 0,
       peakBidPrice: input.buyPrice,
       status: 'monitoring',
+      spotHistory: [],
+      barrierDistanceHistory: [],
     };
 
     this.monitored.set(input.contractId, state);
@@ -768,6 +772,18 @@ class UniversalContractMonitor extends EventEmitter {
     state.tickCount++;
     state.lastUpdate = Date.now();
 
+    // Rastrear histórico de spots do próprio contrato (para análise IA tick a tick)
+    if (state.currentSpot > 0) {
+      state.spotHistory.push(state.currentSpot);
+      if (state.spotHistory.length > 200) state.spotHistory.shift();
+    }
+
+    // Rastrear histórico de distância da barreira
+    if (state.barrierDistance !== undefined) {
+      state.barrierDistanceHistory.push(state.barrierDistance);
+      if (state.barrierDistanceHistory.length > 30) state.barrierDistanceHistory.shift();
+    }
+
     // Atualizar pico
     if (state.profit > state.peakProfit) state.peakProfit = state.profit;
     if (state.bidPrice > state.peakBidPrice) state.peakBidPrice = state.bidPrice;
@@ -930,32 +946,97 @@ class UniversalContractMonitor extends EventEmitter {
 
     // ── 4. ESTRATÉGIAS POR MODALIDADE ────────────────────────────
 
-    // ── ACCUMULATOR ──────────────────────────────────────────────
+    // ── ACCUMULATOR — 100% DECISÃO IA EM TEMPO REAL ──────────────
     if (ct === 'ACCU') {
-      // Alvo de lucro (adaptativo pelo supremo)
-      if (state.profitPct >= thresholds.profitTargetPct) {
-        return { shouldSell: true, reason: `ACCU: alvo ${state.profitPct.toFixed(1)}% ≥ ${thresholds.profitTargetPct.toFixed(0)}% (regime=${supreme.regime})`, urgency: 'high' };
+      const contractId = state.input.contractId;
+
+      // ── EMERGÊNCIA: barreira muito próxima — fecha imediatamente ──
+      if (state.barrierDistance !== undefined && state.barrierDistance < 0.5) {
+        return { shouldSell: true, reason: `ACCU: BARREIRA CRÍTICA a ${state.barrierDistance.toFixed(3)}% — saída de emergência`, urgency: 'emergency' };
       }
-      // Trailing stop dinâmico
-      if (state.peakProfit > 0 && state.profit < state.peakProfit * (1 - thresholds.trailingStopPct / 100)) {
-        if (supremeHold) {
-          console.log(`⏸️ [SUPREMO-HOLD] Trailing ativado mas H=${supreme.hurst.toFixed(2)} tendência forte → aguardando`);
-        } else {
-          const drawdown = ((state.peakProfit - state.profit) / state.peakProfit * 100).toFixed(1);
-          return { shouldSell: true, reason: `ACCU: trailing ${drawdown}% do pico (regime=${supreme.regime} H=${supreme.hurst.toFixed(2)})`, urgency: 'high' };
+
+      // ── TENDÊNCIA DA BARREIRA: barreira se aproximando rapidamente ──
+      if (state.barrierDistanceHistory.length >= 5) {
+        const hist = state.barrierDistanceHistory;
+        const oldest = hist[0];
+        const newest = hist[hist.length - 1];
+        const barrierClosingFast = newest < oldest * 0.7 && newest < 1.5;
+        if (barrierClosingFast && state.profitPct >= 0) {
+          return { shouldSell: true, reason: `ACCU: barreira aproximando rápido (${oldest.toFixed(2)}%→${newest.toFixed(2)}%) | lucro=${state.profitPct.toFixed(1)}%`, urgency: 'high' };
         }
       }
-      // Barreira CRÍTICA — SEMPRE fecha, sem override do supremo
-      if (state.barrierDistance !== undefined && state.barrierDistance < thresholds.barrierDangerPct) {
-        return { shouldSell: true, reason: `ACCU: BARREIRA CRÍTICA a ${state.barrierDistance.toFixed(3)}% do spot!`, urgency: 'emergency' };
+
+      // ── ANÁLISE IA TICK A TICK ─────────────────────────────────
+      const spots = state.spotHistory;
+      if (spots.length >= 8) {
+        const n = spots.length;
+
+        // RSI local a partir dos spots do próprio contrato
+        const rsiPeriod = Math.min(14, n - 1);
+        let gains = 0, losses = 0;
+        for (let i = n - rsiPeriod; i < n; i++) {
+          const delta = spots[i] - spots[i - 1];
+          if (delta > 0) gains += delta; else losses -= delta;
+        }
+        const avgGain = gains / rsiPeriod;
+        const avgLoss = losses / rsiPeriod;
+        const localRSI = avgLoss === 0 ? 100 : 100 - (100 / (1 + avgGain / avgLoss));
+
+        // Momentum dos últimos 5 e 3 spots
+        const m5 = (spots[n-1] - spots[Math.max(0, n-6)]) / (spots[Math.max(0, n-6)] || 1);
+        const m3 = (spots[n-1] - spots[Math.max(0, n-4)]) / (spots[Math.max(0, n-4)] || 1);
+        const m3prev = n >= 7 ? (spots[n-4] - spots[Math.max(0, n-7)]) / (spots[Math.max(0, n-7)] || 1) : m3;
+        const momentumDecelerating = Math.abs(m3) < Math.abs(m3prev) * 0.5 && Math.abs(m3prev) > 0.00001;
+
+        // Ticks consecutivos adversos (preço caindo)
+        let consecutiveAdverse = 0;
+        for (let i = n - 1; i >= Math.max(1, n - 6); i--) {
+          if (spots[i] < spots[i - 1]) consecutiveAdverse++;
+          else break;
+        }
+
+        // Score de saída IA — combina todos os sinais
+        let exitScore = 0;
+        const reasons: string[] = [];
+
+        if (localRSI > 70)            { exitScore += 30; reasons.push(`RSI=${localRSI.toFixed(0)} sobrecomprado`); }
+        else if (localRSI > 62)       { exitScore += 15; reasons.push(`RSI=${localRSI.toFixed(0)} elevado`); }
+
+        if (momentumDecelerating)     { exitScore += 25; reasons.push(`momentum desacelerando`); }
+        if (m5 < 0)                   { exitScore += 20; reasons.push(`m5=${(m5*100).toFixed(3)}% negativo`); }
+        if (m3 < 0 && m5 < 0)        { exitScore += 15; reasons.push(`m3+m5 negativos`); }
+
+        if (consecutiveAdverse >= 4)  { exitScore += 35; reasons.push(`${consecutiveAdverse} ticks adversos`); }
+        else if (consecutiveAdverse >= 3) { exitScore += 20; reasons.push(`${consecutiveAdverse} ticks adversos`); }
+
+        if (supreme.reversalDetected && supreme.strength > 50) { exitScore += 30; reasons.push(`reversão suprema (${supreme.strength.toFixed(0)})`); }
+        if (supreme.urgency === 'high')      { exitScore += 20; reasons.push(`urgência alta`); }
+        if (supreme.urgency === 'emergency') { exitScore += 45; reasons.push(`EMERGÊNCIA suprema`); }
+
+        // Motor supremo reduz score se tendência forte (aguardar)
+        if (supremeHold && state.profitPct > 0) exitScore -= 20;
+        if (supreme.hurst > 0.65)             exitScore -= 15;
+        if (supreme.convergence > 70 && !supreme.reversalDetected) exitScore -= 10;
+
+        // Limiar adaptativo: mais sensível quando já tem lucro
+        const exitThreshold = state.profitPct > 5 ? 40 : state.profitPct > 0 ? 55 : 70;
+
+        if (state.tickCount % 3 === 0) {
+          console.log(`🤖 [ACCU-IA] ${contractId} | tick=${state.tickCount} | RSI=${localRSI.toFixed(1)} | m5=${(m5*100).toFixed(3)}% | adv=${consecutiveAdverse} | H=${supreme.hurst.toFixed(2)} | exitScore=${exitScore} | limiar=${exitThreshold} | lucro=${state.profitPct.toFixed(1)}%`);
+        }
+
+        if (exitScore >= exitThreshold) {
+          return {
+            shouldSell: true,
+            reason: `ACCU-IA: ${reasons.join(' | ')} | score=${exitScore}/${exitThreshold} | lucro=${state.profitPct.toFixed(1)}%`,
+            urgency: supreme.urgency === 'emergency' ? 'emergency' : 'high',
+          };
+        }
       }
-      // Barreira moderada + sinal supremo de reversão
-      if (state.barrierDistance !== undefined && state.barrierDistance < thresholds.barrierDangerPct * 2.5 && (confirmedReversal || supreme.urgency === 'high')) {
-        return { shouldSell: true, reason: `ACCU: barreira ${state.barrierDistance.toFixed(3)}% + ${supreme.exitReason || 'reversão confirmada'}`, urgency: 'high' };
-      }
-      // Sinal supremo de reversão com lucro
-      if (!supremeHold && (confirmedReversal || supreme.urgency === 'high') && state.profitPct > 5) {
-        return { shouldSell: true, reason: `ACCU: ${supreme.exitReason || 'reversão suprema confirmada'} | lucro=${state.profitPct.toFixed(1)}%`, urgency: supreme.urgency };
+
+      // ── SINAL SUPREMO ISOLADO (fallback se spotHistory < 8 ticks) ──
+      if (!supremeHold && (confirmedReversal || supreme.urgency === 'high') && state.profitPct > 3) {
+        return { shouldSell: true, reason: `ACCU: ${supreme.exitReason || 'reversão suprema'} | lucro=${state.profitPct.toFixed(1)}%`, urgency: supreme.urgency };
       }
     }
 
