@@ -1648,10 +1648,13 @@ export class AutoTradingScheduler {
           const supremeUnknown = !supremeAnalysis || supremeAnalysis.regime === 'unknown' || supremeAnalysis.regime === 'neutral';
           const indicatorsAllDefault = rsiIsDefault && macdIsDefault && bbIsDefault;
 
-          if (indicatorsAllDefault && regimeUnknown && supremeUnknown) {
-            console.warn(`⛔ [${operationId}] ACCU BLOQUEADO: Indicadores técnicos em valores padrão (RSI=50, MACD=0, BB=0.5) E regime desconhecido. Análise insuficiente para acumulador — entrada negada.`);
-            this.setPhase('AGUARDANDO', `⛔ ACCU bloqueado em ${selectedSymbol}: indicadores sem dados reais (RSI=50/MACD=0/BB=0.5 + regime desconhecido)`, 'warning');
-            return { success: false, error: `ACCU: Indicadores técnicos insuficientes + regime desconhecido — entrada bloqueada para proteger capital` };
+          // 🔴 BLOQUEIO TOTAL: Se os três indicadores estão todos em valores padrão (não foram calculados),
+          // a análise técnica real não ocorreu — entrar seria operar no escuro. Bloquear SEMPRE,
+          // independente do regime ou supremeAnalysis. (Correção forense: 100% das perdas tinham RSI=50/MACD=0/BB=0.5)
+          if (indicatorsAllDefault) {
+            console.warn(`⛔ [${operationId}] ACCU BLOQUEADO: Indicadores técnicos em valores de inicialização padrão (RSI=50, MACD=0, BB=0.5) — análise técnica real não foi calculada. Entrada negada para proteger capital.`);
+            this.setPhase('AGUARDANDO', `⛔ ACCU bloqueado em ${selectedSymbol}: indicadores não calculados (RSI=50/MACD=0/BB=0.5)`, 'warning');
+            return { success: false, error: `ACCU: Indicadores fictícios (RSI=50/MACD=0/BB=0.5) — análise técnica não disponível, entrada bloqueada` };
           }
 
           // Volatilidade extrema: R_75 e R_100 têm volatilidade inerentemente alta — 
@@ -2298,6 +2301,14 @@ export class AutoTradingScheduler {
             volatilityHistory: []
           } : null;
 
+          // Detectar se estamos operando exclusivamente acumuladores para usar scoring ACCU
+          const isAccuOnly = activeModalities && activeModalities.length > 0 &&
+            activeModalities.every((m: string) => m === 'accumulator');
+          const isAccuIncluded = activeModalities && activeModalities.includes('accumulator');
+
+          // Buscar dados do motor supremo para scoring ACCU (volatilidade e Hurst real)
+          const supremeForScore = isAccuIncluded ? supremeAnalyzer.getLatestAnalysis(symbol) : null;
+
           const scoreInput = {
             symbol,
             priceHistory,
@@ -2308,7 +2319,15 @@ export class AutoTradingScheduler {
               ? Math.max(aiConsensus.upScore || 0, aiConsensus.downScore || 0, aiConsensus.neutralScore || 0)
               : aiConsensus.consensusStrength,
             performance: perfRecord,
-            isBlacklisted: false
+            isBlacklisted: false,
+            // Scoring especializado para ACCU: usa volatilidade + Hurst em vez de frequência de dígitos
+            contractType: isAccuOnly ? 'accumulator' : undefined,
+            supremeStats: supremeForScore ? {
+              hurstExponent: supremeForScore.statistics.hurstExponent,
+              shannonEntropy: supremeForScore.statistics.shannonEntropy,
+              zScoreVolatility: supremeForScore.statistics.zScoreVolatility,
+              marketRegime: supremeForScore.regime,
+            } : undefined,
           };
 
           const scoreResult = assetScorer.scoreAsset(scoreInput);

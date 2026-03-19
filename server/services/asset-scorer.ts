@@ -37,6 +37,14 @@ export interface AssetScoreInput {
   aiAgreementStrength: number;    // 0-100 — quão alinhadas estão as 5 IAs
   performance: AssetPerformanceRecord | null;
   isBlacklisted: boolean;
+  // Campos opcionais para scoring especializado por tipo de contrato
+  contractType?: string;          // 'accumulator' | 'digit_differ' | etc.
+  supremeStats?: {                // Dados do motor supremo (volatilidade real e regime)
+    hurstExponent: number;
+    shannonEntropy: number;
+    zScoreVolatility: number;
+    marketRegime: string;
+  };
 }
 
 export interface DimensionScore {
@@ -84,7 +92,9 @@ const WEIGHTS = {
 export class AssetScorer {
 
   /**
-   * Pontua um ativo em todas as 6 dimensões e retorna o score final
+   * Pontua um ativo em todas as 6 dimensões e retorna o score final.
+   * Para acumuladores (contractType='accumulator'), D1 e D2 usam métricas
+   * de volatilidade e regime de mercado em vez de análise de frequência de dígitos.
    */
   scoreAsset(input: AssetScoreInput): AssetScoreResult {
     // Verificação de bloqueio imediato (descarte antes de qualquer cálculo)
@@ -93,15 +103,30 @@ export class AssetScorer {
       return this.buildBlockedResult(input.symbol, blockCheck);
     }
 
-    // Calcular frequência de dígitos para análises matemáticas/estatísticas
-    const digitAnalysis = digitFrequencyAnalyzer.analyzeSymbolMultiWindow(input.symbol);
-    const barrierResult = digitFrequencyAnalyzer.getBestBarrier(input.symbol);
+    const isAccumulator = input.contractType === 'accumulator';
 
-    // ── D1: Estatística ──────────────────────────────────────────────────────
-    const d1 = this.scoreStatistical(input, digitAnalysis);
+    let d1: DimensionScore;
+    let d2: DimensionScore;
+    let barrierResult: any;
 
-    // ── D2: Edge Matemático ──────────────────────────────────────────────────
-    const d2 = this.scoreMathematical(input, digitAnalysis, barrierResult);
+    if (isAccumulator) {
+      // ── ACCU D1: Volatilidade de Preço ────────────────────────────────────
+      // Acumuladores perdem quando o preço cruza a barreira — baixa volatilidade = melhor
+      d1 = this.scoreAccuVolatility(input);
+
+      // ── ACCU D2: Regime de Mercado (Hurst + Entropia) ─────────────────────
+      // Mercado trending/calm = bom para ACCU. Volátil/randômico = péssimo.
+      d2 = this.scoreAccuRegime(input);
+
+      // ACCU não tem barreira de dígito — usar placeholder
+      barrierResult = { barrier: '0', edge: 0, confidence: 0 };
+    } else {
+      // Calcular frequência de dígitos para análises matemáticas/estatísticas
+      const digitAnalysis = digitFrequencyAnalyzer.analyzeSymbolMultiWindow(input.symbol);
+      barrierResult = digitFrequencyAnalyzer.getBestBarrier(input.symbol);
+      d1 = this.scoreStatistical(input, digitAnalysis);
+      d2 = this.scoreMathematical(input, digitAnalysis, barrierResult);
+    }
 
     // ── D3: Histórico de Performance ─────────────────────────────────────────
     const d3 = this.scoreHistorical(input);
@@ -142,6 +167,134 @@ export class AssetScorer {
       kellyFraction,
       stakeMultiplier
     };
+  }
+
+  // ─── ACCU D1: Volatilidade de Preço ──────────────────────────────────────
+  // Para acumuladores: volatilidade baixa = barreira mais difícil de atingir = melhor
+
+  private scoreAccuVolatility(input: AssetScoreInput): DimensionScore {
+    const prices = input.priceHistory.slice(-100);
+
+    if (prices.length < 20) {
+      return this.dim('Volatilidade ACCU', 40, WEIGHTS.statistical,
+        `Histórico insuficiente (${prices.length} preços) — score conservador`);
+    }
+
+    // Calcular retornos percentuais tick-a-tick
+    const returns: number[] = [];
+    for (let i = 1; i < prices.length; i++) {
+      returns.push(Math.abs((prices[i] - prices[i - 1]) / prices[i - 1]));
+    }
+
+    const mean = returns.reduce((s, r) => s + r, 0) / returns.length;
+    const variance = returns.reduce((s, r) => s + Math.pow(r - mean, 2), 0) / returns.length;
+    const stdDev = Math.sqrt(variance);
+
+    // Coeficiente de variação (volatilidade relativa)
+    // ACCU: quanto menor a volatilidade, mais seguro para entrar
+    const cv = mean; // média dos movimentos tick-a-tick (já é relativa ao preço)
+
+    // Score: volatilidade baixa = score alto (seguro para ACCU)
+    // cv < 0.001 (0.1%/tick) = muito calmo = 95
+    // cv < 0.002 (0.2%/tick) = calmo = 80
+    // cv < 0.003 (0.3%/tick) = moderado = 60
+    // cv < 0.005 (0.5%/tick) = agitado = 40
+    // cv >= 0.005 = muito agitado = 20
+    let score: number;
+    if      (cv < 0.001) score = 95;
+    else if (cv < 0.002) score = 80;
+    else if (cv < 0.003) score = 62;
+    else if (cv < 0.005) score = 42;
+    else                  score = 20;
+
+    // Bônus se dados do motor supremo confirmam baixa volatilidade
+    if (input.supremeStats) {
+      const zVol = input.supremeStats.zScoreVolatility;
+      if (zVol < 1.0) score = Math.min(100, score + 10); // volatilidade abaixo do normal = bom
+      else if (zVol > 2.0) score = Math.max(0, score - 20); // volatilidade anormal = muito ruim para ACCU
+    }
+
+    return this.dim('Volatilidade ACCU', score, WEIGHTS.statistical,
+      `mvto-médio=${(cv * 100).toFixed(3)}%/tick | σ=${(stdDev * 100).toFixed(3)}% | n=${prices.length}${input.supremeStats ? ` | zVol=${input.supremeStats.zScoreVolatility.toFixed(2)}` : ''}`);
+  }
+
+  // ─── ACCU D2: Regime de Mercado (Hurst + Entropia) ───────────────────────
+  // Para acumuladores: trending ou calm = bom. Randômico ou muito volátil = ruim.
+
+  private scoreAccuRegime(input: AssetScoreInput): DimensionScore {
+    if (!input.supremeStats) {
+      // Sem dados do motor supremo, estimar pela série de preços
+      const prices = input.priceHistory.slice(-50);
+      if (prices.length < 20) {
+        return this.dim('Regime ACCU', 40, WEIGHTS.mathematical,
+          'Motor supremo indisponível — sem estimativa de regime');
+      }
+
+      // Estimativa simples de Hurst pela autocorrelação de lag-1
+      const returns: number[] = [];
+      for (let i = 1; i < prices.length; i++) {
+        returns.push(prices[i] - prices[i - 1]);
+      }
+      const n = returns.length;
+      if (n < 10) {
+        return this.dim('Regime ACCU', 45, WEIGHTS.mathematical,
+          'Histórico insuficiente para estimar regime');
+      }
+      const mean = returns.reduce((s, r) => s + r, 0) / n;
+      let cov = 0, varSum = 0;
+      for (let i = 0; i < n - 1; i++) {
+        cov += (returns[i] - mean) * (returns[i + 1] - mean);
+        varSum += Math.pow(returns[i] - mean, 2);
+      }
+      // Proteção contra divisão por zero (mercado completamente estático)
+      const autocorr = varSum > 1e-12 ? Math.max(-1, Math.min(1, cov / varSum)) : 0;
+      // Autocorrelação positiva = trending (Hurst > 0.5), negativa = mean-reverting
+      const hurstProxy = Math.max(0.1, Math.min(0.9, 0.5 + autocorr * 0.3));
+
+      let score = 50;
+      if (hurstProxy > 0.62) score = 78; // trending → bom para ACCU
+      else if (hurstProxy > 0.52) score = 62;
+      else if (hurstProxy < 0.40) score = 55; // mean-reverting → aceitável
+      else score = 40; // randômico → ruim
+
+      return this.dim('Regime ACCU', score, WEIGHTS.mathematical,
+        `Hurst estimado=${hurstProxy.toFixed(2)} | autocorr=${autocorr.toFixed(3)} | regime=estimado`);
+    }
+
+    const { hurstExponent, shannonEntropy, marketRegime } = input.supremeStats;
+
+    // Mapa de regime → score para ACCU
+    // Mercado em tendência clara = ótimo (barreira em 1 direção, preço vai embora da outra)
+    // Mercado calmo = bom (menos chance de atingir barreira)
+    // Mercado randômico/volátil = ruim (preço pode ir em qualquer direção)
+    const regimeScores: Record<string, number> = {
+      'strong_trend':    90,
+      'weak_trend':      75,
+      'calm':            80,
+      'ranging':         65,
+      'mean_reverting':  55,
+      'neutral':         45,
+      'unknown':         30,
+      'volatile':        20,
+      'chaotic':         10,
+    };
+    let regimeScore = regimeScores[marketRegime] ?? 40;
+
+    // Ajuste pelo expoente de Hurst (medida mais precisa que o rótulo)
+    // Hurst > 0.6 = trending → bom para ACCU
+    // Hurst ~0.5 = randômico → neutro
+    // Hurst < 0.4 = mean-reverting → aceitável mas não ótimo
+    if (hurstExponent > 0.65)       regimeScore = Math.min(100, regimeScore + 15);
+    else if (hurstExponent > 0.55)  regimeScore = Math.min(100, regimeScore + 5);
+    else if (hurstExponent < 0.40)  regimeScore = Math.max(0, regimeScore - 5);
+    else if (hurstExponent < 0.35)  regimeScore = Math.max(0, regimeScore - 15);
+
+    // Penalidade por alta entropia (mercado imprevisível)
+    if (shannonEntropy > 3.0) regimeScore = Math.max(0, regimeScore - 15);
+    else if (shannonEntropy < 2.0) regimeScore = Math.min(100, regimeScore + 10);
+
+    return this.dim('Regime ACCU', regimeScore, WEIGHTS.mathematical,
+      `Hurst=${hurstExponent.toFixed(2)} | Entropia=${shannonEntropy.toFixed(2)} | Regime=${marketRegime}`);
   }
 
   // ─── D1: Dimensão Estatística ─────────────────────────────────────────────
