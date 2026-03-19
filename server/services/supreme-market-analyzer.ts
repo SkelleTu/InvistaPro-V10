@@ -673,8 +673,13 @@ export class SupremeMarketAnalyzer extends EventEmitter {
     // 🔧 MODO OPERAÇÕES: growth_rate fixo em 0.05 (5%) — IA decide QUANDO entrar via análise em tempo real
     const volLevel = Math.abs(stats.zScoreVolatility);
     const growthRate = 0.05; // 5% fixo — modo operações configurado pelo usuário
-    // 🎯 Duração alvo: 1-2 ticks — IA escolhe com base no regime
-    const expectedTicks = regime === 'strong_trend' ? 2 : 1;
+    // 🎯 Duração alvo: 2-4 ticks — IA escolhe com base no regime
+    // MATEMÁTICA: com growth=5%, EV breakeven = WR > 95.24% (1 tick) | 90.9% (2 ticks) | 87% (3 ticks)
+    // Mínimo de 2 ticks para garantir EV positivo mesmo com WR ~95%
+    const expectedTicks = regime === 'strong_trend' ? 4
+                        : regime === 'calm'         ? 3
+                        : regime === 'weak_trend'   ? 2
+                        : 2; // ranging/chaotic: mínimo 2 (abaixo disso EV negativo)
 
     // ── Multiplicador: fator por força da tendência (dinâmico — Deriv aceita 5,10,20,50,100) ──
     const trendStrength = mtf.tf30s.strength;

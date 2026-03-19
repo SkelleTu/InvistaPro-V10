@@ -725,7 +725,7 @@ export class AutoTradingScheduler {
       Math.max(1.00, Math.round(bankBalance * this.LEVERAGE_STAKE_PCT * 100) / 100)
     );
 
-    // 9. Executar 1 contrato ACCU — 1 tick, growth_rate 5% fixo
+    // 9. Executar 1 contrato ACCU — 3 ticks, growth_rate 5% fixo (≈15.76% ganho | breakeven WR=86.4%)
     const levOpId = `LEVERAGE_${now}_${best.symbol}`;
     console.log(`🚀🚀 [LEVERAGE FIRE] Ativo: ${best.symbol} | Regime: ${best.regime} | Score: ${best.consensus.toFixed(1)} | Hurst: ${best.hurst.toFixed(3)} | Stake: $${leverageStake} (${(this.LEVERAGE_STAKE_PCT * 100).toFixed(0)}% de $${bankBalance.toFixed(2)}) | Ativos alinhados: ${exceptional.length}`);
     this.setPhase('EXECUTANDO', `🚀 ALAVANCAGEM: ${best.symbol} $${leverageStake} (${exceptional.length} ativos alinhados)`, 'trade');
@@ -759,7 +759,7 @@ export class AutoTradingScheduler {
           aiConsensus: JSON.stringify({ leverageMode: true, assetsAligned: exceptional.length, score: best.consensus }),
         }).catch(err => console.error('⚠️ [LEVERAGE] Erro ao salvar operação:', err));
 
-        // Auto-sell após 1 tick via contract monitor
+        // Auto-sell após 3 ticks via contract monitor (≈15.76% ganho com 5% growth)
         if (contract.contract_id) {
           const { startMonitoring } = await import('./contract-monitor');
           startMonitoring({
@@ -771,7 +771,7 @@ export class AutoTradingScheduler {
             direction: 'up',
             userId: config.userId,
             openedAt: now,
-            targetTicks: 1,
+            targetTicks: 3,
           });
         }
       } else {
@@ -1841,6 +1841,17 @@ export class AutoTradingScheduler {
             return { success: false, error: `ACCU: ${selectedSymbol} (alta volatilidade) com regime desconhecido — bloqueado por segurança` };
           }
 
+          // 🚫 BLOQUEIO 1HZ EM ACCU: índices 1s têm barreiras de knockout muito próximas
+          // Com 1 tick/segundo, a barreira é atingida muito mais facilmente → alta taxa de loss
+          // Só permitir 1HZ em ACCU se o regime for strong_trend (tendência clara e confirmada)
+          const is1HzSymbol = /^1HZ/.test(selectedSymbol);
+          const supremeRegime = supremeAnalysis?.regime ?? 'unknown';
+          if (is1HzSymbol && supremeRegime !== 'strong_trend') {
+            console.warn(`⛔ [${operationId}] ACCU BLOQUEADO: ${selectedSymbol} é índice 1s (1Hz) — barreiras apertadas demais. Regime atual: ${supremeRegime} (exige strong_trend para ACCU).`);
+            this.setPhase('AGUARDANDO', `⛔ ACCU bloqueado: ${selectedSymbol} (1Hz) requer regime strong_trend`, 'warning');
+            return { success: false, error: `ACCU: ${selectedSymbol} (índice 1s) bloqueado em regime ${supremeRegime} — exige strong_trend para operar acumulador` };
+          }
+
           // 🧠 ACCU: stake inteligente — IA decide por operação (síncrono, zero latência)
           // Usa apenas dados já calculados em memória: saldo em cache, consenso, regime, risco
           const accuRisk = supremeAnalysis?.adaptiveParams?.accumulator?.riskLevel ?? 'medium';
@@ -1856,10 +1867,10 @@ export class AutoTradingScheduler {
               opportunityQuality = 'exceptional'; // IA muito confiante + mercado ideal
             } else if (consensus >= 80 && accuRisk !== 'high') {
               opportunityQuality = 'good';        // Sinal forte, risco controlado
-            } else if (consensus >= 65 && accuRisk !== 'high') {
-              opportunityQuality = 'moderate';    // Sinal razoável, risco não-alto (antes exigia 'low')
+            } else if (consensus >= 75 && accuRisk === 'low') {
+              opportunityQuality = 'moderate';    // Sinal razoável, apenas risco baixo (revertido: evita trades em risco médio)
             }
-            // 'minimum' → consenso < 65% ou risco alto → stake mínimo $1
+            // 'minimum' → consenso < 75% ou risco médio/alto → stake mínimo $1
 
             // Teto pela banca: IA só arrisca mais quando a banca suporta
             const pctByQuality: Record<AccuQuality, number> = {
@@ -1881,8 +1892,9 @@ export class AutoTradingScheduler {
 
             // 🧠 SUPREMO: growth_rate FIXO em 5% (modo operações) — IA decide QUANDO entrar
             const adaptiveGrowth = 0.05; // 5% fixo — modo operações configurado pelo usuário
-            // ⚡ Ticks alvo: 1-2 — IA escolhe com base no regime. Contrato FECHA AUTOMATICAMENTE após N ticks
-            const accuTicks = supremeAnalysis?.adaptiveParams?.accumulator?.expectedTicks ?? 1;
+            // ⚡ Ticks alvo: mínimo 2 — garante EV positivo (com 5% growth, breakeven = 90.9% em 2t vs 95.24% em 1t)
+            // Se supremeAnalysis está disponível usa valor do regime, senão mínimo de 2 (nunca 1 isolado)
+            const accuTicks = Math.max(2, supremeAnalysis?.adaptiveParams?.accumulator?.expectedTicks ?? 2);
             accuTargetTicks = accuTicks;
             console.log(`📊 [${operationId}] ACCU MODO-OPS: stake=$${accuStake} [${opportunityQuality}] (banca=$${bankBalance.toFixed(2)} | consenso=${consensus}% | risco=${accuRisk}) | growth=${(adaptiveGrowth*100).toFixed(0)}% FIXO | ticks=${accuTicks}${supremeAnalysis ? ` | regime=${regime} | hurst=${supremeAnalysis.statistics.hurstExponent.toFixed(2)}` : ''} | ${selectedSymbol}`);
             contract = await derivAPI.buyFlexibleContract({
@@ -3236,11 +3248,10 @@ export class AutoTradingScheduler {
           amount = this.calculateDynamicStake(amount, consensoStrength, volatility || 0.5);
         }
 
-        // 🛡️ SAFETY CAP — em recovery permite até 20% da banca (para cobrir mínimo ACCU $1); normal: 8%
-        // O cap de 8% (era 3%) permite que a amplificação dinâmica da IA tenha efeito real:
-        //   banca $10 → cap $0.80 → stake amplificado de $0.56 (×1.6) passa sem ser cortado
+        // 🛡️ SAFETY CAP — em recovery permite até 20% da banca (para cobrir mínimo ACCU $1); normal: 4%
+        // 4% permite amplificação ×1.6 em bancas acima de $8.75 sem corte, preservando a banca menor
         const inRecovery = realStatsTracker.isPostLossMode();
-        const capPct = inRecovery ? 0.20 : 0.08;
+        const capPct = inRecovery ? 0.20 : 0.04;
         // Em recovery: mínimo de $1.00 (mínimo do ACCU); normal: $0.35
         const minFloor = inRecovery ? 1.00 : 0.35;
         const maxSafeStake = Math.max(minFloor, bankSize * capPct);
