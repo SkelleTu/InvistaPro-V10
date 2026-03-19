@@ -82,6 +82,14 @@ export class AutoTradingScheduler {
   private readonly MARTINGALE_CONSENSUS_THRESHOLD = 92;
   private readonly MARTINGALE_COOLDOWN_MS = 15 * 60 * 1000; // 15 min entre sequências
 
+  // 🚀 MODO ALAVANCAGEM — disparo raro e cirúrgico quando o mercado geral está excepcional
+  private leverageLastFiredAt: number = 0;
+  private readonly LEVERAGE_COOLDOWN_MS       = 25 * 60 * 1000; // 25 min entre disparos (raro por design)
+  private readonly LEVERAGE_MIN_ASSETS        = 3;               // ativos em condição excepcional simultaneamente
+  private readonly LEVERAGE_CONSENSUS_MIN     = 78;              // score mínimo no ativo escolhido (supremeAnalysis.opportunityScore)
+  private readonly LEVERAGE_STAKE_PCT         = 0.05;            // 5% da banca
+  private readonly LEVERAGE_MAX_STAKE         = 50.00;           // teto absoluto de segurança
+
   private setPhase(phase: string, detail: string, type: 'info' | 'success' | 'warning' | 'trade' = 'info'): void {
     this.currentPhase = phase;
     this.currentPhaseDetail = detail;
@@ -598,6 +606,12 @@ export class AutoTradingScheduler {
         }
       });
 
+      // 🚀 MODO ALAVANCAGEM: verificar se o mercado geral está excepcional para disparo cirúrgico
+      // Roda em paralelo com o ciclo normal — não bloqueia, não adiciona latência às operações normais
+      this.checkAndExecuteLeverageTrade(operationId).catch(err =>
+        console.error(`⚠️ [LEVERAGE] Erro no ciclo de alavancagem:`, err)
+      );
+
       // Executar TODAS as análises em paralelo total - sem limitações de burst
       // Sistema é inteligente para não abrir trades desnecessários
       await Promise.allSettled(analisePromises);
@@ -622,6 +636,151 @@ export class AutoTradingScheduler {
   }
 
 
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // 🚀 MODO ALAVANCAGEM — 1 contrato cirúrgico quando o mercado geral brilha
+  // ─────────────────────────────────────────────────────────────────────────
+  private async checkAndExecuteLeverageTrade(operationId: string): Promise<void> {
+    // 1. Cooldown: não disparar com frequência
+    const now = Date.now();
+    if (now - this.leverageLastFiredAt < this.LEVERAGE_COOLDOWN_MS) {
+      const minLeft = Math.ceil((this.LEVERAGE_COOLDOWN_MS - (now - this.leverageLastFiredAt)) / 60000);
+      console.log(`🚀 [LEVERAGE] Cooldown ativo — próximo disparo possível em ~${minLeft}min`);
+      return;
+    }
+
+    // 2. Sistema de recuperação ou circuit breaker ativo? Não alavancar agora
+    if (realStatsTracker.isPostLossMode()) {
+      console.log(`🚀 [LEVERAGE] Bloqueado: sistema em modo de recuperação`);
+      return;
+    }
+
+    // 3. Escanear todos os ativos com análise recente (< 90s) buscando condição excepcional
+    const ACCU_SYMBOLS = [
+      'R_10','R_25','R_50','R_75','R_100',
+      '1HZ10V','1HZ25V','1HZ50V','1HZ75V','1HZ100V',
+      'JD10','JD25','JD50','JD75','JD100',
+      'RDBULL','RDBEAR',
+    ];
+    const STALE_THRESHOLD_MS = 90 * 1000;
+
+    type Candidate = { symbol: string; consensus: number; hurst: number; regime: string };
+    const exceptional: Candidate[] = [];
+
+    for (const sym of ACCU_SYMBOLS) {
+      const sa = supremeAnalyzer.getLatestAnalysis(sym);
+      if (!sa) continue;
+      if (now - sa.timestamp > STALE_THRESHOLD_MS) continue; // análise velha — ignorar
+
+      const regime    = sa.regime;
+      const hurst     = sa.statistics.hurstExponent;
+      const consensus = sa.opportunityScore; // 0-100 score calculado pelo analyzer
+
+      // Índices sintéticos Deriv têm Hurst ~0.10 por design — não usar Hurst como filtro.
+      // Critérios reais: opportunityScore alto + qualquer regime favorável (incluindo ranging) + consenso forte
+      const isExceptional =
+        consensus >= 72 &&         // score supremo acima da média
+        regime !== 'chaotic';      // qualquer regime exceto caótico
+
+      if (isExceptional) {
+        exceptional.push({ symbol: sym, consensus, hurst, regime });
+      }
+    }
+
+    console.log(`🚀 [LEVERAGE] Ativos excepcionais encontrados: ${exceptional.length}/${ACCU_SYMBOLS.length}`);
+
+    // 4. Precisamos de pelo menos N ativos excepcionais simultaneamente (mercado geral forte)
+    if (exceptional.length < this.LEVERAGE_MIN_ASSETS) {
+      console.log(`🚀 [LEVERAGE] Insuficiente (${exceptional.length} < ${this.LEVERAGE_MIN_ASSETS} ativos) — aguardando janela melhor`);
+      return;
+    }
+
+    // 5. Escolher o MELHOR ativo do grupo (maior consensus × hurst)
+    exceptional.sort((a, b) => (b.consensus * b.hurst) - (a.consensus * a.hurst));
+    const best = exceptional[0];
+
+    // 6. Verificar threshold de consenso final no ativo escolhido
+    // Usar o microscopic também para double-check síncrono
+    const saFinal = supremeAnalyzer.getLatestAnalysis(best.symbol);
+    if (!saFinal || saFinal.opportunityScore < this.LEVERAGE_CONSENSUS_MIN) {
+      console.log(`🚀 [LEVERAGE] Melhor ativo ${best.symbol} não atingiu threshold final (${saFinal?.opportunityScore ?? 'N/A'} < ${this.LEVERAGE_CONSENSUS_MIN})`);
+      return;
+    }
+
+    // 7. Buscar dados do usuário ativo (primeiro config ativo encontrado)
+    const activeConfigs = await storage.getActiveTradeConfigurations();
+    if (!activeConfigs.length) return;
+    const config = activeConfigs[0];
+    const tokenData = await storage.getUserDerivToken(config.userId);
+    if (!tokenData) return;
+
+    // 8. Calcular stake: 5% da banca, dentro do teto de segurança
+    const bankBalance = this.cachedBalance?.value ?? 0;
+    if (bankBalance <= 0) {
+      console.log(`🚀 [LEVERAGE] Saldo em cache indisponível — abortando`);
+      return;
+    }
+    const leverageStake = Math.min(
+      this.LEVERAGE_MAX_STAKE,
+      Math.max(1.00, Math.round(bankBalance * this.LEVERAGE_STAKE_PCT * 100) / 100)
+    );
+
+    // 9. Executar 1 contrato ACCU — 1 tick, growth_rate 5% fixo
+    const levOpId = `LEVERAGE_${now}_${best.symbol}`;
+    console.log(`🚀🚀 [LEVERAGE FIRE] Ativo: ${best.symbol} | Regime: ${best.regime} | Score: ${best.consensus.toFixed(1)} | Hurst: ${best.hurst.toFixed(3)} | Stake: $${leverageStake} (${(this.LEVERAGE_STAKE_PCT * 100).toFixed(0)}% de $${bankBalance.toFixed(2)}) | Ativos alinhados: ${exceptional.length}`);
+    this.setPhase('EXECUTANDO', `🚀 ALAVANCAGEM: ${best.symbol} $${leverageStake} (${exceptional.length} ativos alinhados)`, 'trade');
+
+    try {
+      const derivAPI = new (await import('./deriv-api')).DerivAPIService(tokenData.token);
+      await derivAPI.connect();
+      const contract = await derivAPI.buyFlexibleContract({
+        contract_type: 'ACCU',
+        symbol: best.symbol,
+        amount: leverageStake,
+        growth_rate: 0.05,
+      });
+
+      if (contract) {
+        this.leverageLastFiredAt = now; // marcar cooldown
+        console.log(`✅ [LEVERAGE] Contrato aberto: ${contract.contract_id} | ${best.symbol} | $${leverageStake}`);
+        this.setPhase('AGUARDANDO', `✅ Alavancagem executada: ${best.symbol} $${leverageStake}`, 'success');
+
+        // Registrar operação no banco (async, não bloqueia)
+        storage.saveTradeOperation({
+          userId: config.userId,
+          symbol: best.symbol,
+          direction: 'accumulator',
+          contractType: 'ACCU',
+          tradeType: 'accumulator',
+          amount: leverageStake,
+          duration: 1,
+          status: 'pending',
+          contractId: contract.contract_id?.toString(),
+          aiConsensus: JSON.stringify({ leverageMode: true, assetsAligned: exceptional.length, score: best.consensus }),
+        }).catch(err => console.error('⚠️ [LEVERAGE] Erro ao salvar operação:', err));
+
+        // Auto-sell após 1 tick via contract monitor
+        if (contract.contract_id) {
+          const { startMonitoring } = await import('./contract-monitor');
+          startMonitoring({
+            contractId: contract.contract_id,
+            contractType: 'ACCU',
+            symbol: best.symbol,
+            buyPrice: leverageStake,
+            amount: leverageStake,
+            direction: 'up',
+            userId: config.userId,
+            openedAt: now,
+            targetTicks: 1,
+          });
+        }
+      } else {
+        console.warn(`⚠️ [LEVERAGE] Contrato rejeitado pela Deriv para ${best.symbol}`);
+      }
+    } catch (err) {
+      console.error(`❌ [LEVERAGE] Erro ao executar alavancagem:`, err);
+    }
+  }
 
   private async processAnaliseNaturalConfiguration(config: any, operationId: string): Promise<{success: boolean, error?: string}> {
     // 🔴 VERIFICAÇÃO CRÍTICA #2: Flag de pausa centralizada (antes de qualquer operação)
