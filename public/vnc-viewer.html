@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Desktop Virtual - MetaTrader 5</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #1a1a2e; }
+    #screen { width: 100%; height: 100%; }
+    #screen canvas { display: block; }
+    #overlay {
+      position: fixed; inset: 0;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      background: #1a1a2e; color: #fff; font-family: 'Segoe UI', sans-serif;
+      transition: opacity 0.5s;
+      z-index: 100;
+    }
+    #overlay.hidden { opacity: 0; pointer-events: none; }
+    .spinner {
+      width: 48px; height: 48px;
+      border: 4px solid rgba(255,255,255,0.15);
+      border-top-color: #3b82f6;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-bottom: 20px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #status-msg { font-size: 14px; color: rgba(255,255,255,0.7); margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <div id="overlay">
+    <div class="spinner"></div>
+    <p id="status-msg">Conectando ao desktop virtual...</p>
+  </div>
+  <div id="screen"></div>
+
+  <script type="module">
+    import RFB from '/novnc/core/rfb.js';
+
+    const overlay = document.getElementById('overlay');
+    const statusMsg = document.getElementById('status-msg');
+
+    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${location.host}/api/desktop/vnc-ws`;
+
+    let rfb;
+    try {
+      rfb = new RFB(document.getElementById('screen'), wsUrl, {
+        credentials: { password: '' }
+      });
+
+      rfb.scaleViewport = true;
+      rfb.resizeSession = false;
+
+      rfb.addEventListener('connect', () => {
+        overlay.classList.add('hidden');
+      });
+
+      rfb.addEventListener('disconnect', (e) => {
+        overlay.classList.remove('hidden');
+        statusMsg.textContent = e.detail.clean
+          ? 'Sessão encerrada.'
+          : 'Conexão perdida. Reinicie o desktop.';
+      });
+
+      rfb.addEventListener('credentialsrequired', () => {
+        rfb.sendCredentials({ password: '' });
+      });
+
+    } catch (err) {
+      statusMsg.textContent = 'Erro ao iniciar o viewer: ' + err.message;
+    }
+  </script>
+</body>
+</html>

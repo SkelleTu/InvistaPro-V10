@@ -3585,6 +3585,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ===== VIRTUAL DESKTOP / MT5 ROUTES =====
+  const { virtualDesktop } = await import('./services/virtual-desktop');
+
+  app.get('/api/desktop/status', isAuthenticated, (req, res) => {
+    res.json(virtualDesktop.getStatus());
+  });
+
+  app.post('/api/desktop/start', isAuthenticated, async (req, res) => {
+    const result = await virtualDesktop.start();
+    res.json(result);
+  });
+
+  app.post('/api/desktop/stop', isAuthenticated, async (req, res) => {
+    await virtualDesktop.stop();
+    res.json({ success: true });
+  });
+
+  app.post('/api/desktop/install-mt5', isAuthenticated, async (req, res) => {
+    const result = await virtualDesktop.installMT5();
+    res.json(result);
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }

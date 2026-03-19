@@ -235,9 +235,13 @@ class VirtualDesktopService {
       return { success: false, error: 'Desktop virtual não está rodando. Inicie primeiro.' };
     }
 
-    const installerPath = path.resolve(process.cwd(), 'attached_assets/mt5setup_1773899696235.exe');
-    if (!existsSync(installerPath)) {
-      return { success: false, error: 'Arquivo do instalador MT5 não encontrado' };
+    const candidates = [
+      'attached_assets/mt5setup_1773900411116.exe',
+      'attached_assets/mt5setup_1773899696235.exe',
+    ];
+    const installerPath = candidates.map(c => path.resolve(process.cwd(), c)).find(p => existsSync(p));
+    if (!installerPath) {
+      return { success: false, error: 'Arquivo do instalador MT5 não encontrado em attached_assets/' };
     }
 
     if (!existsSync(WINE_BIN)) {

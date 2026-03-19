@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { LogOut, User, Settings, Shield, TrendingUp, Palette, Moon, Layout, BarChart3 } from "lucide-react";
+import { LogOut, User, Settings, Shield, TrendingUp, Palette, Moon, Layout, BarChart3, Monitor } from "lucide-react";
 import iconImage from "@/assets/investpro-icon.png";
 import { useAuth } from "@/hooks/useAuth";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -117,6 +117,10 @@ export default function Header() {
                       <DropdownMenuItem onClick={() => setLocation("/metatrader")}>
                         <TrendingUp className="h-4 w-4 mr-2" />
                         MetaTrader 4/5
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setLocation("/metatrader5")}>
+                        <Monitor className="h-4 w-4 mr-2" />
+                        MetaTrader 5 — Desktop
                       </DropdownMenuItem>
                     </>
                   )}

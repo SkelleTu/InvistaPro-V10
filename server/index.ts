@@ -1,5 +1,6 @@
 import express, { type Request, Response, NextFunction } from "express";
 import cookieParser from "cookie-parser";
+import net from "net";
 import { registerRoutes } from "./routes";
 import { whatsappService } from "./whatsappService";
 import { setupVite, serveStatic, log } from "./vite";
@@ -236,6 +237,25 @@ app.use((req, res, next) => {
   };
   
   const server = await registerRoutes(app);
+
+  // WebSocket proxy for noVNC virtual desktop
+  server.on('upgrade', (req, socket, head) => {
+    if (req.url && req.url.startsWith('/api/desktop/vnc-ws')) {
+      const target = net.connect(6080, 'localhost', () => {
+        const reqLine = `${req.method} ${req.url} HTTP/${req.httpVersion}\r\n`;
+        const headers = [];
+        for (let i = 0; i < req.rawHeaders.length; i += 2) {
+          headers.push(`${req.rawHeaders[i]}: ${req.rawHeaders[i + 1]}`);
+        }
+        target.write(reqLine + headers.join('\r\n') + '\r\n\r\n');
+        if (head && head.length > 0) target.write(head);
+        socket.pipe(target);
+        target.pipe(socket);
+      });
+      target.on('error', () => socket.destroy());
+      socket.on('error', () => target.destroy());
+    }
+  });
 
   // Middleware avançado de error handling (deve ser o último middleware)
   app.use(globalErrorHandler);
