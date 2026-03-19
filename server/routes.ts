@@ -3607,6 +3607,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json(result);
   });
 
+  const INTERNAL_SECRET = 'internal-desktop-ctrl-9f3a';
+  const isInternal = (req: any, res: any, next: any) => {
+    if (req.headers['x-internal-key'] === INTERNAL_SECRET) return next();
+    res.status(403).json({ error: 'forbidden' });
+  };
+
+  app.get('/api/internal/desktop/status', isInternal, (req, res) => {
+    res.json(virtualDesktop.getStatus());
+  });
+
+  app.post('/api/internal/desktop/start', isInternal, async (req, res) => {
+    const result = await virtualDesktop.start();
+    res.json(result);
+  });
+
+  app.post('/api/internal/desktop/stop', isInternal, async (req, res) => {
+    await virtualDesktop.stop();
+    res.json({ success: true });
+  });
+
+  app.post('/api/internal/desktop/install-mt5', isInternal, async (req, res) => {
+    const result = await virtualDesktop.startOrInstallMT5();
+    res.json(result);
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }
