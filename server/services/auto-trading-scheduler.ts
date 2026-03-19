@@ -3022,13 +3022,20 @@ export class AutoTradingScheduler {
           amount = this.calculateDynamicStake(amount, consensoStrength, volatility || 0.5);
         }
 
-        // 🛡️ SAFETY CAP — em recovery permite até 5% da banca; normal: 3%
+        // 🛡️ SAFETY CAP — em recovery permite até 20% da banca (para cobrir mínimo ACCU $1); normal: 3%
         const inRecovery = realStatsTracker.isPostLossMode();
-        const capPct = inRecovery ? 0.05 : 0.03;
-        const maxSafeStake = Math.max(0.35, bankSize * capPct);
+        const capPct = inRecovery ? 0.20 : 0.03;
+        // Em recovery: mínimo de $1.00 (mínimo do ACCU); normal: $0.35
+        const minFloor = inRecovery ? 1.00 : 0.35;
+        const maxSafeStake = Math.max(minFloor, bankSize * capPct);
         if (amount > maxSafeStake) {
           console.log(`🛡️ [SAFETY CAP] Stake $${amount.toFixed(2)} > ${(capPct * 100).toFixed(0)}% da banca ($${maxSafeStake.toFixed(2)}) → limitado a $${maxSafeStake.toFixed(2)}`);
           amount = maxSafeStake;
+        }
+        // 🎯 RECOVERY FLOOR: garantir mínimo $1.00 em modo de recuperação (mínimo ACCU/Digit Differs)
+        if (inRecovery && amount < 1.00) {
+          console.log(`🔺 [RECOVERY FLOOR] Stake $${amount.toFixed(2)} < $1.00 mínimo ACCU → elevado a $1.00`);
+          amount = 1.00;
         }
 
         // Arredondar para 2 casas decimais

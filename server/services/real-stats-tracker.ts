@@ -15,8 +15,9 @@
  *   3+ perdas consecutivas → consenso mínimo 95%
  *
  * CAMADA 3 - CIRCUIT BREAKER:
- *   2 perdas consecutivas → pausa obrigatória de 10 minutos antes do próximo trade
- *   3+ perdas consecutivas → pausa obrigatória de 20 minutos
+ *   1 perda consecutiva  → pausa obrigatória de 90 segundos (recuperação rápida)
+ *   2 perdas consecutivas → pausa obrigatória de 5 minutos
+ *   3+ perdas consecutivas → pausa obrigatória de 15 minutos
  *   Assim que saldo superar o pré-perda, volta ao modo normal
  *
  * CAMADA 4 - BLOQUEIO DE ATIVO PERDEDOR:
@@ -354,7 +355,7 @@ class RealStatsTracker {
     // 🛡️ CAMADA 2 - Incrementar streak de perdas consecutivas
     this.consecutiveLosses++;
 
-    // 🛡️ CAMADA 3 - Ativar Circuit Breaker (nível 1=5min, 2=10min, 3+=20min)
+    // 🛡️ CAMADA 3 - Ativar Circuit Breaker (nível 1=90s, 2=5min, 3+=15min)
     const streakLevel = Math.min(this.consecutiveLosses, 3);
     const breakerPauseMs = CIRCUIT_BREAKER_PAUSE_MS[streakLevel] ?? 0;
     if (breakerPauseMs > 0) {
