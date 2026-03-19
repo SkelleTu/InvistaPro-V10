@@ -79,14 +79,14 @@ export class AutoTradingScheduler {
     cooldownUntil: number;
   }> = new Map();
   private pendingMartingaleContracts: Map<string, { userId: string; part: number }> = new Map();
-  private readonly MARTINGALE_CONSENSUS_THRESHOLD = 92;
+  private readonly MARTINGALE_CONSENSUS_THRESHOLD = 75; // Reduzido de 92→75: sistema máx atinge ~75-80%
   private readonly MARTINGALE_COOLDOWN_MS = 15 * 60 * 1000; // 15 min entre sequências
 
   // 🚀 MODO ALAVANCAGEM — disparo raro e cirúrgico quando o mercado geral está excepcional
   private leverageLastFiredAt: number = 0;
   private readonly LEVERAGE_COOLDOWN_MS       = 25 * 60 * 1000; // 25 min entre disparos (raro por design)
-  private readonly LEVERAGE_MIN_ASSETS        = 3;               // ativos em condição excepcional simultaneamente
-  private readonly LEVERAGE_CONSENSUS_MIN     = 78;              // score mínimo no ativo escolhido (supremeAnalysis.opportunityScore)
+  private readonly LEVERAGE_MIN_ASSETS        = 2;               // Reduzido de 3→2: mais fácil atingir com índices sintéticos
+  private readonly LEVERAGE_CONSENSUS_MIN     = 65;              // Reduzido de 78→65: opportunityScore real dos sintéticos fica 55-70
   private readonly LEVERAGE_STAKE_PCT         = 0.05;            // 5% da banca
   private readonly LEVERAGE_MAX_STAKE         = 50.00;           // teto absoluto de segurança
 
@@ -676,10 +676,10 @@ export class AutoTradingScheduler {
       const hurst     = sa.statistics.hurstExponent;
       const consensus = sa.opportunityScore; // 0-100 score calculado pelo analyzer
 
-      // Índices sintéticos Deriv têm Hurst ~0.10 por design — não usar Hurst como filtro.
-      // Critérios reais: opportunityScore alto + qualquer regime favorável (incluindo ranging) + consenso forte
+      // Índices sintéticos Deriv têm Hurst ~0.50 por design — score raramente ultrapassa 65.
+      // Critérios ajustados: opportunityScore ≥ 60 (realista para sintéticos) + regime não caótico
       const isExceptional =
-        consensus >= 72 &&         // score supremo acima da média
+        consensus >= 60 &&         // score supremo atingível pelos sintéticos (reduzido de 72→60)
         regime !== 'chaotic';      // qualquer regime exceto caótico
 
       if (isExceptional) {
