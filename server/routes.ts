@@ -3691,6 +3691,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json(result);
   });
 
+  // Upload MT5 as a single ZIP file — extracts to mt5-uploaded/
+  const zipUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 1024 * 1024 * 1024 }, // 1GB
+  });
+
+  app.post('/api/desktop/upload-mt5-zip', isAuthenticated, zipUpload.single('file'), async (req: any, res) => {
+    try {
+      const file = req.file;
+      if (!file) return res.status(400).json({ success: false, error: 'Nenhum arquivo ZIP recebido.' });
+
+      const unzipper = await import('unzipper');
+      const { rmSync, mkdirSync: mkDir, createWriteStream } = await import('fs');
+      const { Readable } = await import('stream');
+      const { pipeline } = await import('stream/promises');
+
+      try { rmSync(MT5_UPLOAD_DIR, { recursive: true, force: true }); } catch {}
+      mkDir(MT5_UPLOAD_DIR, { recursive: true });
+
+      const readable = Readable.from(file.buffer);
+      const directory = await unzipper.Open.buffer(file.buffer);
+
+      let extractedCount = 0;
+      for (const entry of directory.files) {
+        if (entry.type === 'Directory') continue;
+
+        // Strip top-level folder if all files share one (e.g. "MetaTrader 5/...")
+        let relativePath = entry.path.replace(/\\/g, '/');
+        const parts = relativePath.split('/');
+        if (parts.length > 1) {
+          // Check if first segment is a folder — strip it
+          const firstSegIsFolder = directory.files.some(
+            f => f.path.startsWith(parts[0] + '/') && f.path !== parts[0] + '/'
+          );
+          if (firstSegIsFolder) relativePath = parts.slice(1).join('/');
+        }
+        if (!relativePath) continue;
+
+        const targetPath = pathMod.join(MT5_UPLOAD_DIR, relativePath);
+        mkDir(pathMod.dirname(targetPath), { recursive: true });
+
+        const content = await entry.buffer();
+        writeFileSync(targetPath, content);
+        extractedCount++;
+      }
+
+      const exePath = findMT5ExeInUpload(MT5_UPLOAD_DIR);
+      res.json({ success: true, filesExtracted: extractedCount, exeFound: exePath || null });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   // Get upload status
   app.get('/api/desktop/upload-status', isAuthenticated, (req, res) => {
     const exePath = findMT5ExeInUpload(MT5_UPLOAD_DIR);

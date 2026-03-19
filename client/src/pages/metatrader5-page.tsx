@@ -39,6 +39,7 @@ export default function MetaTrader5Page() {
   const desktopContainerRef = useRef<HTMLDivElement>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
+  const zipInputRef = useRef<HTMLInputElement>(null);
 
   const { data: status, isLoading } = useQuery<DesktopStatus>({
     queryKey: ["/api/desktop/status"],
@@ -197,6 +198,51 @@ export default function MetaTrader5Page() {
     if (e.target) e.target.value = "";
   };
 
+  const handleZipUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploadProgress(0);
+    setUploadInfo(`Enviando ${file.name} (${(file.size / 1024 / 1024).toFixed(0)}MB)...`);
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", "/api/desktop/upload-mt5-zip");
+      xhr.withCredentials = true;
+
+      xhr.upload.onprogress = (ev) => {
+        if (ev.lengthComputable) {
+          const pct = Math.round((ev.loaded / ev.total) * 100);
+          setUploadProgress(pct);
+          setUploadInfo(`Enviando ZIP: ${pct}% (${(ev.loaded / 1024 / 1024).toFixed(0)}MB / ${(ev.total / 1024 / 1024).toFixed(0)}MB)...`);
+        }
+      };
+
+      const result = await new Promise<any>((resolve, reject) => {
+        xhr.onload = () => {
+          try { resolve(JSON.parse(xhr.responseText)); } catch { reject(new Error("Resposta inválida")); }
+        };
+        xhr.onerror = () => reject(new Error("Erro de rede"));
+        xhr.send(formData);
+      });
+
+      if (!result.success) throw new Error(result.error || "Erro ao extrair ZIP");
+
+      setUploadProgress(100);
+      setUploadInfo(`✅ ZIP extraído! ${result.filesExtracted} arquivos prontos.`);
+      queryClient.invalidateQueries({ queryKey: ["/api/desktop/status"] });
+      toast({ title: "ZIP extraído com sucesso!", description: `${result.filesExtracted} arquivos extraídos. MT5 pronto para abrir.` });
+    } catch (err: any) {
+      setUploadInfo(`Erro: ${err.message}`);
+      toast({ title: "Erro no upload do ZIP", description: err.message, variant: "destructive" });
+    }
+
+    if (e.target) e.target.value = "";
+  };
+
   const isRunning = status?.status === "running";
   const isStarting = status?.status === "starting" || startMutation.isPending;
   const isStopped = !status || status.status === "stopped" || status.status === "error";
@@ -267,6 +313,27 @@ export default function MetaTrader5Page() {
               <span className="hidden sm:inline">
                 {hasUploadedMT5 ? "Trocar pasta MT5" : "Enviar pasta MT5"}
               </span>
+            </Button>
+          </div>
+
+          {/* ZIP upload button */}
+          <div className="relative">
+            <input
+              ref={zipInputRef}
+              type="file"
+              accept=".zip"
+              className="absolute inset-0 opacity-0 w-full h-full cursor-pointer"
+              onChange={handleZipUpload}
+              data-testid="input-zip-upload"
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1.5 pointer-events-none border-blue-400 text-blue-600 dark:text-blue-400"
+              data-testid="button-upload-zip"
+            >
+              <Upload className="h-4 w-4" />
+              <span className="hidden sm:inline">Enviar ZIP</span>
             </Button>
           </div>
 
