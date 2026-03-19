@@ -3587,9 +3587,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ===== VIRTUAL DESKTOP / MT5 ROUTES =====
   const { virtualDesktop } = await import('./services/virtual-desktop');
+  const { mkdirSync, writeFileSync, existsSync: fsExists, readdirSync, statSync } = await import('fs');
+  const pathMod = await import('path');
+
+  function findMT5ExeInUpload(dir: string): string | null {
+    if (!fsExists(dir)) return null;
+    const candidates = ['terminal64.exe', 'terminal.exe', 'metatrader5.exe', 'mt5.exe'];
+    function walk(d: string): string | null {
+      let entries: string[];
+      try { entries = readdirSync(d); } catch { return null; }
+      for (const entry of entries) {
+        const full = pathMod.join(d, entry);
+        try {
+          const st = statSync(full);
+          if (st.isDirectory()) {
+            const found = walk(full);
+            if (found) return found;
+          } else if (candidates.includes(entry.toLowerCase())) {
+            return full;
+          }
+        } catch {}
+      }
+      return null;
+    }
+    return walk(dir);
+  }
+
+  const MT5_UPLOAD_DIR = pathMod.resolve(process.cwd(), 'mt5-uploaded');
+
+  // Multer setup for folder upload (memory storage to preserve paths)
+  const mt5UploadStorage = multer.memoryStorage();
+  const mt5Upload = multer({
+    storage: mt5UploadStorage,
+    limits: { fileSize: 500 * 1024 * 1024, files: 5000 }, // 500MB per file, up to 5000 files
+  });
 
   app.get('/api/desktop/status', isAuthenticated, (req, res) => {
-    res.json(virtualDesktop.getStatus());
+    const status = virtualDesktop.getStatus();
+    // Check if MT5 was uploaded manually
+    const uploadedExe = findMT5ExeInUpload(MT5_UPLOAD_DIR);
+    res.json({ ...status, mt5Uploaded: !!uploadedExe, mt5UploadedExe: uploadedExe || null });
   });
 
   app.post('/api/desktop/start', isAuthenticated, async (req, res) => {
@@ -3605,6 +3642,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/desktop/install-mt5', isAuthenticated, async (req, res) => {
     const result = await virtualDesktop.startOrInstallMT5();
     res.json(result);
+  });
+
+  // Upload entire MT5 folder (files sent with their relative paths as originalname)
+  app.post('/api/desktop/upload-mt5-folder', isAuthenticated, mt5Upload.array('files', 5000), async (req: any, res) => {
+    try {
+      const files = req.files as Express.Multer.File[];
+      if (!files || files.length === 0) {
+        return res.status(400).json({ success: false, error: 'Nenhum arquivo recebido.' });
+      }
+
+      // Clear upload dir only on first chunk
+      const isFirst = req.body?.isFirst === 'true';
+      if (isFirst) {
+        const { rmSync } = await import('fs');
+        try { rmSync(MT5_UPLOAD_DIR, { recursive: true, force: true }); } catch {}
+      }
+      mkdirSync(MT5_UPLOAD_DIR, { recursive: true });
+
+      let savedCount = 0;
+      for (const file of files) {
+        // originalname contains the relative path (e.g. "MetaTrader 5/terminal64.exe")
+        const relativePath = file.originalname.replace(/\\/g, '/');
+        const targetPath = pathMod.join(MT5_UPLOAD_DIR, relativePath);
+        const targetDir = pathMod.dirname(targetPath);
+        mkdirSync(targetDir, { recursive: true });
+        writeFileSync(targetPath, file.buffer);
+        savedCount++;
+      }
+
+      const exePath = findMT5ExeInUpload(MT5_UPLOAD_DIR);
+      res.json({ success: true, filesUploaded: savedCount, exeFound: exePath || null });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // Launch uploaded MT5 folder exe via Wine
+  app.post('/api/desktop/launch-uploaded-mt5', isAuthenticated, async (req, res) => {
+    const exePath = findMT5ExeInUpload(MT5_UPLOAD_DIR);
+    if (!exePath) {
+      return res.status(400).json({ success: false, error: 'Nenhum executável MT5 encontrado na pasta enviada.' });
+    }
+    if (virtualDesktop.getStatus().status !== 'running') {
+      return res.status(400).json({ success: false, error: 'Desktop virtual não está rodando. Inicie-o primeiro.' });
+    }
+    const result = await virtualDesktop.launchExe(exePath);
+    res.json(result);
+  });
+
+  // Get upload status
+  app.get('/api/desktop/upload-status', isAuthenticated, (req, res) => {
+    const exePath = findMT5ExeInUpload(MT5_UPLOAD_DIR);
+    res.json({ uploaded: !!exePath, exePath: exePath || null, uploadDir: MT5_UPLOAD_DIR });
   });
 
   const INTERNAL_SECRET = 'internal-desktop-ctrl-9f3a';

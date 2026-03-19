@@ -5,9 +5,11 @@ import { useToast } from "@/hooks/use-toast";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
 import {
   ChevronLeft, Monitor, Play, Square, Download, RefreshCw,
-  Loader2, AlertTriangle, CheckCircle2, Terminal, Maximize2, Minimize2
+  Loader2, AlertTriangle, CheckCircle2, Terminal, Maximize2, Minimize2,
+  FolderOpen, Upload, FolderCheck
 } from "lucide-react";
 
 interface DesktopStatus {
@@ -21,6 +23,8 @@ interface DesktopStatus {
   hasVnc: boolean;
   hasWebsockify: boolean;
   mt5Installed: boolean;
+  mt5Uploaded: boolean;
+  mt5UploadedExe: string | null;
   wineReady: boolean;
 }
 
@@ -29,9 +33,12 @@ export default function MetaTrader5Page() {
   const [, setLocation] = useLocation();
   const [showLogs, setShowLogs] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [uploadInfo, setUploadInfo] = useState<string>("");
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const desktopContainerRef = useRef<HTMLDivElement>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
 
   const { data: status, isLoading } = useQuery<DesktopStatus>({
     queryKey: ["/api/desktop/status"],
@@ -84,6 +91,24 @@ export default function MetaTrader5Page() {
     },
   });
 
+  const launchUploadedMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("/api/desktop/launch-uploaded-mt5", { method: "POST" });
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      if (data.success) {
+        toast({ title: "MT5 iniciado!", description: "O MT5 está abrindo no desktop virtual." });
+        queryClient.invalidateQueries({ queryKey: ["/api/desktop/status"] });
+      } else {
+        toast({ title: "Erro ao abrir MT5", description: data.error, variant: "destructive" });
+      }
+    },
+    onError: (err: any) => {
+      toast({ title: "Erro", description: err.message, variant: "destructive" });
+    },
+  });
+
   useEffect(() => {
     if (logsEndRef.current) {
       logsEndRef.current.scrollIntoView({ behavior: "smooth" });
@@ -108,9 +133,72 @@ export default function MetaTrader5Page() {
     return () => document.removeEventListener("fullscreenchange", handler);
   }, []);
 
+  const handleFolderUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setUploadProgress(0);
+    setUploadInfo(`Preparando ${files.length} arquivos...`);
+
+    const CHUNK_SIZE = 200;
+    const allFiles = Array.from(files);
+    const totalFiles = allFiles.length;
+    let uploaded = 0;
+
+    // Send in chunks to avoid memory issues
+    for (let i = 0; i < allFiles.length; i += CHUNK_SIZE) {
+      const chunk = allFiles.slice(i, i + CHUNK_SIZE);
+      const formData = new FormData();
+
+      for (const file of chunk) {
+        const relativePath = (file as any).webkitRelativePath || file.name;
+        formData.append("files", file, relativePath);
+      }
+
+      const isFirst = i === 0;
+      formData.append("chunkIndex", String(Math.floor(i / CHUNK_SIZE)));
+      formData.append("isFirst", String(isFirst));
+
+      try {
+        const res = await fetch("/api/desktop/upload-mt5-folder", {
+          method: "POST",
+          body: formData,
+          credentials: "include",
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Erro no upload");
+
+        uploaded += chunk.length;
+        const pct = Math.round((uploaded / totalFiles) * 100);
+        setUploadProgress(pct);
+        setUploadInfo(`${uploaded} / ${totalFiles} arquivos enviados...`);
+
+        if (data.exeFound) {
+          setUploadInfo(`✅ Upload completo! Executável encontrado.`);
+          setUploadProgress(100);
+          queryClient.invalidateQueries({ queryKey: ["/api/desktop/status"] });
+          toast({ title: "Upload concluído!", description: `${uploaded} arquivos enviados. MT5 pronto para abrir.` });
+          break;
+        }
+      } catch (err: any) {
+        setUploadInfo(`Erro: ${err.message}`);
+        toast({ title: "Erro no upload", description: err.message, variant: "destructive" });
+        break;
+      }
+    }
+
+    if (uploadProgress !== 100) {
+      setUploadProgress(100);
+      queryClient.invalidateQueries({ queryKey: ["/api/desktop/status"] });
+    }
+
+    if (e.target) e.target.value = "";
+  };
+
   const isRunning = status?.status === "running";
   const isStarting = status?.status === "starting" || startMutation.isPending;
   const isStopped = !status || status.status === "stopped" || status.status === "error";
+  const hasUploadedMT5 = status?.mt5Uploaded;
 
   const statusBadge = () => {
     if (isStarting) return <Badge className="bg-yellow-500 text-white gap-1.5"><Loader2 className="h-3 w-3 animate-spin" />Iniciando...</Badge>;
@@ -128,7 +216,7 @@ export default function MetaTrader5Page() {
   return (
     <div className="min-h-screen bg-background flex flex-col">
       {/* Top bar */}
-      <div className="border-b border-border bg-card px-4 py-3 flex items-center justify-between gap-4 shrink-0">
+      <div className="border-b border-border bg-card px-4 py-3 flex items-center justify-between gap-4 shrink-0 flex-wrap">
         <div className="flex items-center gap-3">
           <Button
             variant="ghost"
@@ -146,9 +234,55 @@ export default function MetaTrader5Page() {
             <span className="text-xs text-muted-foreground hidden sm:inline">— Desktop Virtual</span>
           </div>
           {statusBadge()}
+          {hasUploadedMT5 && (
+            <Badge className="bg-emerald-600 text-white gap-1.5">
+              <FolderCheck className="h-3 w-3" />
+              MT5 carregado
+            </Badge>
+          )}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Folder upload button — always visible */}
+          <div className="relative">
+            <input
+              ref={folderInputRef}
+              type="file"
+              // @ts-ignore
+              webkitdirectory=""
+              multiple
+              className="absolute inset-0 opacity-0 w-full h-full cursor-pointer"
+              onChange={handleFolderUpload}
+              data-testid="input-folder-upload"
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1.5 pointer-events-none"
+              data-testid="button-upload-folder"
+            >
+              <FolderOpen className="h-4 w-4" />
+              <span className="hidden sm:inline">
+                {hasUploadedMT5 ? "Trocar pasta MT5" : "Enviar pasta MT5"}
+              </span>
+            </Button>
+          </div>
+
+          {/* Launch uploaded MT5 */}
+          {hasUploadedMT5 && isRunning && (
+            <Button
+              size="sm"
+              variant="default"
+              onClick={() => launchUploadedMutation.mutate()}
+              disabled={launchUploadedMutation.isPending}
+              data-testid="button-launch-uploaded"
+              className="gap-1.5 bg-green-600 hover:bg-green-700 text-white"
+            >
+              {launchUploadedMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+              <span className="hidden sm:inline">Abrir MT5</span>
+            </Button>
+          )}
+
           {isStopped && !isStarting && (
             <Button
               size="sm"
@@ -164,30 +298,32 @@ export default function MetaTrader5Page() {
 
           {isRunning && (
             <>
-              {status?.mt5Installed ? (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => installMutation.mutate()}
-                  disabled={installMutation.isPending}
-                  data-testid="button-launch-mt5"
-                  className="gap-1.5 border-green-500 text-green-600 hover:bg-green-50 dark:hover:bg-green-950"
-                >
-                  {installMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-                  <span className="hidden sm:inline">Iniciar MT5</span>
-                </Button>
-              ) : (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => installMutation.mutate()}
-                  disabled={installMutation.isPending}
-                  data-testid="button-install-mt5"
-                  className="gap-1.5"
-                >
-                  {installMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                  <span className="hidden sm:inline">Instalar MT5</span>
-                </Button>
+              {!hasUploadedMT5 && (
+                status?.mt5Installed ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => installMutation.mutate()}
+                    disabled={installMutation.isPending}
+                    data-testid="button-launch-mt5"
+                    className="gap-1.5 border-green-500 text-green-600 hover:bg-green-50 dark:hover:bg-green-950"
+                  >
+                    {installMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                    <span className="hidden sm:inline">Iniciar MT5</span>
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => installMutation.mutate()}
+                    disabled={installMutation.isPending}
+                    data-testid="button-install-mt5"
+                    className="gap-1.5"
+                  >
+                    {installMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                    <span className="hidden sm:inline">Instalar MT5</span>
+                  </Button>
+                )
               )}
               <Button
                 size="sm"
@@ -226,11 +362,38 @@ export default function MetaTrader5Page() {
         </div>
       </div>
 
+      {/* Upload progress bar */}
+      {uploadProgress !== null && uploadProgress < 100 && (
+        <div className="px-4 py-2 bg-blue-50 dark:bg-blue-950 border-b border-blue-200 dark:border-blue-800 flex items-center gap-3">
+          <Upload className="h-4 w-4 text-blue-600 shrink-0 animate-pulse" />
+          <div className="flex-1 min-w-0">
+            <div className="flex justify-between text-xs text-blue-700 dark:text-blue-300 mb-1">
+              <span className="truncate">{uploadInfo}</span>
+              <span className="shrink-0 ml-2">{uploadProgress}%</span>
+            </div>
+            <Progress value={uploadProgress} className="h-1.5" />
+          </div>
+        </div>
+      )}
+
+      {/* Upload complete bar */}
+      {uploadProgress === 100 && (
+        <div className="px-4 py-2 bg-green-50 dark:bg-green-950 border-b border-green-200 dark:border-green-800 flex items-center gap-2 text-sm text-green-700 dark:text-green-300">
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
+          <span>{uploadInfo}</span>
+          <button
+            onClick={() => setUploadProgress(null)}
+            className="ml-auto text-xs text-green-500 hover:text-green-700"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Main area */}
       <div className="flex-1 flex overflow-hidden">
         {/* Desktop viewport */}
         <div className="flex-1 flex flex-col overflow-hidden">
-          {/* Windows chrome */}
           <div
             ref={desktopContainerRef}
             className="flex-1 flex flex-col bg-[#1a1a2e] overflow-hidden"
@@ -302,25 +465,46 @@ export default function MetaTrader5Page() {
                       </>
                     ) : (
                       <>
-                        <div>
-                          <p className="font-semibold text-lg">Desktop Virtual</p>
-                          <p className="text-sm text-white/60 mt-1">
-                            Clique em "Iniciar Desktop" para ligar o ambiente Windows
-                          </p>
-                          <p className="text-xs text-white/40 mt-1">
-                            O MetaTrader 5 será executado aqui via Wine
-                          </p>
+                        {hasUploadedMT5 ? (
+                          <div className="flex flex-col items-center gap-4">
+                            <FolderCheck className="h-14 w-14 text-green-400" />
+                            <div>
+                              <p className="font-semibold text-lg text-green-300">Pasta MT5 carregada!</p>
+                              <p className="text-sm text-white/60 mt-1">
+                                Inicie o desktop e clique em <strong>"Abrir MT5"</strong>
+                              </p>
+                              <p className="text-xs text-white/40 mt-1 font-mono break-all px-4">
+                                {status?.mt5UploadedExe?.split("/").slice(-3).join("/")}
+                              </p>
+                            </div>
+                          </div>
+                        ) : (
+                          <div>
+                            <p className="font-semibold text-lg">Desktop Virtual</p>
+                            <p className="text-sm text-white/60 mt-1">
+                              Envie a pasta do MT5 ou clique em "Iniciar Desktop"
+                            </p>
+                          </div>
+                        )}
+                        <div className="flex gap-3 flex-wrap justify-center">
+                          <Button
+                            onClick={() => folderInputRef.current?.click()}
+                            className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white"
+                            data-testid="button-upload-center"
+                          >
+                            <FolderOpen className="h-5 w-5" />
+                            Enviar pasta MT5
+                          </Button>
+                          <Button
+                            onClick={() => startMutation.mutate()}
+                            disabled={startMutation.isPending}
+                            className="gap-2 bg-blue-600 hover:bg-blue-700 text-white"
+                            data-testid="button-start-desktop-center"
+                          >
+                            <Play className="h-5 w-5" />
+                            Iniciar Desktop
+                          </Button>
                         </div>
-                        <Button
-                          onClick={() => startMutation.mutate()}
-                          disabled={startMutation.isPending}
-                          className="gap-2 bg-blue-600 hover:bg-blue-700 text-white"
-                          data-testid="button-start-desktop-center"
-                          size="lg"
-                        >
-                          <Play className="h-5 w-5" />
-                          Iniciar Desktop
-                        </Button>
                       </>
                     )}
                   </div>
@@ -344,11 +528,15 @@ export default function MetaTrader5Page() {
             <div className="bg-[#c0c0c0] border-t border-gray-400 px-3 py-1 flex items-center gap-4 text-xs text-gray-700 shrink-0 select-none">
               <span>
                 {isRunning
-                  ? status?.mt5Installed
-                    ? "✅ MT5 instalado — clique 'Iniciar MT5' para abrir"
-                    : "⏳ Inicializando Wine e instalador MT5..."
+                  ? hasUploadedMT5
+                    ? "✅ Pasta MT5 carregada — clique 'Abrir MT5'"
+                    : status?.mt5Installed
+                      ? "✅ MT5 instalado — clique 'Iniciar MT5'"
+                      : "⏳ Inicializando..."
                   : isStarting
                   ? "⏳ Iniciando componentes..."
+                  : hasUploadedMT5
+                  ? "📁 Pasta MT5 pronta — inicie o desktop"
                   : "⬜ Desktop parado"}
               </span>
               {isRunning && status?.startedAt && (
@@ -368,8 +556,8 @@ export default function MetaTrader5Page() {
                   <span className={status?.hasWebsockify ? "text-green-700" : "text-red-600"}>
                     WS {status?.hasWebsockify ? "✓" : "✗"}
                   </span>
-                  <span className={status?.mt5Installed ? "text-green-700" : "text-orange-600"}>
-                    MT5 {status?.mt5Installed ? "✓" : "..."}
+                  <span className={hasUploadedMT5 ? "text-green-700" : status?.mt5Installed ? "text-green-700" : "text-orange-600"}>
+                    MT5 {hasUploadedMT5 || status?.mt5Installed ? "✓" : "..."}
                   </span>
                 </div>
               )}
@@ -413,20 +601,16 @@ export default function MetaTrader5Page() {
       {!isRunning && !isStarting && (
         <div className="border-t border-border bg-card px-4 py-3 flex flex-wrap gap-4 text-xs text-muted-foreground">
           <div className="flex items-center gap-1.5">
-            <div className="w-2 h-2 rounded-full bg-blue-500" />
-            <span><strong>Passo 1:</strong> Clique em "Iniciar Desktop" para ligar o ambiente virtual</span>
+            <div className="w-2 h-2 rounded-full bg-emerald-500" />
+            <span><strong>Opção 1:</strong> Clique em "Enviar pasta MT5" e selecione a pasta do MT5 no seu computador</span>
           </div>
           <div className="flex items-center gap-1.5">
             <div className="w-2 h-2 rounded-full bg-blue-500" />
-            <span><strong>Passo 2:</strong> Aguarde o desktop carregar (~30s)</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="w-2 h-2 rounded-full bg-blue-500" />
-            <span><strong>Passo 3:</strong> O instalador MT5 abre automaticamente — siga o assistente na tela</span>
+            <span><strong>Opção 2:</strong> Clique em "Iniciar Desktop" e instale o MT5 pelo assistente</span>
           </div>
           <div className="flex items-center gap-1.5">
             <div className="w-2 h-2 rounded-full bg-green-500" />
-            <span><strong>Próximas vezes:</strong> Basta clicar "Iniciar MT5" — sem reinstalar</span>
+            <span><strong>Com pasta enviada:</strong> Inicie o desktop e clique "Abrir MT5" — sem reinstalar</span>
           </div>
         </div>
       )}

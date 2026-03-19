@@ -424,6 +424,59 @@ class VirtualDesktopService {
     return { success: true };
   }
 
+  async launchExe(exePath: string): Promise<{ success: boolean; error?: string }> {
+    if (this.status !== 'running') {
+      return { success: false, error: 'Desktop virtual não está rodando.' };
+    }
+
+    if (!existsSync(WINE_BIN)) {
+      return { success: false, error: `Wine não encontrado: ${WINE_BIN}` };
+    }
+
+    if (this.wineProc && !this.wineProc.killed) {
+      try { this.wineProc.kill('SIGTERM'); } catch {}
+      await this.delay(500);
+    }
+
+    this.log(`🚀 Executando: ${exePath}`);
+
+    const proc = spawn(WINE_BIN, [exePath], {
+      env: {
+        ...process.env,
+        DISPLAY,
+        WINEDEBUG: 'err+all',
+        WINEDLLOVERRIDES: '',
+        HOME: process.env.HOME || '/home/runner',
+        WINEPREFIX: process.env.WINEPREFIX || `${process.env.HOME || '/home/runner'}/.wine`,
+      },
+      detached: false,
+    });
+
+    proc.stdout?.on('data', (d: Buffer) => {
+      const msg = d.toString().trim();
+      if (msg) this.log(`[wine] ${msg}`);
+    });
+
+    proc.stderr?.on('data', (d: Buffer) => {
+      const msg = d.toString().trim();
+      if (msg && !msg.includes('fixme:') && !msg.includes('warn:') && !msg.includes('err:winediag')) {
+        this.log(`[wine] ${msg}`);
+      }
+    });
+
+    proc.on('error', (e) => {
+      this.log(`[wine error] ${e.message}`);
+    });
+
+    proc.on('exit', (code) => {
+      this.log(`[wine] processo encerrado com código ${code}`);
+      this.wineProc = null;
+    });
+
+    this.wineProc = proc;
+    return { success: true };
+  }
+
   async stop(): Promise<void> {
     this.log('Encerrando desktop virtual...');
 
