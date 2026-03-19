@@ -1,8 +1,8 @@
 import { spawn, ChildProcess } from 'child_process';
-import { existsSync, mkdirSync, copyFileSync } from 'fs';
+import { existsSync } from 'fs';
 import path from 'path';
 
-const XVFB_BIN = '/nix/store/ykd61g0lhw6d4fhbc6v4znw3062qjyzw-xorg-server-21.1.13/bin/Xvfb';
+const XVFBRUN = '/nix/store/ds3bnbkkv55ig9243zw88xybk62aqaxx-xvfb-run-1+g87f6705/bin/xvfb-run';
 const X11VNC_BIN = '/nix/store/4rxi8q5x6yb39ykygl5ddvmlx6v26gjy-x11vnc-0.9.17/bin/x11vnc';
 const OPENBOX_BIN = '/nix/store/sj7nznjghqz316gclkz5y4ii0a1nqai9-openbox-3.6.1/bin/openbox';
 const WINE_BIN = '/nix/store/d7zxq15f0sycdi07h77pga90hgwl7rn8-wine-10.0/bin/wine';
@@ -10,6 +10,7 @@ const WEBSOCKIFY_BIN = '/home/runner/workspace/.pythonlibs/bin/websockify';
 const NOVNC_DIR = path.resolve(process.cwd(), 'public/novnc');
 
 const DISPLAY = ':99';
+const DISPLAY_NUM = 99;
 const VNC_PORT = 5901;
 const WEBSOCKIFY_PORT = 6080;
 const RESOLUTION = '1280x800x24';
@@ -17,9 +18,7 @@ const RESOLUTION = '1280x800x24';
 type DesktopStatus = 'stopped' | 'starting' | 'running' | 'error';
 
 class VirtualDesktopService {
-  private xvfbProc: ChildProcess | null = null;
-  private openboxProc: ChildProcess | null = null;
-  private vncProc: ChildProcess | null = null;
+  private desktopProc: ChildProcess | null = null;
   private websockifyProc: ChildProcess | null = null;
   private wineProc: ChildProcess | null = null;
   private status: DesktopStatus = 'stopped';
@@ -32,7 +31,7 @@ class VirtualDesktopService {
     const line = `[${ts}] ${msg}`;
     console.log(`🖥️ [DESKTOP] ${msg}`);
     this.logs.push(line);
-    if (this.logs.length > 100) this.logs.shift();
+    if (this.logs.length > 200) this.logs.shift();
   }
 
   getStatus() {
@@ -42,9 +41,9 @@ class VirtualDesktopService {
       startedAt: this.startedAt,
       vncPort: VNC_PORT,
       websockifyPort: WEBSOCKIFY_PORT,
-      logs: this.logs.slice(-30),
-      hasXvfb: !!this.xvfbProc,
-      hasVnc: !!this.vncProc,
+      logs: this.logs.slice(-50),
+      hasXvfb: !!this.desktopProc,
+      hasVnc: !!this.desktopProc,
       hasWebsockify: !!this.websockifyProc,
     };
   }
@@ -59,13 +58,19 @@ class VirtualDesktopService {
     this.logs = [];
     this.log('Iniciando ambiente virtual Windows...');
 
+    // Clean up any stale lock files
     try {
-      await this.startXvfb();
-      await this.delay(1500);
-      await this.startOpenbox();
-      await this.delay(1000);
-      await this.startVnc();
-      await this.delay(1500);
+      const { execSync } = await import('child_process');
+      execSync(`rm -f /tmp/.X${DISPLAY_NUM}-lock`, { timeout: 2000 });
+      execSync(`pkill -f "Xvfb ${DISPLAY}" 2>/dev/null || true`, { timeout: 2000 });
+      execSync(`pkill -f "x11vnc.*${DISPLAY}" 2>/dev/null || true`, { timeout: 2000 });
+    } catch {}
+
+    await this.delay(800);
+
+    try {
+      await this.startDesktop();
+      await this.delay(5000); // wait for x11vnc to fully initialize
       await this.startWebsockify();
       await this.delay(500);
 
@@ -81,125 +86,104 @@ class VirtualDesktopService {
     }
   }
 
-  private startXvfb(): Promise<void> {
+  private startDesktop(): Promise<void> {
     return new Promise((resolve, reject) => {
-      this.log(`Iniciando Xvfb em display ${DISPLAY} (${RESOLUTION})`);
+      this.log(`Iniciando Xvfb + Openbox + VNC via xvfb-run`);
 
-      if (!existsSync(XVFB_BIN)) {
-        reject(new Error(`Xvfb não encontrado: ${XVFB_BIN}`));
+      if (!existsSync(XVFBRUN)) {
+        reject(new Error(`xvfb-run não encontrado: ${XVFBRUN}`));
         return;
       }
 
-      const proc = spawn(XVFB_BIN, [
-        DISPLAY,
-        '-screen', '0', RESOLUTION,
-        '-ac',
-        '-nolisten', 'tcp',
-      ], { detached: false });
+      // Script that runs inside the xvfb-run context:
+      // - starts openbox (window manager)
+      // - starts x11vnc (VNC server)
+      // - keeps alive with a loop
+      const innerScript = [
+        `export DISPLAY=${DISPLAY}`,
+        `${OPENBOX_BIN} --sm-disable &`,
+        'sleep 2',
+        `${X11VNC_BIN} -display ${DISPLAY} -nopw -rfbport ${VNC_PORT} -forever -shared -noxdamage -noxfixes 2>&1 &`,
+        'sleep 2',
+        'echo "[DESKTOP_READY]"',
+        'while true; do sleep 10; done',
+      ].join('\n');
 
-      proc.stderr?.on('data', (d: Buffer) => {
-        const msg = d.toString().trim();
-        if (msg) this.log(`[Xvfb] ${msg}`);
-      });
-
-      proc.on('error', (e) => { this.log(`[Xvfb error] ${e.message}`); });
-      proc.on('exit', (code) => {
-        this.log(`[Xvfb] exited with code ${code}`);
-        this.xvfbProc = null;
-        if (this.status === 'running') this.status = 'error';
-      });
-
-      this.xvfbProc = proc;
-      setTimeout(() => resolve(), 1000);
-    });
-  }
-
-  private startOpenbox(): Promise<void> {
-    return new Promise((resolve) => {
-      this.log('Iniciando gerenciador de janelas Openbox');
-
-      const proc = spawn(OPENBOX_BIN, [], {
-        env: { ...process.env, DISPLAY },
+      const proc = spawn(XVFBRUN, [
+        `--server-num=${DISPLAY_NUM}`,
+        '--server-args', `-screen 0 ${RESOLUTION} -ac`,
+        'bash', '-c', innerScript,
+      ], {
         detached: false,
+        env: { ...process.env },
       });
 
-      proc.stderr?.on('data', (d: Buffer) => {
-        const msg = d.toString().trim();
-        if (msg) this.log(`[openbox] ${msg}`);
-      });
-
-      proc.on('error', (e) => this.log(`[openbox error] ${e.message}`));
-      proc.on('exit', (code) => {
-        this.log(`[openbox] exited with code ${code}`);
-        this.openboxProc = null;
-      });
-
-      this.openboxProc = proc;
-      setTimeout(() => resolve(), 500);
-    });
-  }
-
-  private startVnc(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      this.log(`Iniciando servidor VNC na porta ${VNC_PORT}`);
-
-      if (!existsSync(X11VNC_BIN)) {
-        reject(new Error(`x11vnc não encontrado: ${X11VNC_BIN}`));
-        return;
-      }
-
-      const proc = spawn(X11VNC_BIN, [
-        '-display', DISPLAY,
-        '-nopw',
-        '-listen', 'localhost',
-        '-rfbport', String(VNC_PORT),
-        '-forever',
-        '-shared',
-        '-quiet',
-      ], { detached: false });
+      let resolved = false;
+      const resolveOnce = () => {
+        if (!resolved) {
+          resolved = true;
+          resolve();
+        }
+      };
 
       proc.stdout?.on('data', (d: Buffer) => {
         const msg = d.toString().trim();
-        if (msg) this.log(`[x11vnc] ${msg}`);
+        if (!msg) return;
+        this.log(`[desktop] ${msg}`);
+        if (msg.includes('[DESKTOP_READY]') && !resolved) {
+          resolveOnce();
+        }
       });
 
       proc.stderr?.on('data', (d: Buffer) => {
         const msg = d.toString().trim();
-        if (msg) this.log(`[x11vnc] ${msg}`);
+        if (!msg) return;
+        // Filter out noisy x11vnc and openbox messages
+        if (msg.includes('XOpenDisplay') || msg.includes('MIT-MAGIC') ||
+            msg.includes('_XSERVTransm') || msg.includes('deprecated')) return;
+        this.log(`[desktop] ${msg}`);
       });
 
       proc.on('error', (e) => {
-        this.log(`[x11vnc error] ${e.message}`);
-        reject(e);
+        this.log(`[desktop error] ${e.message}`);
+        if (!resolved) {
+          resolved = true;
+          reject(e);
+        }
       });
 
       proc.on('exit', (code) => {
-        this.log(`[x11vnc] exited with code ${code}`);
-        this.vncProc = null;
-        if (this.status === 'running') this.status = 'error';
+        this.log(`[desktop] processo encerrado com código ${code}`);
+        this.desktopProc = null;
+        if (this.status === 'running') {
+          this.status = 'error';
+          this.errorMsg = `Desktop encerrado inesperadamente (código ${code})`;
+        }
       });
 
-      this.vncProc = proc;
-      setTimeout(() => resolve(), 1000);
+      this.desktopProc = proc;
+
+      // Resolve after timeout even if [DESKTOP_READY] was missed
+      setTimeout(() => resolveOnce(), 8000);
     });
   }
 
   private startWebsockify(): Promise<void> {
     return new Promise((resolve, reject) => {
-      this.log(`Iniciando websockify na porta ${WEBSOCKIFY_PORT}`);
+      this.log(`Iniciando WebSocket proxy na porta ${WEBSOCKIFY_PORT}`);
 
       if (!existsSync(WEBSOCKIFY_BIN)) {
         reject(new Error(`websockify não encontrado: ${WEBSOCKIFY_BIN}`));
         return;
       }
 
-      if (!existsSync(NOVNC_DIR)) {
-        reject(new Error(`noVNC não encontrado em: ${NOVNC_DIR}`));
-        return;
-      }
+      // Kill any existing websockify on this port
+      try {
+        const { execSync } = require('child_process');
+        execSync(`pkill -f "websockify.*${WEBSOCKIFY_PORT}" 2>/dev/null || true`, { timeout: 2000 });
+      } catch {}
 
       const proc = spawn(WEBSOCKIFY_BIN, [
-        '--web', NOVNC_DIR,
         String(WEBSOCKIFY_PORT),
         `localhost:${VNC_PORT}`,
       ], { detached: false });
@@ -220,13 +204,13 @@ class VirtualDesktopService {
       });
 
       proc.on('exit', (code) => {
-        this.log(`[websockify] exited with code ${code}`);
+        this.log(`[websockify] encerrado com código ${code}`);
         this.websockifyProc = null;
         if (this.status === 'running') this.status = 'error';
       });
 
       this.websockifyProc = proc;
-      setTimeout(() => resolve(), 800);
+      setTimeout(() => resolve(), 1500);
     });
   }
 
@@ -250,62 +234,61 @@ class VirtualDesktopService {
 
     this.log('Iniciando instalador MetaTrader 5 via Wine...');
 
-    return new Promise((resolve) => {
-      const wineProc = spawn(WINE_BIN, [installerPath], {
-        env: { ...process.env, DISPLAY, WINEDEBUG: '-all' },
-        detached: false,
-      });
-
-      wineProc.stdout?.on('data', (d: Buffer) => {
-        const msg = d.toString().trim();
-        if (msg) this.log(`[wine] ${msg}`);
-      });
-
-      wineProc.stderr?.on('data', (d: Buffer) => {
-        const msg = d.toString().trim();
-        if (msg) this.log(`[wine] ${msg}`);
-      });
-
-      wineProc.on('error', (e) => {
-        this.log(`[wine error] ${e.message}`);
-        resolve({ success: false, error: e.message });
-      });
-
-      wineProc.on('exit', (code) => {
-        this.log(`[wine] instalador finalizou com código ${code}`);
-        this.wineProc = null;
-        resolve({ success: true });
-      });
-
-      this.wineProc = wineProc;
-      resolve({ success: true });
+    const wineProc = spawn(WINE_BIN, [installerPath], {
+      env: { ...process.env, DISPLAY, WINEDEBUG: '-all' },
+      detached: false,
     });
+
+    wineProc.stdout?.on('data', (d: Buffer) => {
+      const msg = d.toString().trim();
+      if (msg) this.log(`[wine] ${msg}`);
+    });
+
+    wineProc.stderr?.on('data', (d: Buffer) => {
+      const msg = d.toString().trim();
+      if (msg && !msg.includes('fixme:') && !msg.includes('err:')) this.log(`[wine] ${msg}`);
+    });
+
+    wineProc.on('error', (e) => {
+      this.log(`[wine error] ${e.message}`);
+    });
+
+    wineProc.on('exit', (code) => {
+      this.log(`[wine] instalador finalizou com código ${code}`);
+      this.wineProc = null;
+    });
+
+    this.wineProc = wineProc;
+    return { success: true };
   }
 
   async stop(): Promise<void> {
     this.log('Encerrando desktop virtual...');
 
-    const kill = (proc: ChildProcess | null, name: string) => {
+    const killProc = (proc: ChildProcess | null, name: string) => {
       if (proc && !proc.killed) {
         try { proc.kill('SIGTERM'); } catch {}
         this.log(`[${name}] encerrado`);
       }
     };
 
-    kill(this.wineProc, 'wine');
-    kill(this.websockifyProc, 'websockify');
-    kill(this.vncProc, 'x11vnc');
-    kill(this.openboxProc, 'openbox');
-    await this.delay(500);
-    kill(this.xvfbProc, 'Xvfb');
+    killProc(this.wineProc, 'wine');
+    killProc(this.websockifyProc, 'websockify');
+    await this.delay(300);
+    killProc(this.desktopProc, 'desktop');
 
     this.wineProc = null;
     this.websockifyProc = null;
-    this.vncProc = null;
-    this.openboxProc = null;
-    this.xvfbProc = null;
+    this.desktopProc = null;
     this.status = 'stopped';
     this.startedAt = null;
+
+    // Clean up X lock files
+    try {
+      const { execSync } = require('child_process');
+      execSync(`rm -f /tmp/.X${DISPLAY_NUM}-lock`, { timeout: 2000 });
+    } catch {}
+
     this.log('Desktop virtual encerrado');
   }
 
