@@ -1,10 +1,10 @@
-modules = ["nodejs-20", "web", "bash", "postgresql-16"]
+modules = ["nodejs-20", "web", "bash", "postgresql-16", "python-3.11"]
 run = "npm run dev"
 hidden = [".config", ".git", "generated-icon.png", "node_modules", "dist"]
 
 [nix]
 channel = "stable-25_05"
-packages = ["sqlite", "chromium", "glib", "pango", "fontconfig", "atk", "cairo", "gdk-pixbuf"]
+packages = ["atk", "cairo", "chromium", "fluxbox", "fontconfig", "gdk-pixbuf", "glib", "openbox", "pango", "sqlite", "x11vnc", "xdotool", "xvfb-run", "wine"]
 
 [deployment]
 deploymentTarget = "autoscale"
