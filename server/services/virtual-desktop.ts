@@ -5,6 +5,7 @@ import path from 'path';
 const XVFBRUN = '/nix/store/ds3bnbkkv55ig9243zw88xybk62aqaxx-xvfb-run-1+g87f6705/bin/xvfb-run';
 const X11VNC_BIN = '/nix/store/4rxi8q5x6yb39ykygl5ddvmlx6v26gjy-x11vnc-0.9.17/bin/x11vnc';
 const OPENBOX_BIN = '/nix/store/sj7nznjghqz316gclkz5y4ii0a1nqai9-openbox-3.6.1/bin/openbox';
+const XSETROOT_BIN = '/nix/store/21rcnlwxh0qvlc12whjiscb5qmf5nq8a-xsetroot-1.1.3/bin/xsetroot';
 const WINE_DIR = '/nix/store/d7zxq15f0sycdi07h77pga90hgwl7rn8-wine-10.0/bin';
 const WINE_BIN = `${WINE_DIR}/wine`;
 const WINEBOOT_BIN = `${WINE_DIR}/wineboot`;
@@ -223,8 +224,7 @@ class VirtualDesktopService {
         `export DISPLAY=${DISPLAY}`,
         `${OPENBOX_BIN} --sm-disable &`,
         'sleep 2',
-        // Try to set a visible background color
-        `xsetroot -solid "#1a3a5c" 2>/dev/null || true`,
+        `${XSETROOT_BIN} -solid "#1a3a5c" 2>/dev/null || true`,
         `${X11VNC_BIN} -display ${DISPLAY} -nopw -rfbport ${VNC_PORT} -forever -shared -noxdamage -noxfixes 2>&1 &`,
         'sleep 2',
         'echo "[DESKTOP_READY]"',
@@ -378,8 +378,7 @@ class VirtualDesktopService {
     this.log('🍷 Iniciando instalador MetaTrader 5 via Wine...');
     this.log(`📂 Instalador: ${installerPath}`);
 
-    // Try with /quiet first for silent install, fallback shows GUI
-    const wineProc = spawn(WINE_BIN, [installerPath, '/silent'], {
+    const wineProc = spawn(WINE_BIN, [installerPath], {
       env: {
         ...process.env,
         DISPLAY,
