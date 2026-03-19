@@ -2963,9 +2963,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  const _liveBalanceCache = new Map<string, { balance: number; currency: string; loginid: string; fetchedAt: number }>();
-  const LIVE_BALANCE_TTL_MS = 15000;
-  const _liveBalanceFetching = new Set<string>();
+  // ── SINGLETON DE SALDO — uma única conexão persistente para consultas de balance ──
+  // Separado do derivAPI de trading para não interferir nas operações
+  const _balanceCache = new Map<string, { balance: number; currency: string; loginid: string; fetchedAt: number }>();
+  const BALANCE_CACHE_TTL_MS = 90000; // 90s — reduz conexões de ~60x/min para ~1x/min
+  const _balanceFetching = new Set<string>();
+  let _balanceAPI: DerivAPIService | null = null;
+  let _balanceAPIToken: string | null = null;
+
+  async function fetchBalanceWithSingleton(token: string, accountType: string): Promise<{ balance: number; currency: string; loginid: string } | null> {
+    // Reutilizar singleton se já autenticado com o mesmo token — zero novas conexões
+    if (!_balanceAPI || _balanceAPIToken !== token) {
+      if (_balanceAPI) {
+        await _balanceAPI.disconnect().catch(() => {});
+      }
+      _balanceAPI = new DerivAPIService('BALANCE_SINGLETON');
+      const ok = await _balanceAPI.connect(token, accountType as 'demo' | 'real');
+      if (!ok) { _balanceAPI = null; _balanceAPIToken = null; return null; }
+      _balanceAPIToken = token;
+    }
+    try {
+      const b = await _balanceAPI.getBalance();
+      return b ? { balance: b.balance, currency: b.currency, loginid: b.loginid } : null;
+    } catch {
+      // Conexão pode ter morrido — resetar singleton para próxima tentativa
+      _balanceAPI = null; _balanceAPIToken = null;
+      return null;
+    }
+  }
 
   app.get('/api/trading/live-balance', isAuthenticated, isTradingAuthorized, async (req, res) => {
     try {
@@ -2974,8 +2999,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       const userId = req.user.id;
 
-      const cached = _liveBalanceCache.get(userId);
-      if (cached && Date.now() - cached.fetchedAt < LIVE_BALANCE_TTL_MS) {
+      // Servir do cache se ainda válido (90s) — sem nenhuma conexão WebSocket
+      const cached = _balanceCache.get(userId);
+      if (cached && Date.now() - cached.fetchedAt < BALANCE_CACHE_TTL_MS) {
         return res.json({
           balance: cached.balance,
           currency: cached.currency,
@@ -2986,8 +3012,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      if (_liveBalanceFetching.has(userId)) {
-        const stale = _liveBalanceCache.get(userId);
+      // Já buscando? Retornar stale imediatamente para não empilhar conexões
+      if (_balanceFetching.has(userId)) {
+        const stale = _balanceCache.get(userId);
         return res.json({
           balance: stale?.balance || 0,
           currency: stale?.currency || 'USD',
@@ -3000,51 +3027,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const tokenData = await dbStorage.getUserDerivToken(userId);
       if (!tokenData) {
-        return res.status(400).json({ 
-          message: 'Token Deriv não configurado',
-          balance: 0,
-          connected: false
-        });
+        return res.status(400).json({ message: 'Token Deriv não configurado', balance: 0, connected: false });
       }
 
-      _liveBalanceFetching.add(userId);
+      _balanceFetching.add(userId);
       try {
-        const balanceDerivAPI = new DerivAPIService();
-        const connected = await balanceDerivAPI.connect(tokenData.token, tokenData.accountType as "demo" | "real");
-        if (!connected) {
-          _liveBalanceFetching.delete(userId);
-          return res.json({ balance: 0, connected: false, error: 'Conexão falhada' });
-        }
-
-        const balance = await balanceDerivAPI.getBalance();
-        await balanceDerivAPI.disconnect();
-
+        const b = await fetchBalanceWithSingleton(tokenData.token, tokenData.accountType);
         const entry = {
-          balance: balance?.balance || 0,
-          currency: balance?.currency || 'USD',
-          loginid: balance?.loginid || 'N/A',
+          balance: b?.balance || 0,
+          currency: b?.currency || 'USD',
+          loginid: b?.loginid || 'N/A',
           fetchedAt: Date.now()
         };
-        _liveBalanceCache.set(userId, entry);
-        _liveBalanceFetching.delete(userId);
+        _balanceCache.set(userId, entry);
+        _balanceFetching.delete(userId);
 
         res.json({
           balance: entry.balance,
           currency: entry.currency,
           loginid: entry.loginid,
-          connected: true,
+          connected: !!b,
           lastUpdate: new Date(entry.fetchedAt).toISOString()
         });
-
       } catch (apiError) {
-        _liveBalanceFetching.delete(userId);
+        _balanceFetching.delete(userId);
         console.error('❌ Erro de API Deriv (live-balance):', apiError);
-        const stale = _liveBalanceCache.get(userId);
-        res.json({
-          balance: stale?.balance || 0,
-          connected: !!stale,
-          error: 'Erro de conexão com Deriv'
-        });
+        const stale = _balanceCache.get(userId);
+        res.json({ balance: stale?.balance || 0, connected: !!stale, error: 'Erro de conexão com Deriv' });
       }
 
     } catch (error) {
