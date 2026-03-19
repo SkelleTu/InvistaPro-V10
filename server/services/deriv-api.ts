@@ -187,6 +187,12 @@ export class DerivAPIService extends EventEmitter {
   }
 
   async connect(apiToken: string, accountType: 'demo' | 'real' = 'demo', operationId?: string): Promise<boolean> {
+    // ⚡ CONEXÃO PERSISTENTE: se já estiver conectado com o mesmo token, reutilizar
+    if (this.isConnected && this.ws && this.ws.readyState === WebSocket.OPEN && this.apiToken === apiToken) {
+      console.log(`⚡ [CONN REUSE] Deriv já conectado — reutilizando conexão existente (Operation: ${operationId || 'N/A'})`);
+      return true;
+    }
+
     this.operationId = operationId || `CONNECT_${Date.now()}`;
     this.apiToken = apiToken;
     this.accountType = accountType;

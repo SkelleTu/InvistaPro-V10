@@ -1212,21 +1212,21 @@ export class AutoTradingScheduler {
         return { success: false, error: `Trading pausado globalmente: ${tradingControlStatus.pauseReason}` };
       }
 
-      // Conectar ao Deriv (com timeout de 20 segundos)
-      const CONNECTION_TIMEOUT = 20000;
+      // ⚡ CONEXÃO PERSISTENTE: reutiliza se já conectado, só abre nova se necessário
+      // Timeout de 12s — apenas para primeira conexão real (reutilização retorna instantâneo)
+      const CONNECTION_TIMEOUT = 12000;
       let connected = false;
       
       try {
         const connectPromise = derivAPI.connect(tokenData.token, tokenData.accountType as "demo" | "real", operationId);
         const timeoutPromise = new Promise<boolean>((_, reject) => {
-          setTimeout(() => reject(new Error('Timeout de conexão Deriv (20s)')), CONNECTION_TIMEOUT);
+          setTimeout(() => reject(new Error('Timeout de conexão Deriv (12s)')), CONNECTION_TIMEOUT);
         });
         
         connected = await Promise.race([connectPromise, timeoutPromise]);
       } catch (timeoutError) {
-        console.error(`⏱️ [${operationId}] Timeout na conexão Deriv - pulando trade`);
-        try { await derivAPI.disconnect(); } catch (e) { /* ignore */ }
-        return { success: false, error: 'Timeout de conexão com Deriv (20s)' };
+        console.error(`⏱️ [${operationId}] Timeout na conexão Deriv — pulando trade`);
+        return { success: false, error: 'Timeout de conexão com Deriv (12s)' };
       }
       
       if (!connected) {
@@ -1936,8 +1936,9 @@ export class AutoTradingScheduler {
         return { success: true };
 
       } finally {
-        // Sempre desconectar
-        await derivAPI.disconnect();
+        // ⚡ NÃO DESCONECTAR — manter conexão persistente para reutilização no próximo ciclo
+        // A reconexão automática cuida de quedas de conexão via heartbeat
+        console.log(`🔗 [${operationId}] Conexão Deriv mantida ativa para próximo ciclo`);
       }
 
     } catch (error) {
