@@ -378,12 +378,15 @@ class VirtualDesktopService {
     this.log('🍷 Iniciando instalador MetaTrader 5 via Wine...');
     this.log(`📂 Instalador: ${installerPath}`);
 
-    const wineProc = spawn(WINE_BIN, [installerPath], {
+    // Try with /quiet first for silent install, fallback shows GUI
+    const wineProc = spawn(WINE_BIN, [installerPath, '/silent'], {
       env: {
         ...process.env,
         DISPLAY,
-        WINEDEBUG: '-all',
-        WINEDLLOVERRIDES: 'mscoree,mshtml=',
+        WINEDEBUG: 'err+all',
+        WINEDLLOVERRIDES: '',
+        HOME: process.env.HOME || '/home/runner',
+        WINEPREFIX: process.env.WINEPREFIX || `${process.env.HOME || '/home/runner'}/.wine`,
       },
       detached: false,
     });
