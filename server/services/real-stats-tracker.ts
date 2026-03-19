@@ -33,11 +33,11 @@ const RECOVERY_CONSENSUS_BY_STREAK: Record<number, number> = {
 };
 
 // Pausa obrigatória entre trades por perdas consecutivas (em ms)
-// 🔧 FIX: Adicionado nível 1 (5 min) — previne 3 perdas em 29 min em símbolos diferentes
+// 🔧 FIX: 1 perda → 90s (recuperação rápida); 2+ perdas → pausas maiores para cautela
 const CIRCUIT_BREAKER_PAUSE_MS: Record<number, number> = {
-  1:  5 * 60 * 1000, // 1 perda  → 5 minutos  (proteção mínima pós-loss)
-  2: 10 * 60 * 1000, // 2 perdas → 10 minutos
-  3: 20 * 60 * 1000, // 3+ perdas → 20 minutos
+  1:  90 * 1000,      // 1 perda  → 90 segundos (recuperar rápido com Martingale)
+  2:  5 * 60 * 1000,  // 2 perdas → 5 minutos
+  3: 15 * 60 * 1000,  // 3+ perdas → 15 minutos
 };
 
 export interface PersistedRecoveryState {

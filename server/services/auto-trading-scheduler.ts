@@ -2992,22 +2992,27 @@ export class AutoTradingScheduler {
         if (realStatsTracker.isPostLossMode()) {
           const deficit = realStatsTracker.getLossDeficit();
           if (deficit > 0) {
-            // Stake ideal: déficit / payout_ratio × 1.15 (recupera tudo + 15% extra de lucro)
-            // Exemplo: déficit $1.00 → stake = $1.00/0.95×1.15 = $1.21 → lucro = $1.15 → net +$0.15
+            // ════════════════════════════════════════════════════════════════
+            // 🎰 MARTINGALE DE RECUPERAÇÃO — stake cobre déficit acumulado
+            // Fórmula: stake_ideal = (déficit / payout) × 1.15
+            //   → 1 vitória = déficit zerado + 15% de lucro extra
+            //   → Exemplo: déficit $1.00 → stake $1.21 → lucro $1.15 → net +$0.15
+            // ════════════════════════════════════════════════════════════════
             const RECOVERY_PAYOUT = 0.95;
             const idealRecoveryStake = (deficit / RECOVERY_PAYOUT) * 1.15;
-            // Teto em recovery: 5% da banca (mais generoso que 3% normal para recuperar mais rápido)
-            const maxRecoveryStake = Math.max(bankSize * 0.05, amount);
-            // Não usar menos que o stake base da banca
+            // Teto GENEROSO em recovery: 20% da banca — suficiente para cobrir ACCU ($1 min)
+            const maxRecoveryStake = Math.max(bankSize * 0.20, amount);
+            // Não usar menos que o stake base, nem menos que $1 (mínimo ACCU)
             amount = Math.max(Math.min(idealRecoveryStake, maxRecoveryStake), amount);
             const reqs = realStatsTracker.getRecoveryRequirements();
             const expectedProfit = amount * RECOVERY_PAYOUT;
             const profitAfterRecovery = expectedProfit - deficit;
-            console.log(`🔺 [RECOVERY STAKE] Déficit: $${deficit.toFixed(2)} | Stake calculado: $${amount.toFixed(2)}`);
-            console.log(`   → 1 win esperado: +$${expectedProfit.toFixed(2)} | Recupera déficit + ganho extra: +$${profitAfterRecovery.toFixed(2)}`);
+            const recoversInOneWin = profitAfterRecovery >= 0;
+            console.log(`🎰 [MARTINGALE RECUPERAÇÃO] Déficit: $${deficit.toFixed(2)} | Stake: $${amount.toFixed(2)} | Ideal era: $${idealRecoveryStake.toFixed(2)}`);
+            console.log(`   → 1 vitória esperada: +$${expectedProfit.toFixed(2)} | ${recoversInOneWin ? '✅ Recupera déficit em 1 trade' : '⚠️ Déficit residual: $' + Math.abs(profitAfterRecovery).toFixed(2)}`);
             console.log(`   → Consenso mínimo exigido: ${reqs.minConsensus}% (${reqs.consecutiveLosses} perda(s) consecutiva(s))`);
           } else {
-            console.log(`✅ [RECOVERY] Déficit = $0 (saldo quase recuperado) → stake normal`);
+            console.log(`✅ [RECOVERY] Déficit = $0 (saldo recuperado) → stake normal`);
           }
         }
 
