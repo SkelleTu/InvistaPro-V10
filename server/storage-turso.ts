@@ -945,3 +945,8 @@ export class TursoStorage implements IStorage {
 }
 
 export const tursoStorage = new TursoStorage();
+
+// Executar migrações do Turso na inicialização (adiciona colunas novas se necessário)
+import('./db-turso').then(({ initializeTursoDatabase }) => {
+  initializeTursoDatabase().catch((e: any) => console.warn('⚠️ Migração Turso ignorada:', e?.message));
+});

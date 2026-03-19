@@ -402,6 +402,14 @@ export async function initializeTursoDatabase(): Promise<boolean> {
       // Coluna já existe - ignorar
     }
 
+    // Migração: adicionar operation_mode em trade_operations se não existir
+    try {
+      await (tursoDb as any).run(`ALTER TABLE trade_operations ADD COLUMN operation_mode TEXT DEFAULT 'Operação Ordinária'`);
+      console.log('✅ Coluna operation_mode adicionada ao Turso trade_operations');
+    } catch (e: any) {
+      // Coluna já existe - ignorar
+    }
+
     console.log('✅ Tabelas Turso inicializadas com sucesso!');
     return true;
   } catch (error) {

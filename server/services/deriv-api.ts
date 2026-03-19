@@ -96,7 +96,8 @@ export class DerivAPIService extends EventEmitter {
     super();
     
     // Configurar listeners para error recovery
-    this.setMaxListeners(20); // Evitar memory leaks
+    // 200 slots: 25 ativos × (proposta + compra) + subscrições + heartbeat + auth
+    this.setMaxListeners(200);
     this.setupErrorRecovery();
   }
 
@@ -716,6 +717,7 @@ export class DerivAPIService extends EventEmitter {
       const handler = (msg: any) => {
         if (msg.req_id === reqId) {
           this.removeListener('message', handler);
+          clearTimeout(timer); // Limpar timer ao resolver para evitar acúmulo
           resolve(msg);
         }
       };
@@ -723,11 +725,11 @@ export class DerivAPIService extends EventEmitter {
       this.on('message', handler);
       this.sendMessage(message);
 
-      // Timeout after 30 seconds
-      setTimeout(() => {
+      // Timeout after 15 seconds (reduzido de 30s)
+      const timer = setTimeout(() => {
         this.removeListener('message', handler);
         reject(new Error('WebSocket request timeout'));
-      }, 30000);
+      }, 15000);
     });
   }
 
@@ -741,6 +743,7 @@ export class DerivAPIService extends EventEmitter {
       const contractsHandler = (message: any) => {
         if (message.req_id === reqId) {
           this.removeListener('message', contractsHandler);
+          clearTimeout(timer);
           if (message.contracts_for) {
             const contracts = message.contracts_for.available || [];
             resolve(contracts);
@@ -749,6 +752,13 @@ export class DerivAPIService extends EventEmitter {
           }
         }
       };
+
+      // Timeout de 10s — sem resposta a consulta de contratos não deve bloquear o sistema
+      const timer = setTimeout(() => {
+        this.removeListener('message', contractsHandler);
+        console.warn(`⚠️ [TIMEOUT] getContractsFor ${symbol} — 10s sem resposta`);
+        resolve([]);
+      }, 10000);
 
       this.on('message', contractsHandler);
       this.sendMessage({
@@ -844,13 +854,16 @@ export class DerivAPIService extends EventEmitter {
         this.on('message', buyHandler);
 
         // Comprar usando o ID da proposta
+        // Tolerância de 5%: se o mercado moveu ligeiramente desde a proposta,
+        // a Deriv não rejeita por preço obsoleto
+        const maxPrice = parseFloat((proposal.ask_price * 1.05).toFixed(2));
         const buyMessage = {
           buy: proposal.id,
-          price: proposal.ask_price,
+          price: maxPrice,
           req_id: reqId
         };
 
-        console.log(`📝 Comprando contrato ${contractType} com proposta ID: ${proposal.id}`);
+        console.log(`📝 Comprando contrato ${contractType} com proposta ID: ${proposal.id} | MaxPrice: $${maxPrice}`);
         this.sendMessage(buyMessage);
       });
 
@@ -939,13 +952,15 @@ export class DerivAPIService extends EventEmitter {
         }, OPERATION_TIMEOUT);
 
         // Comprar usando o ID da proposta (método correto da Deriv API)
+        // Tolerância de 5%: evita rejeição quando preço se move entre proposta e compra
+        const maxPriceDigitDiff = parseFloat((proposal.ask_price * 1.05).toFixed(2));
         const buyMessage = {
           buy: proposal.id,
-          price: proposal.ask_price,
+          price: maxPriceDigitDiff,
           req_id: reqId
         };
 
-        console.log(`📝 Comprando contrato digit differs com proposta ID: ${proposal.id}`);
+        console.log(`📝 Comprando contrato digit differs com proposta ID: ${proposal.id} | MaxPrice: $${maxPriceDigitDiff}`);
         this.sendMessage(buyMessage);
       });
 
@@ -1019,6 +1034,7 @@ export class DerivAPIService extends EventEmitter {
       const proposalHandler = (message: any) => {
         if (message.req_id === reqId) {
           this.removeListener('message', proposalHandler);
+          clearTimeout(timer);
           if (message.proposal) {
             console.log(`✅ Proposta digit differs criada: ID ${message.proposal.id} | Preço: $${message.proposal.ask_price}`);
             resolve({
@@ -1031,6 +1047,13 @@ export class DerivAPIService extends EventEmitter {
           }
         }
       };
+
+      // Timeout 10s — sem este timeout o listener ficava preso para sempre
+      const timer = setTimeout(() => {
+        this.removeListener('message', proposalHandler);
+        console.error(`⏱️ [TIMEOUT] createDigitDifferProposal ${normalizedSymbol} — 10s sem resposta`);
+        resolve(null);
+      }, 10000);
 
       this.on('message', proposalHandler);
 
@@ -1151,8 +1174,10 @@ export class DerivAPIService extends EventEmitter {
         console.error(`⏱️ Timeout compra ${params.contract_type}`);
         resolve(null);
       }, TIMEOUT_MS);
+      // Tolerância de 5%: evita rejeição por preço obsoleto
+      const maxBuyPriceGeneric = parseFloat((proposal.ask_price * 1.05).toFixed(2));
       this.on('message', handler);
-      this.sendMessage({ buy: proposal.id, price: proposal.ask_price, req_id: reqBuyId });
+      this.sendMessage({ buy: proposal.id, price: maxBuyPriceGeneric, req_id: reqBuyId });
     });
 
     return contract;
@@ -1333,8 +1358,10 @@ export class DerivAPIService extends EventEmitter {
         console.error(`⏱️ [TIMEOUT] Compra ${params.contract_type} — ${TIMEOUT_MS}ms sem resposta`);
         resolve(null);
       }, TIMEOUT_MS);
+      // Tolerância de 5%: evita rejeição por preço obsoleto quando mercado move entre proposta e buy
+      const maxBuyPrice = parseFloat((proposal.ask_price * 1.05).toFixed(2));
       this.on('message', handler);
-      this.sendMessage({ buy: proposal.id, price: proposal.ask_price, req_id: reqBuyId });
+      this.sendMessage({ buy: proposal.id, price: maxBuyPrice, req_id: reqBuyId });
     });
 
     return contract;
