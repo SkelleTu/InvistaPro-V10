@@ -220,6 +220,7 @@ export default function MetaTrader5Page() {
         formData.append("chunkIndex", String(i));
         formData.append("totalChunks", String(totalChunks));
         formData.append("fileName", file.name);
+        formData.append("totalFileSize", String(file.size));
 
         const uploadedMB = (end / 1024 / 1024).toFixed(0);
         setUploadInfo(`Enviando parte ${i + 1}/${totalChunks} (${uploadedMB}MB / ${totalMB}MB)...`);
