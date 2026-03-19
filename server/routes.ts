@@ -3691,54 +3691,66 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json(result);
   });
 
-  // Upload MT5 as a single ZIP file — extracts to mt5-uploaded/
-  const zipUpload = multer({
+  // Chunked archive upload — accepts ZIP/RAR/7z in 50MB pieces, assembles & extracts with 7z
+  const CHUNK_TEMP_DIR = pathMod.resolve(process.cwd(), 'mt5-upload-chunks');
+  const chunkUpload = multer({
     storage: multer.memoryStorage(),
-    limits: { fileSize: 1024 * 1024 * 1024 }, // 1GB
+    limits: { fileSize: 100 * 1024 * 1024 }, // 100MB per chunk
   });
 
-  app.post('/api/desktop/upload-mt5-zip', isAuthenticated, zipUpload.single('file'), async (req: any, res) => {
+  app.post('/api/desktop/upload-mt5-chunk', isAuthenticated, chunkUpload.single('chunk'), async (req: any, res) => {
     try {
-      const file = req.file;
-      if (!file) return res.status(400).json({ success: false, error: 'Nenhum arquivo ZIP recebido.' });
+      const chunk = req.file;
+      if (!chunk) return res.status(400).json({ success: false, error: 'Nenhum chunk recebido.' });
 
-      const unzipper = await import('unzipper');
-      const { rmSync, mkdirSync: mkDir, createWriteStream } = await import('fs');
-      const { Readable } = await import('stream');
-      const { pipeline } = await import('stream/promises');
+      const chunkIndex = parseInt(req.body.chunkIndex || '0', 10);
+      const totalChunks = parseInt(req.body.totalChunks || '1', 10);
+      const fileName = (req.body.fileName || 'archive').replace(/[^a-zA-Z0-9._-]/g, '_');
+      const { appendFileSync, rmSync: rmS, mkdirSync: mkD } = await import('fs');
 
-      try { rmSync(MT5_UPLOAD_DIR, { recursive: true, force: true }); } catch {}
-      mkDir(MT5_UPLOAD_DIR, { recursive: true });
-
-      const readable = Readable.from(file.buffer);
-      const directory = await unzipper.Open.buffer(file.buffer);
-
-      let extractedCount = 0;
-      for (const entry of directory.files) {
-        if (entry.type === 'Directory') continue;
-
-        // Strip top-level folder if all files share one (e.g. "MetaTrader 5/...")
-        let relativePath = entry.path.replace(/\\/g, '/');
-        const parts = relativePath.split('/');
-        if (parts.length > 1) {
-          // Check if first segment is a folder — strip it
-          const firstSegIsFolder = directory.files.some(
-            f => f.path.startsWith(parts[0] + '/') && f.path !== parts[0] + '/'
-          );
-          if (firstSegIsFolder) relativePath = parts.slice(1).join('/');
-        }
-        if (!relativePath) continue;
-
-        const targetPath = pathMod.join(MT5_UPLOAD_DIR, relativePath);
-        mkDir(pathMod.dirname(targetPath), { recursive: true });
-
-        const content = await entry.buffer();
-        writeFileSync(targetPath, content);
-        extractedCount++;
+      // On first chunk, clear previous temp & upload dirs
+      if (chunkIndex === 0) {
+        try { rmS(CHUNK_TEMP_DIR, { recursive: true, force: true }); } catch {}
+        try { rmS(MT5_UPLOAD_DIR, { recursive: true, force: true }); } catch {}
+        mkD(CHUNK_TEMP_DIR, { recursive: true });
       }
 
-      const exePath = findMT5ExeInUpload(MT5_UPLOAD_DIR);
-      res.json({ success: true, filesExtracted: extractedCount, exeFound: exePath || null });
+      const assembledPath = pathMod.join(CHUNK_TEMP_DIR, fileName);
+      appendFileSync(assembledPath, chunk.buffer);
+
+      // If this is the last chunk — extract with 7z
+      if (chunkIndex === totalChunks - 1) {
+        mkdirSync(MT5_UPLOAD_DIR, { recursive: true });
+        const { execSync } = await import('child_process');
+        try {
+          // Extract to a temp subfolder first to detect top-level dir
+          const tmpExtract = pathMod.join(CHUNK_TEMP_DIR, 'extracted');
+          try { rmS(tmpExtract, { recursive: true, force: true }); } catch {}
+          mkD(tmpExtract, { recursive: true });
+
+          execSync(`7z x "${assembledPath}" -o"${tmpExtract}" -y`, { stdio: 'pipe', timeout: 120000 });
+
+          // Check if everything is under one top-level folder
+          const { readdirSync: rdSync, statSync: stSync } = await import('fs');
+          const topEntries = rdSync(tmpExtract);
+          let srcDir = tmpExtract;
+          if (topEntries.length === 1 && stSync(pathMod.join(tmpExtract, topEntries[0])).isDirectory()) {
+            srcDir = pathMod.join(tmpExtract, topEntries[0]);
+          }
+
+          // Move files from srcDir to MT5_UPLOAD_DIR
+          execSync(`cp -r "${srcDir}/." "${MT5_UPLOAD_DIR}/"`, { stdio: 'pipe' });
+          try { rmS(CHUNK_TEMP_DIR, { recursive: true, force: true }); } catch {}
+
+          const count = (await import('fs')).readdirSync(MT5_UPLOAD_DIR, { recursive: true } as any).filter((f: any) => typeof f === 'string').length;
+          const exePath = findMT5ExeInUpload(MT5_UPLOAD_DIR);
+          return res.json({ success: true, done: true, filesExtracted: count, exeFound: exePath || null });
+        } catch (extractErr: any) {
+          return res.status(500).json({ success: false, error: `Erro ao extrair: ${extractErr.message}` });
+        }
+      }
+
+      res.json({ success: true, done: false, chunkIndex });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
     }

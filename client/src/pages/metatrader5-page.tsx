@@ -202,42 +202,60 @@ export default function MetaTrader5Page() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    setUploadProgress(0);
-    setUploadInfo(`Enviando ${file.name} (${(file.size / 1024 / 1024).toFixed(0)}MB)...`);
+    const CHUNK_SIZE = 50 * 1024 * 1024; // 50MB per chunk
+    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+    const totalMB = (file.size / 1024 / 1024).toFixed(0);
 
-    const formData = new FormData();
-    formData.append("file", file);
+    setUploadProgress(0);
+    setUploadInfo(`Preparando ${file.name} (${totalMB}MB) em ${totalChunks} partes...`);
 
     try {
-      const xhr = new XMLHttpRequest();
-      xhr.open("POST", "/api/desktop/upload-mt5-zip");
-      xhr.withCredentials = true;
+      for (let i = 0; i < totalChunks; i++) {
+        const start = i * CHUNK_SIZE;
+        const end = Math.min(start + CHUNK_SIZE, file.size);
+        const chunkBlob = file.slice(start, end);
 
-      xhr.upload.onprogress = (ev) => {
-        if (ev.lengthComputable) {
-          const pct = Math.round((ev.loaded / ev.total) * 100);
-          setUploadProgress(pct);
-          setUploadInfo(`Enviando ZIP: ${pct}% (${(ev.loaded / 1024 / 1024).toFixed(0)}MB / ${(ev.total / 1024 / 1024).toFixed(0)}MB)...`);
+        const formData = new FormData();
+        formData.append("chunk", chunkBlob, file.name);
+        formData.append("chunkIndex", String(i));
+        formData.append("totalChunks", String(totalChunks));
+        formData.append("fileName", file.name);
+
+        const uploadedMB = (end / 1024 / 1024).toFixed(0);
+        setUploadInfo(`Enviando parte ${i + 1}/${totalChunks} (${uploadedMB}MB / ${totalMB}MB)...`);
+
+        const result = await new Promise<any>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open("POST", "/api/desktop/upload-mt5-chunk");
+          xhr.withCredentials = true;
+          xhr.upload.onprogress = (ev) => {
+            if (ev.lengthComputable) {
+              const chunkPct = ev.loaded / ev.total;
+              const overallPct = Math.round(((i + chunkPct) / totalChunks) * 95);
+              setUploadProgress(overallPct);
+            }
+          };
+          xhr.onload = () => {
+            try { resolve(JSON.parse(xhr.responseText)); }
+            catch { reject(new Error("Resposta inválida do servidor")); }
+          };
+          xhr.onerror = () => reject(new Error("Erro de rede ao enviar parte " + (i + 1)));
+          xhr.send(formData);
+        });
+
+        if (!result.success) throw new Error(result.error || "Erro no servidor");
+
+        if (result.done) {
+          setUploadProgress(100);
+          setUploadInfo(`✅ Extração concluída! ${result.filesExtracted} arquivos prontos.`);
+          queryClient.invalidateQueries({ queryKey: ["/api/desktop/status"] });
+          toast({ title: "Arquivo extraído!", description: `${result.filesExtracted} arquivos prontos. MT5 pronto para abrir.` });
+          break;
         }
-      };
-
-      const result = await new Promise<any>((resolve, reject) => {
-        xhr.onload = () => {
-          try { resolve(JSON.parse(xhr.responseText)); } catch { reject(new Error("Resposta inválida")); }
-        };
-        xhr.onerror = () => reject(new Error("Erro de rede"));
-        xhr.send(formData);
-      });
-
-      if (!result.success) throw new Error(result.error || "Erro ao extrair ZIP");
-
-      setUploadProgress(100);
-      setUploadInfo(`✅ ZIP extraído! ${result.filesExtracted} arquivos prontos.`);
-      queryClient.invalidateQueries({ queryKey: ["/api/desktop/status"] });
-      toast({ title: "ZIP extraído com sucesso!", description: `${result.filesExtracted} arquivos extraídos. MT5 pronto para abrir.` });
+      }
     } catch (err: any) {
       setUploadInfo(`Erro: ${err.message}`);
-      toast({ title: "Erro no upload do ZIP", description: err.message, variant: "destructive" });
+      toast({ title: "Erro no upload", description: err.message, variant: "destructive" });
     }
 
     if (e.target) e.target.value = "";
@@ -321,7 +339,7 @@ export default function MetaTrader5Page() {
             <input
               ref={zipInputRef}
               type="file"
-              accept=".zip"
+              accept=".zip,.rar,.7z"
               className="absolute inset-0 opacity-0 w-full h-full cursor-pointer"
               onChange={handleZipUpload}
               data-testid="input-zip-upload"
@@ -333,7 +351,7 @@ export default function MetaTrader5Page() {
               data-testid="button-upload-zip"
             >
               <Upload className="h-4 w-4" />
-              <span className="hidden sm:inline">Enviar ZIP</span>
+              <span className="hidden sm:inline">Enviar ZIP/RAR</span>
             </Button>
           </div>
 
