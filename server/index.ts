@@ -1,6 +1,7 @@
 import express, { type Request, Response, NextFunction } from "express";
 import cookieParser from "cookie-parser";
 import net from "net";
+import path from "path";
 import { registerRoutes } from "./routes";
 import { whatsappService } from "./whatsappService";
 import { setupVite, serveStatic, log } from "./vite";
@@ -256,6 +257,10 @@ app.use((req, res, next) => {
       socket.on('error', () => target.destroy());
     }
   });
+
+  // Serve arquivos estáticos da pasta public/ raiz (vnc-viewer.html, novnc/, etc.)
+  const rootPublicPath = path.resolve(process.cwd(), 'public');
+  app.use(express.static(rootPublicPath));
 
   // Middleware avançado de error handling (deve ser o último middleware)
   app.use(globalErrorHandler);
