@@ -3705,9 +3705,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const chunkIndex = parseInt(req.body.chunkIndex || '0', 10);
       const totalChunks = parseInt(req.body.totalChunks || '1', 10);
-      const totalFileSize = parseInt(req.body.totalFileSize || '0', 10);
       const fileName = (req.body.fileName || 'archive').replace(/[^a-zA-Z0-9._-]/g, '_');
-      const { appendFileSync, rmSync: rmS, mkdirSync: mkD, statSync: stS } = await import('fs');
+      const { appendFileSync, rmSync: rmS, mkdirSync: mkD } = await import('fs');
 
       // On first chunk, clear previous temp & upload dirs
       if (chunkIndex === 0) {
@@ -3719,39 +3718,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const assembledPath = pathMod.join(CHUNK_TEMP_DIR, fileName);
       appendFileSync(assembledPath, chunk.buffer);
 
-      // If this is the last chunk — validate size then extract with 7z
+      // If this is the last chunk — extract with 7z
       if (chunkIndex === totalChunks - 1) {
-        // Verify assembled file size matches expected size
-        if (totalFileSize > 0) {
-          const assembledSize = stS(assembledPath).size;
-          if (assembledSize !== totalFileSize) {
-            return res.status(400).json({
-              success: false,
-              error: `Arquivo incompleto: esperado ${totalFileSize} bytes, recebido ${assembledSize} bytes. Tente fazer o upload novamente.`
-            });
-          }
-        }
-
         mkdirSync(MT5_UPLOAD_DIR, { recursive: true });
         const { execSync } = await import('child_process');
         try {
-          // Test archive integrity before extracting
-          try {
-            execSync(`7z t "${assembledPath}" -y`, { stdio: 'pipe', timeout: 60000 });
-          } catch (testErr: any) {
-            const stderr = testErr.stderr?.toString() || testErr.stdout?.toString() || '';
-            return res.status(400).json({
-              success: false,
-              error: `Arquivo corrompido ou formato inválido. Verifique se o arquivo RAR/ZIP está completo e tente novamente. Detalhes: ${stderr.split('\n')[0] || 'formato não reconhecido'}`
-            });
-          }
-
           // Extract to a temp subfolder first to detect top-level dir
           const tmpExtract = pathMod.join(CHUNK_TEMP_DIR, 'extracted');
           try { rmS(tmpExtract, { recursive: true, force: true }); } catch {}
           mkD(tmpExtract, { recursive: true });
 
-          execSync(`7z x "${assembledPath}" -o"${tmpExtract}" -y`, { stdio: 'pipe', timeout: 300000 });
+          execSync(`7z x "${assembledPath}" -o"${tmpExtract}" -y`, { stdio: 'pipe', timeout: 120000 });
 
           // Check if everything is under one top-level folder
           const { readdirSync: rdSync, statSync: stSync } = await import('fs');
@@ -3769,8 +3746,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const exePath = findMT5ExeInUpload(MT5_UPLOAD_DIR);
           return res.json({ success: true, done: true, filesExtracted: count, exeFound: exePath || null });
         } catch (extractErr: any) {
-          const errMsg = extractErr.stderr?.toString() || extractErr.message || '';
-          return res.status(500).json({ success: false, error: `Erro ao extrair: ${errMsg.split('\n')[0] || extractErr.message}` });
+          return res.status(500).json({ success: false, error: `Erro ao extrair: ${extractErr.message}` });
         }
       }
 
