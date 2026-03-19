@@ -67,6 +67,15 @@ export class AutoTradingScheduler {
   // Baixa = muitos ativos com consenso ruim simultaneamente → modo defensivo
   private lastScanMarketQuality: number = 100;
   private readonly CYCLE_INTERVAL_MS = 60000;
+
+  // 🚫 PAUSA POR MERCADO RUIM — Bloqueia operações quando o mercado global está desfavorável
+  private badMarketPausedUntil: number = 0;             // Timestamp até quando operações estão pausadas
+  private badMarketReducedGrowthActive: boolean = false; // true = opera com growth 1% (recuperação parcial)
+  private readonly BAD_MARKET_PAUSE_MS = 15 * 60 * 1000; // 15 min de pausa quando mercado cai abaixo do threshold
+  private readonly BAD_MARKET_QUALITY_THRESHOLD = 40;    // Qualidade ≤ 40% → pausa total
+  private readonly BAD_MARKET_RECOVERED_THRESHOLD = 60;  // Qualidade > 60% → recuperação plena (5%)
+  private readonly BAD_MARKET_PARTIAL_THRESHOLD = 40;    // Qualidade 41-60% → recuperação parcial (1%)
+  private readonly BAD_MARKET_GROWTH_REDUCED = 0.01;     // Taxa de crescimento reduzida (1%)
   private activityLog: Array<{ time: number; message: string; type: 'info' | 'success' | 'warning' | 'trade' }> = [];
 
   // 🎰 SISTEMA MARTINGALE TRIPLO — Gerenciado por IA de Alta Precisão
@@ -649,6 +658,13 @@ export class AutoTradingScheduler {
       return;
     }
 
+    // 1b. Mercado globalmente ruim? Alavancagem é vetada durante qualquer janela de pausa
+    if (this.badMarketPausedUntil > now) {
+      const secsLeft = Math.round((this.badMarketPausedUntil - now) / 1000);
+      console.log(`🚀 [LEVERAGE] Bloqueado: janela de mercado ruim ativa (${secsLeft}s restantes) — alavancagem suspensa`);
+      return;
+    }
+
     // 2. Sistema de recuperação ou circuit breaker ativo? Não alavancar agora
     if (realStatsTracker.isPostLossMode()) {
       console.log(`🚀 [LEVERAGE] Bloqueado: sistema em modo de recuperação`);
@@ -788,6 +804,24 @@ export class AutoTradingScheduler {
     if (tradingControlStatus?.isPaused) {
       console.log(`🛑 [${operationId}] Pausa global detectada - não executando trade`);
       return { success: false, error: 'Trading pausado globalmente' };
+    }
+
+    // 🚫 VERIFICAÇÃO DE PAUSA POR MERCADO RUIM
+    const nowCheck = Date.now();
+    if (this.badMarketPausedUntil > nowCheck) {
+      // Dentro da janela de pausa — verificar se há recuperação parcial
+      if (this.badMarketReducedGrowthActive) {
+        // Recuperação parcial detectada pela IA → permite continuar com growth 1%
+        const secsLeft = Math.round((this.badMarketPausedUntil - nowCheck) / 1000);
+        console.log(`⚠️ [${operationId}] Mercado em recuperação parcial — operando com growth 1% (${secsLeft}s restantes na janela)`);
+        // Não bloqueia — deixa continuar, growth será 1% na execução do contrato
+      } else {
+        // Ainda mercado ruim → bloquear operação
+        const secsLeft = Math.round((this.badMarketPausedUntil - nowCheck) / 1000);
+        const qualStr = `${this.lastScanMarketQuality}%`;
+        console.log(`🚫 [${operationId}] Mercado ruim (qualidade=${qualStr}) — operação bloqueada. Pausa encerra em ${secsLeft}s`);
+        return { success: false, error: `Mercado ruim — operações pausadas (${secsLeft}s restantes)` };
+      }
     }
     
     // SEGURANÇA: Verificar limites antes de processar
@@ -1890,13 +1924,16 @@ export class AutoTradingScheduler {
             };
             const accuStake = Math.round(targetByQuality[opportunityQuality] * 100) / 100;
 
-            // 🧠 SUPREMO: growth_rate FIXO em 5% (modo operações) — IA decide QUANDO entrar
-            const adaptiveGrowth = 0.05; // 5% fixo — modo operações configurado pelo usuário
+            // 🧠 SUPREMO: growth_rate dinâmico — 5% normal, 1% se mercado em recuperação parcial
+            const adaptiveGrowth = this.badMarketReducedGrowthActive
+              ? this.BAD_MARKET_GROWTH_REDUCED  // 1% — mercado em recuperação, modo conservador
+              : 0.05;                            // 5% — modo normal de operações
+            const growthModeLabel = this.badMarketReducedGrowthActive ? 'REDUZIDO (mercado parcial)' : 'FIXO (normal)';
             // ⚡ Ticks alvo: mínimo 2 — garante EV positivo (com 5% growth, breakeven = 90.9% em 2t vs 95.24% em 1t)
             // Se supremeAnalysis está disponível usa valor do regime, senão mínimo de 2 (nunca 1 isolado)
             const accuTicks = Math.max(2, supremeAnalysis?.adaptiveParams?.accumulator?.expectedTicks ?? 2);
             accuTargetTicks = accuTicks;
-            console.log(`📊 [${operationId}] ACCU MODO-OPS: stake=$${accuStake} [${opportunityQuality}] (banca=$${bankBalance.toFixed(2)} | consenso=${consensus}% | risco=${accuRisk}) | growth=${(adaptiveGrowth*100).toFixed(0)}% FIXO | ticks=${accuTicks}${supremeAnalysis ? ` | regime=${regime} | hurst=${supremeAnalysis.statistics.hurstExponent.toFixed(2)}` : ''} | ${selectedSymbol}`);
+            console.log(`📊 [${operationId}] ACCU MODO-OPS: stake=$${accuStake} [${opportunityQuality}] (banca=$${bankBalance.toFixed(2)} | consenso=${consensus}% | risco=${accuRisk}) | growth=${(adaptiveGrowth*100).toFixed(0)}% ${growthModeLabel} | ticks=${accuTicks}${supremeAnalysis ? ` | regime=${regime} | hurst=${supremeAnalysis.statistics.hurstExponent.toFixed(2)}` : ''} | ${selectedSymbol}`);
             contract = await derivAPI.buyFlexibleContract({
               contract_type: 'ACCU',
               symbol: selectedSymbol,
@@ -2629,8 +2666,42 @@ export class AutoTradingScheduler {
         ? Math.round(((top5.length - poorAssets) / top5.length) * 100)
         : 100;
       this.lastScanMarketQuality = scanQuality;
-      if (scanQuality <= 40) {
-        console.log(`⚠️ [MERCADO RUIM] ${poorAssets}/${top5.length} ativos com consenso < ${POOR_CONSENSUS_THRESHOLD}% → qualidade=${scanQuality}% → modo defensivo ativo`);
+
+      // 🚫 PAUSA POR MERCADO RUIM — lógica de pausa, recuperação parcial e plena
+      const now = Date.now();
+      if (scanQuality <= this.BAD_MARKET_QUALITY_THRESHOLD) {
+        // Mercado globalmente ruim → pausar por 15 min (renova o timer a cada scan ruim)
+        this.badMarketPausedUntil = now + this.BAD_MARKET_PAUSE_MS;
+        this.badMarketReducedGrowthActive = false;
+        const pauseMin = Math.round(this.BAD_MARKET_PAUSE_MS / 60000);
+        console.log(`🚫 [MERCADO RUIM] ${poorAssets}/${top5.length} ativos fracos → qualidade=${scanQuality}% ≤ ${this.BAD_MARKET_QUALITY_THRESHOLD}% → PAUSA TOTAL de ${pauseMin} min ativada`);
+        this.setPhase('PAUSADO', `🚫 Mercado ruim (qualidade ${scanQuality}%) — operações pausadas por ${pauseMin} min`, 'warning');
+      } else if (this.badMarketPausedUntil > now) {
+        // Ainda dentro da janela de pausa — verificar se recuperou parcialmente
+        if (scanQuality > this.BAD_MARKET_RECOVERED_THRESHOLD) {
+          // Recuperação plena → encerrar pausa e voltar ao normal (5%)
+          this.badMarketPausedUntil = 0;
+          this.badMarketReducedGrowthActive = false;
+          console.log(`✅ [MERCADO RECUPERADO] Qualidade=${scanQuality}% > ${this.BAD_MARKET_RECOVERED_THRESHOLD}% → pausa encerrada, retomando growth 5% normal`);
+          this.setPhase('ANALISANDO', `✅ Mercado recuperado (qualidade ${scanQuality}%) — operações normais retomadas`, 'success');
+        } else if (scanQuality > this.BAD_MARKET_PARTIAL_THRESHOLD) {
+          // Recuperação parcial (41-60%) → permitir operações com growth 1%
+          this.badMarketReducedGrowthActive = true;
+          const secsLeft = Math.round((this.badMarketPausedUntil - now) / 1000);
+          console.log(`⚠️ [MERCADO PARCIAL] Qualidade=${scanQuality}% (parcial) → operações com growth 1% por mais ${secsLeft}s`);
+          this.setPhase('REDUZIDO', `⚠️ Recuperação parcial (qualidade ${scanQuality}%) — operando a 1% de crescimento`, 'warning');
+        } else {
+          // Ainda ruim (dentro da pausa e qualidade ainda ≤ 40)
+          this.badMarketReducedGrowthActive = false;
+          const secsLeft = Math.round((this.badMarketPausedUntil - now) / 1000);
+          console.log(`🚫 [MERCADO RUIM] Qualidade=${scanQuality}% ainda baixa → pausa ativa por mais ${secsLeft}s`);
+        }
+      } else {
+        // Fora da janela de pausa e mercado OK → garantir que flags estão limpas
+        if (this.badMarketReducedGrowthActive) {
+          this.badMarketReducedGrowthActive = false;
+          console.log(`✅ [MERCADO NORMAL] Janela de pausa expirada → growth 5% restaurado`);
+        }
       }
       
       // Melhor símbolo
@@ -3357,7 +3428,14 @@ export class AutoTradingScheduler {
     nextCycleAt: number;
     cycleIntervalMs: number;
     activityLog: Array<{ time: number; message: string; type: string }>;
+    marketQuality: number;
+    badMarketPaused: boolean;
+    badMarketPausedSecondsLeft: number;
+    badMarketReducedGrowth: boolean;
   } {
+    const nowSt = Date.now();
+    const isPaused = this.badMarketPausedUntil > nowSt;
+    const secsLeft = isPaused ? Math.round((this.badMarketPausedUntil - nowSt) / 1000) : 0;
     return {
       isRunning: !!this.cronJob,
       hasActiveSessions: this.activeSessions.size > 0,
@@ -3368,7 +3446,11 @@ export class AutoTradingScheduler {
       lastCycleStartedAt: this.lastCycleStartedAt,
       nextCycleAt: this.nextCycleAt,
       cycleIntervalMs: this.CYCLE_INTERVAL_MS,
-      activityLog: this.activityLog.slice(0, 10)
+      activityLog: this.activityLog.slice(0, 10),
+      marketQuality: this.lastScanMarketQuality,
+      badMarketPaused: isPaused && !this.badMarketReducedGrowthActive,
+      badMarketPausedSecondsLeft: secsLeft,
+      badMarketReducedGrowth: this.badMarketReducedGrowthActive,
     };
   }
 
