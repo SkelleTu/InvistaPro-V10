@@ -53,6 +53,10 @@ export class AutoTradingScheduler {
   private lastOperationStartTime: number = 0;
   private readonly OPERATION_TIMEOUT_MS = 90000; // 90 segundos máximo por ciclo
 
+  // ⚡ CACHE DE SALDO — evita round-trip WebSocket a cada operação ACCU (stake fixo $1)
+  private cachedBalance: { value: number; currency: string; loginid: string; fetchedAt: number } | null = null;
+  private readonly BALANCE_CACHE_TTL_MS = 60000; // 60 segundos de validade
+
   // 📊 RASTREAMENTO DE FASE — exibido na interface para o usuário
   private currentPhase: string = 'INICIALIZANDO';
   private currentPhaseDetail: string = 'Sistema inicializando...';
@@ -1234,22 +1238,30 @@ export class AutoTradingScheduler {
       }
 
       // ✅ SALDO REAL: Buscar saldo atual da conta Deriv e sincronizar com o banco
-      // Garante que o stake e as proteções sejam calculados sobre o saldo real
+      // ⚡ OTIMIZAÇÃO ACCU: usar cache de saldo (stake fixo $1 — round-trip desnecessário)
+      const isAccuMode = (config.activeModalities && config.activeModalities.includes('accumulator')) ||
+                         (config.mode && config.mode.includes('accumulator'));
+      const cacheValid = this.cachedBalance && (Date.now() - this.cachedBalance.fetchedAt) < this.BALANCE_CACHE_TTL_MS;
+      
       try {
-        const realBalance = await derivAPI.getBalance();
-        if (realBalance && realBalance.balance >= 0) {
-          const rb = realBalance.balance;
-          console.log(`💳 [${operationId}] Saldo REAL Deriv: $${rb} ${realBalance.currency} (conta: ${realBalance.loginid})`);
-          // Sempre sincroniza currentBalance E openingBalance com o saldo real da Deriv.
-          // Isso garante que o sistema de proteção use o saldo atual como referência,
-          // nunca um valor obsoleto do banco de dados.
-          await storage.createOrUpdateDailyPnL(config.userId, {
-            currentBalance: rb,
-            openingBalance: rb,
-          });
-          console.log(`🔄 [${operationId}] Saldo sincronizado com Deriv: currentBalance=$${rb} | openingBalance=$${rb}`);
+        if (isAccuMode && cacheValid && this.cachedBalance) {
+          // ⚡ Saldo em cache — sem round-trip WebSocket (reduz latência para ACCU)
+          console.log(`⚡ [${operationId}] Saldo em CACHE: $${this.cachedBalance.value} ${this.cachedBalance.currency} (${Math.round((Date.now() - this.cachedBalance.fetchedAt)/1000)}s atrás)`);
         } else {
-          console.log(`⚠️ [${operationId}] Saldo da Deriv não disponível — usando saldo do banco`);
+          const realBalance = await derivAPI.getBalance();
+          if (realBalance && realBalance.balance >= 0) {
+            const rb = realBalance.balance;
+            // Atualizar cache
+            this.cachedBalance = { value: rb, currency: realBalance.currency, loginid: realBalance.loginid, fetchedAt: Date.now() };
+            console.log(`💳 [${operationId}] Saldo REAL Deriv: $${rb} ${realBalance.currency} (conta: ${realBalance.loginid})`);
+            await storage.createOrUpdateDailyPnL(config.userId, {
+              currentBalance: rb,
+              openingBalance: rb,
+            });
+            console.log(`🔄 [${operationId}] Saldo sincronizado com Deriv: currentBalance=$${rb} | openingBalance=$${rb}`);
+          } else {
+            console.log(`⚠️ [${operationId}] Saldo da Deriv não disponível — usando saldo do banco`);
+          }
         }
       } catch (balErr: any) {
         console.log(`⚠️ [${operationId}] Erro ao buscar saldo real: ${balErr?.message} — usando saldo do banco`);
@@ -1669,18 +1681,15 @@ export class AutoTradingScheduler {
             return { success: false, error: `ACCU: ${selectedSymbol} (alta volatilidade) com regime desconhecido — bloqueado por segurança` };
           }
 
-          // 🧠 ACCU usa o mesmo stake amplificado pela IA (tradeParams.amount já inclui AI amplifier).
-          // Apenas aplica o mínimo da Deriv ($1.00). Sem teto fixo — a IA decide o tamanho.
-          const accuStake = Math.max(1.00, Math.round(tradeParams.amount * 100) / 100);
+          // 🎯 MODO OPERAÇÕES ACCU: stake FIXO $1.00 (mínimo Deriv) — sem variação por banca ou IA
+          // Stake fixo elimina variabilidade entre operações e reduz overhead de cálculo
+          const accuStake = 1.00;
           // 🧠 SUPREMO: growth_rate FIXO em 5% (modo operações) — IA decide QUANDO entrar
-          // 🔧 MODO OPERAÇÕES: 5% fixo + 1-2 ticks alvo
-          const rawAdaptiveGrowth = supremeAnalysis?.adaptiveParams?.accumulator?.growthRate ?? 0.05;
-          // CRÍTICO: Deriv só aceita 0.01, 0.02, 0.03, 0.04, 0.05 — growth_rate fixo 0.05
-          const adaptiveGrowth = 0.05; // 5% fixo — configurado pelo modo operações
+          const adaptiveGrowth = 0.05; // 5% fixo — modo operações configurado pelo usuário
           const accuRisk = supremeAnalysis?.adaptiveParams?.accumulator?.riskLevel ?? 'medium';
           // 🎯 Ticks alvo: 1-2 — IA escolhe com base no regime (strong_trend=2, demais=1)
           const accuTicks = supremeAnalysis?.adaptiveParams?.accumulator?.expectedTicks ?? 1;
-          console.log(`📊 [${operationId}] ACCU: stake=$${accuStake} (IA-amplificado, mín Deriv $1.00) | growth_rate=${(adaptiveGrowth*100).toFixed(0)}% (raw=${(rawAdaptiveGrowth*100).toFixed(1)}%) | ticks_alvo=${accuTicks}${supremeAnalysis ? ` ADAPTATIVO (regime=${supremeAnalysis.regime} | risco=${accuRisk} | hurst=${supremeAnalysis.statistics.hurstExponent.toFixed(2)})` : ' padrão'} | Symbol: ${selectedSymbol}`);
+          console.log(`📊 [${operationId}] ACCU MODO-OPS: stake=$${accuStake} (FIXO) | growth_rate=${(adaptiveGrowth*100).toFixed(0)}% (FIXO) | ticks_alvo=${accuTicks}${supremeAnalysis ? ` | regime=${supremeAnalysis.regime} | risco=${accuRisk} | hurst=${supremeAnalysis.statistics.hurstExponent.toFixed(2)}` : ''} | Symbol: ${selectedSymbol}`);
           contract = await derivAPI.buyFlexibleContract({
             contract_type: 'ACCU',
             symbol: selectedSymbol,
