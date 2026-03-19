@@ -87,6 +87,11 @@ export class DerivAPIService extends EventEmitter {
   private cacheExpireMs: number = 5 * 60 * 1000; // 5 minutos
   private keepAliveInterval: NodeJS.Timeout | null = null;
 
+  // ⚡ CACHE DE PREÇO EM TEMPO REAL — elimina roundtrip extra antes de cada trade
+  // Atualizado a cada tick recebido via subscription. Máx 3s de idade para ser usado.
+  private lastTickCache: Map<string, { quote: number; epoch: number; receivedAt: number }> = new Map();
+  private readonly TICK_CACHE_MAX_AGE_MS = 3000; // 3 segundos
+
   constructor() {
     super();
     
@@ -1152,12 +1157,22 @@ export class DerivAPIService extends EventEmitter {
    */
   async getCurrentPrice(symbol: string): Promise<number | null> {
     if (!this.isConnected) return null;
+
+    // ⚡ CACHE HIT — retornar preço em tempo real se < 3s de idade (zero latência extra)
+    const cached = this.lastTickCache.get(symbol);
+    if (cached && (Date.now() - cached.receivedAt) < this.TICK_CACHE_MAX_AGE_MS) {
+      console.log(`⚡ [PRICE CACHE] ${symbol} → $${cached.quote} (${Date.now() - cached.receivedAt}ms atrás — sem roundtrip WS)`);
+      return cached.quote;
+    }
+
+    // Cache miss ou expirado — fazer requisição WS normal
+    console.log(`🌐 [PRICE FETCH] ${symbol} — cache miss (${cached ? `${Date.now() - cached.receivedAt}ms atrás` : 'sem cache'}) → requisição WS`);
     return new Promise((resolve) => {
       const reqId = this.generateRequestId();
       const timer = setTimeout(() => {
         this.removeListener('message', handler);
         resolve(null);
-      }, 8000);
+      }, 5000); // Reduzido de 8s para 5s — se demorar mais, preço já mudou demais
       const handler = (message: any) => {
         if (message.req_id === reqId) {
           clearTimeout(timer);
@@ -1210,9 +1225,10 @@ export class DerivAPIService extends EventEmitter {
       return null;
     }
 
-    const TIMEOUT_MS = 20000;
+    const TIMEOUT_MS = 8000; // Reduzido de 20s → 8s: preço que demora 8s já é inválido
     const currency = params.currency || 'USD';
     const reqProposalId = this.generateRequestId();
+    const execStart = Date.now();
 
     // Contratos Lookback (LBFLOATPUT, LBFLOATCALL, LBHIGHLOW) NÃO usam o campo "basis"
     const LOOKBACK_TYPES = new Set(['LBFLOATPUT', 'LBFLOATCALL', 'LBHIGHLOW']);
@@ -1246,14 +1262,20 @@ export class DerivAPIService extends EventEmitter {
     if (params.growth_rate !== undefined) proposalMsg.growth_rate = params.growth_rate;
     if (params.date_expiry !== undefined) proposalMsg.date_expiry = params.date_expiry;
 
-    console.log(`📋 [FLEX CONTRACT] ${params.contract_type} | ${params.symbol} | $${params.amount}`);
+    console.log(`📋 [FLEX CONTRACT] ${params.contract_type} | ${params.symbol} | $${params.amount} | Iniciando proposal...`);
 
+    const proposalStart = Date.now();
     const proposal = await new Promise<{ id: string; ask_price: number } | null>((resolve) => {
       const handler = (message: any) => {
         if (message.req_id === reqProposalId) {
           this.removeListener('message', handler);
           clearTimeout(timer);
           if (message.proposal) {
+            const proposalMs = Date.now() - proposalStart;
+            console.log(`⚡ [LATÊNCIA] Proposta recebida em ${proposalMs}ms | ${params.contract_type} ${params.symbol}`);
+            if (proposalMs > 3000) {
+              console.warn(`⚠️ [LATÊNCIA ALTA] Proposta demorou ${proposalMs}ms — mercado pode ter se movido!`);
+            }
             resolve({ id: message.proposal.id, ask_price: message.proposal.ask_price });
           } else {
             console.error(`❌ Proposta ${params.contract_type} falhou:`, message.error?.message || message.error);
@@ -1263,7 +1285,7 @@ export class DerivAPIService extends EventEmitter {
       };
       const timer = setTimeout(() => {
         this.removeListener('message', handler);
-        console.error(`⏱️ Timeout proposta ${params.contract_type}`);
+        console.error(`⏱️ [TIMEOUT] Proposta ${params.contract_type} — ${TIMEOUT_MS}ms sem resposta → abortando`);
         resolve(null);
       }, TIMEOUT_MS);
       this.on('message', handler);
@@ -1272,6 +1294,7 @@ export class DerivAPIService extends EventEmitter {
 
     if (!proposal) return null;
 
+    const buyStart = Date.now();
     const reqBuyId = this.generateRequestId();
     const contract = await new Promise<DerivContractInfo | null>((resolve) => {
       const handler = (message: any) => {
@@ -1279,7 +1302,13 @@ export class DerivAPIService extends EventEmitter {
           this.removeListener('message', handler);
           clearTimeout(timer);
           if (message.buy) {
-            console.log(`✅ Contrato ${params.contract_type} comprado: ${message.buy.contract_id}`);
+            const buyMs = Date.now() - buyStart;
+            const totalMs = Date.now() - execStart;
+            console.log(`✅ Contrato ${params.contract_type} ABERTO: ${message.buy.contract_id}`);
+            console.log(`⏱️ [LATÊNCIA TOTAL] Proposta→Compra: ${buyMs}ms | Total execução: ${totalMs}ms | ${params.symbol}`);
+            if (totalMs > 4000) {
+              console.warn(`⚠️ [LATÊNCIA ALTA] Total ${totalMs}ms — slippage provável no entry tick`);
+            }
             resolve({
               contract_id: message.buy.contract_id,
               shortcode: message.buy.shortcode || '',
@@ -1295,7 +1324,7 @@ export class DerivAPIService extends EventEmitter {
       };
       const timer = setTimeout(() => {
         this.removeListener('message', handler);
-        console.error(`⏱️ Timeout compra ${params.contract_type}`);
+        console.error(`⏱️ [TIMEOUT] Compra ${params.contract_type} — ${TIMEOUT_MS}ms sem resposta`);
         resolve(null);
       }, TIMEOUT_MS);
       this.on('message', handler);
@@ -1395,6 +1424,12 @@ export class DerivAPIService extends EventEmitter {
         epoch: message.tick.epoch,
         display_value: message.tick.display_value || message.tick.quote?.toString() || ''
       };
+      // ⚡ ATUALIZAR CACHE DE PREÇO — elimina roundtrip extra em getCurrentPrice()
+      this.lastTickCache.set(message.tick.symbol, {
+        quote: parseFloat(message.tick.quote),
+        epoch: message.tick.epoch,
+        receivedAt: Date.now(),
+      });
       this.emit('tick', tickData);
     }
 

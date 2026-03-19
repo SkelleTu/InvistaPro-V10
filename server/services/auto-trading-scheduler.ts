@@ -1113,6 +1113,9 @@ export class AutoTradingScheduler {
 
       // Usar consenso pré-calculado da análise de todos os símbolos
       const aiConsensus = aiConsensusPreCalculated;
+      // ⏱️ MARCADOR: Momento exato da decisão da IA (sinal confirmado)
+      const signalDecisionAt = Date.now();
+      console.log(`🕐 [${operationId}] SINAL DECIDIDO: ${aiConsensus.finalDecision.toUpperCase()} ${selectedSymbol} | Consenso: ${aiConsensus.consensusStrength}% | Preparando execução...`);
       
       // 🎯 REGISTRAR THRESHOLD NO TRACKER DINÂMICO (essencial para cálculo da média alta)
       dynamicThresholdTracker.recordThreshold(
@@ -1788,7 +1791,12 @@ export class AutoTradingScheduler {
           return { success: false, error: `Falha ao executar trade [${selectedModality}] na Deriv` };
         }
 
-        console.log(`✅ [${operationId}] Contrato [${selectedModality}] comprado com sucesso: ${contract.contract_id}`);
+        const signalToOpenMs = Date.now() - signalDecisionAt;
+        console.log(`✅ [${operationId}] Contrato [${selectedModality}] ABERTO: ${contract.contract_id}`);
+        console.log(`⏱️ [SINAL→ABERTURA] Tempo total: ${signalToOpenMs}ms (${(signalToOpenMs/1000).toFixed(1)}s) | ${selectedSymbol} | Consenso: ${aiConsensus.consensusStrength}%`);
+        if (signalToOpenMs > 5000) {
+          console.warn(`⚠️ [SLIPPAGE RISK] Tempo sinal→abertura ${signalToOpenMs}ms > 5s — entry tick pode ter divergido da análise da IA`);
+        }
 
         // 🎰 REGISTRAR CONTRATO NO MARTINGALE (se estiver em sequência ativa)
         try {
