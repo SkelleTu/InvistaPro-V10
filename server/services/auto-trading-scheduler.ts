@@ -1638,24 +1638,24 @@ export class AutoTradingScheduler {
         } else if (selectedModality === 'accumulator') {
           // ── Contratos Acumuladores (ACCU) ──
 
-          // 🛡️ FILTRO DE SEGURANÇA ACCU — aprendizado com as 3 perdas recentes
-          // Indicadores em valores padrão (RSI=50, MACD=0, BB=0.5) significam que a análise técnica
-          // real não estava disponível, tornando a entrada extremamente arriscada.
-          const rsiIsDefault   = !aiConsensus.rsi       || aiConsensus.rsi      === 50;
-          const macdIsDefault  = aiConsensus.macd       === undefined || aiConsensus.macd === null || aiConsensus.macd === 0;
-          const bbIsDefault    = !aiConsensus.bbPosition || aiConsensus.bbPosition === 0.5;
+          // 🛡️ FILTRO DE SEGURANÇA ACCU — indicadores devem ter sido CALCULADOS (não undefined)
+          // Bloqueio apenas quando os três indicadores estão todos ausentes (undefined/null),
+          // o que indica que a análise técnica real nunca foi executada.
+          const rsiNotCalculated  = aiConsensus.rsi       === undefined || aiConsensus.rsi      === null;
+          const macdNotCalculated = aiConsensus.macd      === undefined || aiConsensus.macd     === null;
+          const bbNotCalculated   = aiConsensus.bbPosition === undefined || aiConsensus.bbPosition === null;
           const regimeUnknown  = !aiConsensus.marketRegime || aiConsensus.marketRegime === 'unknown';
           const supremeUnknown = !supremeAnalysis || supremeAnalysis.regime === 'unknown' || supremeAnalysis.regime === 'neutral';
-          const indicatorsAllDefault = rsiIsDefault && macdIsDefault && bbIsDefault;
+          const indicatorsAllDefault = rsiNotCalculated && macdNotCalculated && bbNotCalculated;
 
-          // 🔴 BLOQUEIO TOTAL: Se os três indicadores estão todos em valores padrão (não foram calculados),
-          // a análise técnica real não ocorreu — entrar seria operar no escuro. Bloquear SEMPRE,
-          // independente do regime ou supremeAnalysis. (Correção forense: 100% das perdas tinham RSI=50/MACD=0/BB=0.5)
+          // 🔴 BLOQUEIO TOTAL: Se os três indicadores nunca foram calculados (undefined),
+          // a análise técnica real não ocorreu — entrar seria operar no escuro.
           if (indicatorsAllDefault) {
-            console.warn(`⛔ [${operationId}] ACCU BLOQUEADO: Indicadores técnicos em valores de inicialização padrão (RSI=50, MACD=0, BB=0.5) — análise técnica real não foi calculada. Entrada negada para proteger capital.`);
-            this.setPhase('AGUARDANDO', `⛔ ACCU bloqueado em ${selectedSymbol}: indicadores não calculados (RSI=50/MACD=0/BB=0.5)`, 'warning');
-            return { success: false, error: `ACCU: Indicadores fictícios (RSI=50/MACD=0/BB=0.5) — análise técnica não disponível, entrada bloqueada` };
+            console.warn(`⛔ [${operationId}] ACCU BLOQUEADO: Indicadores técnicos não calculados (undefined) — análise técnica real não foi executada. Entrada negada para proteger capital.`);
+            this.setPhase('AGUARDANDO', `⛔ ACCU bloqueado em ${selectedSymbol}: indicadores técnicos não disponíveis`, 'warning');
+            return { success: false, error: `ACCU: Indicadores técnicos não disponíveis (undefined) — análise técnica não executada, entrada bloqueada` };
           }
+          console.log(`✅ [${operationId}] ACCU: Indicadores técnicos calculados — RSI=${aiConsensus.rsi?.toFixed(1)} | MACD=${aiConsensus.macd?.toFixed(6)} | BB=${aiConsensus.bbPosition?.toFixed(3)}`);
 
           // Volatilidade extrema: R_75 e R_100 têm volatilidade inerentemente alta — 
           // só entrar se o regime for CONFIRMADO (não 'unknown')

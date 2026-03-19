@@ -471,6 +471,17 @@ export class HuggingFaceAIService {
         volatilityVal = Math.sqrt(variance);
       }
 
+      // Calcular indicadores técnicos reais a partir dos preços dos ticks
+      let rsiVal: number | undefined;
+      let macdVal: number | undefined;
+      let bbPositionVal: number | undefined;
+      if (tickPrices.length >= 26) {
+        rsiVal = this.computeRSI(tickPrices, 14);
+        const macdResult = this.computeMACD(tickPrices);
+        macdVal = macdResult.histogram;
+        bbPositionVal = this.computeBollingerPosition(tickPrices);
+      }
+
       // upScore/downScore/neutralScore derivados da direção final e força do sinal
       const upScoreVal = finalDir === 'up' ? adjustedConsensus : finalDir === 'neutral' ? 30 : 100 - adjustedConsensus;
       const downScoreVal = finalDir === 'down' ? adjustedConsensus : finalDir === 'neutral' ? 30 : 100 - adjustedConsensus;
@@ -494,6 +505,10 @@ export class HuggingFaceAIService {
         microscopicConfidence: hybridResult.systems.microscopic?.cooperativeSignal?.confidence ?? undefined,
         volatility: volatilityVal,
         marketRegime: hybridResult.systems.hybrid?.mode || 'unknown',
+        // Indicadores técnicos reais calculados dos preços dos ticks
+        rsi: rsiVal,
+        macd: macdVal,
+        bbPosition: bbPositionVal,
       };
       
       console.log(`🎉 [HYBRID SUCCESS] Consenso híbrido: ${hybridConsensus.finalDecision} (${hybridConsensus.consensusStrength}%)`);
@@ -1681,6 +1696,18 @@ Os modelos identificaram padrões convergentes nos dados de mercado que indicam 
       timestamp: new Date()
     });
     
+    // Calcular indicadores técnicos reais para o fallback
+    const fallbackPrices = tickData.map(t => t.quote);
+    let fallbackRsi: number | undefined;
+    let fallbackMacd: number | undefined;
+    let fallbackBb: number | undefined;
+    if (fallbackPrices.length >= 26) {
+      fallbackRsi = this.computeRSI(fallbackPrices, 14);
+      const macdResult = this.computeMACD(fallbackPrices);
+      fallbackMacd = macdResult.histogram;
+      fallbackBb = this.computeBollingerPosition(fallbackPrices);
+    }
+
     // Generate consensus from technical analyses with enhanced strength (símbolo correto)
     const consensus = await this.generateConsensus(analyses, false, 0.75, symbol);
     
@@ -1694,7 +1721,10 @@ Os modelos identificaram padrões convergentes nos dados de mercado que indicam 
         consensusStrength: forceDecision.strength,
         participatingModels: 5,
         analyses,
-        reasoning: `Sistema anti-neutral: ${forceDecision.reasoning}`
+        reasoning: `Sistema anti-neutral: ${forceDecision.reasoning}`,
+        rsi: fallbackRsi,
+        macd: fallbackMacd,
+        bbPosition: fallbackBb,
       };
     }
     
@@ -1703,7 +1733,10 @@ Os modelos identificaram padrões convergentes nos dados de mercado que indicam 
     
     return {
       ...consensus,
-      reasoning: enhancedReasoning
+      reasoning: enhancedReasoning,
+      rsi: fallbackRsi,
+      macd: fallbackMacd,
+      bbPosition: fallbackBb,
     };
   }
   
