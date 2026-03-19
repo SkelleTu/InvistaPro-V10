@@ -27,9 +27,9 @@ const RECOVERY_ASSET_BLOCK_MS = 30 * 60 * 1000; // 30 min de bloqueio para o ati
 
 // Consenso mínimo por nível de perdas consecutivas
 const RECOVERY_CONSENSUS_BY_STREAK: Record<number, number> = {
-  1: 85,  // 1 perda consecutiva → 85%
-  2: 90,  // 2 perdas consecutivas → 90%
-  3: 95,  // 3+ perdas consecutivas → 95%
+  1: 75,  // 1 perda consecutiva → 75% (leve proteção, não trava o bot)
+  2: 82,  // 2 perdas consecutivas → 82%
+  3: 88,  // 3+ perdas consecutivas → 88%
 };
 
 // Pausa obrigatória entre trades por perdas consecutivas (em ms)

@@ -1805,20 +1805,20 @@ export class AutoTradingScheduler {
         }
 
         // 🔭 MONITOR UNIVERSAL IA — acompanhar contrato tick a tick
+        const contractTypeForMonitor = (
+          DIGIT_TYPES[selectedModality] ||
+          (RISFALL_TYPES.has(selectedModality) ? (selectedModality === 'rise' || selectedModality === 'higher' ? 'CALL' : 'PUT') : undefined) ||
+          IN_OUT_TYPES[selectedModality] ||
+          TOUCH_TYPES[selectedModality] ||
+          MULTIPLIER_TYPES[selectedModality] ||
+          (selectedModality === 'accumulator' ? 'ACCU' : undefined) ||
+          TURBO_TYPES[selectedModality] ||
+          VANILLA_TYPES[selectedModality] ||
+          LOOKBACK_TYPES[selectedModality] ||
+          'DIGITDIFF'
+        );
         try {
           contractMonitor.setToken(tokenData.token);
-          const contractTypeForMonitor = (
-            DIGIT_TYPES[selectedModality] ||
-            (RISFALL_TYPES.has(selectedModality) ? (selectedModality === 'rise' || selectedModality === 'higher' ? 'CALL' : 'PUT') : undefined) ||
-            IN_OUT_TYPES[selectedModality] ||
-            TOUCH_TYPES[selectedModality] ||
-            MULTIPLIER_TYPES[selectedModality] ||
-            (selectedModality === 'accumulator' ? 'ACCU' : undefined) ||
-            TURBO_TYPES[selectedModality] ||
-            VANILLA_TYPES[selectedModality] ||
-            LOOKBACK_TYPES[selectedModality] ||
-            'DIGITDIFF'
-          );
           await contractMonitor.startMonitoring({
             contractId: contract.contract_id,
             contractType: contractTypeForMonitor,
