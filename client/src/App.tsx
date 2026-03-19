@@ -58,7 +58,7 @@ function Router() {
           );
         }
 
-        if (!isAuthenticated || !isPhoneVerified) {
+        if (!isAuthenticated) {
           return (
             <>
               <Route path="/auth" component={AuthPage} />

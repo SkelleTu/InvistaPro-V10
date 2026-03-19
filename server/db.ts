@@ -616,6 +616,16 @@ export function initializeDatabase() {
       }
     }
 
+    // Migração: marcar todos os usuários como telefone verificado (verificação removida)
+    try {
+      const result = sqlite.prepare(`UPDATE users SET telefone_verificado = 1 WHERE telefone_verificado = 0 OR telefone_verificado IS NULL`).run();
+      if (result.changes > 0) {
+        console.log(`✅ Migração: ${result.changes} usuário(s) marcado(s) como telefone verificado`);
+      }
+    } catch (error) {
+      console.error('⚠️ Erro na migração telefoneVerificado:', error);
+    }
+
     console.log('✅ Banco de dados local inicializado com sucesso!');
     console.log('🛡️ Sistema de resiliência e auto-restart configurado!');
     console.log(`📍 Local do arquivo: ${dbPath}`);
