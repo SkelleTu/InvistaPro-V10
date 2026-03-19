@@ -37,7 +37,10 @@ export default function MetaTrader5Page() {
   });
 
   const startMutation = useMutation({
-    mutationFn: () => apiRequest("POST", "/api/desktop/start"),
+    mutationFn: async () => {
+      const res = await apiRequest("/api/desktop/start", { method: "POST" });
+      return res.json();
+    },
     onSuccess: (data: any) => {
       if (data.success) {
         toast({ title: "Desktop iniciado!", description: "Ambiente Windows carregando..." });
@@ -52,7 +55,10 @@ export default function MetaTrader5Page() {
   });
 
   const stopMutation = useMutation({
-    mutationFn: () => apiRequest("POST", "/api/desktop/stop"),
+    mutationFn: async () => {
+      const res = await apiRequest("/api/desktop/stop", { method: "POST" });
+      return res.json();
+    },
     onSuccess: () => {
       toast({ title: "Desktop encerrado" });
       queryClient.invalidateQueries({ queryKey: ["/api/desktop/status"] });
@@ -60,7 +66,10 @@ export default function MetaTrader5Page() {
   });
 
   const installMutation = useMutation({
-    mutationFn: () => apiRequest("POST", "/api/desktop/install-mt5"),
+    mutationFn: async () => {
+      const res = await apiRequest("/api/desktop/install-mt5", { method: "POST" });
+      return res.json();
+    },
     onSuccess: (data: any) => {
       if (data.success) {
         toast({ title: "Instalador iniciado!", description: "Siga o assistente no desktop virtual." });
