@@ -20,6 +20,8 @@ interface DesktopStatus {
   hasXvfb: boolean;
   hasVnc: boolean;
   hasWebsockify: boolean;
+  mt5Installed: boolean;
+  wineReady: boolean;
 }
 
 export default function MetaTrader5Page() {
@@ -162,17 +164,31 @@ export default function MetaTrader5Page() {
 
           {isRunning && (
             <>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => installMutation.mutate()}
-                disabled={installMutation.isPending}
-                data-testid="button-install-mt5"
-                className="gap-1.5"
-              >
-                {installMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                <span className="hidden sm:inline">Instalar MT5</span>
-              </Button>
+              {status?.mt5Installed ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => installMutation.mutate()}
+                  disabled={installMutation.isPending}
+                  data-testid="button-launch-mt5"
+                  className="gap-1.5 border-green-500 text-green-600 hover:bg-green-50 dark:hover:bg-green-950"
+                >
+                  {installMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                  <span className="hidden sm:inline">Iniciar MT5</span>
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => installMutation.mutate()}
+                  disabled={installMutation.isPending}
+                  data-testid="button-install-mt5"
+                  className="gap-1.5"
+                >
+                  {installMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                  <span className="hidden sm:inline">Instalar MT5</span>
+                </Button>
+              )}
               <Button
                 size="sm"
                 variant="outline"
@@ -328,14 +344,16 @@ export default function MetaTrader5Page() {
             <div className="bg-[#c0c0c0] border-t border-gray-400 px-3 py-1 flex items-center gap-4 text-xs text-gray-700 shrink-0 select-none">
               <span>
                 {isRunning
-                  ? "✅ Desktop ativo — clique na tela para interagir"
+                  ? status?.mt5Installed
+                    ? "✅ MT5 instalado — clique 'Iniciar MT5' para abrir"
+                    : "⏳ Inicializando Wine e instalador MT5..."
                   : isStarting
                   ? "⏳ Iniciando componentes..."
                   : "⬜ Desktop parado"}
               </span>
               {isRunning && status?.startedAt && (
                 <span className="text-gray-500">
-                  Iniciado em {new Date(status.startedAt).toLocaleTimeString('pt-BR')}
+                  {new Date(status.startedAt).toLocaleTimeString('pt-BR')}
                 </span>
               )}
               <div className="flex-1" />
@@ -349,6 +367,9 @@ export default function MetaTrader5Page() {
                   </span>
                   <span className={status?.hasWebsockify ? "text-green-700" : "text-red-600"}>
                     WS {status?.hasWebsockify ? "✓" : "✗"}
+                  </span>
+                  <span className={status?.mt5Installed ? "text-green-700" : "text-orange-600"}>
+                    MT5 {status?.mt5Installed ? "✓" : "..."}
                   </span>
                 </div>
               )}
@@ -393,19 +414,19 @@ export default function MetaTrader5Page() {
         <div className="border-t border-border bg-card px-4 py-3 flex flex-wrap gap-4 text-xs text-muted-foreground">
           <div className="flex items-center gap-1.5">
             <div className="w-2 h-2 rounded-full bg-blue-500" />
-            <span><strong>Passo 1:</strong> Clique em "Iniciar Desktop" para ligar o ambiente</span>
+            <span><strong>Passo 1:</strong> Clique em "Iniciar Desktop" para ligar o ambiente virtual</span>
           </div>
           <div className="flex items-center gap-1.5">
             <div className="w-2 h-2 rounded-full bg-blue-500" />
-            <span><strong>Passo 2:</strong> Aguarde o desktop carregar (pode levar ~30s)</span>
+            <span><strong>Passo 2:</strong> Aguarde o desktop carregar (~30s)</span>
           </div>
           <div className="flex items-center gap-1.5">
             <div className="w-2 h-2 rounded-full bg-blue-500" />
-            <span><strong>Passo 3:</strong> Clique em "Instalar MT5" para executar o instalador no desktop</span>
+            <span><strong>Passo 3:</strong> O instalador MT5 abre automaticamente — siga o assistente na tela</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <div className="w-2 h-2 rounded-full bg-blue-500" />
-            <span><strong>Passo 4:</strong> Siga o assistente de instalação que aparecerá na janela</span>
+            <div className="w-2 h-2 rounded-full bg-green-500" />
+            <span><strong>Próximas vezes:</strong> Basta clicar "Iniciar MT5" — sem reinstalar</span>
           </div>
         </div>
       )}

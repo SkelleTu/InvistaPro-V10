@@ -27,51 +27,150 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
     #status-msg { font-size: 14px; color: rgba(255,255,255,0.7); margin-top: 8px; }
+    #error-msg { font-size: 12px; color: #ef4444; margin-top: 12px; max-width: 320px; text-align: center; display: none; }
+    #retry-btn {
+      margin-top: 16px;
+      padding: 8px 20px;
+      background: #3b82f6;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+      display: none;
+    }
+    #retry-btn:hover { background: #2563eb; }
+    #conn-indicator {
+      position: fixed;
+      top: 8px; right: 8px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-family: 'Segoe UI', sans-serif;
+      z-index: 200;
+      pointer-events: none;
+      transition: all 0.3s;
+    }
+    #conn-indicator.connecting { background: rgba(251,191,36,0.9); color: #1a1a2e; }
+    #conn-indicator.connected { background: rgba(34,197,94,0.9); color: #1a1a2e; }
+    #conn-indicator.disconnected { background: rgba(239,68,68,0.9); color: white; }
   </style>
 </head>
 <body>
   <div id="overlay">
     <div class="spinner"></div>
     <p id="status-msg">Conectando ao desktop virtual...</p>
+    <p id="error-msg"></p>
+    <button id="retry-btn" onclick="connect()">Tentar Novamente</button>
   </div>
   <div id="screen"></div>
+  <div id="conn-indicator" class="connecting">Conectando...</div>
 
   <script type="module">
     import RFB from '/novnc/core/rfb.js';
 
     const overlay = document.getElementById('overlay');
     const statusMsg = document.getElementById('status-msg');
+    const errorMsg = document.getElementById('error-msg');
+    const retryBtn = document.getElementById('retry-btn');
+    const connIndicator = document.getElementById('conn-indicator');
 
-    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${location.host}/api/desktop/vnc-ws`;
+    let rfb = null;
+    let retryCount = 0;
+    const MAX_RETRIES = 10;
+    const RETRY_DELAY_MS = 3000;
 
-    let rfb;
-    try {
-      rfb = new RFB(document.getElementById('screen'), wsUrl, {
-        credentials: { password: '' }
-      });
-
-      rfb.scaleViewport = true;
-      rfb.resizeSession = false;
-
-      rfb.addEventListener('connect', () => {
-        overlay.classList.add('hidden');
-      });
-
-      rfb.addEventListener('disconnect', (e) => {
-        overlay.classList.remove('hidden');
-        statusMsg.textContent = e.detail.clean
-          ? 'Sessão encerrada.'
-          : 'Conexão perdida. Reinicie o desktop.';
-      });
-
-      rfb.addEventListener('credentialsrequired', () => {
-        rfb.sendCredentials({ password: '' });
-      });
-
-    } catch (err) {
-      statusMsg.textContent = 'Erro ao iniciar o viewer: ' + err.message;
+    function setStatus(msg) {
+      statusMsg.textContent = msg;
     }
+
+    function showError(msg) {
+      errorMsg.textContent = msg;
+      errorMsg.style.display = 'block';
+      retryBtn.style.display = 'inline-block';
+    }
+
+    function hideError() {
+      errorMsg.style.display = 'none';
+      retryBtn.style.display = 'none';
+    }
+
+    window.connect = function connect() {
+      hideError();
+
+      if (rfb) {
+        try { rfb.disconnect(); } catch(e) {}
+        rfb = null;
+      }
+
+      const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${location.host}/api/desktop/vnc-ws`;
+
+      overlay.classList.remove('hidden');
+      connIndicator.className = 'connecting';
+      connIndicator.textContent = 'Conectando...';
+      setStatus(`Conectando ao desktop virtual... (tentativa ${retryCount + 1})`);
+
+      try {
+        rfb = new RFB(document.getElementById('screen'), wsUrl, {
+          credentials: { password: '' }
+        });
+
+        rfb.scaleViewport = true;
+        rfb.resizeSession = false;
+        rfb.clipViewport = false;
+
+        rfb.addEventListener('connect', () => {
+          retryCount = 0;
+          overlay.classList.add('hidden');
+          connIndicator.className = 'connected';
+          connIndicator.textContent = '● Conectado';
+          setTimeout(() => {
+            connIndicator.style.opacity = '0';
+            setTimeout(() => { connIndicator.style.opacity = '1'; }, 3000);
+          }, 2000);
+        });
+
+        rfb.addEventListener('disconnect', (e) => {
+          overlay.classList.remove('hidden');
+          connIndicator.className = 'disconnected';
+          connIndicator.textContent = '● Desconectado';
+          connIndicator.style.opacity = '1';
+
+          if (e.detail.clean) {
+            setStatus('Sessão encerrada.');
+            showError('O desktop foi encerrado. Reinicie para continuar.');
+          } else {
+            if (retryCount < MAX_RETRIES) {
+              retryCount++;
+              setStatus(`Reconectando... (${retryCount}/${MAX_RETRIES})`);
+              setTimeout(() => window.connect(), RETRY_DELAY_MS);
+            } else {
+              setStatus('Não foi possível conectar ao desktop.');
+              showError(`Falha após ${MAX_RETRIES} tentativas. Verifique se o desktop está rodando e tente novamente.`);
+            }
+          }
+        });
+
+        rfb.addEventListener('credentialsrequired', () => {
+          rfb.sendCredentials({ password: '' });
+        });
+
+        rfb.addEventListener('securityfailure', () => {
+          setStatus('Falha de segurança VNC.');
+          showError('Autenticação VNC falhou.');
+        });
+
+      } catch (err) {
+        setStatus('Erro ao iniciar o viewer.');
+        showError('Erro: ' + err.message);
+        connIndicator.className = 'disconnected';
+        connIndicator.textContent = '● Erro';
+      }
+    }
+
+    // Start connection
+    connect();
   </script>
 </body>
 </html>

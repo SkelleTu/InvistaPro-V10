@@ -3603,7 +3603,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.post('/api/desktop/install-mt5', isAuthenticated, async (req, res) => {
-    const result = await virtualDesktop.installMT5();
+    const result = await virtualDesktop.startOrInstallMT5();
     res.json(result);
   });
 
