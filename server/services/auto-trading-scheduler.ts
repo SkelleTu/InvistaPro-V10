@@ -3297,8 +3297,8 @@ export class AutoTradingScheduler {
             // ════════════════════════════════════════════════════════════════
             const RECOVERY_PAYOUT = 0.95;
             const idealRecoveryStake = (deficit / RECOVERY_PAYOUT) * 1.15;
-            // Teto GENEROSO em recovery: 20% da banca — suficiente para cobrir ACCU ($1 min)
-            const maxRecoveryStake = Math.max(bankSize * 0.20, amount);
+            // Teto em recovery: 12% da banca (abaixo do limite de proteção de 15% → nunca bloqueia)
+            const maxRecoveryStake = Math.max(bankSize * 0.12, amount);
             // Não usar menos que o stake base, nem menos que $1 (mínimo ACCU)
             amount = Math.max(Math.min(idealRecoveryStake, maxRecoveryStake), amount);
             const reqs = realStatsTracker.getRecoveryRequirements();
@@ -3319,10 +3319,10 @@ export class AutoTradingScheduler {
           amount = this.calculateDynamicStake(amount, consensoStrength, volatility || 0.5);
         }
 
-        // 🛡️ SAFETY CAP — em recovery permite até 20% da banca (para cobrir mínimo ACCU $1); normal: 4%
+        // 🛡️ SAFETY CAP — em recovery: 12% da banca (seguro abaixo do limite de proteção de 15%); normal: 4%
         // 4% permite amplificação ×1.6 em bancas acima de $8.75 sem corte, preservando a banca menor
         const inRecovery = realStatsTracker.isPostLossMode();
-        const capPct = inRecovery ? 0.20 : 0.04;
+        const capPct = inRecovery ? 0.12 : 0.04;
         // Em recovery: mínimo de $1.00 (mínimo do ACCU); normal: $0.35
         const minFloor = inRecovery ? 1.00 : 0.35;
         const maxSafeStake = Math.max(minFloor, bankSize * capPct);
