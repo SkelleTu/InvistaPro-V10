@@ -741,12 +741,48 @@ export class AutoTradingScheduler {
       Math.max(1.00, Math.round(bankBalance * this.LEVERAGE_STAKE_PCT * 100) / 100)
     );
 
-    // 9. Growth rate dinâmico por volatilidade — ticks calibrados ao growth para lucro alvo equivalente
-    // 1%→10t | 2%→7t | 3%→5t | 4%→4t | 5%→3t  (lucro alvo ≈ 10-17%)
-    // Proxy de volatilidade: Hurst alto (trend) = vol baixa; Hurst baixo (chop) = vol alta
+    // 9. Growth rate dinâmico por volatilidade — respeita taxas e ticks configurados pelo usuário
     const levVolatility = Math.max(0, Math.min(1, 1 - best.hurst));
-    const { rate: levGrowth, reason: levGrowthReason } = this.selectAccumulatorGrowthRate(levVolatility, best.consensus);
-    const levTicksByGrowth: Record<number, number> = { 0.01: 10, 0.02: 7, 0.03: 5, 0.04: 4, 0.05: 3 };
+
+    // Ler taxas de crescimento habilitadas pelo usuário no card ACCU
+    let levAllowedRates: number[] = [0.01, 0.02, 0.03, 0.04, 0.05];
+    try {
+      if ((config as any).accuGrowthRates) {
+        const parsedRates = JSON.parse((config as any).accuGrowthRates);
+        if (Array.isArray(parsedRates) && parsedRates.length > 0) {
+          const converted = parsedRates.map((r: string) => Number(r) / 100).filter((n: number) => n > 0 && n <= 0.05);
+          if (converted.length > 0) {
+            levAllowedRates = converted;
+            console.log(`🎯 [LEVERAGE] Taxas permitidas pelo usuário: [${levAllowedRates.map(r => (r*100)+'%').join(', ')}]`);
+          }
+        }
+      }
+    } catch {}
+
+    const { rate: levGrowth, reason: levGrowthReason } = this.selectAccumulatorGrowthRate(levVolatility, best.consensus, levAllowedRates);
+
+    // Ler ticks por taxa configurados pelo usuário no card de modalidades
+    let levTicksByGrowth: Record<number, number> = { 0.01: 10, 0.02: 7, 0.03: 5, 0.04: 4, 0.05: 3 };
+    try {
+      if ((config as any).accuTicksPerRate) {
+        const parsed = JSON.parse((config as any).accuTicksPerRate);
+        if (parsed && typeof parsed === 'object') {
+          const converted: Record<number, number> = {};
+          for (const [k, v] of Object.entries(parsed)) {
+            const rateKey = Number(k) / 100;
+            const tickVal = Math.round(Number(v));
+            if (rateKey > 0 && rateKey <= 0.05 && tickVal >= 1 && tickVal <= 30) {
+              converted[rateKey] = tickVal;
+            }
+          }
+          if (Object.keys(converted).length > 0) {
+            levTicksByGrowth = converted;
+            console.log(`🎯 [LEVERAGE] Ticks por taxa carregados da configuração do usuário:`, JSON.stringify(converted));
+          }
+        }
+      }
+    } catch {}
+
     const levTargetTicks = levTicksByGrowth[levGrowth] ?? 3;
 
     const levOpId = `LEVERAGE_${now}_${best.symbol}`;
