@@ -741,9 +741,16 @@ export class AutoTradingScheduler {
       Math.max(1.00, Math.round(bankBalance * this.LEVERAGE_STAKE_PCT * 100) / 100)
     );
 
-    // 9. Executar 1 contrato ACCU — 3 ticks, growth_rate 5% fixo (≈15.76% ganho | breakeven WR=86.4%)
+    // 9. Growth rate dinâmico por volatilidade — ticks calibrados ao growth para lucro alvo equivalente
+    // 1%→10t | 2%→7t | 3%→5t | 4%→4t | 5%→3t  (lucro alvo ≈ 10-17%)
+    // Proxy de volatilidade: Hurst alto (trend) = vol baixa; Hurst baixo (chop) = vol alta
+    const levVolatility = Math.max(0, Math.min(1, 1 - best.hurst));
+    const { rate: levGrowth, reason: levGrowthReason } = this.selectAccumulatorGrowthRate(levVolatility, best.consensus);
+    const levTicksByGrowth: Record<number, number> = { 0.01: 10, 0.02: 7, 0.03: 5, 0.04: 4, 0.05: 3 };
+    const levTargetTicks = levTicksByGrowth[levGrowth] ?? 3;
+
     const levOpId = `LEVERAGE_${now}_${best.symbol}`;
-    console.log(`🚀🚀 [LEVERAGE FIRE] Ativo: ${best.symbol} | Regime: ${best.regime} | Score: ${best.consensus.toFixed(1)} | Hurst: ${best.hurst.toFixed(3)} | Stake: $${leverageStake} (${(this.LEVERAGE_STAKE_PCT * 100).toFixed(0)}% de $${bankBalance.toFixed(2)}) | Ativos alinhados: ${exceptional.length}`);
+    console.log(`🚀🚀 [LEVERAGE FIRE] Ativo: ${best.symbol} | Regime: ${best.regime} | Score: ${best.consensus.toFixed(1)} | Hurst: ${best.hurst.toFixed(3)} | Stake: $${leverageStake} (${(this.LEVERAGE_STAKE_PCT * 100).toFixed(0)}% de $${bankBalance.toFixed(2)}) | Ativos alinhados: ${exceptional.length} | growth=${(levGrowth*100).toFixed(0)}% (${levGrowthReason}) | ticks=${levTargetTicks}`);
     this.setPhase('EXECUTANDO', `🚀 ALAVANCAGEM: ${best.symbol} $${leverageStake} (${exceptional.length} ativos alinhados)`, 'trade');
 
     try {
@@ -753,12 +760,12 @@ export class AutoTradingScheduler {
         contract_type: 'ACCU',
         symbol: best.symbol,
         amount: leverageStake,
-        growth_rate: 0.05,
+        growth_rate: levGrowth,
       });
 
       if (contract) {
         this.leverageLastFiredAt = now; // marcar cooldown
-        console.log(`✅ [LEVERAGE] Contrato aberto: ${contract.contract_id} | ${best.symbol} | $${leverageStake}`);
+        console.log(`✅ [LEVERAGE] Contrato aberto: ${contract.contract_id} | ${best.symbol} | $${leverageStake} | growth=${(levGrowth*100).toFixed(0)}% | ticks=${levTargetTicks}`);
         this.setPhase('AGUARDANDO', `✅ Alavancagem executada: ${best.symbol} $${leverageStake}`, 'success');
 
         // Registrar operação no banco (async, não bloqueia)
@@ -772,10 +779,10 @@ export class AutoTradingScheduler {
           duration: 1,
           status: 'pending',
           contractId: contract.contract_id?.toString(),
-          aiConsensus: JSON.stringify({ leverageMode: true, assetsAligned: exceptional.length, score: best.consensus }),
+          aiConsensus: JSON.stringify({ leverageMode: true, assetsAligned: exceptional.length, score: best.consensus, growthRate: levGrowth }),
         }).catch(err => console.error('⚠️ [LEVERAGE] Erro ao salvar operação:', err));
 
-        // Auto-sell após 3 ticks via contract monitor (≈15.76% ganho com 5% growth)
+        // Auto-sell após N ticks decididos pela IA (calibrados ao growth rate)
         if (contract.contract_id) {
           const { startMonitoring } = await import('./contract-monitor');
           startMonitoring({
@@ -787,7 +794,7 @@ export class AutoTradingScheduler {
             direction: 'up',
             userId: config.userId,
             openedAt: now,
-            targetTicks: 3,
+            targetTicks: levTargetTicks,
           });
         }
       } else {
@@ -1948,14 +1955,35 @@ export class AutoTradingScheduler {
             };
             const accuStake = Math.round(targetByQuality[opportunityQuality] * 100) / 100;
 
-            // 🧠 SUPREMO: growth_rate dinâmico — 5% normal, 1% se mercado em recuperação parcial
-            const adaptiveGrowth = this.badMarketReducedGrowthActive
-              ? this.BAD_MARKET_GROWTH_REDUCED  // 1% — mercado em recuperação, modo conservador
-              : 0.05;                            // 5% — modo normal de operações
-            const growthModeLabel = this.badMarketReducedGrowthActive ? 'REDUZIDO (mercado parcial)' : 'FIXO (normal)';
-            // ⚡ Ticks alvo: mínimo 2 — garante EV positivo (com 5% growth, breakeven = 90.9% em 2t vs 95.24% em 1t)
-            // Se supremeAnalysis está disponível usa valor do regime, senão mínimo de 2 (nunca 1 isolado)
-            const accuTicks = Math.max(2, supremeAnalysis?.adaptiveParams?.accumulator?.expectedTicks ?? 2);
+            // 🧠 SUPREMO: growth_rate totalmente dinâmico — IA escolhe 1%-5% conforme volatilidade real
+            // mercado em recuperação parcial → força 1% conservador
+            // mercado normal → selectAccumulatorGrowthRate decide: alta vol=1-2%, baixa vol=4-5%
+            let adaptiveGrowth: number;
+            let growthModeLabel: string;
+            if (this.badMarketReducedGrowthActive) {
+              adaptiveGrowth = this.BAD_MARKET_GROWTH_REDUCED; // 1% — recuperação forçada
+              growthModeLabel = 'REDUZIDO (mercado em recuperação)';
+            } else {
+              // Shannon Entropy como proxy de volatilidade (0=previsível=baixa vol, 1=caótico=alta vol)
+              const mktVol = supremeAnalysis?.statistics?.shannonEntropy ?? 0.5;
+              const { rate, reason } = this.selectAccumulatorGrowthRate(mktVol, consensus);
+              adaptiveGrowth = rate;
+              growthModeLabel = `IA (${reason})`;
+            }
+
+            // ⚡ Ticks alvo: inversamente proporcional ao growth — taxa menor = mais ticks necessários
+            // para manter lucro alvo similar e compensar a barreira mais apertada com acumulação gradual
+            //   1% growth → 10 ticks → ~10.5% lucro se todos sobreviverem
+            //   2% growth →  7 ticks → ~14.9% lucro
+            //   3% growth →  5 ticks → ~15.9% lucro
+            //   4% growth →  4 ticks → ~16.9% lucro
+            //   5% growth →  3 ticks → ~15.8% lucro
+            const minTicksByGrowthRate: Record<number, number> = {
+              0.01: 10, 0.02: 7, 0.03: 5, 0.04: 4, 0.05: 3,
+            };
+            const baseExpectedTicks = supremeAnalysis?.adaptiveParams?.accumulator?.expectedTicks ?? 3;
+            const minTicksForRate = minTicksByGrowthRate[adaptiveGrowth] ?? 3;
+            const accuTicks = Math.max(minTicksForRate, baseExpectedTicks);
             accuTargetTicks = accuTicks;
             console.log(`📊 [${operationId}] ACCU MODO-OPS: stake=$${accuStake} [${opportunityQuality}] (banca=$${bankBalance.toFixed(2)} | consenso=${consensus}% | risco=${accuRisk}) | growth=${(adaptiveGrowth*100).toFixed(0)}% ${growthModeLabel} | ticks=${accuTicks}${supremeAnalysis ? ` | regime=${regime} | hurst=${supremeAnalysis.statistics.hurstExponent.toFixed(2)}` : ''} | ${selectedSymbol}`);
             contract = await derivAPI.buyFlexibleContract({
