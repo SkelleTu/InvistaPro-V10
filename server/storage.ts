@@ -1285,60 +1285,46 @@ export class DatabaseStorage implements IStorage {
 
     const currentBalance = todayPnL.currentBalance;
     const openingBalance = todayPnL.openingBalance;
-    
-    // Buscar saldo do dia anterior
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayStr = yesterday.toISOString().split('T')[0];
-    
-    const yesterdayPnL = await this.getDailyPnL(userId, yesterdayStr);
-    const previousDayClosingBalance = yesterdayPnL ? yesterdayPnL.currentBalance : openingBalance;
-    
+
     // Calcular saldo após potencial perda
     const projectedBalance = currentBalance - potentialLoss;
-    
-    // REGRA FUNDAMENTAL: JAMAIS pode fechar abaixo do anterior OU da abertura
-    // EXCEÇÃO: Para contas demo, permitir até 5% de perda para fins de teste
-    let minimumRequired = Math.max(previousDayClosingBalance, openingBalance);
-    
-    // Verificar se é conta demo e aplicar margem de teste
+
+    // PROTEÇÃO ORIENTADA AO MERCADO:
+    // Não usa o fechamento do dia anterior como piso (que causaria bloqueio até meia-noite).
+    // Em vez disso, usa uma margem de drawdown máximo sobre a ABERTURA DO DIA.
+    // O mercado controla quando voltar: o Recovery Mode já exige consenso alto (75%+)
+    // antes de autorizar qualquer trade após perdas.
     const tokenData = await this.getUserDerivToken(userId);
-    if (tokenData && tokenData.accountType === 'demo') {
-      // Permitir até 15% de perda do saldo inicial em contas demo (margem ampla para recuperação)
-      const demoLossMargin = openingBalance * 0.15; // 15% de margem
-      minimumRequired = Math.max(minimumRequired - demoLossMargin, openingBalance * 0.85);
-    }
-    
+    const accountType = tokenData?.accountType || 'demo';
+
+    // Demo: tolera até 15% de queda da abertura | Real: até 10%
+    const maxDrawdownPct = accountType === 'demo' ? 0.15 : 0.10;
+    const minimumRequired = openingBalance * (1 - maxDrawdownPct);
+
     if (projectedBalance < minimumRequired) {
-      let reason = '';
-      if (minimumRequired === previousDayClosingBalance && minimumRequired === openingBalance) {
-        reason = 'Trade bloqueado: saldo projetado ficaria abaixo da abertura e do fechamento anterior';
-      } else if (minimumRequired === previousDayClosingBalance) {
-        reason = 'Trade bloqueado: saldo projetado ficaria abaixo do fechamento do dia anterior';
-      } else {
-        reason = 'Trade bloqueado: saldo projetado ficaria abaixo da abertura do dia';
-      }
-      
+      const lostPct = (((openingBalance - projectedBalance) / openingBalance) * 100).toFixed(1);
+      const reason = `Trade bloqueado: queda de ${lostPct}% excede limite de ${(maxDrawdownPct * 100).toFixed(0)}% da abertura do dia ($${openingBalance.toFixed(2)})`;
+
       console.log(`🚫 PROTEÇÃO ATIVADA: ${reason}`);
       console.log(`   • Saldo atual: $${currentBalance.toFixed(2)}`);
       console.log(`   • Perda potencial: $${potentialLoss.toFixed(2)}`);
       console.log(`   • Saldo projetado: $${projectedBalance.toFixed(2)}`);
-      console.log(`   • Mínimo requerido: $${minimumRequired.toFixed(2)}`);
+      console.log(`   • Mínimo permitido: $${minimumRequired.toFixed(2)} (${(maxDrawdownPct*100).toFixed(0)}% abaixo da abertura)`);
       console.log(`   • Abertura do dia: $${openingBalance.toFixed(2)}`);
-      console.log(`   • Fechamento anterior: $${previousDayClosingBalance.toFixed(2)}`);
-      
-      return { 
-        canExecute: false, 
-        reason, 
-        currentBalance, 
-        minimumRequired 
+      console.log(`   ⏳ Sistema aguardará mercado melhorar (consenso ≥75%) antes de operar.`);
+
+      return {
+        canExecute: false,
+        reason,
+        currentBalance,
+        minimumRequired
       };
     }
-    
-    return { 
-      canExecute: true, 
-      currentBalance, 
-      minimumRequired 
+
+    return {
+      canExecute: true,
+      currentBalance,
+      minimumRequired
     };
   }
 

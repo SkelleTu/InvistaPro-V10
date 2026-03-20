@@ -680,20 +680,23 @@ export class TursoStorage implements IStorage {
       }
     }
 
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayPnL = await this.getDailyPnL(userId, yesterday.toISOString().split('T')[0]);
-    const previousDayClosingBalance = yesterdayPnL ? yesterdayPnL.currentBalance : todayPnL.openingBalance;
-
-    let minimumRequired = Math.max(previousDayClosingBalance, todayPnL.openingBalance);
+    // PROTEÇÃO ORIENTADA AO MERCADO:
+    // Usa apenas a abertura do dia como referência — sem depender do fechamento anterior.
+    // O Recovery Mode (consenso ≥75%) já garante que o mercado esteja favorável.
     const tokenData = await this.getUserDerivToken(userId);
-    if (tokenData?.accountType === 'demo') {
-      minimumRequired = Math.max(minimumRequired - todayPnL.openingBalance * 0.15, todayPnL.openingBalance * 0.85);
-    }
+    const accountType = tokenData?.accountType || 'demo';
+    const maxDrawdownPct = accountType === 'demo' ? 0.15 : 0.10;
+    const minimumRequired = todayPnL.openingBalance * (1 - maxDrawdownPct);
 
     const projectedBalance = todayPnL.currentBalance - potentialLoss;
     if (projectedBalance < minimumRequired) {
-      return { canExecute: false, reason: 'Saldo projetado ficaria abaixo do mínimo requerido', currentBalance: todayPnL.currentBalance, minimumRequired };
+      const lostPct = (((todayPnL.openingBalance - projectedBalance) / todayPnL.openingBalance) * 100).toFixed(1);
+      return {
+        canExecute: false,
+        reason: `Trade bloqueado: queda de ${lostPct}% excede limite de ${(maxDrawdownPct*100).toFixed(0)}% da abertura ($${todayPnL.openingBalance.toFixed(2)}) — aguardando mercado melhorar`,
+        currentBalance: todayPnL.currentBalance,
+        minimumRequired
+      };
     }
     return { canExecute: true, currentBalance: todayPnL.currentBalance, minimumRequired };
   }
