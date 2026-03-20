@@ -627,6 +627,20 @@ export function initializeDatabase() {
     } catch (e: any) {
       // Coluna já existe - ignorar
     }
+    // Migração: adicionar accu_ticks_per_rate se não existir
+    try {
+      sqlite.exec(`ALTER TABLE trade_configurations ADD COLUMN accu_ticks_per_rate TEXT DEFAULT '{"1":10,"2":7,"3":5,"4":4,"5":3}'`);
+      console.log('✅ Coluna accu_ticks_per_rate adicionada ao trade_configurations');
+    } catch (e: any) {
+      // Coluna já existe - ignorar
+    }
+    // Migração: adicionar modality_ticks se não existir
+    try {
+      sqlite.exec(`ALTER TABLE trade_configurations ADD COLUMN modality_ticks TEXT DEFAULT '{}'`);
+      console.log('✅ Coluna modality_ticks adicionada ao trade_configurations');
+    } catch (e: any) {
+      // Coluna já existe - ignorar
+    }
 
     console.log('✅ Banco de dados local inicializado com sucesso!');
     console.log('🛡️ Sistema de resiliência e auto-restart configurado!');

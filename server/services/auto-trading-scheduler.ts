@@ -1588,6 +1588,34 @@ export class AutoTradingScheduler {
           }
         } catch {}
 
+        // Ler ticks por taxa do ACCU configurados pelo usuário
+        let userAccuTicksPerRate: Record<number, number> = { 0.01: 10, 0.02: 7, 0.03: 5, 0.04: 4, 0.05: 3 };
+        try {
+          if ((config as any).accuTicksPerRate) {
+            const parsed = JSON.parse((config as any).accuTicksPerRate);
+            if (parsed && typeof parsed === 'object') {
+              const converted: Record<number, number> = {};
+              for (const [k, v] of Object.entries(parsed)) {
+                const rateKey = Number(k) / 100;
+                const tickVal = Math.round(Number(v));
+                if (rateKey > 0 && rateKey <= 0.05 && tickVal >= 1 && tickVal <= 30) {
+                  converted[rateKey] = tickVal;
+                }
+              }
+              if (Object.keys(converted).length > 0) userAccuTicksPerRate = converted;
+            }
+          }
+        } catch {}
+
+        // Ler ticks por modalidade configurados pelo usuário (dígitos, rise/fall)
+        let userModalityTicks: Record<string, number> = {};
+        try {
+          if ((config as any).modalityTicks) {
+            const parsed = JSON.parse((config as any).modalityTicks);
+            if (parsed && typeof parsed === 'object') userModalityTicks = parsed;
+          }
+        } catch {}
+
         console.log(`🎯 [${operationId}] Modalidades ativas do usuário: ${activeModalities.join(', ')}`);
         if (allowedAccuGrowthRates.length < 5 && activeModalities.includes('accumulator')) {
           console.log(`📈 [${operationId}] ACCU growth rates permitidas: ${allowedAccuGrowthRates.map(r => (r*100).toFixed(0)+'%').join(', ')}`);
@@ -1783,10 +1811,13 @@ export class AutoTradingScheduler {
           }
           if (!needsBarrier) barrier = undefined;
 
+          const digitDuration = userModalityTicks[selectedModality]
+            ? Math.max(1, Math.min(userModalityTicks[selectedModality], 10))
+            : tradeParams.duration;
           contract = await derivAPI.buyGenericDigitContract({
             contract_type: contractType,
             symbol: selectedSymbol,
-            duration: tradeParams.duration,
+            duration: digitDuration,
             amount: tradeParams.amount,
             barrier,
             currency: 'USD',
@@ -1798,7 +1829,9 @@ export class AutoTradingScheduler {
           const callPutDirection: 'up' | 'down' = (selectedModality === 'rise' || selectedModality === 'higher') ? 'up' : 
                                                     (selectedModality === 'fall' || selectedModality === 'lower') ? 'down' : 
                                                     safeDirection;
-          const callPutDuration = Math.max(1, Math.floor(tradeParams.duration / 2));
+          const callPutDuration = userModalityTicks[selectedModality]
+            ? Math.max(1, Math.min(userModalityTicks[selectedModality], 10))
+            : Math.max(1, Math.floor(tradeParams.duration / 2));
           contract = await derivAPI.buyCallPutContract(selectedSymbol, callPutDirection, callPutDuration, tradeParams.amount);
           resolvedTradeType = selectedModality;
 
@@ -2009,9 +2042,7 @@ export class AutoTradingScheduler {
             //   3% growth →  5 ticks → ~15.9% lucro
             //   4% growth →  4 ticks → ~16.9% lucro
             //   5% growth →  3 ticks → ~15.8% lucro
-            const minTicksByGrowthRate: Record<number, number> = {
-              0.01: 10, 0.02: 7, 0.03: 5, 0.04: 4, 0.05: 3,
-            };
+            const minTicksByGrowthRate: Record<number, number> = userAccuTicksPerRate;
             const baseExpectedTicks = supremeAnalysis?.adaptiveParams?.accumulator?.expectedTicks ?? 3;
             const minTicksForRate = minTicksByGrowthRate[adaptiveGrowth] ?? 3;
             const accuTicks = Math.max(minTicksForRate, baseExpectedTicks);

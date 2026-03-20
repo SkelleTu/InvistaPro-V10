@@ -413,6 +413,18 @@ export async function initializeTursoDatabase(): Promise<boolean> {
     } catch (e: any) {
       // Coluna já existe - ignorar
     }
+    // Migração: adicionar accu_ticks_per_rate se não existir
+    try {
+      await (tursoDb as any).run(`ALTER TABLE trade_configurations ADD COLUMN accu_ticks_per_rate TEXT DEFAULT '{"1":10,"2":7,"3":5,"4":4,"5":3}'`);
+    } catch (e: any) {
+      // Coluna já existe - ignorar
+    }
+    // Migração: adicionar modality_ticks se não existir
+    try {
+      await (tursoDb as any).run(`ALTER TABLE trade_configurations ADD COLUMN modality_ticks TEXT DEFAULT '{}'`);
+    } catch (e: any) {
+      // Coluna já existe - ignorar
+    }
 
     // Migração: adicionar operation_mode em trade_operations se não existir
     try {

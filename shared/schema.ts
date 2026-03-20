@@ -248,6 +248,8 @@ export const tradeConfigurations = sqliteTable("trade_configurations", {
   selectedModalities: text("selected_modalities").default('digit_differs'), // JSON array or comma-separated
   accuGrowthRates: text("accu_growth_rates").default('["1","2","3","4","5"]'), // JSON array of allowed growth rates
   modalityFrequency: text("modality_frequency").default('{}'), // JSON object: { modality_id: 'low'|'normal'|'high' }
+  accuTicksPerRate: text("accu_ticks_per_rate").default('{"1":10,"2":7,"3":5,"4":4,"5":3}'), // JSON: { rate: ticks } for auto-sell
+  modalityTicks: text("modality_ticks").default('{}'), // JSON: { modality_id: ticks } for digit/rise-fall duration
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`),
 });

@@ -2463,13 +2463,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const config = await dbStorage.getUserTradeConfig(req.user.id);
     let accuGrowthRates: string[] = ['1','2','3','4','5'];
     let modalityFrequency: Record<string, string> = {};
+    let accuTicksPerRate: Record<string, number> = { '1': 10, '2': 7, '3': 5, '4': 4, '5': 3 };
+    let modalityTicks: Record<string, number> = {};
     try {
       if (config?.accuGrowthRates) accuGrowthRates = JSON.parse(config.accuGrowthRates);
     } catch {}
     try {
       if (config?.modalityFrequency) modalityFrequency = JSON.parse(config.modalityFrequency);
     } catch {}
-    res.json({ accuGrowthRates, modalityFrequency });
+    try {
+      if ((config as any)?.accuTicksPerRate) accuTicksPerRate = JSON.parse((config as any).accuTicksPerRate);
+    } catch {}
+    try {
+      if ((config as any)?.modalityTicks) modalityTicks = JSON.parse((config as any).modalityTicks);
+    } catch {}
+    res.json({ accuGrowthRates, modalityFrequency, accuTicksPerRate, modalityTicks });
   }));
 
   app.put('/api/trading/accu-growth-rates', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
@@ -2496,6 +2504,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
     await dbStorage.updateModalityFrequency(req.user.id, cleaned);
     console.log(`⚡ [FREQ] Usuário ${req.user.id} atualizou frequência de modalidades`);
     res.json({ success: true, frequency: cleaned });
+  }));
+
+  app.put('/api/trading/accu-ticks-per-rate', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+    const { ticks } = req.body;
+    if (typeof ticks !== 'object' || Array.isArray(ticks)) {
+      return res.status(400).json({ message: 'ticks deve ser um objeto { rate: number }' });
+    }
+    const VALID_RATES = new Set(['1','2','3','4','5']);
+    const cleaned: Record<string, number> = {};
+    for (const [k, v] of Object.entries(ticks)) {
+      if (VALID_RATES.has(k)) {
+        const n = Math.round(Number(v));
+        if (n >= 1 && n <= 30) cleaned[k] = n;
+      }
+    }
+    await dbStorage.updateAccuTicksPerRate(req.user.id, cleaned);
+    console.log(`⏱️ [ACCU-TICKS] Usuário ${req.user.id} atualizou ticks por taxa: ${JSON.stringify(cleaned)}`);
+    res.json({ success: true, ticks: cleaned });
+  }));
+
+  app.put('/api/trading/modality-ticks', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+    const { ticks } = req.body;
+    if (typeof ticks !== 'object' || Array.isArray(ticks)) {
+      return res.status(400).json({ message: 'ticks deve ser um objeto { modality_id: number }' });
+    }
+    const cleaned: Record<string, number> = {};
+    for (const [k, v] of Object.entries(ticks)) {
+      const n = Math.round(Number(v));
+      if (n >= 1 && n <= 10) cleaned[k] = n;
+    }
+    await dbStorage.updateModalityTicks(req.user.id, cleaned);
+    console.log(`⏱️ [MOD-TICKS] Usuário ${req.user.id} atualizou ticks de modalidades: ${JSON.stringify(cleaned)}`);
+    res.json({ success: true, ticks: cleaned });
   }));
 
   // =========================== MARKET DATA & REAL-TIME ===========================

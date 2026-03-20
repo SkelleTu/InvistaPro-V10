@@ -657,6 +657,20 @@ export default function TradingSystemPage() {
     } catch {}
     return {};
   });
+  const [accuTicksPerRate, setAccuTicksPerRate] = useState<Record<string, number>>(() => {
+    try {
+      const s = localStorage.getItem("accu_ticks_per_rate");
+      if (s) { const p = JSON.parse(s); if (p && typeof p === 'object') return p; }
+    } catch {}
+    return { '1': 10, '2': 7, '3': 5, '4': 4, '5': 3 };
+  });
+  const [modalityTicks, setModalityTicks] = useState<Record<string, number>>(() => {
+    try {
+      const s = localStorage.getItem("modality_ticks");
+      if (s) { const p = JSON.parse(s); if (p && typeof p === 'object') return p; }
+    } catch {}
+    return {};
+  });
   const [modalitySettingsLoaded, setModalitySettingsLoaded] = useState(false);
   const [autoMode, setAutoMode] = useState<boolean>(() => {
     try { return localStorage.getItem("trade_auto_mode") === "true"; } catch { return false; }
@@ -705,6 +719,14 @@ export default function TradingSystemPage() {
         if (data?.modalityFrequency && typeof data.modalityFrequency === 'object') {
           setModalityFrequency(data.modalityFrequency);
           localStorage.setItem("modality_frequency", JSON.stringify(data.modalityFrequency));
+        }
+        if (data?.accuTicksPerRate && typeof data.accuTicksPerRate === 'object') {
+          setAccuTicksPerRate(data.accuTicksPerRate);
+          localStorage.setItem("accu_ticks_per_rate", JSON.stringify(data.accuTicksPerRate));
+        }
+        if (data?.modalityTicks && typeof data.modalityTicks === 'object') {
+          setModalityTicks(data.modalityTicks);
+          localStorage.setItem("modality_ticks", JSON.stringify(data.modalityTicks));
         }
       } catch {}
       setModalitySettingsLoaded(true);
@@ -1808,6 +1830,21 @@ export default function TradingSystemPage() {
                       body: JSON.stringify({ frequency: freq }),
                     }).catch(() => {});
                   };
+                  const saveAccuTicksPerRate = (ticks: Record<string, number>) => {
+                    localStorage.setItem("accu_ticks_per_rate", JSON.stringify(ticks));
+                    apiRequest("/api/trading/accu-ticks-per-rate", {
+                      method: "PUT",
+                      body: JSON.stringify({ ticks }),
+                    }).catch(() => {});
+                  };
+                  const saveModalityTicks = (ticks: Record<string, number>) => {
+                    localStorage.setItem("modality_ticks", JSON.stringify(ticks));
+                    apiRequest("/api/trading/modality-ticks", {
+                      method: "PUT",
+                      body: JSON.stringify({ ticks }),
+                    }).catch(() => {});
+                  };
+                  const TICK_MODALITIES = new Set(['digit_differs','digit_matches','digit_even','digit_odd','digit_over','digit_under','rise','fall','higher','lower']);
                   const toggleModality = (id: string, newVal: boolean, name: string) => {
                     const updated = { ...enabledModalities, [id]: newVal };
                     setEnabledModalities(updated);
@@ -1943,6 +1980,51 @@ export default function TradingSystemPage() {
                                       </p>
                                     </div>
 
+                                    {/* ── Ticks por Taxa (ACCU) ── */}
+                                    {accuGrowthRates.length > 0 && (
+                                      <div className="rounded-md bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-800 p-2">
+                                        <p className="text-[11px] font-semibold text-teal-700 dark:text-teal-300 mb-1.5 flex items-center gap-1">
+                                          <span>⏱️</span> Ticks de saída por taxa
+                                        </p>
+                                        <div className="space-y-1.5">
+                                          {['1','2','3','4','5'].filter(r => accuGrowthRates.includes(r)).map((rate) => {
+                                            const currentTicks = accuTicksPerRate[rate] ?? { '1': 10, '2': 7, '3': 5, '4': 4, '5': 3 }[rate as keyof typeof accuTicksPerRate] ?? 5;
+                                            return (
+                                              <div key={rate} className="flex items-center gap-2">
+                                                <span className="text-[11px] font-bold text-teal-700 dark:text-teal-300 w-6 shrink-0">{rate}%</span>
+                                                <div className="flex items-center gap-1">
+                                                  {[1,2,3,4,5,7,10,15,20].map((t) => (
+                                                    <button
+                                                      key={t}
+                                                      type="button"
+                                                      data-testid={`accu-ticks-rate${rate}-${t}`}
+                                                      onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        const next = { ...accuTicksPerRate, [rate]: t };
+                                                        setAccuTicksPerRate(next);
+                                                        saveAccuTicksPerRate(next);
+                                                        toast({ title: `Taxa ${rate}%: ${t} ticks`, duration: 1200 });
+                                                      }}
+                                                      className={`px-1.5 py-0.5 rounded text-[10px] font-bold border transition-all ${
+                                                        currentTicks === t
+                                                          ? 'bg-teal-500 text-white border-teal-500'
+                                                          : 'bg-white dark:bg-gray-800 text-muted-foreground border-border hover:border-teal-400'
+                                                      }`}
+                                                    >
+                                                      {t}
+                                                    </button>
+                                                  ))}
+                                                </div>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                        <p className="text-[10px] text-teal-600 dark:text-teal-400 mt-1.5">
+                                          Número de ticks acumulados antes de encerrar automaticamente o contrato.
+                                        </p>
+                                      </div>
+                                    )}
+
                                     {/* ── Frequência de Operações (ACCU) ── */}
                                     <div className="rounded-md bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 p-2">
                                       <p className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1.5 flex items-center gap-1">
@@ -1984,7 +2066,7 @@ export default function TradingSystemPage() {
 
                                 {/* ── Frequência de Operações (demais modalidades) — somente quando habilitada ── */}
                                 {isEnabled && modality.id !== 'accumulator' && (
-                                  <div className="mt-2 pt-2 border-t border-blue-200 dark:border-blue-700">
+                                  <div className="mt-2 pt-2 border-t border-blue-200 dark:border-blue-700 space-y-2">
                                     <div className="rounded-md bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 p-2">
                                       <p className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1.5 flex items-center gap-1">
                                         <span>⚡</span> Frequência de operações
@@ -2020,6 +2102,45 @@ export default function TradingSystemPage() {
                                         })}
                                       </div>
                                     </div>
+
+                                    {/* ── Ticks por Operação (somente modalidades compatíveis) ── */}
+                                    {TICK_MODALITIES.has(modality.id) && (
+                                      <div className="rounded-md bg-violet-50 dark:bg-violet-900/20 border border-violet-200 dark:border-violet-800 p-2">
+                                        <p className="text-[11px] font-semibold text-violet-700 dark:text-violet-300 mb-1.5 flex items-center gap-1">
+                                          <span>⏱️</span> Ticks por operação
+                                        </p>
+                                        <div className="flex flex-wrap gap-1">
+                                          {[1,2,3,4,5,6,7,8,9,10].map((t) => {
+                                            const curTicks = modalityTicks[modality.id] ?? 5;
+                                            const isSel = curTicks === t;
+                                            return (
+                                              <button
+                                                key={t}
+                                                type="button"
+                                                data-testid={`modality-ticks-${modality.id}-${t}`}
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  const next = { ...modalityTicks, [modality.id]: t };
+                                                  setModalityTicks(next);
+                                                  saveModalityTicks(next);
+                                                  toast({ title: `${modality.name}: ${t} ticks`, duration: 1200 });
+                                                }}
+                                                className={`px-2 py-1 rounded text-[11px] font-bold border transition-all ${
+                                                  isSel
+                                                    ? 'bg-violet-500 text-white border-violet-500'
+                                                    : 'bg-white dark:bg-gray-800 text-muted-foreground border-border hover:border-violet-400'
+                                                }`}
+                                              >
+                                                {t}
+                                              </button>
+                                            );
+                                          })}
+                                        </div>
+                                        <p className="text-[10px] text-violet-600 dark:text-violet-400 mt-1">
+                                          Duração do contrato em ticks (1–10). Padrão: 5.
+                                        </p>
+                                      </div>
+                                    )}
                                   </div>
                                 )}
                               </div>

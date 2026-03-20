@@ -434,6 +434,12 @@ export class PostgresStorage implements IStorage {
       .where(eq(pgSchema.tradeConfigurations.userId, userId));
   }
 
+  async updateSelectedModalities(_userId: string, _modalities: string[]): Promise<void> {}
+  async updateAccuGrowthRates(_userId: string, _rates: string[]): Promise<void> {}
+  async updateModalityFrequency(_userId: string, _freq: Record<string, string>): Promise<void> {}
+  async updateAccuTicksPerRate(_userId: string, _ticks: Record<string, number>): Promise<void> {}
+  async updateModalityTicks(_userId: string, _ticks: Record<string, number>): Promise<void> {}
+
   async getActiveTradeConfigurations(): Promise<TradeConfiguration[]> {
     const configs = await db
       .select()
