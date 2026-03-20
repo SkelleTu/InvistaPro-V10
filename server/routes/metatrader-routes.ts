@@ -81,6 +81,189 @@ router.get('/signal', (req: Request, res: Response) => {
   }
 });
 
+/**
+ * POST /api/metatrader/signal-with-indicators
+ * Endpoint principal para o EA v5.0.
+ * Recebe candles + dados reais dos indicadores instalados no gráfico
+ * (Girassol, Fibonacci automático e qualquer outro) e retorna sinal da IA.
+ */
+router.post('/signal-with-indicators', async (req: Request, res: Response) => {
+  try {
+    const {
+      symbol,
+      ask,
+      bid,
+      candles,
+      indicatorSignals,   // { girassol: {...}, fibonacci: {...} }
+      indicatorBuffers,   // array bruto de todos os buffers
+      indicatorCount,
+      token
+    } = req.body;
+
+    const config = metaTraderBridge.getConfig();
+    if (config.apiToken && token && token !== config.apiToken) {
+      return res.status(401).json({ error: 'Token inválido' });
+    }
+    if (!config.enabled) {
+      return res.json({ action: 'HOLD', reason: 'Sistema desabilitado', confidence: 0 });
+    }
+    if (!symbol) {
+      return res.status(400).json({ error: 'symbol é obrigatório' });
+    }
+
+    const sym = symbol as string;
+
+    // Atualiza dados de mercado no bridge
+    if (Array.isArray(candles) && candles.length > 0) {
+      metaTraderBridge.addMarketData(sym, candles);
+    }
+
+    // ── Analisa sinais do Girassol ───────────────────────────────────────
+    const girassol = indicatorSignals?.girassol;
+    const fibonacci = indicatorSignals?.fibonacci;
+
+    let girassolBias: 'BUY' | 'SELL' | 'NEUTRAL' = 'NEUTRAL';
+    let girassolDesc = 'Girassol não detectado no gráfico';
+    let fibDesc      = 'Fibonacci não detectado no gráfico';
+    let fibNearestLevel: number | null = null;
+
+    if (girassol?.detected) {
+      const buySigs  = girassol.signals?.buy_signals  || [];
+      const sellSigs = girassol.signals?.sell_signals || [];
+      const exitSigs = girassol.signals?.exit_signals || [];
+
+      // Sinal mais recente (bar=0 = barra atual, bar=1 = anterior, etc.)
+      const recentBuy  = buySigs.find((s: any)  => s.bar <= 1);
+      const recentSell = sellSigs.find((s: any) => s.bar <= 1);
+      const recentExit = exitSigs.find((s: any) => s.bar <= 1);
+
+      if (recentExit) {
+        girassolBias = 'NEUTRAL';
+        girassolDesc = `Girassol: sinal de SAÍDA na barra ${recentExit.bar} (buffer ${recentExit.buffer}, valor ${recentExit.value})`;
+      } else if (recentBuy && !recentSell) {
+        girassolBias = 'BUY';
+        girassolDesc = `Girassol: COMPRA detectada na barra ${recentBuy.bar} (valor ${recentBuy.value})`;
+      } else if (recentSell && !recentBuy) {
+        girassolBias = 'SELL';
+        girassolDesc = `Girassol: VENDA detectada na barra ${recentSell.bar} (valor ${recentSell.value})`;
+      } else if (recentBuy && recentSell) {
+        girassolBias = 'NEUTRAL';
+        girassolDesc = `Girassol: sinais conflitantes (compra e venda simultâneas) — aguardando confirmação`;
+      } else {
+        girassolBias = 'NEUTRAL';
+        girassolDesc = `Girassol ativo (${girassol.name}) — sem sinal novo nas últimas 2 barras`;
+      }
+
+      console.log(`[MT5-Indicators] 🌻 ${girassolDesc}`);
+    }
+
+    if (fibonacci?.detected && Array.isArray(fibonacci.levels) && fibonacci.levels.length > 0) {
+      const currentPrice = ask || bid || 0;
+      const levels = fibonacci.levels as Array<{ level: string; price: number; buffer: number }>;
+
+      if (currentPrice > 0) {
+        // Encontra o nível de Fibonacci mais próximo do preço atual
+        let minDist = Infinity;
+        let nearest = levels[0];
+        for (const lv of levels) {
+          const dist = Math.abs(lv.price - currentPrice);
+          if (dist < minDist) { minDist = dist; nearest = lv; }
+        }
+        fibNearestLevel = nearest.price;
+        const pct = ((minDist / currentPrice) * 100).toFixed(3);
+        fibDesc = `Fibonacci (${fibonacci.name}): ${levels.length} níveis | Mais próximo: ${nearest.level} @ ${nearest.price.toFixed(5)} (${pct}% de distância)`;
+      } else {
+        fibDesc = `Fibonacci (${fibonacci.name}): ${levels.length} níveis detectados`;
+      }
+
+      console.log(`[MT5-Indicators] 📐 ${fibDesc}`);
+    }
+
+    // ── Consulta sinal pendente da IA ────────────────────────────────────
+    const baseSignal = metaTraderBridge.getPendingSignal(sym);
+
+    // ── Aplica filtro do Girassol ────────────────────────────────────────
+    // Se o Girassol estiver ativo E der sinal contrário ao da IA → HOLD
+    // Se o Girassol confirmar → aumenta confiança
+    // Se o Girassol não tiver sinal novo → mantém sinal original da IA
+    let finalAction: string = baseSignal?.action || 'HOLD';
+    let finalConfidence: number = baseSignal?.confidence || 0;
+    let finalReason: string = baseSignal?.reason || 'Aguardando sinal';
+    const indicatorNotes: string[] = [];
+
+    if (girassol?.detected && girassolBias !== 'NEUTRAL') {
+      if (girassolBias === finalAction) {
+        // Girassol CONFIRMA o sinal da IA
+        finalConfidence = Math.min(100, finalConfidence * 1.15);
+        indicatorNotes.push(`✅ Girassol CONFIRMA ${finalAction} — confiança elevada`);
+        finalReason = `${finalReason} | ${girassolDesc}`;
+      } else if (finalAction !== 'HOLD' && girassolBias !== finalAction) {
+        // Girassol CONTRADIZ o sinal da IA → filtra (HOLD)
+        indicatorNotes.push(`🚫 Girassol CONTRADIZ IA (${finalAction}→${girassolBias}) — operação bloqueada`);
+        console.log(`[MT5-Indicators] 🚫 Sinal ${finalAction} BLOQUEADO pelo Girassol (indicador diz ${girassolBias})`);
+        finalAction     = 'HOLD';
+        finalConfidence = 0;
+        finalReason     = `Bloqueado: ${girassolDesc}`;
+      }
+    } else if (girassol?.detected) {
+      indicatorNotes.push(girassolDesc);
+    }
+
+    // ── Aplica filtro do Fibonacci ───────────────────────────────────────
+    // Se preço está muito próximo de um nível de Fibonacci → zona de decisão
+    if (fibonacci?.detected && fibNearestLevel !== null) {
+      const currentPrice = ask || bid || 0;
+      if (currentPrice > 0) {
+        const distPct = Math.abs(fibNearestLevel - currentPrice) / currentPrice * 100;
+        if (distPct < 0.05) {
+          indicatorNotes.push(`⚡ Preço em zona de Fibonacci (${distPct.toFixed(3)}% do nível) — zona de reversão/suporte`);
+        }
+      }
+      indicatorNotes.push(fibDesc);
+    }
+
+    // Monta resposta final
+    if (!baseSignal || finalAction === 'HOLD') {
+      return res.json({
+        action: 'HOLD',
+        reason: finalReason,
+        confidence: finalConfidence,
+        indicatorNotes,
+        girassolBias,
+        fibonacciNearestLevel: fibNearestLevel,
+        indicatorsDetected: indicatorCount || 0,
+        timestamp: Date.now()
+      });
+    }
+
+    res.json({
+      id:                    baseSignal.id,
+      symbol:                baseSignal.symbol,
+      action:                finalAction,
+      lotSize:               baseSignal.lotSize,
+      stopLoss:              baseSignal.stopLoss,
+      takeProfit:            baseSignal.takeProfit,
+      stopLossPips:          baseSignal.stopLossPips,
+      takeProfitPips:        baseSignal.takeProfitPips,
+      entryPrice:            baseSignal.entryPrice,
+      confidence:            Math.round(finalConfidence * 10) / 10,
+      reason:                finalReason,
+      indicatorNotes,
+      girassolBias,
+      girassolDescription:   girassolDesc,
+      fibonacciDescription:  fibDesc,
+      fibonacciNearestLevel: fibNearestLevel,
+      indicatorsDetected:    indicatorCount || 0,
+      aiSources:             baseSignal.aiSources,
+      timestamp:             baseSignal.timestamp,
+      expiresAt:             baseSignal.expiresAt
+    });
+  } catch (err: any) {
+    console.error('[MT5-Indicators] Erro:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/market-data', (req: Request, res: Response) => {
   try {
     const { symbol, candles } = req.body;
