@@ -643,6 +643,21 @@ export default function TradingSystemPage() {
     return {};
   });
   const [modalitiesLoaded, setModalitiesLoaded] = useState(false);
+  const [accuGrowthRates, setAccuGrowthRates] = useState<string[]>(() => {
+    try {
+      const s = localStorage.getItem("accu_growth_rates");
+      if (s) { const p = JSON.parse(s); if (Array.isArray(p)) return p; }
+    } catch {}
+    return ['1','2','3','4','5'];
+  });
+  const [modalityFrequency, setModalityFrequency] = useState<Record<string, string>>(() => {
+    try {
+      const s = localStorage.getItem("modality_frequency");
+      if (s) { const p = JSON.parse(s); if (p && typeof p === 'object') return p; }
+    } catch {}
+    return {};
+  });
+  const [modalitySettingsLoaded, setModalitySettingsLoaded] = useState(false);
   const [autoMode, setAutoMode] = useState<boolean>(() => {
     try { return localStorage.getItem("trade_auto_mode") === "true"; } catch { return false; }
   });
@@ -676,6 +691,25 @@ export default function TradingSystemPage() {
       setModalitiesLoaded(true);
     }).catch(() => { setModalitiesLoaded(true); });
   }, [modalitiesLoaded]);
+
+  // Carregar configurações de growth rates e frequência do servidor
+  useEffect(() => {
+    if (modalitySettingsLoaded) return;
+    apiRequest("/api/trading/modality-settings").then(async (res) => {
+      try {
+        const data = await res.json();
+        if (Array.isArray(data?.accuGrowthRates)) {
+          setAccuGrowthRates(data.accuGrowthRates);
+          localStorage.setItem("accu_growth_rates", JSON.stringify(data.accuGrowthRates));
+        }
+        if (data?.modalityFrequency && typeof data.modalityFrequency === 'object') {
+          setModalityFrequency(data.modalityFrequency);
+          localStorage.setItem("modality_frequency", JSON.stringify(data.modalityFrequency));
+        }
+      } catch {}
+      setModalitySettingsLoaded(true);
+    }).catch(() => { setModalitySettingsLoaded(true); });
+  }, [modalitySettingsLoaded]);
 
   useEffect(() => {
     if (!autoMode) return;
@@ -1760,6 +1794,20 @@ export default function TradingSystemPage() {
                       body: JSON.stringify({ modalities: active }),
                     }).catch(() => {});
                   };
+                  const saveAccuGrowthRates = (rates: string[]) => {
+                    localStorage.setItem("accu_growth_rates", JSON.stringify(rates));
+                    apiRequest("/api/trading/accu-growth-rates", {
+                      method: "PUT",
+                      body: JSON.stringify({ rates }),
+                    }).catch(() => {});
+                  };
+                  const saveModalityFrequency = (freq: Record<string, string>) => {
+                    localStorage.setItem("modality_frequency", JSON.stringify(freq));
+                    apiRequest("/api/trading/modality-frequency", {
+                      method: "PUT",
+                      body: JSON.stringify({ frequency: freq }),
+                    }).catch(() => {});
+                  };
                   const toggleModality = (id: string, newVal: boolean, name: string) => {
                     const updated = { ...enabledModalities, [id]: newVal };
                     setEnabledModalities(updated);
@@ -1839,12 +1887,96 @@ export default function TradingSystemPage() {
                                   </Badge>
                                 </div>
                                 {isEnabled && (
-                                  <div className="mt-2 pt-2 border-t border-blue-200 dark:border-blue-700">
-                                    <div className="flex items-center gap-1 mb-0.5">
-                                      <Brain className="h-3 w-3 text-blue-500" />
-                                      <span className="text-xs font-medium text-blue-600 dark:text-blue-400">Estratégia de IA:</span>
+                                  <div className="mt-2 pt-2 border-t border-blue-200 dark:border-blue-700 space-y-2">
+                                    {/* Estratégia de IA */}
+                                    <div>
+                                      <div className="flex items-center gap-1 mb-0.5">
+                                        <Brain className="h-3 w-3 text-blue-500" />
+                                        <span className="text-xs font-medium text-blue-600 dark:text-blue-400">Estratégia de IA:</span>
+                                      </div>
+                                      <p className="text-xs text-muted-foreground leading-relaxed">{modality.aiStrategy}</p>
                                     </div>
-                                    <p className="text-xs text-muted-foreground leading-relaxed">{modality.aiStrategy}</p>
+
+                                    {/* ── Taxas de Crescimento (somente ACCU) ── */}
+                                    {(modality.id === 'accumulator' || modality.id === 'ACCU') && (
+                                      <div className="rounded-md bg-cyan-50 dark:bg-cyan-900/20 border border-cyan-200 dark:border-cyan-800 p-2">
+                                        <p className="text-[11px] font-semibold text-cyan-700 dark:text-cyan-300 mb-1.5 flex items-center gap-1">
+                                          <span>📈</span> Taxas de crescimento permitidas
+                                        </p>
+                                        <div className="flex flex-wrap gap-1.5">
+                                          {['1','2','3','4','5'].map((rate) => {
+                                            const isChecked = accuGrowthRates.includes(rate);
+                                            return (
+                                              <button
+                                                key={rate}
+                                                type="button"
+                                                data-testid={`accu-growth-rate-${rate}`}
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  let next: string[];
+                                                  if (isChecked) {
+                                                    if (accuGrowthRates.length <= 1) return;
+                                                    next = accuGrowthRates.filter(r => r !== rate);
+                                                  } else {
+                                                    next = [...accuGrowthRates, rate].sort((a,b)=>Number(a)-Number(b));
+                                                  }
+                                                  setAccuGrowthRates(next);
+                                                  saveAccuGrowthRates(next);
+                                                  toast({ title: `Taxa ${rate}% ${isChecked ? 'removida' : 'adicionada'}`, duration: 1500 });
+                                                }}
+                                                className={`px-2.5 py-1 rounded-full text-[11px] font-bold transition-all border ${
+                                                  isChecked
+                                                    ? 'bg-cyan-500 text-white border-cyan-500 shadow-sm'
+                                                    : 'bg-white dark:bg-gray-800 text-muted-foreground border-border hover:border-cyan-400'
+                                                }`}
+                                              >
+                                                {rate}%
+                                              </button>
+                                            );
+                                          })}
+                                        </div>
+                                        <p className="text-[10px] text-cyan-600 dark:text-cyan-400 mt-1">
+                                          A IA escolhe automaticamente entre as taxas selecionadas conforme a volatilidade do mercado.
+                                        </p>
+                                      </div>
+                                    )}
+
+                                    {/* ── Frequência de Operações ── */}
+                                    <div className="rounded-md bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 p-2">
+                                      <p className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1.5 flex items-center gap-1">
+                                        <span>⚡</span> Frequência de operações
+                                      </p>
+                                      <div className="flex gap-1.5">
+                                        {[
+                                          { value: 'low', label: 'Baixa', desc: '~1/3 das ops', color: 'text-amber-600 dark:text-amber-400 border-amber-400 bg-amber-50 dark:bg-amber-900/30' },
+                                          { value: 'normal', label: 'Normal', desc: 'padrão', color: 'text-green-600 dark:text-green-400 border-green-400 bg-green-50 dark:bg-green-900/30' },
+                                          { value: 'high', label: 'Alta', desc: '2× as ops', color: 'text-blue-600 dark:text-blue-400 border-blue-400 bg-blue-50 dark:bg-blue-900/30' },
+                                        ].map(({ value, label, desc, color }) => {
+                                          const current = modalityFrequency[modality.id] ?? 'normal';
+                                          const isSel = current === value;
+                                          return (
+                                            <button
+                                              key={value}
+                                              type="button"
+                                              data-testid={`modality-freq-${modality.id}-${value}`}
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                const next = { ...modalityFrequency, [modality.id]: value };
+                                                setModalityFrequency(next);
+                                                saveModalityFrequency(next);
+                                                toast({ title: `Frequência ${label} para ${modality.name}`, duration: 1500 });
+                                              }}
+                                              className={`flex-1 px-2 py-1.5 rounded-lg text-[11px] font-semibold border transition-all text-center ${
+                                                isSel ? color + ' border-2' : 'bg-white dark:bg-gray-900 text-muted-foreground border-border hover:border-muted-foreground/50'
+                                              }`}
+                                            >
+                                              <div>{label}</div>
+                                              <div className="font-normal opacity-70">{desc}</div>
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
                                   </div>
                                 )}
                               </div>

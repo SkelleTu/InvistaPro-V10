@@ -401,6 +401,18 @@ export async function initializeTursoDatabase(): Promise<boolean> {
     } catch (e: any) {
       // Coluna já existe - ignorar
     }
+    // Migração: adicionar accu_growth_rates se não existir
+    try {
+      await (tursoDb as any).run(`ALTER TABLE trade_configurations ADD COLUMN accu_growth_rates TEXT DEFAULT '["1","2","3","4","5"]'`);
+    } catch (e: any) {
+      // Coluna já existe - ignorar
+    }
+    // Migração: adicionar modality_frequency se não existir
+    try {
+      await (tursoDb as any).run(`ALTER TABLE trade_configurations ADD COLUMN modality_frequency TEXT DEFAULT '{}'`);
+    } catch (e: any) {
+      // Coluna já existe - ignorar
+    }
 
     // Migração: adicionar operation_mode em trade_operations se não existir
     try {

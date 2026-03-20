@@ -611,9 +611,21 @@ export function initializeDatabase() {
       sqlite.exec(`ALTER TABLE trade_configurations ADD COLUMN selected_modalities TEXT DEFAULT 'digit_differs'`);
       console.log('✅ Coluna selected_modalities adicionada ao trade_configurations');
     } catch (e: any) {
-      if (!e.message?.includes('duplicate column')) {
-        // Coluna já existe - ignorar
-      }
+      // Coluna já existe - ignorar
+    }
+    // Migração: adicionar accu_growth_rates se não existir
+    try {
+      sqlite.exec(`ALTER TABLE trade_configurations ADD COLUMN accu_growth_rates TEXT DEFAULT '["1","2","3","4","5"]'`);
+      console.log('✅ Coluna accu_growth_rates adicionada ao trade_configurations');
+    } catch (e: any) {
+      // Coluna já existe - ignorar
+    }
+    // Migração: adicionar modality_frequency se não existir
+    try {
+      sqlite.exec(`ALTER TABLE trade_configurations ADD COLUMN modality_frequency TEXT DEFAULT '{}'`);
+      console.log('✅ Coluna modality_frequency adicionada ao trade_configurations');
+    } catch (e: any) {
+      // Coluna já existe - ignorar
     }
 
     console.log('✅ Banco de dados local inicializado com sucesso!');

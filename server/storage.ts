@@ -168,6 +168,8 @@ export interface IStorage {
   getActiveTradeConfigurations(): Promise<TradeConfiguration[]>;
   updateTradeConfig(userId: string, mode: string): Promise<TradeConfiguration>;
   updateSelectedModalities(userId: string, modalities: string[]): Promise<void>;
+  updateAccuGrowthRates(userId: string, rates: string[]): Promise<void>;
+  updateModalityFrequency(userId: string, freq: Record<string, string>): Promise<void>;
   deactivateAllTradeConfigs(userId: string): Promise<void>;
   reactivateTradeConfiguration(id: string): Promise<void>;
   deactivateTradeConfiguration(id: string): Promise<void>;
@@ -598,6 +600,26 @@ export class DatabaseStorage implements IStorage {
       .update(tradeConfigurations)
       .set({
         selectedModalities: modalitiesJson,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(and(eq(tradeConfigurations.userId, userId), eq(tradeConfigurations.isActive, true)));
+  }
+
+  async updateAccuGrowthRates(userId: string, rates: string[]): Promise<void> {
+    await db
+      .update(tradeConfigurations)
+      .set({
+        accuGrowthRates: JSON.stringify(rates),
+        updatedAt: new Date().toISOString(),
+      })
+      .where(and(eq(tradeConfigurations.userId, userId), eq(tradeConfigurations.isActive, true)));
+  }
+
+  async updateModalityFrequency(userId: string, freq: Record<string, string>): Promise<void> {
+    await db
+      .update(tradeConfigurations)
+      .set({
+        modalityFrequency: JSON.stringify(freq),
         updatedAt: new Date().toISOString(),
       })
       .where(and(eq(tradeConfigurations.userId, userId), eq(tradeConfigurations.isActive, true)));

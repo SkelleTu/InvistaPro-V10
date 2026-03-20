@@ -2458,6 +2458,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.put('/api/trading/modalities', isAuthenticated, isTradingAuthorized, handleUpdateModalities);
   app.post('/api/trading/modalities', isAuthenticated, isTradingAuthorized, handleUpdateModalities);
 
+  // ── ACCU GROWTH RATES ──────────────────────────────────────────────────────────
+  app.get('/api/trading/modality-settings', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+    const config = await dbStorage.getUserTradeConfig(req.user.id);
+    let accuGrowthRates: string[] = ['1','2','3','4','5'];
+    let modalityFrequency: Record<string, string> = {};
+    try {
+      if (config?.accuGrowthRates) accuGrowthRates = JSON.parse(config.accuGrowthRates);
+    } catch {}
+    try {
+      if (config?.modalityFrequency) modalityFrequency = JSON.parse(config.modalityFrequency);
+    } catch {}
+    res.json({ accuGrowthRates, modalityFrequency });
+  }));
+
+  app.put('/api/trading/accu-growth-rates', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+    const { rates } = req.body;
+    if (!Array.isArray(rates)) return res.status(400).json({ message: 'rates deve ser um array' });
+    const VALID_RATES = new Set(['1','2','3','4','5']);
+    const filtered = rates.filter((r: string) => VALID_RATES.has(String(r))).map(String);
+    if (filtered.length === 0) return res.status(400).json({ message: 'Selecione pelo menos uma taxa de crescimento' });
+    await dbStorage.updateAccuGrowthRates(req.user.id, filtered);
+    console.log(`📈 [ACCU] Usuário ${req.user.id} atualizou growth rates: ${filtered.join(', ')}%`);
+    res.json({ success: true, rates: filtered });
+  }));
+
+  app.put('/api/trading/modality-frequency', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+    const { frequency } = req.body;
+    if (typeof frequency !== 'object' || Array.isArray(frequency)) {
+      return res.status(400).json({ message: 'frequency deve ser um objeto { modality_id: level }' });
+    }
+    const VALID_LEVELS = new Set(['low','normal','high']);
+    const cleaned: Record<string, string> = {};
+    for (const [k, v] of Object.entries(frequency)) {
+      if (VALID_LEVELS.has(String(v))) cleaned[k] = String(v);
+    }
+    await dbStorage.updateModalityFrequency(req.user.id, cleaned);
+    console.log(`⚡ [FREQ] Usuário ${req.user.id} atualizou frequência de modalidades`);
+    res.json({ success: true, frequency: cleaned });
+  }));
+
   // =========================== MARKET DATA & REAL-TIME ===========================
 
   app.get('/api/trading/market-data/:symbol', isAuthenticated, isTradingAuthorized, async (req, res) => {

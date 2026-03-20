@@ -246,6 +246,8 @@ export const tradeConfigurations = sqliteTable("trade_configurations", {
   intervalType: text("interval_type").notNull(), // 'minutes', 'hours', 'days'  
   intervalValue: integer("interval_value").notNull(),
   selectedModalities: text("selected_modalities").default('digit_differs'), // JSON array or comma-separated
+  accuGrowthRates: text("accu_growth_rates").default('["1","2","3","4","5"]'), // JSON array of allowed growth rates
+  modalityFrequency: text("modality_frequency").default('{}'), // JSON object: { modality_id: 'low'|'normal'|'high' }
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`),
 });

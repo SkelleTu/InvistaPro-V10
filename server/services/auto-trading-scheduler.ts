@@ -1568,7 +1568,30 @@ export class AutoTradingScheduler {
           return { success: false, reason: 'no_modalities' };
         }
 
+        // Ler taxas de crescimento permitidas para ACCU (padrão: todas)
+        let allowedAccuGrowthRates: number[] = [0.01, 0.02, 0.03, 0.04, 0.05];
+        try {
+          if ((config as any).accuGrowthRates) {
+            const parsedRates = JSON.parse((config as any).accuGrowthRates);
+            if (Array.isArray(parsedRates) && parsedRates.length > 0) {
+              allowedAccuGrowthRates = parsedRates.map((r: string) => Number(r) / 100).filter((n: number) => n > 0 && n <= 0.05);
+            }
+          }
+        } catch {}
+
+        // Ler frequência por modalidade (padrão: normal para todas)
+        let modalityFrequency: Record<string, string> = {};
+        try {
+          if ((config as any).modalityFrequency) {
+            const parsedFreq = JSON.parse((config as any).modalityFrequency);
+            if (parsedFreq && typeof parsedFreq === 'object') modalityFrequency = parsedFreq;
+          }
+        } catch {}
+
         console.log(`🎯 [${operationId}] Modalidades ativas do usuário: ${activeModalities.join(', ')}`);
+        if (allowedAccuGrowthRates.length < 5 && activeModalities.includes('accumulator')) {
+          console.log(`📈 [${operationId}] ACCU growth rates permitidas: ${allowedAccuGrowthRates.map(r => (r*100).toFixed(0)+'%').join(', ')}`);
+        }
 
         // Escolher modalidade por rotação: pega baseado na hora atual para distribuir
         const DIGIT_TYPES: Record<string, string> = {
@@ -1714,10 +1737,18 @@ export class AutoTradingScheduler {
             console.log(`🔄 [${operationId}] ${recommended} incompatível com ${selectedSymbol} → fallback rotação: ${selectedModality}`);
           }
         } else {
+          // Construir pool ponderado pela frequência configurada pelo usuário
+          const freqWeights: Record<string, number> = { low: 1, normal: 3, high: 6 };
+          const weightedPool: string[] = [];
+          for (const m of compatibleModalities) {
+            const level = modalityFrequency[m] ?? 'normal';
+            const w = freqWeights[level] ?? 3;
+            for (let i = 0; i < w; i++) weightedPool.push(m);
+          }
           const opHash = operationId.split('').reduce((acc: number, c: string) => acc + c.charCodeAt(0), 0);
-          const rotationIndex = (Math.floor(Date.now() / 1000) + opHash) % compatibleModalities.length;
-          selectedModality = compatibleModalities[rotationIndex];
-          console.log(`⏳ [${operationId}] Motor Supremo acumulando dados → rotação: ${selectedModality} (pool: ${compatibleModalities.join(', ')})`);
+          const rotationIndex = (Math.floor(Date.now() / 1000) + opHash) % weightedPool.length;
+          selectedModality = weightedPool[rotationIndex];
+          console.log(`⏳ [${operationId}] Motor Supremo acumulando dados → rotação ponderada: ${selectedModality} (pool: ${compatibleModalities.join(', ')})`);
         }
 
 
@@ -3004,23 +3035,46 @@ export class AutoTradingScheduler {
    * Lógica: mercado volátil → crescimento menor (menos KO risk), mercado calmo → crescimento maior.
    * Taxa disponíveis Deriv: 1%, 2%, 3%, 4%, 5%
    */
-  private selectAccumulatorGrowthRate(volatility: number, consensusStrength: number): { rate: number; reason: string } {
+  private selectAccumulatorGrowthRate(
+    volatility: number,
+    consensusStrength: number,
+    allowedRates: number[] = [0.01, 0.02, 0.03, 0.04, 0.05]
+  ): { rate: number; reason: string } {
+    // Determina a taxa ideal com base na volatilidade e consenso
+    let idealRate: number;
     if (volatility > 0.75) {
-      return { rate: 0.01, reason: `volatilidade ALTA (${(volatility * 100).toFixed(0)}%) → 1% para minimizar KO` };
+      idealRate = 0.01;
     } else if (volatility > 0.55) {
-      return { rate: 0.02, reason: `volatilidade MÉDIA-ALTA (${(volatility * 100).toFixed(0)}%) → 2% conservador` };
+      idealRate = 0.02;
     } else if (volatility > 0.35) {
-      // Consenso forte → 3%, consenso fraco → 2%
-      const rate = consensusStrength > 70 ? 0.03 : 0.02;
-      return { rate, reason: `volatilidade MÉDIA (${(volatility * 100).toFixed(0)}%) + consenso ${consensusStrength.toFixed(0)}% → ${(rate * 100).toFixed(0)}%` };
+      idealRate = consensusStrength > 70 ? 0.03 : 0.02;
     } else if (volatility > 0.18) {
-      const rate = consensusStrength > 75 ? 0.04 : 0.03;
-      return { rate, reason: `volatilidade BAIXA-MÉDIA (${(volatility * 100).toFixed(0)}%) + consenso ${consensusStrength.toFixed(0)}% → ${(rate * 100).toFixed(0)}%` };
+      idealRate = consensusStrength > 75 ? 0.04 : 0.03;
     } else {
-      // Mercado muito calmo + consenso forte → máxima taxa
-      const rate = consensusStrength > 72 ? 0.05 : 0.04;
-      return { rate, reason: `volatilidade BAIXA (${(volatility * 100).toFixed(0)}%) + consenso ${consensusStrength.toFixed(0)}% → ${(rate * 100).toFixed(0)}% (máximo ganho/tick)` };
+      idealRate = consensusStrength > 72 ? 0.05 : 0.04;
     }
+
+    // Filtra pelas taxas permitidas pelo usuário
+    const allowed = allowedRates.sort((a, b) => a - b);
+    if (!allowed.length) return { rate: idealRate, reason: `sem filtro → taxa ideal ${(idealRate * 100).toFixed(0)}%` };
+
+    // Encontra a taxa permitida mais próxima da ideal
+    let best = allowed[0];
+    let minDist = Math.abs(idealRate - allowed[0]);
+    for (const r of allowed) {
+      const d = Math.abs(idealRate - r);
+      if (d < minDist) { minDist = d; best = r; }
+    }
+
+    const restricted = best !== idealRate ? ` (ideal ${(idealRate*100).toFixed(0)}% → forçado para ${(best*100).toFixed(0)}% pelas suas preferências)` : '';
+    let reason = '';
+    if (volatility > 0.75) reason = `volatilidade ALTA (${(volatility * 100).toFixed(0)}%) → ${(best*100).toFixed(0)}% para minimizar KO`;
+    else if (volatility > 0.55) reason = `volatilidade MÉDIA-ALTA (${(volatility * 100).toFixed(0)}%) → ${(best*100).toFixed(0)}% conservador`;
+    else if (volatility > 0.35) reason = `volatilidade MÉDIA (${(volatility * 100).toFixed(0)}%) + consenso ${consensusStrength.toFixed(0)}% → ${(best*100).toFixed(0)}%`;
+    else if (volatility > 0.18) reason = `volatilidade BAIXA-MÉDIA (${(volatility * 100).toFixed(0)}%) + consenso ${consensusStrength.toFixed(0)}% → ${(best*100).toFixed(0)}%`;
+    else reason = `volatilidade BAIXA (${(volatility * 100).toFixed(0)}%) + consenso ${consensusStrength.toFixed(0)}% → ${(best*100).toFixed(0)}% (máximo ganho/tick)`;
+
+    return { rate: best, reason: reason + restricted };
   }
 
   /**
