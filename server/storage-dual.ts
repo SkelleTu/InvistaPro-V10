@@ -1,8 +1,14 @@
 /**
  * STORAGE COOPERATIVO
  *
- * LEITURAS : Neon PostgreSQL (primário, cota preservada) → Turso → SQLite
  * ESCRITAS : Turso (primário) + SQLite (sync background) — Neon NÃO recebe escritas
+ * LEITURAS críticas/raras    : Neon (circuit breaker) → Turso → SQLite
+ * LEITURAS alta frequência   : SQLite (primário, já sincronizado) → Turso (fallback)
+ *
+ * ESTRATÉGIA DE PRESERVAÇÃO DE COTA:
+ *  - Dados efêmeros (market data, heartbeat, ws subs, ai logs) → SQLite only
+ *  - Leituras de alta frequência (controle, sessões ativas) → SQLite first
+ *  - Escritas importantes (users, trades, movimentos) → Turso + SQLite sync
  */
 
 import { randomBytes } from "crypto";
@@ -44,20 +50,25 @@ export class DualStorage implements IStorage {
   private neonFailCount = 0;
   private readonly MAX_NEON_FAILS = 3;
 
+  // Circuit breaker para o Turso (preservar cota)
+  private tursoReadDisabled = false;
+  private tursoReadFailCount = 0;
+  private readonly MAX_TURSO_READ_FAILS = 5;
+
   constructor() {
     this.sqlite = new DatabaseStorage();
     this.turso  = isTursoAvailable  ? new TursoStorage()    : null;
     this.neon   = isPostgresAvailable ? new PostgresStorage() : null;
 
     if (this.turso)
-      console.log('✅ [STORAGE] Turso ATIVO — banco de escritas + fallback de leituras');
+      console.log('✅ [STORAGE] Turso ATIVO — banco de escritas + fallback de leituras críticas');
     else
       console.warn('⚠️ [STORAGE] Turso indisponível — escritas vão para SQLite');
 
     if (this.neon)
       console.log('🔍 [STORAGE] Neon ATIVO — banco de leituras primário (sem escritas)');
     else
-      console.warn('⚠️ [STORAGE] Neon indisponível — leituras vão para Turso/SQLite');
+      console.warn('⚠️ [STORAGE] Neon indisponível — leituras vão para SQLite/Turso');
   }
 
   // ─── Circuit breaker do Neon ──────────────────────────────────────────────
@@ -69,7 +80,7 @@ export class DualStorage implements IStorage {
     if (isQuotaOrBlockError(msg)) {
       if (!this.neonDisabled) {
         this.neonDisabled = true;
-        console.warn(`🔌 [NEON] Circuit breaker ATIVADO — leituras redirecionadas para Turso/SQLite.`);
+        console.warn(`🔌 [NEON] Circuit breaker ATIVADO — leituras redirecionadas para SQLite/Turso.`);
         console.warn(`   Motivo: cota/bloqueio detectado em "${op}"`);
       }
       return;
@@ -82,6 +93,27 @@ export class DualStorage implements IStorage {
   }
 
   private neonOk_reset(): void { this.neonFailCount = 0; }
+
+  // ─── Circuit breaker do Turso (leituras) ─────────────────────────────────
+
+  private get tursoReadOk(): boolean { return !this.tursoReadDisabled && this.turso !== null; }
+
+  private onTursoReadError(err: any, op: string): void {
+    const msg = err?.message || String(err);
+    if (isQuotaOrBlockError(msg)) {
+      if (!this.tursoReadDisabled) {
+        this.tursoReadDisabled = true;
+        console.warn(`🔌 [TURSO] Circuit breaker de LEITURAS ATIVADO — redirecionando para SQLite.`);
+        console.warn(`   Motivo: cota/bloqueio detectado em "${op}"`);
+      }
+      return;
+    }
+    this.tursoReadFailCount++;
+    if (this.tursoReadFailCount >= this.MAX_TURSO_READ_FAILS && !this.tursoReadDisabled) {
+      this.tursoReadDisabled = true;
+      console.warn(`🔌 [TURSO] Circuit breaker de LEITURAS ATIVADO após ${this.MAX_TURSO_READ_FAILS} falhas (última: ${op})`);
+    }
+  }
 
   // ─── Primitivas ───────────────────────────────────────────────────────────
 
@@ -103,8 +135,8 @@ export class DualStorage implements IStorage {
   }
 
   /**
-   * LEITURA: Neon (circuit breaker) → Turso → SQLite
-   * neonFn pode ser null se o Neon não implementa o método.
+   * LEITURA REMOTA: Neon (circuit breaker) → Turso (circuit breaker) → SQLite
+   * Usar apenas para dados críticos de baixa frequência (ex: leitura de usuário na autenticação).
    */
   private async read<T>(
     neonFn: (() => Promise<T>) | null,
@@ -121,10 +153,43 @@ export class DualStorage implements IStorage {
         this.onNeonError(e, op);
       }
     }
-    if (this.turso) {
-      try { return await tursoFn(); } catch {}
+    if (this.tursoReadOk) {
+      try {
+        const r = await tursoFn();
+        this.tursoReadFailCount = 0;
+        return r;
+      } catch (e: any) {
+        this.onTursoReadError(e, op);
+      }
     }
     return sqliteFn();
+  }
+
+  /**
+   * LEITURA LOCAL: SQLite (primário) → Turso (fallback)
+   * Usar para dados de alta frequência já sincronizados no SQLite via dual-write.
+   * PRESERVA COTA DO TURSO: evita chamadas remotas desnecessárias.
+   */
+  private async localRead<T>(
+    tursoFn: () => Promise<T>,
+    sqliteFn: () => Promise<T>,
+    op: string
+  ): Promise<T> {
+    try {
+      return await sqliteFn();
+    } catch (e: any) {
+      // SQLite falhou, tenta Turso como fallback
+      if (this.tursoReadOk) {
+        try {
+          const r = await tursoFn();
+          this.tursoReadFailCount = 0;
+          return r;
+        } catch (te: any) {
+          this.onTursoReadError(te, op);
+        }
+      }
+      throw e;
+    }
   }
 
   // ─── Usuários ─────────────────────────────────────────────────────────────
@@ -167,7 +232,7 @@ export class DualStorage implements IStorage {
 
   async createDerivToken(t: InsertDerivToken) { return this.write(() => this.turso!.createDerivToken(t), () => this.sqlite.createDerivToken(t), 'createDerivToken'); }
   async getUserDerivToken(uid: string) {
-    return this.read(() => this.neon!.getUserDerivToken(uid), () => this.turso!.getUserDerivToken(uid), () => this.sqlite.getUserDerivToken(uid), 'getUserDerivToken');
+    return this.localRead(() => this.turso!.getUserDerivToken(uid), () => this.sqlite.getUserDerivToken(uid), 'getUserDerivToken');
   }
   async updateDerivToken(uid: string, token: string, accountType: string) { return this.write(() => this.turso!.updateDerivToken(uid, token, accountType), () => this.sqlite.updateDerivToken(uid, token, accountType), 'updateDerivToken'); }
   async deactivateDerivToken(uid: string)                                  { return this.write(() => this.turso!.deactivateDerivToken(uid), () => this.sqlite.deactivateDerivToken(uid), 'deactivateDerivToken'); }
@@ -176,13 +241,14 @@ export class DualStorage implements IStorage {
 
   async createTradeConfig(c: InsertTradeConfiguration) { return this.write(() => this.turso!.createTradeConfig(c), () => this.sqlite.createTradeConfig(c), 'createTradeConfig'); }
   async getUserTradeConfig(uid: string) {
-    return this.read(() => this.neon!.getUserTradeConfig(uid), () => this.turso!.getUserTradeConfig(uid), () => this.sqlite.getUserTradeConfig(uid), 'getUserTradeConfig');
+    return this.localRead(() => this.turso!.getUserTradeConfig(uid), () => this.sqlite.getUserTradeConfig(uid), 'getUserTradeConfig');
   }
   async getAllTradeConfigurations() {
-    return this.read(() => this.neon!.getAllTradeConfigurations(), () => this.turso!.getAllTradeConfigurations(), () => this.sqlite.getAllTradeConfigurations(), 'getAllTradeConfigurations');
+    return this.localRead(() => this.turso!.getAllTradeConfigurations(), () => this.sqlite.getAllTradeConfigurations(), 'getAllTradeConfigurations');
   }
   async getActiveTradeConfigurations() {
-    return this.read(() => this.neon!.getActiveTradeConfigurations(), () => this.turso!.getActiveTradeConfigurations(), () => this.sqlite.getActiveTradeConfigurations(), 'getActiveTradeConfigurations');
+    // Alta frequência (chamado a cada 60s) → SQLite first
+    return this.localRead(() => this.turso!.getActiveTradeConfigurations(), () => this.sqlite.getActiveTradeConfigurations(), 'getActiveTradeConfigurations');
   }
   async updateTradeConfig(uid: string, mode: string)               { return this.write(() => this.turso!.updateTradeConfig(uid, mode), () => this.sqlite.updateTradeConfig(uid, mode), 'updateTradeConfig'); }
   async updateSelectedModalities(uid: string, modalities: string[]) { return this.write(() => this.turso!.updateSelectedModalities(uid, modalities), () => this.sqlite.updateSelectedModalities(uid, modalities), 'updateSelectedModalities'); }
@@ -208,8 +274,7 @@ export class DualStorage implements IStorage {
   }
 
   async getUserTradeOperations(uid: string, limit?: number) {
-    return this.read(
-      () => this.neon!.getUserTradeOperations(uid, limit),
+    return this.localRead(
       () => this.turso!.getUserTradeOperations(uid, limit),
       () => this.sqlite.getUserTradeOperations(uid, limit),
       'getUserTradeOperations'
@@ -217,16 +282,17 @@ export class DualStorage implements IStorage {
   }
   async updateTradeOperation(id: string, updates: Partial<TradeOperation>) { return this.write(() => this.turso!.updateTradeOperation(id, updates), () => this.sqlite.updateTradeOperation(id, updates), 'updateTradeOperation'); }
   async getActiveTradeOperations(uid: string) {
-    return this.read(() => this.neon!.getActiveTradeOperations(uid), () => this.turso!.getActiveTradeOperations(uid), () => this.sqlite.getActiveTradeOperations(uid), 'getActiveTradeOperations');
+    // Alta frequência (sync a cada 30s) → SQLite first
+    return this.localRead(() => this.turso!.getActiveTradeOperations(uid), () => this.sqlite.getActiveTradeOperations(uid), 'getActiveTradeOperations');
   }
 
-  // ─── Logs de IA (somente SQLite — dados transientes) ─────────────────────
+  // ─── Logs de IA (somente SQLite — dados transientes de alta frequência) ───
 
   async createAiLog(log: InsertAiLog)                  { return this.sqlite.createAiLog(log); }
   async getUserAiLogs(uid: string, limit?: number)     { return this.sqlite.getUserAiLogs(uid, limit); }
   async getLatestAiAnalysis(uid: string)               { return this.sqlite.getLatestAiAnalysis(uid); }
 
-  // ─── Dados de Mercado (somente SQLite — cache local) ─────────────────────
+  // ─── Dados de Mercado (somente SQLite — cache local de alta frequência) ───
 
   async upsertMarketData(data: InsertMarketData) { return this.sqlite.upsertMarketData(data); }
   async getMarketData(symbol: string)            { return this.sqlite.getMarketData(symbol); }
@@ -237,45 +303,48 @@ export class DualStorage implements IStorage {
   async getTradingStats(uid: string) { return this.sqlite.getTradingStats(uid); }
 
   async getActiveTradesCount(uid: string) {
-    return this.read(() => this.neon!.getActiveTradesCount(uid), () => this.turso!.getActiveTradesCount(uid), () => this.sqlite.getActiveTradesCount(uid), 'getActiveTradesCount');
+    // Alta frequência → SQLite first
+    return this.localRead(() => this.turso!.getActiveTradesCount(uid), () => this.sqlite.getActiveTradesCount(uid), 'getActiveTradesCount');
   }
   async getDailyLossCount(uid: string, date: string) {
-    return this.read(() => this.neon!.getDailyLossCount(uid, date), () => this.turso!.getDailyLossCount(uid, date), () => this.sqlite.getDailyLossCount(uid, date), 'getDailyLossCount');
+    // Alta frequência → SQLite first
+    return this.localRead(() => this.turso!.getDailyLossCount(uid, date), () => this.sqlite.getDailyLossCount(uid, date), 'getDailyLossCount');
   }
-  async saveActiveTradeForTracking(data: any) { return this.write(() => this.turso!.saveActiveTradeForTracking(data), () => this.sqlite.saveActiveTradeForTracking(data), 'saveActiveTradeForTracking'); }
+  // saveActiveTradeForTracking: dados temporários de rastreamento → SQLite only
+  async saveActiveTradeForTracking(data: any) { return this.sqlite.saveActiveTradeForTracking(data); }
 
   // ─── PnL Diário ───────────────────────────────────────────────────────────
 
   async createOrUpdateDailyPnL(uid: string, data: Partial<InsertDailyPnL>) { return this.write(() => this.turso!.createOrUpdateDailyPnL(uid, data), () => this.sqlite.createOrUpdateDailyPnL(uid, data), 'createOrUpdateDailyPnL'); }
   async getDailyPnL(uid: string, date?: string) {
-    return this.read(() => this.neon!.getDailyPnL(uid, date), () => this.turso!.getDailyPnL(uid, date), () => this.sqlite.getDailyPnL(uid, date), 'getDailyPnL');
+    return this.localRead(() => this.turso!.getDailyPnL(uid, date), () => this.sqlite.getDailyPnL(uid, date), 'getDailyPnL');
   }
   async getConservativeOperationsToday(uid: string) {
-    return this.read(() => this.neon!.getConservativeOperationsToday(uid), () => this.turso!.getConservativeOperationsToday(uid), () => this.sqlite.getConservativeOperationsToday(uid), 'getConservativeOperationsToday');
+    return this.localRead(() => this.turso!.getConservativeOperationsToday(uid), () => this.sqlite.getConservativeOperationsToday(uid), 'getConservativeOperationsToday');
   }
   async incrementConservativeOperations(uid: string) { return this.write(() => this.turso!.incrementConservativeOperations(uid), () => this.sqlite.incrementConservativeOperations(uid), 'incrementConservativeOperations'); }
   async getRecentDailyPnL(uid: string, days?: number) {
-    return this.read(() => this.neon!.getRecentDailyPnL(uid, days), () => this.turso!.getRecentDailyPnL(uid, days), () => this.sqlite.getRecentDailyPnL(uid, days), 'getRecentDailyPnL');
+    return this.localRead(() => this.turso!.getRecentDailyPnL(uid, days), () => this.sqlite.getRecentDailyPnL(uid, days), 'getRecentDailyPnL');
   }
 
   // ─── Estratégias de Recuperação ───────────────────────────────────────────
 
   async createAiRecoveryStrategy(s: InsertAiRecoveryStrategy) { return this.write(() => this.turso!.createAiRecoveryStrategy(s), () => this.sqlite.createAiRecoveryStrategy(s), 'createAiRecoveryStrategy'); }
   async getUserRecoveryStrategies(uid: string) {
-    return this.read(() => this.neon!.getUserRecoveryStrategies(uid), () => this.turso!.getUserRecoveryStrategies(uid), () => this.sqlite.getUserRecoveryStrategies(uid), 'getUserRecoveryStrategies');
+    return this.localRead(() => this.turso!.getUserRecoveryStrategies(uid), () => this.sqlite.getUserRecoveryStrategies(uid), 'getUserRecoveryStrategies');
   }
   async updateRecoveryStrategy(id: string, updates: Partial<AiRecoveryStrategy>) { return this.write(() => this.turso!.updateRecoveryStrategy(id, updates), () => this.sqlite.updateRecoveryStrategy(id, updates), 'updateRecoveryStrategy'); }
   async calculateRecoveryMultiplier(uid: string) {
-    return this.read(() => this.neon!.calculateRecoveryMultiplier(uid), () => this.turso!.calculateRecoveryMultiplier(uid), () => this.sqlite.calculateRecoveryMultiplier(uid), 'calculateRecoveryMultiplier');
+    return this.localRead(() => this.turso!.calculateRecoveryMultiplier(uid), () => this.sqlite.calculateRecoveryMultiplier(uid), 'calculateRecoveryMultiplier');
   }
   async shouldActivateRecovery(uid: string) {
-    return this.read(() => this.neon!.shouldActivateRecovery(uid), () => this.turso!.shouldActivateRecovery(uid), () => this.sqlite.shouldActivateRecovery(uid), 'shouldActivateRecovery');
+    return this.localRead(() => this.turso!.shouldActivateRecovery(uid), () => this.sqlite.shouldActivateRecovery(uid), 'shouldActivateRecovery');
   }
   async getRecoveryThresholdRecommendation(uid: string) {
-    return this.read(() => this.neon!.getRecoveryThresholdRecommendation(uid), () => this.turso!.getRecoveryThresholdRecommendation(uid), () => this.sqlite.getRecoveryThresholdRecommendation(uid), 'getRecoveryThresholdRecommendation');
+    return this.localRead(() => this.turso!.getRecoveryThresholdRecommendation(uid), () => this.sqlite.getRecoveryThresholdRecommendation(uid), 'getRecoveryThresholdRecommendation');
   }
   async canExecuteTradeWithoutViolatingMinimum(uid: string, potentialLoss: number) {
-    return this.read(() => this.neon!.canExecuteTradeWithoutViolatingMinimum(uid, potentialLoss), () => this.turso!.canExecuteTradeWithoutViolatingMinimum(uid, potentialLoss), () => this.sqlite.canExecuteTradeWithoutViolatingMinimum(uid, potentialLoss), 'canExecuteTradeWithoutViolatingMinimum');
+    return this.localRead(() => this.turso!.canExecuteTradeWithoutViolatingMinimum(uid, potentialLoss), () => this.sqlite.canExecuteTradeWithoutViolatingMinimum(uid, potentialLoss), 'canExecuteTradeWithoutViolatingMinimum');
   }
   async getMinimumBalanceRequired(uid: string)  { return this.sqlite.getMinimumBalanceRequired(uid); }
   async getBalanceAnalysis(uid: string)          { return this.sqlite.getBalanceAnalysis(uid); }
@@ -284,25 +353,25 @@ export class DualStorage implements IStorage {
 
   async upsertActiveTradingSession(session: InsertActiveTradingSession) { return this.write(() => this.turso!.upsertActiveTradingSession(session), () => this.sqlite.upsertActiveTradingSession(session), 'upsertActiveTradingSession'); }
   async getActiveTradingSession(key: string) {
-    return this.read(() => this.neon!.getActiveTradingSession(key), () => this.turso!.getActiveTradingSession(key), () => this.sqlite.getActiveTradingSession(key), 'getActiveTradingSession');
+    // Alta frequência → SQLite first
+    return this.localRead(() => this.turso!.getActiveTradingSession(key), () => this.sqlite.getActiveTradingSession(key), 'getActiveTradingSession');
   }
   async getAllActiveTradingSessions() {
-    return this.read(() => this.neon!.getAllActiveTradingSessions(), () => this.turso!.getAllActiveTradingSessions(), () => this.sqlite.getAllActiveTradingSessions(), 'getAllActiveTradingSessions');
+    // Alta frequência (a cada 60s) → SQLite first
+    return this.localRead(() => this.turso!.getAllActiveTradingSessions(), () => this.sqlite.getAllActiveTradingSessions(), 'getAllActiveTradingSessions');
   }
   async updateActiveTradingSession(key: string, updates: Partial<ActiveTradingSession>) { return this.write(() => this.turso!.updateActiveTradingSession(key, updates), () => this.sqlite.updateActiveTradingSession(key, updates), 'updateActiveTradingSession'); }
   async deactivateActiveTradingSession(key: string) { return this.write(() => this.turso!.deactivateActiveTradingSession(key), () => this.sqlite.deactivateActiveTradingSession(key), 'deactivateActiveTradingSession'); }
   async clearInactiveTradingSessions()               { return this.write(() => this.turso!.clearInactiveTradingSessions(), () => this.sqlite.clearInactiveTradingSessions(), 'clearInactiveTradingSessions'); }
 
-  // ─── Subscriptions WebSocket ──────────────────────────────────────────────
+  // ─── Subscriptions WebSocket (SQLite only — efêmeras, recriadas no boot) ─
 
-  async saveWebSocketSubscription(sub: InsertActiveWebSocketSubscription) { return this.write(() => this.turso!.saveWebSocketSubscription(sub), () => this.sqlite.saveWebSocketSubscription(sub), 'saveWebSocketSubscription'); }
-  async getActiveWebSocketSubscriptions() {
-    return this.read(() => this.neon!.getActiveWebSocketSubscriptions(), () => this.turso!.getActiveWebSocketSubscriptions(), () => this.sqlite.getActiveWebSocketSubscriptions(), 'getActiveWebSocketSubscriptions');
-  }
-  async deactivateWebSocketSubscription(id: string) { return this.write(() => this.turso!.deactivateWebSocketSubscription(id), () => this.sqlite.deactivateWebSocketSubscription(id), 'deactivateWebSocketSubscription'); }
-  async clearAllWebSocketSubscriptions()             { return this.write(() => this.turso!.clearAllWebSocketSubscriptions(), () => this.sqlite.clearAllWebSocketSubscriptions(), 'clearAllWebSocketSubscriptions'); }
+  async saveWebSocketSubscription(sub: InsertActiveWebSocketSubscription) { return this.sqlite.saveWebSocketSubscription(sub); }
+  async getActiveWebSocketSubscriptions() { return this.sqlite.getActiveWebSocketSubscriptions(); }
+  async deactivateWebSocketSubscription(id: string) { return this.sqlite.deactivateWebSocketSubscription(id); }
+  async clearAllWebSocketSubscriptions()             { return this.sqlite.clearAllWebSocketSubscriptions(); }
 
-  // ─── Health Heartbeat (SQLite local — não precisa de nuvem) ──────────────
+  // ─── Health Heartbeat (SQLite local — alta frequência, não precisa de nuvem)
 
   async updateSystemHeartbeat(name: string, status: string, meta?: any, lastErr?: string) { return this.sqlite.updateSystemHeartbeat(name, status, meta, lastErr); }
   async getSystemHeartbeat(name: string)   { return this.sqlite.getSystemHeartbeat(name); }
@@ -313,12 +382,13 @@ export class DualStorage implements IStorage {
   // ─── Controle de Trading ──────────────────────────────────────────────────
 
   async getTradingControlStatus() {
-    return this.read(() => this.neon!.getTradingControlStatus(), () => this.turso!.getTradingControlStatus(), () => this.sqlite.getTradingControlStatus(), 'getTradingControlStatus');
+    // Alta frequência → SQLite first
+    return this.localRead(() => this.turso!.getTradingControlStatus(), () => this.sqlite.getTradingControlStatus(), 'getTradingControlStatus');
   }
   async pauseTrading(by: string, reason: string) { return this.write(() => this.turso!.pauseTrading(by, reason), () => this.sqlite.pauseTrading(by, reason), 'pauseTrading'); }
   async resumeTrading()                           { return this.write(() => this.turso!.resumeTrading(), () => this.sqlite.resumeTrading(), 'resumeTrading'); }
 
-  // ─── Blacklist / Ativos Bloqueados ────────────────────────────────────────
+  // ─── Blacklist / Ativos Bloqueados (SQLite only — verificação por trade) ──
 
   async createAssetBlacklist(b: any)                          { return this.sqlite.createAssetBlacklist(b); }
   async getUserAssetBlacklists(uid: string)                   { return this.sqlite.getUserAssetBlacklists(uid); }
@@ -326,7 +396,7 @@ export class DualStorage implements IStorage {
   async isAssetBlocked(uid: string, asset: string)            { return this.sqlite.isAssetBlocked(uid, asset); }
   async isUserBlockedAsset(uid: string, sym: string, mode: string) { return this.sqlite.isUserBlockedAsset(uid, sym, mode); }
 
-  // ─── Configuração de Pausa ────────────────────────────────────────────────
+  // ─── Configuração de Pausa (SQLite only — verificação por trade) ──────────
 
   async getUserPauseConfig(uid: string)                       { return this.sqlite.getUserPauseConfig(uid); }
   async createPauseConfig(cfg: any)                           { return this.sqlite.createPauseConfig(cfg); }
