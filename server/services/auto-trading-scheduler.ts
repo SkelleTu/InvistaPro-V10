@@ -1667,6 +1667,25 @@ export class AutoTradingScheduler {
           console.log(`🔄 [${operationId}] Compatibilidade: ${dropped.join(', ')} não disponível em ${selectedSymbol} → usando: ${compatibleModalities.join(', ')}`);
         }
 
+        // 🎯 FILTRO DE QUALIDADE — DIGIT DIFFERS: só opera com consenso ≥90%
+        // Fundamento matemático: payout ~9% por trade exige win rate >92% para ser lucrativo.
+        // Abaixo de 90% de consenso da IA o edge não está garantido → usar Accumulator no ciclo.
+        // Quando consenso ≥90% a IA está com confiança excepcional → Digit Differs é autorizado.
+        const DIGIT_DIFFERS_MIN_CONSENSUS = 90;
+        if (compatibleModalities.includes('digit_differs') && aiConsensus.consensusStrength < DIGIT_DIFFERS_MIN_CONSENSUS) {
+          const withoutDD = compatibleModalities.filter(m => m !== 'digit_differs');
+          if (withoutDD.length === 0) {
+            // Só tem Digit Differs e o consenso é baixo → aguardar sinal mais forte
+            console.log(`🔒 [${operationId}] Digit Differs bloqueado: consenso ${aiConsensus.consensusStrength.toFixed(1)}% < ${DIGIT_DIFFERS_MIN_CONSENSUS}% mínimo exigido. Sem alternativa — aguardando consenso excepcional.`);
+            return { success: false, reason: 'digit_differs_low_consensus' };
+          }
+          // Tem outra modalidade (ex: Accumulator) → usar ela neste ciclo
+          console.log(`🔒 [${operationId}] Digit Differs requer consenso ≥${DIGIT_DIFFERS_MIN_CONSENSUS}% (atual: ${aiConsensus.consensusStrength.toFixed(1)}%) → usando ${withoutDD.join(', ')} neste ciclo`);
+          compatibleModalities.splice(0, compatibleModalities.length, ...withoutDD);
+        } else if (compatibleModalities.includes('digit_differs') && aiConsensus.consensusStrength >= DIGIT_DIFFERS_MIN_CONSENSUS) {
+          console.log(`✅ [${operationId}] Digit Differs AUTORIZADO: consenso ${aiConsensus.consensusStrength.toFixed(1)}% ≥ ${DIGIT_DIFFERS_MIN_CONSENSUS}% — edge confirmado`);
+        }
+
         // 🧠 SUPREME MARKET ANALYZER: Selecionar modalidade por inteligência, não por rotação de tempo
         let selectedModality: string;
         const supremeAnalysis = supremeAnalyzer.getLatestAnalysis(selectedSymbol);
