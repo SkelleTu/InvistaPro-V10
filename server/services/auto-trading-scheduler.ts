@@ -768,21 +768,7 @@ export class AutoTradingScheduler {
         console.log(`✅ [LEVERAGE] Contrato aberto: ${contract.contract_id} | ${best.symbol} | $${leverageStake} | growth=${(levGrowth*100).toFixed(0)}% | ticks=${levTargetTicks}`);
         this.setPhase('AGUARDANDO', `✅ Alavancagem executada: ${best.symbol} $${leverageStake}`, 'success');
 
-        // Registrar operação no banco (async, não bloqueia)
-        storage.saveTradeOperation({
-          userId: config.userId,
-          symbol: best.symbol,
-          direction: 'accumulator',
-          contractType: 'ACCU',
-          tradeType: 'accumulator',
-          amount: leverageStake,
-          duration: 1,
-          status: 'pending',
-          contractId: contract.contract_id?.toString(),
-          aiConsensus: JSON.stringify({ leverageMode: true, assetsAligned: exceptional.length, score: best.consensus, growthRate: levGrowth }),
-        }).catch(err => console.error('⚠️ [LEVERAGE] Erro ao salvar operação:', err));
-
-        // Auto-sell após N ticks decididos pela IA (calibrados ao growth rate)
+        // Auto-sell após N ticks — inicia ANTES do salvamento para garantir monitoramento
         if (contract.contract_id) {
           const { startMonitoring } = await import('./contract-monitor');
           startMonitoring({
@@ -796,7 +782,22 @@ export class AutoTradingScheduler {
             openedAt: now,
             targetTicks: levTargetTicks,
           });
+          console.log(`🎯 [LEVERAGE] Monitor de auto-sell ativo: contrato ${contract.contract_id} | alvo=${levTargetTicks} ticks`);
         }
+
+        // Registrar operação no banco (async, não bloqueia)
+        storage.createTradeOperation({
+          userId: config.userId,
+          symbol: best.symbol,
+          direction: 'accumulator',
+          contractType: 'ACCU',
+          tradeType: 'accumulator',
+          amount: leverageStake,
+          duration: 1,
+          status: 'pending',
+          contractId: contract.contract_id?.toString(),
+          aiConsensus: JSON.stringify({ leverageMode: true, assetsAligned: exceptional.length, score: best.consensus, growthRate: levGrowth }),
+        }).catch(err => console.error('⚠️ [LEVERAGE] Erro ao salvar operação:', err));
       } else {
         console.warn(`⚠️ [LEVERAGE] Contrato rejeitado pela Deriv para ${best.symbol}`);
       }
