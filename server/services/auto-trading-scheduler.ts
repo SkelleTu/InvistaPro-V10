@@ -1180,6 +1180,11 @@ export class AutoTradingScheduler {
           if (!realStatsTracker.isAssetRepeated(config.userId, altClean) && !this.isSymbolBlocked(altClean)) {
             console.log(`🔄 [${operationId}] ANTI-REP: Alternativa selecionada → ${altClean}`);
             selectedSymbol = altClean;
+            // Atualizar consenso para o ativo alternativo (extraído do top5 "SYMBOL(score%)")
+            const altScoreMatch = alt.match(/\(([0-9.]+)%\)/);
+            if (altScoreMatch) {
+              aiConsensusPreCalculated.consensusStrength = parseFloat(altScoreMatch[1]);
+            }
             switched = true;
             break;
           }
