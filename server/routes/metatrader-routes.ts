@@ -41,13 +41,23 @@ router.post('/heartbeat', (req: Request, res: Response) => {
 
 router.get('/signal', (req: Request, res: Response) => {
   try {
-    const { symbol, token } = req.query;
+    const { symbol, token, accountId } = req.query;
     const config = metaTraderBridge.getConfig();
     if (config.apiToken && token !== config.apiToken) {
       return res.status(401).json({ error: 'Token inválido' });
     }
+    // Auto-registrar conexão quando o EA chama o endpoint de sinal
+    // Funciona mesmo sem heartbeat explícito (compatível com qualquer versão do EA)
     if (!config.enabled) {
-      return res.json({ action: 'HOLD', reason: 'Sistema desabilitado', confidence: 0 });
+      const accId = (accountId as string) || 'EA_AUTO';
+      metaTraderBridge.recordHeartbeat({
+        accountId: accId,
+        broker: 'MT5',
+        balance: 0,
+        equity: 0,
+        freeMargin: 0
+      });
+      console.log(`[MT5Bridge] 🔌 Conexão auto-registrada via sinal (accountId: ${accId})`);
     }
     const symbolStr = (symbol as string) || config.symbols[0] || 'EURUSD';
     const signal = metaTraderBridge.getPendingSignal(symbolStr);
