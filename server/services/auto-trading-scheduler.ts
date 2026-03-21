@@ -806,8 +806,8 @@ export class AutoTradingScheduler {
 
         // Auto-sell após N ticks — inicia ANTES do salvamento para garantir monitoramento
         if (contract.contract_id) {
-          const { startMonitoring } = await import('./contract-monitor');
-          startMonitoring({
+          contractMonitor.setToken(tokenData.token);
+          await contractMonitor.startMonitoring({
             contractId: contract.contract_id,
             contractType: 'ACCU',
             symbol: best.symbol,
