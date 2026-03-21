@@ -62,15 +62,12 @@ router.get('/signal', (req: Request, res: Response) => {
     const resolvedSymbol = symbolStr || config.symbols[0] || 'EURUSD';
     const signal = metaTraderBridge.getPendingSignal(resolvedSymbol);
 
-    // Se não há sinal pendente mas há dados de mercado disponíveis, gerar sob demanda
+    // Se não há sinal pendente, gerar sob demanda (modo IA pura ou com candles)
     if ((!signal || signal.action === 'HOLD') && symbolStr && config.enabled) {
-      const hasData = metaTraderBridge.getMarketData(resolvedSymbol).length >= 15;
-      if (hasData) {
-        // Dispara geração em segundo plano; próximo poll do EA receberá o sinal
-        setImmediate(() => {
-          metaTraderBridge.generateSignal(resolvedSymbol).catch(() => {});
-        });
-      }
+      // Dispara geração em segundo plano; próximo poll do EA receberá o sinal
+      setImmediate(() => {
+        metaTraderBridge.generateSignal(resolvedSymbol).catch(() => {});
+      });
     }
 
     if (!signal || signal.action === 'HOLD') {

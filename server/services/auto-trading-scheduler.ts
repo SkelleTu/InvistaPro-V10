@@ -14,6 +14,24 @@ import { contractMonitor } from './contract-monitor';
 import { persistentLearningEngine } from './persistent-learning-engine';
 import { supremeAnalyzer, SupremeAnalysis } from './supreme-market-analyzer';
 import { analyzeCrashBoomSpike } from './crash-boom-spike-engine';
+import { setSignal } from './signal-store';
+
+function derivToMT5Name(derivSymbol: string): string | null {
+  const map: Record<string, string> = {
+    'R_10': 'Volatility 10 Index', 'R_25': 'Volatility 25 Index',
+    'R_50': 'Volatility 50 Index', 'R_75': 'Volatility 75 Index',
+    'R_100': 'Volatility 100 Index', 'R_10_1S': 'Volatility 10 (1s) Index',
+    'R_25_1S': 'Volatility 25 (1s) Index', 'R_50_1S': 'Volatility 50 (1s) Index',
+    'R_75_1S': 'Volatility 75 (1s) Index', 'R_100_1S': 'Volatility 100 (1s) Index',
+    'JD10': 'Jump 10 Index', 'JD25': 'Jump 25 Index', 'JD50': 'Jump 50 Index',
+    'JD75': 'Jump 75 Index', 'JD100': 'Jump 100 Index',
+    'RDBULL': 'Range Break Bull 200', 'RDBEAR': 'Range Break Bear 200',
+    'CRASH300': 'Crash 300 Index', 'CRASH500': 'Crash 500 Index',
+    'CRASH1000': 'Crash 1000 Index', 'BOOM300': 'Boom 300 Index',
+    'BOOM500': 'Boom 500 Index', 'BOOM1000': 'Boom 1000 Index',
+  };
+  return map[derivSymbol.toUpperCase()] || null;
+}
 
 export interface ActiveTradeSession {
   userId: string;
@@ -1362,7 +1380,26 @@ export class AutoTradingScheduler {
       // ⏱️ MARCADOR: Momento exato da decisão da IA (sinal confirmado)
       const signalDecisionAt = Date.now();
       console.log(`🕐 [${operationId}] SINAL DECIDIDO: ${aiConsensus.finalDecision.toUpperCase()} ${selectedSymbol} | Consenso: ${aiConsensus.consensusStrength}% | Preparando execução...`);
-      
+
+      // 📡 PUBLICAR SINAL NO STORE COMPARTILHADO (lido pela ponte MT5)
+      // Usa a mesma lógica de safeDirection do scheduler (upScore vs downScore quando neutral)
+      const storeDirection: 'up' | 'down' | 'neutral' =
+        (aiConsensus.finalDecision === 'up' || aiConsensus.finalDecision === 'down')
+          ? (aiConsensus.finalDecision as 'up' | 'down')
+          : ((aiConsensus.upScore || 0) >= (aiConsensus.downScore || 0) ? 'up' : 'down');
+      const signalEntry = {
+        symbol: selectedSymbol,
+        direction: storeDirection,
+        confidence: aiConsensus.consensusStrength,
+        consensus: aiConsensus.consensusStrength,
+        reason: `Análise Deriv: ${storeDirection.toUpperCase()} ${selectedSymbol} — consenso ${aiConsensus.consensusStrength}%`,
+        timestamp: Date.now()
+      };
+      setSignal(selectedSymbol, signalEntry);
+      // Mapear para nome MT5 também
+      const mt5Name = derivToMT5Name(selectedSymbol);
+      if (mt5Name) setSignal(mt5Name, { ...signalEntry, symbol: mt5Name });
+
       // 🎯 REGISTRAR THRESHOLD NO TRACKER DINÂMICO (essencial para cálculo da média alta)
       dynamicThresholdTracker.recordThreshold(
         aiConsensus.consensusStrength,
@@ -2828,6 +2865,27 @@ export class AutoTradingScheduler {
         }
       }
       
+      // 📡 PUBLICAR SINAIS DE TODOS OS SÍMBOLOS ANALISADOS NO STORE (lido pela ponte MT5)
+      for (const r of validResults) {
+        if (!r) continue;
+        const symAi = r.aiConsensus;
+        if (!symAi) continue;
+        const symDir: 'up' | 'down' =
+          (symAi.finalDecision === 'up' || symAi.finalDecision === 'down')
+            ? symAi.finalDecision as 'up' | 'down'
+            : ((symAi.upScore || 0) >= (symAi.downScore || 0) ? 'up' : 'down');
+        const sym = r.symbol;
+        const entry = {
+          symbol: sym, direction: symDir, confidence: r.consensus,
+          consensus: r.consensus,
+          reason: `Análise Deriv: ${symDir.toUpperCase()} ${sym} — score ${r.consensus.toFixed(1)}%`,
+          timestamp: Date.now()
+        };
+        setSignal(sym, entry);
+        const mt5 = derivToMT5Name(sym);
+        if (mt5) setSignal(mt5, { ...entry, symbol: mt5 });
+      }
+
       // Melhor símbolo
       const best = validResults[0];
       

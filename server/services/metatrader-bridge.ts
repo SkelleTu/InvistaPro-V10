@@ -10,6 +10,8 @@
 import { EventEmitter } from 'events';
 import { huggingFaceAI } from './huggingface-ai';
 import { DerivTickData } from './deriv-api';
+import { storage } from '../storage';
+import { getSignal } from './signal-store';
 
 export interface MT5Signal {
   id: string;
@@ -1100,6 +1102,23 @@ class MetaTraderBridge extends EventEmitter {
     return symbol.toUpperCase().startsWith('WIN');
   }
 
+  private mapMT5ToDerivSymbol(mt5Symbol: string): string | null {
+    const map: Record<string, string> = {
+      'VOLATILITY 10 INDEX': 'R_10', 'VOLATILITY 25 INDEX': 'R_25',
+      'VOLATILITY 50 INDEX': 'R_50', 'VOLATILITY 75 INDEX': 'R_75',
+      'VOLATILITY 100 INDEX': 'R_100', 'VOLATILITY 10 (1S) INDEX': 'R_10_1S',
+      'VOLATILITY 25 (1S) INDEX': 'R_25_1S', 'VOLATILITY 50 (1S) INDEX': 'R_50_1S',
+      'VOLATILITY 75 (1S) INDEX': 'R_75_1S', 'VOLATILITY 100 (1S) INDEX': 'R_100_1S',
+      'JUMP 10 INDEX': 'JD10', 'JUMP 25 INDEX': 'JD25', 'JUMP 50 INDEX': 'JD50',
+      'JUMP 75 INDEX': 'JD75', 'JUMP 100 INDEX': 'JD100',
+      'RANGE BREAK BULL 200': 'RDBULL', 'RANGE BREAK BEAR 200': 'RDBEAR',
+      'CRASH 300 INDEX': 'CRASH300', 'CRASH 500 INDEX': 'CRASH500',
+      'CRASH 1000 INDEX': 'CRASH1000', 'BOOM 300 INDEX': 'BOOM300',
+      'BOOM 500 INDEX': 'BOOM500', 'BOOM 1000 INDEX': 'BOOM1000',
+    };
+    return map[mt5Symbol.toUpperCase()] || null;
+  }
+
   /**
    * Detecta se é Mini Dólar (WDO) especificamente.
    */
@@ -1625,23 +1644,33 @@ class MetaTraderBridge extends EventEmitter {
     try {
       const marketData = this.getMarketDataForSymbol(symbol);
 
-      // Dados insuficientes
-      if (marketData.length < 15) {
-        this.logAnalysis({
-          id: entryId,
-          timestamp: Date.now(),
-          symbol,
-          phase: 'data_check',
-          status: 'waiting',
-          candlesAvailable: marketData.length,
-          consecutiveLosses: this.consecutiveLosses,
-          decisionReason: `Dados insuficientes: apenas ${marketData.length} candles disponíveis (mínimo: 15). Aguardando mais dados do EA.`
-        });
-        console.log(`[MT5Bridge] ⏳ Dados insuficientes para ${symbol} (${marketData.length} candles) — aguardando`);
-        return null;
+      let aiOnlyMode = marketData.length < 15;
+
+      // Se sem candles do EA, tentar buscar dados reais do DB (preços Deriv)
+      if (aiOnlyMode) {
+        try {
+          const derivSymbol = this.mapMT5ToDerivSymbol(symbol);
+          const dbData = await storage.getMarketData(derivSymbol || symbol);
+          if (dbData?.priceHistory) {
+            const prices: number[] = JSON.parse(dbData.priceHistory);
+            if (prices.length >= 15) {
+              const now = Math.floor(Date.now() / 1000);
+              const syntheticCandles = prices.map((p, i) => ({
+                open: p, high: p * 1.0005, low: p * 0.9995, close: p, volume: 1,
+                time: now - (prices.length - i) * 60
+              }));
+              this.marketDataCache.set(symbol, syntheticCandles);
+              marketData.splice(0, 0, ...syntheticCandles);
+              aiOnlyMode = false;
+              console.log(`[MT5Bridge] 📊 Dados reais do DB carregados para ${symbol} (${derivSymbol}): ${prices.length} preços`);
+            }
+          }
+        } catch {
+          // fallback — seguir em aiOnlyMode
+        }
       }
 
-      // Log fase de dados OK
+      // Log fase de dados
       this.logAnalysis({
         id: `${entryId}_data`,
         timestamp: Date.now(),
@@ -1649,8 +1678,15 @@ class MetaTraderBridge extends EventEmitter {
         phase: 'data_check',
         status: 'processing',
         candlesAvailable: marketData.length,
-        decisionReason: `${marketData.length} candles recebidos. Iniciando análise das IAs...`
+        consecutiveLosses: this.consecutiveLosses,
+        decisionReason: aiOnlyMode
+          ? `Modo IA pura: ${marketData.length} candles disponíveis — analisando com modelos NLP sem dados técnicos.`
+          : `${marketData.length} candles disponíveis. Iniciando análise das IAs...`
       });
+
+      if (aiOnlyMode) {
+        console.log(`[MT5Bridge] 🤖 Modo IA pura para ${symbol} (${marketData.length} candles) — geração sem candles`);
+      }
 
       // ============================================================
       // MODO BOOM/CRASH — ESTRATÉGIA DE DIREÇÃO NATURAL + SPIKE
@@ -1667,7 +1703,7 @@ class MetaTraderBridge extends EventEmitter {
       // REGRA DE OURO: A IA prefere SEMPRE a direção natural do ativo.
       // Spike só é operado quando há ABSOLUTA CERTEZA técnica e de imminência.
       // ============================================================
-      if (this.isSpikeIndex(symbol)) {
+      if (!aiOnlyMode && this.isSpikeIndex(symbol)) {
         const sym = symbol.toUpperCase();
         const isCrash = sym.includes('CRASH');
         const earlySpike = this.detectSpikePattern(marketData, symbol);
@@ -1828,11 +1864,18 @@ class MetaTraderBridge extends EventEmitter {
       }
 
       // Converter candles do MT5 para formato DerivTickData
-      const tickData: DerivTickData[] = marketData.map((candle, i) => ({
-        symbol,
-        quote: candle.close,
-        epoch: candle.time ? Math.floor(candle.time) : Math.floor(Date.now() / 1000) - (marketData.length - i) * 60,
-      }));
+      // Em modo IA pura (sem candles), cria ticks sintéticos para alimentar os modelos NLP
+      const tickData: DerivTickData[] = aiOnlyMode
+        ? Array.from({ length: 30 }, (_, i) => ({
+            symbol,
+            quote: 1.0,
+            epoch: Math.floor(Date.now() / 1000) - (30 - i) * 60,
+          }))
+        : marketData.map((candle, i) => ({
+            symbol,
+            quote: candle.close,
+            epoch: candle.time ? Math.floor(candle.time) : Math.floor(Date.now() / 1000) - (marketData.length - i) * 60,
+          }));
 
       // ============================================================
       // ANÁLISE REAL: HuggingFace AI (FinBERT + RoBERTa + modelos)
@@ -1893,45 +1936,65 @@ class MetaTraderBridge extends EventEmitter {
       }
 
       if (aiConsensus < this.MIN_AI_CONSENSUS || aiDirection === 'neutral') {
-        return null;
+        // ── FALLBACK: tentar sinal do bot Deriv (mesmo ativo, análise recente) ──
+        const derivSym = this.mapMT5ToDerivSymbol(symbol);
+        const storedSignal = getSignal(symbol) || (derivSym ? getSignal(derivSym) : undefined);
+        if (storedSignal && storedSignal.direction !== 'neutral' && storedSignal.confidence >= 60) {
+          aiDirection = storedSignal.direction;
+          aiConsensus = storedSignal.confidence;
+          aiReasoning = storedSignal.reason;
+          console.log(`[MT5Bridge] 🔄 Usando sinal do bot Deriv para ${symbol}: ${aiDirection.toUpperCase()} ${aiConsensus}%`);
+        } else {
+          return null;
+        }
       }
 
       // ============================================================
       // VALIDAÇÃO TÉCNICA ADAPTADA AO ATIVO SINTÉTICO
-      // Usa perfis específicos de cada ativo Deriv para limiares de RSI,
-      // ADX, Fibonacci e detecção de spike.
+      // Em modo IA pura (sem candles), pula análise técnica e usa só IA.
       // ============================================================
       const assetContext = this.getAssetAIContext(symbol);
       const derivProfile = resolveDerivProfile(symbol);
 
-      const technicalSignal = this.runAssetAdaptedTechnicalAnalysis(symbol, marketData);
-      const technicalAgrees =
-        (aiDirection === 'up' && technicalSignal.action === 'BUY') ||
-        (aiDirection === 'down' && technicalSignal.action === 'SELL');
+      let technicalSignal: { action: string; confidence: number; profileNotes: string } = {
+        action: aiDirection === 'up' ? 'BUY' : 'SELL',
+        confidence: aiConsensus / 100,
+        profileNotes: 'Modo IA pura — sem dados técnicos'
+      };
+      let technicalAgrees = true;
+      let prices: number[] = [];
+      let indicators: any = { rsi: 50, ema20: 1, ema50: 1, adx: 25, bb: { upper: 1, lower: 0 }, macd: 0 };
+      let technicalNarrative = 'Análise técnica indisponível — sem candles do EA.';
+      let enrichedModelResults = modelResults;
 
-      // Build indicators for the log
-      const prices = marketData.map((d: any) => d.close);
-      const indicators = this.buildIndicators(prices, marketData, symbol);
-      const technicalNarrative = this.buildTechnicalNarrative(indicators, prices);
+      if (!aiOnlyMode) {
+        technicalSignal = this.runAssetAdaptedTechnicalAnalysis(symbol, marketData);
+        technicalAgrees =
+          (aiDirection === 'up' && technicalSignal.action === 'BUY') ||
+          (aiDirection === 'down' && technicalSignal.action === 'SELL');
+        prices = marketData.map((d: any) => d.close);
+        indicators = this.buildIndicators(prices, marketData, symbol);
+        technicalNarrative = this.buildTechnicalNarrative(indicators, prices);
+        enrichedModelResults = modelResults.length > 0
+          ? this.buildModelNarratives(modelResults, indicators, aiDirection, aiConsensus, symbol)
+          : modelResults;
+      }
 
-      // Enrich model results with individual narratives
-      const enrichedModelResults = modelResults.length > 0
-        ? this.buildModelNarratives(modelResults, indicators, aiDirection, aiConsensus, symbol)
-        : modelResults;
-
-      const techDecisionReason = !technicalAgrees && aiConsensus < 80
-        ? `Divergência: IA diz ${aiDirection.toUpperCase()} mas análise técnica diz ${technicalSignal.action}. Consenso ${aiConsensus.toFixed(1)}% < 80% — sem trade. ${technicalSignal.profileNotes}`
-        : technicalAgrees
-          ? `Confirmação técnica (${derivProfile?.family ?? 'padrão'}): RSI=${indicators.rsi.toFixed(1)} [thr: ${derivProfile?.rsiOversold ?? 30}/${derivProfile?.rsiOverbought ?? 70}] | EMA20 ${indicators.ema20 > indicators.ema50 ? '>' : '<'} EMA50 | ADX=${indicators.adx.toFixed(1)} | ${technicalSignal.profileNotes}`
-          : `Alta confiança (${aiConsensus.toFixed(1)}% ≥ 80%) — override da análise técnica divergente | ${technicalSignal.profileNotes}`;
+      const techDecisionReason = aiOnlyMode
+        ? `Modo IA pura: consenso ${aiConsensus.toFixed(1)}% → ${aiDirection.toUpperCase()} | ${participatingModels} modelos | Sem validação técnica (EA não enviou candles)`
+        : !technicalAgrees && aiConsensus < 80
+          ? `Divergência: IA diz ${aiDirection.toUpperCase()} mas análise técnica diz ${technicalSignal.action}. Consenso ${aiConsensus.toFixed(1)}% < 80% — sem trade. ${technicalSignal.profileNotes}`
+          : technicalAgrees
+            ? `Confirmação técnica (${derivProfile?.family ?? 'padrão'}): RSI=${indicators.rsi.toFixed(1)} [thr: ${derivProfile?.rsiOversold ?? 30}/${derivProfile?.rsiOverbought ?? 70}] | EMA20 ${indicators.ema20 > indicators.ema50 ? '>' : '<'} EMA50 | ADX=${indicators.adx.toFixed(1)} | ${technicalSignal.profileNotes}`
+            : `Alta confiança (${aiConsensus.toFixed(1)}% ≥ 80%) — override da análise técnica divergente | ${technicalSignal.profileNotes}`;
 
       this.logAnalysis({
         id: `${entryId}_tech`,
         timestamp: Date.now(),
         symbol,
         phase: 'technical',
-        status: (!technicalAgrees && aiConsensus < 80) ? 'rejected' : 'processing',
-        technicalAction: technicalSignal.action as 'BUY' | 'SELL' | 'HOLD',
+        status: (!aiOnlyMode && !technicalAgrees && aiConsensus < 80) ? 'rejected' : 'processing',
+        technicalAction: (aiOnlyMode ? (aiDirection === 'up' ? 'BUY' : 'SELL') : technicalSignal.action) as 'BUY' | 'SELL' | 'HOLD',
         technicalAgrees,
         technicalScore: Math.round(technicalSignal.confidence * 100),
         indicators,
@@ -1942,7 +2005,7 @@ class MetaTraderBridge extends EventEmitter {
         decisionReason: techDecisionReason
       });
 
-      if (!technicalAgrees && aiConsensus < 80) {
+      if (!aiOnlyMode && !technicalAgrees && aiConsensus < 80) {
         return null;
       }
 
@@ -1950,12 +2013,18 @@ class MetaTraderBridge extends EventEmitter {
       const action: MT5Signal['action'] = aiDirection === 'up' ? 'BUY' : 'SELL';
       const finalConfidence = aiConsensus / 100;
 
-      const signals = [
-        { action, confidence: finalConfidence, source: 'huggingface_ai' },
-        { action: technicalSignal.action, confidence: technicalSignal.confidence, source: `technical_${derivProfile?.family ?? 'standard'}` }
-      ];
+      const signals = aiOnlyMode
+        ? [{ action, confidence: finalConfidence, source: 'huggingface_ai_only' }]
+        : [
+            { action, confidence: finalConfidence, source: 'huggingface_ai' },
+            { action: technicalSignal.action, confidence: technicalSignal.confidence, source: `technical_${derivProfile?.family ?? 'standard'}` }
+          ];
 
-      const signal = this.fuseSignals(symbol, signals, marketData, aiReasoning, finalConfidence);
+      // Em modo IA pura, passa um candle mínimo para fuseSignals não quebrar com array vazio
+      const marketDataForFuse = aiOnlyMode
+        ? [{ open: 1.0, high: 1.001, low: 0.999, close: 1.0, volume: 0, time: Math.floor(Date.now() / 1000) }]
+        : marketData;
+      const signal = this.fuseSignals(symbol, signals, marketDataForFuse, aiReasoning, finalConfidence);
 
       // Build full narrative for the decision entry
       const fullNarrative = this.buildFullNarrative(
