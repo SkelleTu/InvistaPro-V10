@@ -617,8 +617,13 @@ export class DerivAPIService extends EventEmitter {
         const hasDigitDiff = contracts.some((c: any) => c.contract_type === 'DIGITDIFF');
         
         if (hasDigitDiff) {
-          supportedSymbols.push(symbol);
-          console.log(`✅ ${symbol} SUPORTA DIGITDIFF`);
+          // 🚫 Nunca adicionar ativos 1s ao cache de DIGITDIFF
+          if (/\(1s\)|^1HZ/i.test(symbol)) {
+            console.log(`🚫 ${symbol} SUPORTA DIGITDIFF mas é ativo 1s — IGNORADO`);
+          } else {
+            supportedSymbols.push(symbol);
+            console.log(`✅ ${symbol} SUPORTA DIGITDIFF`);
+          }
         }
       } catch (error) {
         console.warn(`⚠️ [DIGITDIFF DISCOVERY] Erro ao verificar ${symbol}:`, error);

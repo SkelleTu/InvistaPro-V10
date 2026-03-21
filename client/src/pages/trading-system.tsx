@@ -1985,22 +1985,32 @@ export default function TradingSystemPage() {
                                         </p>
                                         <div className="space-y-1.5">
                                           {['1','2','3','4','5'].filter(r => accuGrowthRates.includes(r)).map((rate) => {
-                                            const rawTicks = accuTicksPerRate[rate as keyof typeof accuTicksPerRate];
-                                            const isDynamic = rawTicks === 0;
-                                            const currentTicks = isDynamic ? 0 : (rawTicks ?? { '1': 10, '2': 7, '3': 5, '4': 4, '5': 3 }[rate as keyof typeof accuTicksPerRate] ?? 5);
+                                            const DEFAULTS: Record<string, number> = { '1': 10, '2': 7, '3': 5, '4': 4, '5': 3 };
+                                            const rawTicks = accuTicksPerRate[rate as keyof typeof accuTicksPerRate] ?? DEFAULTS[rate] ?? 5;
+                                            // Negativo = IA dinâmico com máximo |N|; Positivo = fixo em N
+                                            const isDynamic = rawTicks < 0;
+                                            const absMax = Math.abs(rawTicks) || DEFAULTS[rate] || 5;
                                             return (
                                               <div key={rate} className="flex items-center gap-1.5">
                                                 <span className="text-[11px] font-bold text-teal-700 dark:text-teal-300 w-6 shrink-0">{rate}%</span>
-                                                {/* Botão Dinâmico (IA) — aparece antes dos ticks fixos */}
+                                                {/* Botão IA — toggle de modo dinâmico; número selecionado vira o teto máximo */}
                                                 <button
                                                   type="button"
                                                   data-testid={`accu-ticks-rate${rate}-dynamic`}
+                                                  title={isDynamic ? `IA ativo: decide entre 1 e ${absMax} ticks` : 'Ativar modo IA (IA decide entre 1 e o número selecionado)'}
                                                   onClick={(e) => {
                                                     e.stopPropagation();
-                                                    const next = { ...accuTicksPerRate, [rate]: 0 };
+                                                    // Alterna o sinal: mantém o valor absoluto, só muda se é IA ou fixo
+                                                    const newVal = isDynamic ? absMax : -absMax;
+                                                    const next = { ...accuTicksPerRate, [rate]: newVal };
                                                     setAccuTicksPerRate(next);
                                                     saveAccuTicksPerRate(next);
-                                                    toast({ title: `Taxa ${rate}%: IA decide ticks`, duration: 1200 });
+                                                    toast({
+                                                      title: isDynamic
+                                                        ? `Taxa ${rate}%: fixo em ${absMax} ticks`
+                                                        : `Taxa ${rate}%: IA decide (1 a ${absMax} ticks)`,
+                                                      duration: 1500
+                                                    });
                                                   }}
                                                   className={`px-1.5 py-0.5 rounded text-[10px] font-bold border transition-all ${
                                                     isDynamic
@@ -2010,22 +2020,32 @@ export default function TradingSystemPage() {
                                                 >
                                                   IA
                                                 </button>
-                                                <div className={`flex items-center gap-1 ${isDynamic ? 'opacity-40' : ''}`}>
+                                                <div className="flex items-center gap-1">
                                                   {[1,2,3,4,5,7,10,15,20].map((t) => (
                                                     <button
                                                       key={t}
                                                       type="button"
                                                       data-testid={`accu-ticks-rate${rate}-${t}`}
+                                                      title={isDynamic ? `Máximo: ${t} ticks (IA decide entre 1 e ${t})` : `Fixo: ${t} ticks`}
                                                       onClick={(e) => {
                                                         e.stopPropagation();
-                                                        const next = { ...accuTicksPerRate, [rate]: t };
+                                                        // Preserva o modo (IA ou fixo), só muda o valor absoluto
+                                                        const newVal = isDynamic ? -t : t;
+                                                        const next = { ...accuTicksPerRate, [rate]: newVal };
                                                         setAccuTicksPerRate(next);
                                                         saveAccuTicksPerRate(next);
-                                                        toast({ title: `Taxa ${rate}%: ${t} ticks`, duration: 1200 });
+                                                        toast({
+                                                          title: isDynamic
+                                                            ? `Taxa ${rate}%: IA decide (1 a ${t} ticks)`
+                                                            : `Taxa ${rate}%: fixo em ${t} ticks`,
+                                                          duration: 1200
+                                                        });
                                                       }}
                                                       className={`px-1.5 py-0.5 rounded text-[10px] font-bold border transition-all ${
-                                                        !isDynamic && currentTicks === t
-                                                          ? 'bg-teal-500 text-white border-teal-500'
+                                                        absMax === t
+                                                          ? isDynamic
+                                                            ? 'bg-violet-400 text-white border-violet-400'
+                                                            : 'bg-teal-500 text-white border-teal-500'
                                                           : 'bg-white dark:bg-gray-800 text-muted-foreground border-border hover:border-teal-400'
                                                       }`}
                                                     >
@@ -2038,7 +2058,7 @@ export default function TradingSystemPage() {
                                           })}
                                         </div>
                                         <p className="text-[10px] text-teal-600 dark:text-teal-400 mt-1.5">
-                                          <span className="font-semibold text-violet-600 dark:text-violet-400">IA</span> = IA calcula ticks ótimos dinamicamente. Número fixo = encerra após exatamente aquele número de ticks.
+                                          <span className="font-semibold text-violet-600 dark:text-violet-400">IA</span> ligado = IA decide entre 1 e o número selecionado (máximo). <span className="font-semibold text-teal-600 dark:text-teal-400">IA</span> desligado = fixo exatamente no número.
                                         </p>
                                       </div>
                                     )}
