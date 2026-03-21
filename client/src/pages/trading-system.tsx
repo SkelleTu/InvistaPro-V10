@@ -1985,11 +1985,32 @@ export default function TradingSystemPage() {
                                         </p>
                                         <div className="space-y-1.5">
                                           {['1','2','3','4','5'].filter(r => accuGrowthRates.includes(r)).map((rate) => {
-                                            const currentTicks = accuTicksPerRate[rate] ?? { '1': 10, '2': 7, '3': 5, '4': 4, '5': 3 }[rate as keyof typeof accuTicksPerRate] ?? 5;
+                                            const rawTicks = accuTicksPerRate[rate as keyof typeof accuTicksPerRate];
+                                            const isDynamic = rawTicks === 0;
+                                            const currentTicks = isDynamic ? 0 : (rawTicks ?? { '1': 10, '2': 7, '3': 5, '4': 4, '5': 3 }[rate as keyof typeof accuTicksPerRate] ?? 5);
                                             return (
-                                              <div key={rate} className="flex items-center gap-2">
+                                              <div key={rate} className="flex items-center gap-1.5">
                                                 <span className="text-[11px] font-bold text-teal-700 dark:text-teal-300 w-6 shrink-0">{rate}%</span>
-                                                <div className="flex items-center gap-1">
+                                                {/* Botão Dinâmico (IA) — aparece antes dos ticks fixos */}
+                                                <button
+                                                  type="button"
+                                                  data-testid={`accu-ticks-rate${rate}-dynamic`}
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    const next = { ...accuTicksPerRate, [rate]: 0 };
+                                                    setAccuTicksPerRate(next);
+                                                    saveAccuTicksPerRate(next);
+                                                    toast({ title: `Taxa ${rate}%: IA decide ticks`, duration: 1200 });
+                                                  }}
+                                                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold border transition-all ${
+                                                    isDynamic
+                                                      ? 'bg-violet-500 text-white border-violet-500'
+                                                      : 'bg-white dark:bg-gray-800 text-violet-500 dark:text-violet-400 border-violet-300 dark:border-violet-700 hover:border-violet-500'
+                                                  }`}
+                                                >
+                                                  IA
+                                                </button>
+                                                <div className={`flex items-center gap-1 ${isDynamic ? 'opacity-40' : ''}`}>
                                                   {[1,2,3,4,5,7,10,15,20].map((t) => (
                                                     <button
                                                       key={t}
@@ -2003,7 +2024,7 @@ export default function TradingSystemPage() {
                                                         toast({ title: `Taxa ${rate}%: ${t} ticks`, duration: 1200 });
                                                       }}
                                                       className={`px-1.5 py-0.5 rounded text-[10px] font-bold border transition-all ${
-                                                        currentTicks === t
+                                                        !isDynamic && currentTicks === t
                                                           ? 'bg-teal-500 text-white border-teal-500'
                                                           : 'bg-white dark:bg-gray-800 text-muted-foreground border-border hover:border-teal-400'
                                                       }`}
@@ -2017,7 +2038,7 @@ export default function TradingSystemPage() {
                                           })}
                                         </div>
                                         <p className="text-[10px] text-teal-600 dark:text-teal-400 mt-1.5">
-                                          Número de ticks acumulados antes de encerrar automaticamente o contrato.
+                                          <span className="font-semibold text-violet-600 dark:text-violet-400">IA</span> = IA calcula ticks ótimos dinamicamente. Número fixo = encerra após exatamente aquele número de ticks.
                                         </p>
                                       </div>
                                     )}

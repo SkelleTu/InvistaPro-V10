@@ -1635,7 +1635,8 @@ export class AutoTradingScheduler {
               for (const [k, v] of Object.entries(parsed)) {
                 const rateKey = Number(k) / 100;
                 const tickVal = Math.round(Number(v));
-                if (rateKey > 0 && rateKey <= 0.05 && tickVal >= 1 && tickVal <= 30) {
+                // 0 = dinâmico (IA decide); outros valores 1-30 são fixos
+                if (rateKey > 0 && rateKey <= 0.05 && (tickVal === 0 || (tickVal >= 1 && tickVal <= 30))) {
                   converted[rateKey] = tickVal;
                 }
               }
@@ -2061,8 +2062,11 @@ export class AutoTradingScheduler {
             //   4% growth →  4 ticks → ~16.9% lucro
             //   5% growth →  3 ticks → ~15.8% lucro
             const minTicksByGrowthRate: Record<number, number> = userAccuTicksPerRate;
-            const minTicksForRate = minTicksByGrowthRate[adaptiveGrowth] ?? 3;
-            const accuTicks = minTicksForRate;
+            const configuredTicks = minTicksByGrowthRate[adaptiveGrowth] ?? 3;
+            // 0 = dinâmico: IA calcula ticks ótimos com base em regime/volatilidade/historico
+            const accuTicks = configuredTicks === 0
+              ? this.calculateDynamicTicks(selectedSymbol, { 0.01: 10, 0.02: 7, 0.03: 5, 0.04: 4, 0.05: 3 }[adaptiveGrowth] ?? 5)
+              : configuredTicks;
             accuTargetTicks = accuTicks;
             console.log(`📊 [${operationId}] ACCU MODO-OPS: stake=$${accuStake} [${opportunityQuality}] (banca=$${bankBalance.toFixed(2)} | consenso=${consensus}% | risco=${accuRisk}) | growth=${(adaptiveGrowth*100).toFixed(0)}% ${growthModeLabel} | ticks=${accuTicks}${supremeAnalysis ? ` | regime=${regime} | hurst=${supremeAnalysis.statistics.hurstExponent.toFixed(2)}` : ''} | ${selectedSymbol}`);
             contract = await derivAPI.buyFlexibleContract({

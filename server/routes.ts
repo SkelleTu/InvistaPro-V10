@@ -2516,7 +2516,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     for (const [k, v] of Object.entries(ticks)) {
       if (VALID_RATES.has(k)) {
         const n = Math.round(Number(v));
-        if (n >= 1 && n <= 30) cleaned[k] = n;
+        if (n === 0 || (n >= 1 && n <= 30)) cleaned[k] = n; // 0 = dinâmico (IA decide)
       }
     }
     await dbStorage.updateAccuTicksPerRate(req.user.id, cleaned);
