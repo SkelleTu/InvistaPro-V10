@@ -1089,6 +1089,18 @@ double ExtractJsonDouble(string json, string key) {
    string val = StringSubstr(json, start, end - start);
    return StringToDouble(val);
 }
+
+//+------------------------------------------------------------------+
+//| Extrai bool de JSON simples                                      |
+//+------------------------------------------------------------------+
+bool ExtractJsonBool(string json, string key) {
+   string search = "\\"" + key + "\\":";
+   int start = StringFind(json, search);
+   if(start < 0) return false;
+   start += StringLen(search);
+   string val = StringSubstr(json, start, 4);
+   return (StringFind(val, "true") == 0);
+}
 `;
 }
 
