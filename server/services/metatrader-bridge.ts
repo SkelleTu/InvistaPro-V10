@@ -1634,15 +1634,28 @@ class MetaTraderBridge extends EventEmitter {
       });
 
       // ============================================================
-      // MODO SPIKE INTELIGENTE: Para Crash/Boom, o motor de spike
-      // técnico lidera a decisão. A IA HuggingFace roda em PARALELO
-      // e atua como AMPLIFICADORA de confiança — se concordar com o
-      // spike, aumenta a confiança final. Se discordar, o spike ainda
-      // executa (pois a IA NLP não é treinada pra índices sintéticos).
+      // MODO BOOM/CRASH — ESTRATÉGIA DE DIREÇÃO NATURAL + SPIKE
+      //
+      // PRINCÍPIO FUNDAMENTAL:
+      //  • Crash (CRASH300/500/1000): força dominante é de ALTA entre spikes.
+      //    → CONTINUIDADE = BUY (segue a subida constante entre os spikes de queda)
+      //    → SPIKE = SELL apenas com CERTEZA ABSOLUTA (imminência ≥85%)
+      //
+      //  • Boom (BOOM300/500/1000): força dominante é de BAIXA entre spikes.
+      //    → CONTINUIDADE = SELL (segue a queda constante entre os spikes de alta)
+      //    → SPIKE = BUY apenas com CERTEZA ABSOLUTA (imminência ≥85%)
+      //
+      // REGRA DE OURO: A IA prefere SEMPRE a direção natural do ativo.
+      // Spike só é operado quando há ABSOLUTA CERTEZA técnica e de imminência.
       // ============================================================
       if (this.isSpikeIndex(symbol)) {
+        const sym = symbol.toUpperCase();
+        const isCrash = sym.includes('CRASH');
         const earlySpike = this.detectSpikePattern(marketData, symbol);
-        if (earlySpike.expected && earlySpike.confidence >= 70) {
+
+        // ── CAMINHO 1: SPIKE COM CERTEZA ABSOLUTA (confiança ≥85%) ──
+        // Threshold elevado: só opera spike quando IA tem CERTEZA ABSOLUTA.
+        if (earlySpike.expected && earlySpike.confidence >= 85) {
           const spikeAction: MT5Signal['action'] = earlySpike.direction === 'down' ? 'SELL' : 'BUY';
           let spikeConf = earlySpike.confidence / 100;
 
@@ -1664,14 +1677,12 @@ class MetaTraderBridge extends EventEmitter {
               const aiConf = (aiResult as any).consensusStrength as number;
               const spikeExpectedAI = (spikeAction === 'BUY' && aiDir === 'up') || (spikeAction === 'SELL' && aiDir === 'down');
               if (spikeExpectedAI && aiConf >= 40) {
-                // IA concorda → amplifica confiança (até +10%)
                 aiBoostAmount = Math.min(0.10, (aiConf / 100) * 0.15);
                 spikeConf = Math.min(0.97, spikeConf + aiBoostAmount);
                 aiBoostLabel = `IA CONCORDA: ${aiDir.toUpperCase()} (${aiConf.toFixed(0)}%) → +${(aiBoostAmount * 100).toFixed(1)}% boost`;
               } else if (!spikeExpectedAI && aiDir !== 'neutral' && aiConf >= 60) {
-                // IA discorda com alta convicção → reduz levemente (até -5%), spike ainda executa
                 aiBoostAmount = -Math.min(0.05, (aiConf / 100) * 0.08);
-                spikeConf = Math.max(0.65, spikeConf + aiBoostAmount);
+                spikeConf = Math.max(0.80, spikeConf + aiBoostAmount); // piso mais alto para spike
                 aiBoostLabel = `IA DIVERGE: ${aiDir.toUpperCase()} (${aiConf.toFixed(0)}%) → ${(aiBoostAmount * 100).toFixed(1)}% adj`;
               } else {
                 aiBoostLabel = `IA: ${aiDir.toUpperCase()} (${aiConf.toFixed(0)}%) — neutro, sem ajuste`;
@@ -1698,11 +1709,102 @@ class MetaTraderBridge extends EventEmitter {
               status: 'approved',
               finalDecision: spikeSignal.action as 'BUY' | 'SELL' | 'HOLD',
               consecutiveLosses: this.consecutiveLosses,
-              decisionReason: `✅ SPIKE + IA: ${spikeSignal.action} ${symbol} | Técnico: ${earlySpike.confidence.toFixed(1)}% | Iminência: ${earlySpike.imminencePercent.toFixed(0)}% | ${aiBoostLabel} | Confiança final: ${(spikeConf * 100).toFixed(1)}%`
+              decisionReason: `✅ SPIKE CERTEZA ABSOLUTA: ${spikeSignal.action} ${symbol} | Técnico: ${earlySpike.confidence.toFixed(1)}% | Iminência: ${earlySpike.imminencePercent.toFixed(0)}% | ${aiBoostLabel} | Confiança final: ${(spikeConf * 100).toFixed(1)}%`
             });
-            console.log(`[MT5Bridge] ⚡ SPIKE + IA: ${spikeSignal.action} ${symbol} | Técnico: ${earlySpike.confidence.toFixed(1)}% | ${aiBoostLabel}`);
+            console.log(`[MT5Bridge] ⚡ SPIKE ABSOLUTO: ${spikeSignal.action} ${symbol} | Técnico: ${earlySpike.confidence.toFixed(1)}% | ${aiBoostLabel}`);
             return spikeSignal;
           }
+        }
+
+        // ── CAMINHO 2: ZONA DE PERIGO — spike iminente mas sem certeza absoluta ──
+        // Imminência entre 65-84%: NÃO operar — risco de spike contra a continuidade
+        // e sem confiança suficiente para spike. Melhor esperar.
+        if (earlySpike.expected && earlySpike.imminencePercent >= 65) {
+          this.logAnalysis({
+            id: `${entryId}_spike_danger`,
+            timestamp: Date.now(),
+            symbol,
+            phase: 'spike',
+            status: 'rejected',
+            decisionReason: `⚠️ ZONA DE PERIGO: iminência ${earlySpike.imminencePercent}% (65-84%) — sem certeza para spike, sem segurança para continuidade. Aguardando.`
+          });
+          console.log(`[MT5Bridge] ⚠️ ${symbol}: zona de perigo (iminência ${earlySpike.imminencePercent}%) — sem operação`);
+          return null;
+        }
+
+        // ── CAMINHO 3: CONTINUIDADE — direção natural do ativo ──
+        // Spike NÃO iminente (imminência <65%) → operar na direção NATURAL do ativo.
+        // Crash = COMPRA (subida gradual entre spikes de queda)
+        // Boom  = VENDA  (queda gradual entre spikes de alta)
+        {
+          const naturalAction: MT5Signal['action'] = isCrash ? 'BUY' : 'SELL';
+          const prices = marketData.map((d: any) => d.close);
+          const rsi    = this.calcRSI(prices, 14);
+          const ema20  = this.calcEMA(prices, 20);
+          const ema50  = this.calcEMA(prices, 50);
+          const profile = resolveDerivProfile(symbol);
+          const rsiOversold   = profile?.rsiOversold   ?? 25;
+          const rsiOverbought = profile?.rsiOverbought  ?? 75;
+
+          // Verificar se indicadores técnicos confirmam a entrada na direção natural
+          let continuityScore = 0;
+          const reasonParts: string[] = [];
+
+          if (naturalAction === 'BUY') {
+            // Para Crash (BUY de continuidade): evitar entrar quando RSI sobrecomprado
+            if (rsi < rsiOverbought - 10) { continuityScore += 2; reasonParts.push(`RSI ${rsi.toFixed(1)} ok para BUY`); }
+            else if (rsi >= rsiOverbought) { continuityScore -= 3; reasonParts.push(`RSI ${rsi.toFixed(1)} sobrecomprado — aguardar`); }
+            if (ema20 >= ema50) { continuityScore += 1; reasonParts.push('EMA20≥EMA50 confirma alta'); }
+          } else {
+            // Para Boom (SELL de continuidade): evitar entrar quando RSI sobrevendido
+            if (rsi > rsiOversold + 10) { continuityScore += 2; reasonParts.push(`RSI ${rsi.toFixed(1)} ok para SELL`); }
+            else if (rsi <= rsiOversold) { continuityScore -= 3; reasonParts.push(`RSI ${rsi.toFixed(1)} sobrevendido — aguardar`); }
+            if (ema20 <= ema50) { continuityScore += 1; reasonParts.push('EMA20≤EMA50 confirma baixa'); }
+          }
+
+          // Penalizar se iminência de spike cresceu moderadamente (cautela)
+          if (earlySpike.imminencePercent >= 50) {
+            continuityScore -= 2;
+            reasonParts.push(`Iminência de spike ${earlySpike.imminencePercent}% — entrada reduzida`);
+          }
+
+          const continuityConf = Math.min(0.82, Math.max(0.55, 0.60 + continuityScore * 0.06));
+
+          if (continuityScore >= 1) {
+            const continuitySignal = this.fuseSignals(
+              symbol,
+              [{ action: naturalAction, confidence: continuityConf, source: 'continuity_natural_direction' }],
+              marketData,
+              `CONTINUIDADE ${isCrash ? 'CRASH→BUY' : 'BOOM→SELL'}: ${reasonParts.join(' | ')} | Spike ${earlySpike.imminencePercent}% imminente`,
+              continuityConf
+            );
+            if (continuitySignal && continuitySignal.action !== 'HOLD') {
+              this.logAnalysis({
+                id: `${entryId}_continuity`,
+                timestamp: Date.now(),
+                symbol,
+                phase: 'decision',
+                status: 'approved',
+                finalDecision: continuitySignal.action as 'BUY' | 'SELL' | 'HOLD',
+                consecutiveLosses: this.consecutiveLosses,
+                decisionReason: `✅ CONTINUIDADE NATURAL: ${continuitySignal.action} ${symbol} | ${reasonParts.join(' | ')} | Confiança: ${(continuityConf * 100).toFixed(1)}% | Iminência spike: ${earlySpike.imminencePercent}%`
+              });
+              console.log(`[MT5Bridge] 📈 CONTINUIDADE ${isCrash ? 'CRASH→BUY' : 'BOOM→SELL'}: ${symbol} | Conf: ${(continuityConf * 100).toFixed(1)}% | Spike ${earlySpike.imminencePercent}% imminente`);
+              return continuitySignal;
+            }
+          }
+
+          this.logAnalysis({
+            id: `${entryId}_continuity_skip`,
+            timestamp: Date.now(),
+            symbol,
+            phase: 'decision',
+            status: 'rejected',
+            consecutiveLosses: this.consecutiveLosses,
+            decisionReason: `⏳ CONTINUIDADE ${isCrash ? 'CRASH' : 'BOOM'}: score insuficiente (${continuityScore}) — ${reasonParts.join(' | ')} | Aguardando melhor entrada`
+          });
+          console.log(`[MT5Bridge] ⏳ ${symbol}: continuidade bloqueada (score ${continuityScore}) — ${reasonParts.join(', ')}`);
+          return null;
         }
       }
 

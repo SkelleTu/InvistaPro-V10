@@ -755,44 +755,42 @@ void CheckAndExecuteSignal() {
    double point      = SymbolInfoDouble(symbol, SYMBOL_POINT);
    int    digits     = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
    
-   //--- Crash/Boom: spikes pulam stops — operar sem SL e TP
+   //--- Determinar se é índice de spike (Crash/Boom)
    string symUp = symbol;
    StringToUpper(symUp);
    bool isSpikeIdx = (StringFind(symUp, "CRASH") >= 0 || StringFind(symUp, "BOOM") >= 0);
 
-   if(isSpikeIdx)
-   {
-      slPrice = 0;
-      tpPrice = 0;
-      Print("ℹ️ Crash/Boom — sem SL/TP");
+   //--- Para TODOS os ativos (inclusive Crash/Boom): usar SL/TP calculados pela IA.
+   //--- A IA calcula SL/TP adaptativos para cada tipo de operação:
+   //---  • CONTINUIDADE em Crash/Boom: SL/TP moderados para seguir a tendência natural
+   //---  • SPIKE em Crash/Boom: SL/TP apertados para capturar o movimento rápido
+   //--- Se a IA não forneceu valores, usar os parâmetros manuais configurados.
+   if(!UseAIStopLoss || slPrice <= 0) {
+      slPrice = (action == "BUY") ? entryPrice - StopLoss * point : entryPrice + StopLoss * point;
    }
-   else
+   if(!UseAIStopLoss || tpPrice <= 0) {
+      tpPrice = (action == "BUY") ? entryPrice + TakeProfit * point : entryPrice - TakeProfit * point;
+   }
+
+   //--- Garantir distância mínima exigida pelo broker
+   long   stopsLevel = SymbolInfoInteger(symbol, SYMBOL_TRADE_STOPS_LEVEL);
+   double minDist    = MathMax((double)stopsLevel * point, (SymbolInfoDouble(symbol, SYMBOL_ASK) - SymbolInfoDouble(symbol, SYMBOL_BID)) * 3.0);
+   if(minDist > 0)
    {
-      if(!UseAIStopLoss || slPrice <= 0) {
-         slPrice = (action == "BUY") ? entryPrice - StopLoss * point : entryPrice + StopLoss * point;
-      }
-      if(!UseAIStopLoss || tpPrice <= 0) {
-         tpPrice = (action == "BUY") ? entryPrice + TakeProfit * point : entryPrice - TakeProfit * point;
-      }
-      //--- Garantir distância mínima exigida pelo broker
-      long   stopsLevel = SymbolInfoInteger(symbol, SYMBOL_TRADE_STOPS_LEVEL);
-      double minDist    = MathMax((double)stopsLevel * point, (SymbolInfoDouble(symbol, SYMBOL_ASK) - SymbolInfoDouble(symbol, SYMBOL_BID)) * 3.0);
-      if(minDist > 0)
+      if(action == "BUY")
       {
-         if(action == "BUY")
-         {
-            if((entryPrice - slPrice) < minDist) slPrice = NormalizeDouble(entryPrice - minDist, digits);
-            if((tpPrice - entryPrice) < minDist) tpPrice = NormalizeDouble(entryPrice + minDist, digits);
-         }
-         else
-         {
-            if((slPrice - entryPrice) < minDist) slPrice = NormalizeDouble(entryPrice + minDist, digits);
-            if((entryPrice - tpPrice) < minDist) tpPrice = NormalizeDouble(entryPrice - minDist, digits);
-         }
+         if(slPrice > 0 && (entryPrice - slPrice) < minDist) slPrice = NormalizeDouble(entryPrice - minDist, digits);
+         if(tpPrice > 0 && (tpPrice - entryPrice) < minDist) tpPrice = NormalizeDouble(entryPrice + minDist, digits);
       }
-      slPrice = NormalizeDouble(slPrice, digits);
-      tpPrice = NormalizeDouble(tpPrice, digits);
+      else
+      {
+         if(slPrice > 0 && (slPrice - entryPrice) < minDist) slPrice = NormalizeDouble(entryPrice + minDist, digits);
+         if(tpPrice > 0 && (entryPrice - tpPrice) < minDist) tpPrice = NormalizeDouble(entryPrice - minDist, digits);
+      }
    }
+   if(slPrice > 0) slPrice = NormalizeDouble(slPrice, digits);
+   if(tpPrice > 0) tpPrice = NormalizeDouble(tpPrice, digits);
+   if(isSpikeIdx) Print("ℹ️ Crash/Boom — SL: ", DoubleToString(slPrice, digits), " TP: ", DoubleToString(tpPrice, digits));
    if(lotSize <= 0) lotSize = LotSize;
 
    bool ok = false;
@@ -873,22 +871,46 @@ void UpdateOpenPositions() {
 }
 
 //+------------------------------------------------------------------+
-//| Trailing stop                                                    |
+//| Trailing stop — só ativa quando a posição está no lucro         |
+//| TrailingPips: distância do SL ao preço atual (em pips)          |
+//| TrailingActivation: lucro mínimo em pips para ativar trailing   |
 //+------------------------------------------------------------------+
 void ManageTrailingStop() {
-   double point = SymbolInfoDouble(GetSymbol(), SYMBOL_POINT);
+   string sym   = GetSymbol();
+   double point = SymbolInfoDouble(sym, SYMBOL_POINT);
+   double activationDist = TrailingPips * 0.5 * point; // Ativar quando lucro >= 50% do trailing
+
    for(int i = PositionsTotal() - 1; i >= 0; i--) {
       if(!posInfo.SelectByIndex(i)) continue;
       if(posInfo.Magic() != 20250101) continue;
-      double newSL = 0;
+
+      double openPrice    = posInfo.PriceOpen();
+      double currentPrice = posInfo.PriceCurrent();
+      double currentSL    = posInfo.StopLoss();
+      double currentTP    = posInfo.TakeProfit();
+      ulong  ticket       = posInfo.Ticket();
+      double newSL        = 0;
+      bool   shouldModify = false;
+
       if(posInfo.PositionType() == POSITION_TYPE_BUY) {
-         newSL = posInfo.PriceCurrent() - TrailingPips * point;
-         if(newSL > posInfo.StopLoss() + point)
-            trade.PositionModify(posInfo.Ticket(), newSL, posInfo.TakeProfit());
+         double profit = currentPrice - openPrice;
+         // Só ativar trailing se a posição já tem lucro mínimo de TrailingPips/2
+         if(profit < activationDist) continue;
+         newSL = NormalizeDouble(currentPrice - TrailingPips * point, (int)SymbolInfoInteger(sym, SYMBOL_DIGITS));
+         // Mover SL apenas se o novo SL for MELHOR que o atual (mais alto para BUY)
+         if(newSL > currentSL + point) shouldModify = true;
       } else {
-         newSL = posInfo.PriceCurrent() + TrailingPips * point;
-         if(newSL < posInfo.StopLoss() - point || posInfo.StopLoss() == 0)
-            trade.PositionModify(posInfo.Ticket(), newSL, posInfo.TakeProfit());
+         double profit = openPrice - currentPrice;
+         // Só ativar trailing se a posição já tem lucro mínimo de TrailingPips/2
+         if(profit < activationDist) continue;
+         newSL = NormalizeDouble(currentPrice + TrailingPips * point, (int)SymbolInfoInteger(sym, SYMBOL_DIGITS));
+         // Mover SL apenas se o novo SL for MELHOR que o atual (mais baixo para SELL)
+         if(currentSL == 0 || newSL < currentSL - point) shouldModify = true;
+      }
+
+      if(shouldModify) {
+         trade.PositionModify(ticket, newSL, currentTP);
+         Print("📉 Trailing stop movido: #", ticket, " → SL=", DoubleToString(newSL, (int)SymbolInfoInteger(sym, SYMBOL_DIGITS)));
       }
    }
 }
