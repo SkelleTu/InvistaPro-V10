@@ -3156,6 +3156,111 @@ export default function TradingSystemPage() {
                   </div>
                 )}
 
+                {/* ===== INDICADORES REAIS DO GRÁFICO MT5 ===== */}
+                {(mt5Signal as any)?.indicatorsDetected !== undefined && (
+                  <div className="border border-blue-500/30 bg-blue-500/5 rounded-lg p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Activity className="h-4 w-4 text-blue-400" />
+                        <span className="font-semibold text-sm">Indicadores do Gráfico MT5</span>
+                        <Badge variant="outline" className="border-blue-400 text-blue-400 text-[10px]">
+                          {(mt5Signal as any).indicatorsDetected > 0
+                            ? `${(mt5Signal as any).indicatorsDetected} detectado(s)`
+                            : 'Nenhum detectado'}
+                        </Badge>
+                      </div>
+                      {(mt5Signal as any)?.assetFamily && (
+                        <Badge variant="outline" className="text-[10px] text-purple-400 border-purple-400">
+                          {(mt5Signal as any).assetFamily} · {(mt5Signal as any).assetVolClass}
+                        </Badge>
+                      )}
+                    </div>
+
+                    {/* Girassol */}
+                    {(mt5Signal as any)?.girassolBias !== undefined && (
+                      <div className={`flex items-start gap-3 p-3 rounded border ${
+                        (mt5Signal as any).girassolBias === 'BUY'
+                          ? 'bg-green-500/10 border-green-500/30'
+                          : (mt5Signal as any).girassolBias === 'SELL'
+                          ? 'bg-red-500/10 border-red-500/30'
+                          : 'bg-muted/30 border-muted'
+                      }`}>
+                        <span className="text-lg shrink-0">🌻</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs font-bold">Girassol (Sunflower)</span>
+                            <Badge className={`text-[10px] ${
+                              (mt5Signal as any).girassolBias === 'BUY'
+                                ? 'bg-green-600'
+                                : (mt5Signal as any).girassolBias === 'SELL'
+                                ? 'bg-red-600'
+                                : 'bg-gray-600'
+                            }`}>
+                              {(mt5Signal as any).girassolBias === 'BUY' ? '🟢 COMPRA' : (mt5Signal as any).girassolBias === 'SELL' ? '🔴 VENDA' : '🟡 NEUTRO'}
+                            </Badge>
+                          </div>
+                          <p className="text-[11px] text-muted-foreground mt-0.5">
+                            {(mt5Signal as any).girassolDescription || 'Aguardando dados...'}
+                          </p>
+                          {((mt5Signal as any).girassolSupportLevel || (mt5Signal as any).girassolResistLevel) && (
+                            <div className="flex gap-4 mt-1">
+                              {(mt5Signal as any).girassolSupportLevel && (
+                                <span className="text-[10px] text-green-400">
+                                  Suporte: <span className="font-mono font-bold">{(mt5Signal as any).girassolSupportLevel?.toFixed(2)}</span>
+                                </span>
+                              )}
+                              {(mt5Signal as any).girassolResistLevel && (
+                                <span className="text-[10px] text-red-400">
+                                  Resistência: <span className="font-mono font-bold">{(mt5Signal as any).girassolResistLevel?.toFixed(2)}</span>
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Fibonacci */}
+                    {(mt5Signal as any)?.fibonacciDescription && (
+                      <div className="flex items-start gap-3 p-3 rounded border bg-orange-500/5 border-orange-500/20">
+                        <span className="text-lg shrink-0">📐</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs font-bold">Fibonacci Automático</span>
+                            {(mt5Signal as any).fibonacciNearestLevel && (
+                              <Badge variant="outline" className="text-[10px] border-orange-400 text-orange-400">
+                                Nível próximo: {(mt5Signal as any).fibonacciNearestLevel?.toFixed(2)}
+                              </Badge>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-muted-foreground mt-0.5">
+                            {(mt5Signal as any).fibonacciDescription}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Notas dos indicadores */}
+                    {Array.isArray((mt5Signal as any)?.indicatorNotes) && (mt5Signal as any).indicatorNotes.length > 0 && (
+                      <div className="space-y-1">
+                        <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wide">Análise dos Indicadores</p>
+                        {(mt5Signal as any).indicatorNotes.map((note: string, i: number) => (
+                          <div key={i} className="flex items-start gap-2 text-[11px] text-muted-foreground py-0.5">
+                            <span className="shrink-0 mt-0.5">›</span>
+                            <span>{note}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {(mt5Signal as any)?.indicatorsDetected === 0 && (
+                      <p className="text-xs text-muted-foreground text-center py-2">
+                        Nenhum indicador detectado no gráfico. Adicione o Girassol ou outro indicador ao gráfico ativo no MT5.
+                      </p>
+                    )}
+                  </div>
+                )}
+
                 {/* Sinal Ativo das IAs */}
                 {(mt5Signal as any)?.action && (mt5Signal as any).action !== 'HOLD' && (
                   <div className="border border-yellow-500/40 bg-yellow-500/5 rounded-lg p-4 space-y-4">
