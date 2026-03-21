@@ -832,6 +832,84 @@ const DERIV_SYNTHETIC_PROFILES: Record<string, DerivSyntheticProfile> = {
     tickSize: 0.01,
     avgDailyRange: 150,
   },
+  'JUMP50': {
+    family: 'Jump Index',
+    description: 'Jump 50 Index — jumps de 50% de probabilidade a cada tick, índice de alta volatilidade',
+    alwaysOpen: true,
+    spikeIndex: false,
+    volClass: 'ultra-high',
+    slAtrMultiplier: 2.5,
+    tpAtrMultiplier: 4.5,
+    minSlPips: 800, maxSlPips: 5000, minTpPips: 1000, maxTpPips: 8000,
+    rsiOversold: 25, rsiOverbought: 75,
+    trendType: 'hybrid',
+    jumpProbability: 0.50,
+    indicatorNotes: 'Jump 50 tem jumps aleatórios a cada 2 ticks em média — SL mínimo de 800 pontos obrigatório. ATR-based SL é mandatório. Tendências entre jumps são muito curtas.',
+    behaviorKnowledge: [
+      'Jumps de alta amplitude ocorrem a cada ~2 ticks — SL grande é essencial',
+      'Tendências entre jumps são muito curtas e instáveis',
+      'RSI e MACD têm efetividade reduzida pela alta frequência de jumps',
+      'SL deve ser no mínimo 800-1000 pontos do preço de entrada',
+      'TP deve ser no mínimo 1000-1500 pontos para compensar o risco',
+      'Girassol detecta direção entre jumps mas sinais são de curta duração',
+      'Priorizar entradas com Girassol muito bem definido e ATR grande',
+    ],
+    optimalTimeframe: 'M1, M5',
+    useFibonacci: true,
+    aiContextHint: 'Jump 50: jumps a cada ~2 ticks. SL mínimo 800 pontos obrigatório para evitar stop prematuro. Apenas entrar com sinal de Girassol muito claro. TP/SL largos.',
+    tickSize: 0.01,
+    avgDailyRange: 3000,
+  },
+  'JUMP75': {
+    family: 'Jump Index',
+    description: 'Jump 75 Index — jumps de 75% de probabilidade a cada tick, extremamente volátil',
+    alwaysOpen: true,
+    spikeIndex: false,
+    volClass: 'ultra-high',
+    slAtrMultiplier: 3.0,
+    tpAtrMultiplier: 5.0,
+    minSlPips: 1200, maxSlPips: 8000, minTpPips: 1500, maxTpPips: 12000,
+    rsiOversold: 22, rsiOverbought: 78,
+    trendType: 'hybrid',
+    jumpProbability: 0.75,
+    indicatorNotes: 'Jump 75 tem jumps na maioria dos ticks — SL mínimo de 1200 pontos obrigatório. Ativo extremamente difícil de operar.',
+    behaviorKnowledge: [
+      'Jumps ocorrem em ~3 de cada 4 ticks — volatilidade extrema',
+      'SL deve ser no mínimo 1200 pontos para sobreviver aos jumps',
+      'Indicadores standard são menos confiáveis por causa da frequência de jumps',
+      'Apenas entrar com sinal fortíssimo do Girassol',
+    ],
+    optimalTimeframe: 'M5, M15',
+    useFibonacci: false,
+    aiContextHint: 'Jump 75: jumps em 75% dos ticks. SL mínimo 1200 pontos. Muito arriscado — só entrar com sinal Girassol muito claro e ATR grande.',
+    tickSize: 0.01,
+    avgDailyRange: 5000,
+  },
+  'JUMP100': {
+    family: 'Jump Index',
+    description: 'Jump 100 Index — jumps de 100% de probabilidade a cada tick',
+    alwaysOpen: true,
+    spikeIndex: false,
+    volClass: 'ultra-high',
+    slAtrMultiplier: 3.5,
+    tpAtrMultiplier: 6.0,
+    minSlPips: 1500, maxSlPips: 10000, minTpPips: 2000, maxTpPips: 15000,
+    rsiOversold: 20, rsiOverbought: 80,
+    trendType: 'hybrid',
+    jumpProbability: 1.0,
+    indicatorNotes: 'Jump 100 tem jumps em todos os ticks — SL mínimo de 1500 pontos obrigatório. Ativo de altíssimo risco.',
+    behaviorKnowledge: [
+      'Jumps ocorrem em TODOS os ticks — volatilidade máxima',
+      'SL mínimo 1500 pontos obrigatório',
+      'Indicadores convencionais têm efetividade muito reduzida',
+      'Apenas operar com lote mínimo e sinal de altíssima confiança',
+    ],
+    optimalTimeframe: 'M5, M15',
+    useFibonacci: false,
+    aiContextHint: 'Jump 100: jumps em todos os ticks. SL mínimo 1500 pontos. Ativo de altíssimo risco — lote mínimo sempre.',
+    tickSize: 0.01,
+    avgDailyRange: 8000,
+  },
   // ── RANGE BREAK INDICES ──────────────────────────────────────
   'RDBEAR': {
     family: 'Range Break Index',
@@ -962,9 +1040,13 @@ function resolveDerivProfile(symbol: string): DerivSyntheticProfile | null {
   // Step
   if (sym.includes('STEP')) return DERIV_SYNTHETIC_PROFILES['STEPINDEX'];
 
-  // Jump
-  if (sym.includes('JUMP10') || sym.includes('JUMP_10')) return DERIV_SYNTHETIC_PROFILES['JUMP10'];
-  if (sym.includes('JUMP25') || sym.includes('JUMP_25')) return DERIV_SYNTHETIC_PROFILES['JUMP25'];
+  // Jump — ordem importa: checar strings mais longas antes
+  // Suporta: "JUMP100", "JUMP_100", "JD100", "JUMP 100 INDEX" (com espaços, nome MT5 original)
+  if (sym.includes('JUMP100') || sym.includes('JUMP_100') || sym.includes('JD100') || sym.includes('JUMP 100')) return DERIV_SYNTHETIC_PROFILES['JUMP100'];
+  if (sym.includes('JUMP75')  || sym.includes('JUMP_75')  || sym.includes('JD75')  || sym.includes('JUMP 75'))  return DERIV_SYNTHETIC_PROFILES['JUMP75'];
+  if (sym.includes('JUMP50')  || sym.includes('JUMP_50')  || sym.includes('JD50')  || sym.includes('JUMP 50'))  return DERIV_SYNTHETIC_PROFILES['JUMP50'];
+  if (sym.includes('JUMP25')  || sym.includes('JUMP_25')  || sym.includes('JD25')  || sym.includes('JUMP 25'))  return DERIV_SYNTHETIC_PROFILES['JUMP25'];
+  if (sym.includes('JUMP10')  || sym.includes('JUMP_10')  || sym.includes('JD10')  || sym.includes('JUMP 10'))  return DERIV_SYNTHETIC_PROFILES['JUMP10'];
 
   // Range Break
   if (sym.includes('RDBEAR') || sym.includes('RANGEBREAK') && sym.includes('BEAR')) return DERIV_SYNTHETIC_PROFILES['RDBEAR'];

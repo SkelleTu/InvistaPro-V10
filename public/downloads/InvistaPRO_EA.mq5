@@ -711,6 +711,22 @@ void FetchAndProcessSignal()
       double point      = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
       long   stopsLevel = SymbolInfoInteger(g_symbol, SYMBOL_TRADE_STOPS_LEVEL);
       double minDist    = MathMax((double)stopsLevel * point, (ask - bid) * 3.0);
+
+      // Para índices Jump (preço alto + jumps frequentes): usar mínimo proporcional ao preço
+      // Jump 50 = 5% do preço, Jump 75 = 7%, Jump 100 = 9% — evita "invalid stops" do broker
+      string symUpper2 = g_symbol;
+      StringToUpper(symUpper2);
+      if (StringFind(symUpper2, "JUMP") >= 0 && ask > 1000)
+      {
+         double jumpMinPct = 0.03; // 3% padrão para qualquer Jump
+         if (StringFind(symUpper2, "100") >= 0) jumpMinPct = 0.09;
+         else if (StringFind(symUpper2, "75")  >= 0) jumpMinPct = 0.07;
+         else if (StringFind(symUpper2, "50")  >= 0) jumpMinPct = 0.05;
+         else if (StringFind(symUpper2, "25")  >= 0) jumpMinPct = 0.04;
+         minDist = MathMax(minDist, ask * jumpMinPct);
+         Print("⚡ Jump Index detectado — distância mínima SL/TP: ", NormalizeDouble(minDist, 2), " pontos (", jumpMinPct * 100, "% do preço)");
+      }
+
       if (minDist <= 0) minDist = ask * 0.002;
 
       if (action == "BUY")
