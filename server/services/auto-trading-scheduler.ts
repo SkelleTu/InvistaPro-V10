@@ -2061,6 +2061,7 @@ export class AutoTradingScheduler {
               accuTicks = configuredTicks;
             }
             accuTargetTicks = accuTicks;
+            const opportunityQuality = consensus >= 75 ? 'ALTA' : consensus >= 50 ? 'MÉDIA' : 'BAIXA';
             console.log(`📊 [${operationId}] ACCU MODO-OPS: stake=$${accuStake} [${opportunityQuality}] (banca=$${bankBalance.toFixed(2)} | consenso=${consensus}% | risco=${accuRisk}) | growth=${(adaptiveGrowth*100).toFixed(0)}% ${growthModeLabel} | ticks=${accuTicks}${supremeAnalysis ? ` | regime=${regime} | hurst=${supremeAnalysis.statistics.hurstExponent.toFixed(2)}` : ''} | ${selectedSymbol}`);
             contract = await derivAPI.buyFlexibleContract({
               contract_type: 'ACCU',
