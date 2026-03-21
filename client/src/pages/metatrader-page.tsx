@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -10,14 +10,13 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import {
   Activity, TrendingUp, TrendingDown, Settings, Download, Wifi, WifiOff,
   BarChart2, Zap, Shield, RefreshCw, AlertTriangle, CheckCircle2,
   Brain, Target, DollarSign, ArrowUpRight, ArrowDownRight, Clock, Info, ChevronLeft,
   Eye, Cpu, XCircle, CheckCircle, Minus, ChevronDown, ChevronUp, Copy, ClipboardCheck,
-  Flame, ArrowDownCircle, ArrowUpCircle, Gauge, Layers, ToggleLeft, ToggleRight
+  Flame, ArrowDownCircle, ArrowUpCircle, Gauge, Layers, History, Timer
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 
@@ -170,6 +169,47 @@ const HEALTH_LABEL = {
 
 const ALL_SYMBOLS = ['EURUSD', 'GBPUSD', 'XAUUSD', 'USDJPY', 'BTCUSD', 'AUDUSD', 'USDCAD', 'NZDUSD', 'EURGBP', 'GBPJPY'];
 
+function formatDuration(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return `${h}h ${m}m`;
+}
+
+function formatTime(ts: number): string {
+  if (!ts) return '—';
+  const d = new Date(ts < 1e12 ? ts * 1000 : ts);
+  return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function GirassolStatusBadge({ bias, description }: { bias?: string; description?: string }) {
+  if (!bias || bias === 'NEUTRAL') {
+    return (
+      <div className="flex items-center gap-2 px-3 py-1.5 rounded-md border border-muted bg-muted/30 text-xs text-muted-foreground">
+        <span>🌻</span>
+        <span>{description || 'Girassol: aguardando sinal'}</span>
+      </div>
+    );
+  }
+  if (bias === 'BUY') {
+    return (
+      <div className="flex items-center gap-2 px-3 py-1.5 rounded-md border border-green-500/50 bg-green-500/10 text-xs text-green-500 font-medium">
+        <span>🌻</span>
+        <TrendingUp className="h-3.5 w-3.5" />
+        <span>{description || 'Girassol: COMPRA (azul)'}</span>
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2 px-3 py-1.5 rounded-md border border-red-500/50 bg-red-500/10 text-xs text-red-500 font-medium">
+      <span>🌻</span>
+      <TrendingDown className="h-3.5 w-3.5" />
+      <span>{description || 'Girassol: VENDA (vermelho)'}</span>
+    </div>
+  );
+}
+
 export default function MetaTraderPage() {
   const { toast } = useToast();
   const [, setLocation] = useLocation();
@@ -178,10 +218,14 @@ export default function MetaTraderPage() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [urlCopied, setUrlCopied] = useState(false);
   const [platformUrlCopied, setPlatformUrlCopied] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
+  const [secondsAgo, setSecondsAgo] = useState(0);
+  const [positionTimers, setPositionTimers] = useState<Record<number, number>>({});
+  const analysisEndRef = useRef<HTMLDivElement>(null);
 
   const { data: status, isLoading: statusLoading } = useQuery<MT5Status>({
     queryKey: ['/api/mt5/status'],
-    refetchInterval: 5000
+    refetchInterval: 2000
   });
 
   const { data: config, isLoading: configLoading } = useQuery<MT5Config>({
@@ -191,29 +235,72 @@ export default function MetaTraderPage() {
 
   const { data: positions } = useQuery<any[]>({
     queryKey: ['/api/mt5/positions'],
-    refetchInterval: 5000
+    refetchInterval: 2000
   });
 
   const { data: trades } = useQuery<any[]>({
     queryKey: ['/api/mt5/trades'],
-    refetchInterval: 10000
+    refetchInterval: 2000
   });
 
   const { data: activeSignal, isLoading: signalLoading } = useQuery<any>({
     queryKey: ['/api/mt5/signal'],
-    refetchInterval: 15000,
+    refetchInterval: 2000,
     enabled: !!status?.connected
   });
 
   const { data: aiAnalysis } = useQuery<AIAnalysisResponse>({
     queryKey: ['/api/mt5/ai-analysis'],
-    refetchInterval: 3000
+    refetchInterval: 2000
   });
 
   const { data: spikeDashboard } = useQuery<any>({
     queryKey: ['/api/mt5/spike-dashboard'],
-    refetchInterval: 5000
+    refetchInterval: 3000
   });
+
+  // Atualizar timestamp de "última atualização"
+  useEffect(() => {
+    setLastUpdated(new Date());
+    setSecondsAgo(0);
+  }, [status, positions, trades, aiAnalysis]);
+
+  // Contador de segundos desde última atualização
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setSecondsAgo(prev => prev + 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Atualizar duração das posições abertas a cada segundo
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (positions && positions.length > 0) {
+        const now = Date.now();
+        const timers: Record<number, number> = {};
+        positions.forEach((pos: any) => {
+          if (pos.openTime) {
+            const openMs = pos.openTime * 1000 > now ? pos.openTime : pos.openTime * 1000;
+            timers[pos.ticket] = Math.floor((now - openMs) / 1000);
+          }
+        });
+        setPositionTimers(timers);
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [positions]);
+
+  // Auto-scroll do feed de análises quando chega nova entrada
+  const prevAnalysisCount = useRef(0);
+  useEffect(() => {
+    if (aiAnalysis?.log && aiAnalysis.log.length > prevAnalysisCount.current) {
+      prevAnalysisCount.current = aiAnalysis.log.length;
+      if (activeTab === 'signals' && analysisEndRef.current) {
+        analysisEndRef.current.scrollIntoView({ behavior: 'smooth' });
+      }
+    }
+  }, [aiAnalysis?.log?.length, activeTab]);
 
   const updateConfigMutation = useMutation({
     mutationFn: async (updates: Partial<MT5Config>) => {
@@ -298,7 +385,16 @@ export default function MetaTraderPage() {
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
+            {/* Badge tempo real */}
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground border rounded-full px-2.5 py-1">
+              <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+              <Timer className="h-3 w-3" />
+              <span>
+                {secondsAgo < 5 ? 'Agora mesmo' : `${secondsAgo}s atrás`}
+              </span>
+            </div>
+            {/* Conexão EA */}
             <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border ${
               status?.connected
                 ? 'border-green-500 bg-green-500/10'
@@ -427,7 +523,7 @@ export default function MetaTraderPage() {
         )}
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-5" data-testid="tabs-metatrader">
+          <TabsList className="grid w-full grid-cols-6" data-testid="tabs-metatrader">
             <TabsTrigger value="dashboard" data-testid="tab-dashboard">Dashboard</TabsTrigger>
             <TabsTrigger value="signals" data-testid="tab-signals">Sinais & IAs</TabsTrigger>
             <TabsTrigger value="spike" data-testid="tab-spike" className="relative">
@@ -439,11 +535,31 @@ export default function MetaTraderPage() {
                 </span>
               )}
             </TabsTrigger>
-            <TabsTrigger value="positions" data-testid="tab-positions">Posições</TabsTrigger>
-            <TabsTrigger value="config" data-testid="tab-config">Configuração</TabsTrigger>
+            <TabsTrigger value="positions" data-testid="tab-positions" className="relative">
+              Posições
+              {positions && positions.length > 0 && (
+                <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-blue-500 text-white text-[10px] flex items-center justify-center font-bold">
+                  {positions.length}
+                </span>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="history" data-testid="tab-history">
+              <History className="h-3.5 w-3.5 mr-1" />
+              Histórico
+            </TabsTrigger>
+            <TabsTrigger value="config" data-testid="tab-config">Config</TabsTrigger>
           </TabsList>
 
           <TabsContent value="dashboard" className="space-y-4 mt-4">
+
+            {/* Status Girassol em tempo real */}
+            {activeSignal && (activeSignal.girassolBias || activeSignal.girassolDescription) && (
+              <GirassolStatusBadge
+                bias={activeSignal.girassolBias}
+                description={activeSignal.girassolDescription}
+              />
+            )}
+
             <div className="grid md:grid-cols-2 gap-4">
               <Card>
                 <CardHeader>
@@ -487,6 +603,9 @@ export default function MetaTraderPage() {
                   <CardTitle className="flex items-center gap-2 text-base">
                     <Zap className="h-5 w-5 text-yellow-500" />
                     Sinal Ativo das IAs
+                    {activeSignal?.action && activeSignal.action !== 'HOLD' && (
+                      <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse ml-auto" />
+                    )}
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -509,13 +628,31 @@ export default function MetaTraderPage() {
                         </div>
                         <div>
                           <span className="text-muted-foreground">Stop Loss</span>
-                          <p className="font-medium text-red-500">{status.activeSignal.stopLossPips} pips</p>
+                          <p className="font-medium text-red-500">
+                            {status.activeSignal.stopLoss > 0
+                              ? status.activeSignal.stopLoss.toFixed(2)
+                              : status.activeSignal.stopLossPips > 0
+                                ? `${status.activeSignal.stopLossPips} pips`
+                                : 'IA monit.'}
+                          </p>
                         </div>
                         <div>
                           <span className="text-muted-foreground">Take Profit</span>
-                          <p className="font-medium text-green-500">{status.activeSignal.takeProfitPips} pips</p>
+                          <p className="font-medium text-green-500">
+                            {status.activeSignal.takeProfit > 0
+                              ? status.activeSignal.takeProfit.toFixed(2)
+                              : status.activeSignal.takeProfitPips > 0
+                                ? `${status.activeSignal.takeProfitPips} pips`
+                                : 'IA monit.'}
+                          </p>
                         </div>
                       </div>
+                      {status.activeSignal.girassolDescription && (
+                        <GirassolStatusBadge
+                          bias={status.activeSignal.girassolBias}
+                          description={status.activeSignal.girassolDescription}
+                        />
+                      )}
                       <p className="text-xs text-muted-foreground border-t pt-2">{status.activeSignal.reason}</p>
                     </div>
                   ) : (
@@ -529,9 +666,57 @@ export default function MetaTraderPage() {
               </Card>
             </div>
 
+            {/* Posições abertas em miniatura no dashboard */}
+            {positions && positions.length > 0 && (
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <Activity className="h-5 w-5 text-blue-500" />
+                    Posições Abertas — Monitoramento em Tempo Real
+                    <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse ml-auto" />
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2">
+                    {positions.map((pos: any) => {
+                      const duration = positionTimers[pos.ticket] || 0;
+                      return (
+                        <div key={pos.ticket} className={`flex items-center justify-between p-3 rounded-lg border ${pos.profit >= 0 ? 'border-green-500/30 bg-green-500/5' : 'border-red-500/30 bg-red-500/5'}`} data-testid={`dash-position-${pos.ticket}`}>
+                          <div className="flex items-center gap-3">
+                            {pos.type === 'BUY'
+                              ? <TrendingUp className="h-4 w-4 text-green-500" />
+                              : <TrendingDown className="h-4 w-4 text-red-500" />}
+                            <div>
+                              <p className="font-bold text-sm">{pos.symbol}</p>
+                              <p className="text-xs text-muted-foreground">#{pos.ticket} • {pos.lots} lot • entrada: {pos.openPrice}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-4">
+                            <div className="text-xs text-muted-foreground flex items-center gap-1">
+                              <Clock className="h-3 w-3" />
+                              {formatDuration(duration)}
+                            </div>
+                            <div className="text-right">
+                              <p className={`font-bold ${pos.profit >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                {pos.profit >= 0 ? '+' : ''}${pos.profit?.toFixed(2)}
+                              </p>
+                              <p className="text-xs text-muted-foreground">{pos.type}</p>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Histórico Recente</CardTitle>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <History className="h-5 w-5 text-muted-foreground" />
+                  Últimas Operações Fechadas
+                </CardTitle>
               </CardHeader>
               <CardContent>
                 {trades && trades.length > 0 ? (
@@ -544,20 +729,24 @@ export default function MetaTraderPage() {
                           </Badge>
                           <div>
                             <p className="font-medium text-sm">{trade.symbol}</p>
-                            <p className="text-xs text-muted-foreground">{trade.lots} lotes • #{trade.ticket}</p>
+                            <p className="text-xs text-muted-foreground">{trade.lots} lots • #{trade.ticket}</p>
                           </div>
                         </div>
                         <div className="text-right">
                           <p className={`font-bold ${trade.profit >= 0 ? 'text-green-500' : 'text-red-500'}`}>
                             {trade.profit >= 0 ? '+' : ''}${trade.profit?.toFixed(2)}
                           </p>
-                          <Badge variant="outline" className="text-xs">{trade.closeReason}</Badge>
+                          <Badge variant="outline" className="text-xs">{trade.closeReason || 'CLOSED'}</Badge>
                         </div>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <p className="text-center text-muted-foreground py-8">Nenhuma operação registrada ainda</p>
+                  <div className="flex flex-col items-center py-8 text-muted-foreground gap-2">
+                    <History className="h-10 w-10 opacity-30" />
+                    <p className="text-sm">Nenhuma operação fechada nesta sessão</p>
+                    <p className="text-xs">O histórico aparecerá aqui quando posições forem encerradas</p>
+                  </div>
                 )}
               </CardContent>
             </Card>
@@ -1142,37 +1331,196 @@ export default function MetaTraderPage() {
           <TabsContent value="positions" className="space-y-4 mt-4">
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Activity className="h-5 w-5 text-blue-500" />
-                  Posições Abertas ({positions?.length || 0})
+                <CardTitle className="flex items-center justify-between text-base">
+                  <span className="flex items-center gap-2">
+                    <Activity className="h-5 w-5 text-blue-500" />
+                    Posições Abertas ({positions?.length || 0})
+                  </span>
+                  <Badge variant="outline" className="text-xs gap-1">
+                    <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+                    Atualiza a cada 2s
+                  </Badge>
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 {positions && positions.length > 0 ? (
-                  <div className="space-y-3">
-                    {positions.map((pos: any, i: number) => (
-                      <div key={i} className="flex items-center justify-between p-3 border rounded-lg" data-testid={`card-position-${pos.ticket}`}>
-                        <div className="flex items-center gap-3">
-                          {pos.type === 'BUY' ? <TrendingUp className="h-5 w-5 text-green-500" /> : <TrendingDown className="h-5 w-5 text-red-500" />}
-                          <div>
-                            <p className="font-bold">{pos.symbol}</p>
-                            <p className="text-sm text-muted-foreground">#{pos.ticket} • {pos.lots} lots • {pos.type}</p>
+                  <div className="space-y-4">
+                    {positions.map((pos: any) => {
+                      const duration = positionTimers[pos.ticket] || 0;
+                      const isProfit = pos.profit >= 0;
+                      return (
+                        <div key={pos.ticket} className={`p-4 border-2 rounded-xl space-y-3 ${isProfit ? 'border-green-500/40 bg-green-500/5' : 'border-red-500/40 bg-red-500/5'}`} data-testid={`card-position-${pos.ticket}`}>
+                          {/* Header da posição */}
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className={`p-2 rounded-lg ${pos.type === 'BUY' ? 'bg-green-500/20' : 'bg-red-500/20'}`}>
+                                {pos.type === 'BUY'
+                                  ? <TrendingUp className="h-5 w-5 text-green-500" />
+                                  : <TrendingDown className="h-5 w-5 text-red-500" />}
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <p className="font-bold text-lg">{pos.symbol}</p>
+                                  <Badge className={pos.type === 'BUY' ? 'bg-green-500' : 'bg-red-500'}>
+                                    {pos.type}
+                                  </Badge>
+                                </div>
+                                <p className="text-xs text-muted-foreground">Ticket #{pos.ticket} • {pos.lots} lote(s)</p>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <p className={`text-2xl font-bold ${isProfit ? 'text-green-500' : 'text-red-500'}`}>
+                                {isProfit ? '+' : ''}${pos.profit?.toFixed(2)}
+                              </p>
+                              <div className="flex items-center gap-1 text-xs text-muted-foreground justify-end">
+                                <Clock className="h-3 w-3" />
+                                <span>{formatDuration(duration)}</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Detalhes da posição */}
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                            <div className="bg-background/50 rounded-md p-2">
+                              <p className="text-muted-foreground">Entrada</p>
+                              <p className="font-mono font-bold">{pos.openPrice}</p>
+                            </div>
+                            <div className="bg-background/50 rounded-md p-2">
+                              <p className="text-muted-foreground">Preço Atual</p>
+                              <p className="font-mono font-bold">{pos.currentPrice || pos.openPrice}</p>
+                            </div>
+                            <div className="bg-background/50 rounded-md p-2">
+                              <p className="text-muted-foreground">Stop Loss</p>
+                              <p className={`font-mono font-bold ${pos.stopLoss > 0 ? 'text-red-500' : 'text-muted-foreground'}`}>
+                                {pos.stopLoss > 0 ? pos.stopLoss : 'IA monitora'}
+                              </p>
+                            </div>
+                            <div className="bg-background/50 rounded-md p-2">
+                              <p className="text-muted-foreground">Take Profit</p>
+                              <p className={`font-mono font-bold ${pos.takeProfit > 0 ? 'text-green-500' : 'text-muted-foreground'}`}>
+                                {pos.takeProfit > 0 ? pos.takeProfit : 'IA monitora'}
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Hora de abertura */}
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground border-t pt-2">
+                            <Clock className="h-3 w-3" />
+                            <span>Aberta às {formatTime(pos.openTime)}</span>
+                            {pos.signalId && (
+                              <>
+                                <span>•</span>
+                                <span>Sinal: {pos.signalId}</span>
+                              </>
+                            )}
+                            <span className="ml-auto flex items-center gap-1">
+                              <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+                              IA monitorando
+                            </span>
                           </div>
                         </div>
-                        <div className="text-right">
-                          <p className={`font-bold ${pos.profit >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                            {pos.profit >= 0 ? '+' : ''}${pos.profit?.toFixed(2)}
-                          </p>
-                          <p className="text-xs text-muted-foreground">@ {pos.openPrice}</p>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 ) : (
-                  <div className="text-center py-12 text-muted-foreground">
-                    <Activity className="h-10 w-10 mx-auto mb-3 opacity-30" />
-                    <p>Nenhuma posição aberta no momento</p>
+                  <div className="text-center py-16 text-muted-foreground">
+                    <Activity className="h-14 w-14 mx-auto mb-4 opacity-20" />
+                    <p className="font-medium">Nenhuma posição aberta no momento</p>
                     <p className="text-xs mt-1">O EA abrirá posições automaticamente com base nos sinais das IAs</p>
+                    <div className="flex items-center justify-center gap-1.5 mt-3 text-xs">
+                      <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                      <span>Monitorando mercado em tempo real</span>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="history" className="space-y-4 mt-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center justify-between text-base">
+                  <span className="flex items-center gap-2">
+                    <History className="h-5 w-5 text-muted-foreground" />
+                    Histórico de Operações Fechadas
+                  </span>
+                  <div className="flex items-center gap-2">
+                    {trades && trades.length > 0 && (
+                      <Badge variant="outline">
+                        {trades.filter((t: any) => t.profit >= 0).length} ganhos / {trades.filter((t: any) => t.profit < 0).length} perdas
+                      </Badge>
+                    )}
+                    <Badge variant="outline" className="text-xs gap-1">
+                      <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                      Ao vivo
+                    </Badge>
+                  </div>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {trades && trades.length > 0 ? (
+                  <>
+                    {/* Resumo */}
+                    <div className="grid grid-cols-3 gap-3 mb-4">
+                      <div className="bg-muted/30 rounded-lg p-3 text-center">
+                        <p className="text-xs text-muted-foreground">Total Operações</p>
+                        <p className="text-xl font-bold">{trades.length}</p>
+                      </div>
+                      <div className="bg-green-500/10 rounded-lg p-3 text-center">
+                        <p className="text-xs text-muted-foreground">Lucro Total</p>
+                        <p className="text-xl font-bold text-green-500">
+                          +${trades.filter((t: any) => t.profit > 0).reduce((acc: number, t: any) => acc + t.profit, 0).toFixed(2)}
+                        </p>
+                      </div>
+                      <div className="bg-red-500/10 rounded-lg p-3 text-center">
+                        <p className="text-xs text-muted-foreground">Perda Total</p>
+                        <p className="text-xl font-bold text-red-500">
+                          -${Math.abs(trades.filter((t: any) => t.profit < 0).reduce((acc: number, t: any) => acc + t.profit, 0)).toFixed(2)}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Lista de trades */}
+                    <div className="space-y-2 max-h-[600px] overflow-y-auto pr-1">
+                      {trades.map((trade: any, i: number) => (
+                        <div key={i} className={`p-3 rounded-lg border ${trade.profit >= 0 ? 'border-green-500/30 bg-green-500/5' : 'border-red-500/30 bg-red-500/5'}`} data-testid={`history-trade-${i}`}>
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-2">
+                              <Badge className={trade.type === 'BUY' ? 'bg-blue-500' : 'bg-purple-500'} variant="default">
+                                {trade.type}
+                              </Badge>
+                              <span className="font-bold">{trade.symbol}</span>
+                              <span className="text-xs text-muted-foreground">{trade.lots} lots • #{trade.ticket}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Badge variant="outline" className="text-xs">{trade.closeReason || 'CLOSED'}</Badge>
+                              <span className={`font-bold text-lg ${trade.profit >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                {trade.profit >= 0 ? '+' : ''}${trade.profit?.toFixed(2)}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs text-muted-foreground">
+                            <span>Entrada: <span className="font-mono text-foreground">{trade.openPrice || '—'}</span></span>
+                            <span>Saída: <span className="font-mono text-foreground">{trade.closePrice || '—'}</span></span>
+                            <span>Abertura: <span className="text-foreground">{formatTime(trade.openTime)}</span></span>
+                            <span>Fechamento: <span className="text-foreground">{formatTime(trade.closeTime)}</span></span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex flex-col items-center py-16 text-muted-foreground gap-3">
+                    <History className="h-14 w-14 opacity-20" />
+                    <p className="font-medium">Nenhuma operação fechada ainda nesta sessão</p>
+                    <p className="text-xs max-w-sm text-center">
+                      O histórico é registrado automaticamente quando o EA fecha posições e reporta ao servidor via <code>/trade/close</code>
+                    </p>
+                    <div className="flex items-center gap-1.5 text-xs">
+                      <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                      Aguardando fechamento de posições...
+                    </div>
                   </div>
                 )}
               </CardContent>
