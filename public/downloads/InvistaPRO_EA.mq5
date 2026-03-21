@@ -12,6 +12,14 @@
 #include <Trade\Trade.mqh>
 #include <Trade\PositionInfo.mqh>
 
+//--- Modo de Controle da IA
+enum ENUM_AI_CONTROL_MODE
+{
+   AI_MANUAL  = 0,  // Manual — Defino tudo, IA não decide nada
+   AI_PARTIAL = 1,  // Parcial — Escolho exatamente o que a IA controla
+   AI_FULL    = 2   // Total — IA controla 100% de forma autônoma
+};
+
 //--- Parâmetros de entrada
 input string   ServerURL        = "https://7352d23d-7673-4705-a8d7-9e8839cf09fa-00-1jh0r3h4kuy8w.worf.replit.dev"; // URL do servidor
 input string   DiscoveryBlobURL = "https://jsonblob.com/api/jsonBlob/019d0dd7-564d-7c0c-a833-9a25b3b70c81"; // URL de descoberta automática
@@ -19,12 +27,26 @@ input string   ApiToken         = "";          // Token de autenticação (opcio
 input string   Symbol_Override  = "";          // Símbolo (vazio = gráfico atual)
 input int      HeartbeatSeconds = 30;          // Intervalo do heartbeat (segundos)
 input int      SignalSeconds    = 5;           // Intervalo de busca de sinal (segundos)
-input double   LotSize          = 0.01;        // Tamanho do lote
 input int      MagicNumber      = 20250315;    // Número mágico
 input bool     AutoReconnect    = true;        // Reconexão automática de URL
 input int      MaxReconnectTries= 5;           // Tentativas máximas de reconexão
 input int      IndicatorBars    = 5;           // Quantas barras recentes dos indicadores ler
 input int      CandleCount      = 200;         // Candles para enviar à IA (histórico)
+
+//--- Controle de Autonomia da IA
+input ENUM_AI_CONTROL_MODE AIControlMode = AI_FULL; // Modo de Controle da IA
+
+//--- Parâmetros Manuais (usados no modo Manual ou Parcial quando IA não controla o item)
+input double   ManualLotSize    = 0.01;  // Lote (manual)
+input int      ManualStopLoss   = 0;     // Stop Loss em pontos — 0 = desativado (manual)
+input int      ManualTakeProfit = 0;     // Take Profit em pontos — 0 = desativado (manual)
+
+//--- Controle Parcial — marque o que a IA deve decidir (visível no modo Parcial)
+input bool     AI_Lote          = true;  // IA define o tamanho do lote
+input bool     AI_StopLoss      = true;  // IA define o Stop Loss
+input bool     AI_TakeProfit    = true;  // IA define o Take Profit
+input bool     AI_Entrada       = true;  // IA decide quando e se entrar
+input bool     AI_Saida         = true;  // IA decide quando sair (monitor de posições)
 
 //--- Variáveis globais
 string   g_serverUrl      = "";
@@ -77,6 +99,19 @@ int OnInit()
 
    Print("🚀 InvistaPRO EA v6.0 iniciado | Símbolo: ", g_symbol);
    Print("   → Perfil de ativo Deriv | SL/TP por indicadores reais | ", CandleCount, " candles históricos");
+
+   string modeLabel = "";
+   if (AIControlMode == AI_MANUAL)
+      modeLabel = "MANUAL — usuário define tudo (lote, SL, TP, entradas e saídas)";
+   else if (AIControlMode == AI_PARTIAL)
+      modeLabel = "PARCIAL — IA controla: Lote=" + (AI_Lote ? "sim" : "não") +
+                  " | SL=" + (AI_StopLoss ? "sim" : "não") +
+                  " | TP=" + (AI_TakeProfit ? "sim" : "não") +
+                  " | Entrada=" + (AI_Entrada ? "sim" : "não") +
+                  " | Saída=" + (AI_Saida ? "sim" : "não");
+   else
+      modeLabel = "TOTAL — IA controla 100% de forma autônoma";
+   Print("🤖 Modo de Controle da IA: ", modeLabel);
 
    ScanChartIndicators();
 
@@ -425,6 +460,7 @@ void OnTick()
 
 //+------------------------------------------------------------------+
 //| Monitor de posições — inclui leituras dos indicadores do gráfico  |
+//| Respeitando o Modo de Controle da IA (AI_Saida)                  |
 //+------------------------------------------------------------------+
 void MonitorOpenPositions()
 {
@@ -489,6 +525,16 @@ void MonitorOpenPositions()
       bool shouldClose = (action == "CLOSE_PROFIT"        ||
                           action == "CLOSE_SPIKE_EXIT"    ||
                           action == "CLOSE_LOSS_PREVENTION");
+
+      // Respeita modo de controle: em MANUAL ou PARCIAL com AI_Saida=false, IA não fecha posições
+      bool aiCanClose = (AIControlMode == AI_FULL) ||
+                        (AIControlMode == AI_PARTIAL && AI_Saida);
+      if (!aiCanClose && shouldClose)
+      {
+         Print("ℹ️ Monitor IA sugeriu ", action, " mas saída por IA está desativada (modo: ",
+               AIControlMode == AI_MANUAL ? "Manual" : "Parcial", ")");
+         shouldClose = false;
+      }
 
       if (shouldClose)
       {
@@ -583,7 +629,71 @@ void FetchAndProcessSignal()
    string reason       = ExtractJsonString(resp, "reason");
    string girassolBias = ExtractJsonString(resp, "girassolBias");
 
-   if (lotSize <= 0) lotSize = LotSize;
+   // === Aplicação do Modo de Controle da IA ===
+   if (AIControlMode == AI_MANUAL)
+   {
+      // Modo Manual: IA apenas informa direção — usuário controla tudo
+      Print("ℹ️ Modo MANUAL: usando parâmetros definidos pelo usuário");
+      lotSize    = ManualLotSize;
+      double point = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
+      stopLoss   = (ManualStopLoss   > 0) ? ManualStopLoss   * point : 0;
+      takeProfit = (ManualTakeProfit > 0) ? ManualTakeProfit * point : 0;
+      if (action == "BUY")
+      {
+         double entry = SymbolInfoDouble(g_symbol, SYMBOL_ASK);
+         if (stopLoss   > 0) stopLoss   = NormalizeDouble(entry - stopLoss,   _Digits);
+         if (takeProfit > 0) takeProfit = NormalizeDouble(entry + takeProfit, _Digits);
+      }
+      else if (action == "SELL")
+      {
+         double entry = SymbolInfoDouble(g_symbol, SYMBOL_BID);
+         if (stopLoss   > 0) stopLoss   = NormalizeDouble(entry + stopLoss,   _Digits);
+         if (takeProfit > 0) takeProfit = NormalizeDouble(entry - takeProfit, _Digits);
+      }
+   }
+   else if (AIControlMode == AI_PARTIAL)
+   {
+      // Modo Parcial: aplica IA apenas nos itens selecionados
+      if (!AI_Entrada)
+      {
+         Print("ℹ️ Modo PARCIAL: IA_Entrada=false — entrada bloqueada pelo usuário");
+         return;
+      }
+      double point = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
+      if (!AI_Lote || lotSize <= 0)
+         lotSize = ManualLotSize;
+      if (!AI_StopLoss)
+      {
+         double rawSL = (ManualStopLoss > 0) ? ManualStopLoss * point : 0;
+         if (rawSL > 0)
+         {
+            if (action == "BUY")  stopLoss = NormalizeDouble(SymbolInfoDouble(g_symbol, SYMBOL_ASK) - rawSL, _Digits);
+            else                   stopLoss = NormalizeDouble(SymbolInfoDouble(g_symbol, SYMBOL_BID) + rawSL, _Digits);
+         }
+         else stopLoss = 0;
+      }
+      if (!AI_TakeProfit)
+      {
+         double rawTP = (ManualTakeProfit > 0) ? ManualTakeProfit * point : 0;
+         if (rawTP > 0)
+         {
+            if (action == "BUY")  takeProfit = NormalizeDouble(SymbolInfoDouble(g_symbol, SYMBOL_ASK) + rawTP, _Digits);
+            else                   takeProfit = NormalizeDouble(SymbolInfoDouble(g_symbol, SYMBOL_BID) - rawTP, _Digits);
+         }
+         else takeProfit = 0;
+      }
+      slTpSource = "parcial_usuario_ia";
+      Print("ℹ️ Modo PARCIAL: Lote=", AI_Lote ? "IA" : "Manual",
+            " | SL=", AI_StopLoss ? "IA" : "Manual",
+            " | TP=", AI_TakeProfit ? "IA" : "Manual");
+   }
+   else // AI_FULL
+   {
+      // Modo Total: IA define tudo (comportamento padrão)
+      if (lotSize <= 0) lotSize = ManualLotSize;
+   }
+
+   if (lotSize <= 0) lotSize = ManualLotSize;
 
    string symUpper = g_symbol;
    StringToUpper(symUpper);
