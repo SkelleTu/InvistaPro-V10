@@ -2080,9 +2080,8 @@ export class AutoTradingScheduler {
             //   4% growth →  4 ticks → ~16.9% lucro
             //   5% growth →  3 ticks → ~15.8% lucro
             const minTicksByGrowthRate: Record<number, number> = userAccuTicksPerRate;
-            const baseExpectedTicks = supremeAnalysis?.adaptiveParams?.accumulator?.expectedTicks ?? 3;
             const minTicksForRate = minTicksByGrowthRate[adaptiveGrowth] ?? 3;
-            const accuTicks = Math.max(minTicksForRate, baseExpectedTicks);
+            const accuTicks = minTicksForRate;
             accuTargetTicks = accuTicks;
             console.log(`📊 [${operationId}] ACCU MODO-OPS: stake=$${accuStake} [${opportunityQuality}] (banca=$${bankBalance.toFixed(2)} | consenso=${consensus}% | risco=${accuRisk}) | growth=${(adaptiveGrowth*100).toFixed(0)}% ${growthModeLabel} | ticks=${accuTicks}${supremeAnalysis ? ` | regime=${regime} | hurst=${supremeAnalysis.statistics.hurstExponent.toFixed(2)}` : ''} | ${selectedSymbol}`);
             contract = await derivAPI.buyFlexibleContract({
