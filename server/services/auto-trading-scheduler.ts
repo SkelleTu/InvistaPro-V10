@@ -2000,43 +2000,28 @@ export class AutoTradingScheduler {
             return { success: false, error: `ACCU: ${selectedSymbol} (alta volatilidade) com regime desconhecido — bloqueado por segurança` };
           }
 
-          // 🧠 ACCU: stake inteligente — IA decide por operação (síncrono, zero latência)
-          // Usa apenas dados já calculados em memória: saldo em cache, consenso, regime, risco
+          // 🧠 ACCU: stake via IA por ativo — mesmo motor de calculateAIStakePercentage
           const accuRisk = supremeAnalysis?.adaptiveParams?.accumulator?.riskLevel ?? 'medium';
           {
             const bankBalance  = this.cachedBalance?.value ?? tradeParams.amount * 30;
             const consensus    = aiConsensus.consensusStrength ?? 50;
             const regime       = supremeAnalysis?.regime ?? 'unknown';
+            const hurst        = supremeAnalysis?.statistics?.hurstExponent ?? 0.5;
+            const vol          = aiConsensus.volatility ?? supremeAnalysis?.statistics?.shannonEntropy ?? 0.5;
+            const perf         = this.assetPerformance.get(selectedSymbol);
+            const totalPerfTrades = perf ? perf.wins + perf.losses : 0;
+            const assetWinRate = totalPerfTrades > 0 ? perf!.wins / totalPerfTrades : 0.55;
 
-            // Qualidade da oportunidade — totalmente síncrono, sem round-trip
-            type AccuQuality = 'exceptional' | 'good' | 'moderate' | 'minimum';
-            let opportunityQuality: AccuQuality = 'minimum';
-            if (consensus >= 90 && accuRisk === 'low' && (regime === 'strong_trend' || regime === 'calm')) {
-              opportunityQuality = 'exceptional'; // IA muito confiante + mercado ideal
-            } else if (consensus >= 80 && accuRisk !== 'high') {
-              opportunityQuality = 'good';        // Sinal forte, risco controlado
-            } else if (consensus >= 75 && accuRisk === 'low') {
-              opportunityQuality = 'moderate';    // Sinal razoável, apenas risco baixo (revertido: evita trades em risco médio)
-            }
-            // 'minimum' → consenso < 75% ou risco médio/alto → stake mínimo $1
+            // 🧠 IA calcula stake específico para ESTE ativo neste momento
+            let aiPct = this.calculateAIStakePercentage(consensus, regime, hurst, vol, assetWinRate, bankBalance);
 
-            // Teto pela banca: IA só arrisca mais quando a banca suporta
-            const pctByQuality: Record<AccuQuality, number> = {
-              exceptional: 0.030, // até 3% da banca
-              good:        0.020, // até 2%
-              moderate:    0.015, // até 1.5%
-              minimum:     0.000, // apenas $1 fixo
-            };
-            const maxByBank = Math.max(1.00, bankBalance * pctByQuality[opportunityQuality]);
+            // Redução adicional por risco do ACCU (barreira)
+            if      (accuRisk === 'high')    aiPct *= 0.70;
+            else if (accuRisk === 'medium')  aiPct *= 0.90;
+            // 'low' → sem penalidade
 
-            // Stake alvo: cresce com a qualidade, sempre dentro do teto da banca
-            const targetByQuality: Record<AccuQuality, number> = {
-              exceptional: maxByBank,
-              good:        Math.min(maxByBank, Math.max(1.00, bankBalance * 0.015)),
-              moderate:    Math.min(maxByBank, Math.max(1.00, bankBalance * 0.010)),
-              minimum:     1.00,
-            };
-            const accuStake = Math.round(targetByQuality[opportunityQuality] * 100) / 100;
+            const accuStake = Math.max(1.00, Math.round(bankBalance * aiPct * 100) / 100);
+            console.log(`🧠 [ACCU STAKE] ${selectedSymbol} | consenso=${consensus.toFixed(0)}% | regime=${regime} | risco=${accuRisk} | WR=${(assetWinRate*100).toFixed(0)}% → ${(aiPct*100).toFixed(1)}% × $${bankBalance.toFixed(2)} = $${accuStake.toFixed(2)}`);
 
             // 🧠 SUPREMO: growth_rate totalmente dinâmico — IA escolhe 1%-5% conforme volatilidade real
             // mercado em recuperação parcial → força 1% conservador
@@ -3403,46 +3388,83 @@ export class AutoTradingScheduler {
     return ticksAdjustment;
   }
 
+  /**
+   * Calcula o percentual de stake por ativo usando todos os dados da IA disponíveis.
+   * Combina: consenso, regime de mercado, Hurst, volatilidade e win rate histórico do ativo.
+   * Retorna um percentual da banca (ex: 0.13 = 13%).
+   */
+  private calculateAIStakePercentage(
+    consensus: number,
+    regime: string,
+    hurst: number,
+    volatility: number,
+    assetWinRate: number,
+    bankSize: number,
+  ): number {
+    // ── 1. Base por nível de consenso ──────────────────────────────────
+    let pct: number;
+    if      (consensus >= 93) pct = 0.18; // Sinal excepcional → 18%
+    else if (consensus >= 88) pct = 0.14; // Sinal muito forte → 14%
+    else if (consensus >= 83) pct = 0.10; // Sinal forte       → 10%
+    else if (consensus >= 77) pct = 0.07; // Sinal bom         →  7%
+    else                      pct = 0.04; // Sinal fraco       →  4%
+
+    // ── 2. Ajuste por regime de mercado ───────────────────────────────
+    if (regime === 'trending' && hurst > 0.60)      pct *= 1.20; // Tendência com persistência → mais
+    else if (regime === 'strong_trend')              pct *= 1.25; // Tendência forte → máximo
+    else if (regime === 'calm')                      pct *= 1.10; // Mercado calmo → bom
+    else if (regime === 'ranging' && hurst < 0.40)  pct *= 0.85; // Lateral com reversão → menos
+    else if (regime === 'chaotic')                   pct *= 0.70; // Caótico → muito conservador
+
+    // ── 3. Ajuste por win rate histórico do ativo ─────────────────────
+    if      (assetWinRate > 0.72) pct *= 1.18; // ativo consistente → confiar mais
+    else if (assetWinRate > 0.60) pct *= 1.08;
+    else if (assetWinRate < 0.40) pct *= 0.75; // ativo problemático → reduzir
+    else if (assetWinRate < 0.50) pct *= 0.90;
+
+    // ── 4. Guarda de volatilidade ──────────────────────────────────────
+    if      (volatility > 0.80) pct *= 0.80; // alta volatilidade → proteger
+    else if (volatility > 0.65) pct *= 0.90;
+    else if (volatility < 0.25) pct *= 1.10; // baixa volatilidade → aproveitar
+
+    // ── 5. Teto adaptativo por tamanho da banca ────────────────────────
+    // Bancas pequenas têm teto maior (%) para conseguir superar o mínimo Deriv ($0.35-$1)
+    const maxPct = bankSize <= 20  ? 0.22 // até $4.40 max em $20
+                 : bankSize <= 50  ? 0.16
+                 : bankSize <= 200 ? 0.10
+                 : bankSize <= 1000? 0.07
+                 :                   0.05;
+
+    return Math.min(pct, maxPct);
+  }
+
   private async getTradeParamsForMode(mode: string, symbol: string, direction: string, userId: string, consensoStrength?: number, volatility?: number): Promise<{amount: number, duration: number, barrier: string}> {
     let amount = 0.35; // Default para bancas pequenas (conservador)
     let duration = 10; // ⚡ OTIMIZAÇÃO: Aumentado de 5 para 10 ticks para distribuir fechamento
     
-    // 🎯 CALCULAR STAKE BASEADO NO TAMANHO DA BANCA + CONSENSO DINÂMICO
+    // 🎯 CALCULAR STAKE VIA IA — por ativo, por sinal, por regime
     try {
       // Buscar saldo do usuário
       const balanceAnalysis = await storage.getBalanceAnalysis(userId);
       
       if (balanceAnalysis && balanceAnalysis.currentBalance > 0) {
         const bankSize = balanceAnalysis.currentBalance;
-        
-        // 💰 SISTEMA DE STAKE CONSERVADOR PROGRESSIVO
-        // Banca pequena (até $10): 0.35 fixo (3.5% de $10)
-        // Banca média ($10-$50): 0.5% a 1% da banca
-        // Banca grande ($50-$200): 0.75% da banca
-        // Banca muito grande (>$200): 1% da banca (max conservador)
-        
-        if (bankSize <= 10) {
-          amount = 0.35; // Fixo para bancas pequenas
-          console.log(`💰 [STAKE] Banca pequena ($${bankSize.toFixed(2)}): stake fixo $${amount}`);
-        } else if (bankSize <= 50) {
-          amount = bankSize * 0.007; // 0.7% da banca
-          amount = Math.max(0.35, Math.min(amount, 0.50)); // Entre $0.35 e $0.50
-          console.log(`💰 [STAKE] Banca média ($${bankSize.toFixed(2)}): stake $${amount.toFixed(2)} (0.7%)`);
-        } else if (bankSize <= 200) {
-          amount = bankSize * 0.0075; // 0.75% da banca
-          amount = Math.max(0.50, Math.min(amount, 1.50)); // Entre $0.50 e $1.50
-          console.log(`💰 [STAKE] Banca grande ($${bankSize.toFixed(2)}): stake $${amount.toFixed(2)} (0.75%)`);
-        } else {
-          amount = bankSize * 0.01; // 1% da banca base
-          // Teto dinâmico proporcional à banca — elimina o cap fixo de $3
-          const dynamicMax = bankSize <= 1000
-            ? Math.max(3.00, bankSize * 0.005)  // $200-$1000: 0.5% da banca
-            : bankSize <= 10000
-              ? bankSize * 0.004                  // $1000-$10000: 0.4% da banca
-              : bankSize * 0.003;                 // >$10000: 0.3% da banca (proteção extra)
-          amount = Math.max(1.00, Math.min(amount, dynamicMax));
-          console.log(`💰 [STAKE] Banca muito grande ($${bankSize.toFixed(2)}): stake $${amount.toFixed(2)} (${(amount/bankSize*100).toFixed(2)}% — teto=$${dynamicMax.toFixed(2)})`);
-        }
+
+        // Dados de IA disponíveis para decisão de stake
+        const consensus  = consensoStrength ?? 50;
+        const vol        = volatility ?? 0.5;
+        const supreme    = supremeAnalyzer.getLatestAnalysis(symbol);
+        const regime     = supreme?.regime ?? 'unknown';
+        const hurst      = supreme?.statistics?.hurstExponent ?? 0.5;
+        const perf       = this.assetPerformance.get(symbol);
+        const totalTrades = perf ? perf.wins + perf.losses : 0;
+        const winRate    = totalTrades > 0 ? perf!.wins / totalTrades : 0.55; // Prior favorável
+
+        // 🧠 IA CALCULA O STAKE: percentual específico para este ativo + sinal
+        const aiPct = this.calculateAIStakePercentage(consensus, regime, hurst, vol, winRate, bankSize);
+        amount = Math.max(0.35, Math.round(bankSize * aiPct * 100) / 100);
+
+        console.log(`🧠 [AI STAKE] ${symbol} | consenso=${consensus.toFixed(0)}% | regime=${regime} | hurst=${hurst.toFixed(2)} | vol=${(vol*100).toFixed(0)}% | WR=${(winRate*100).toFixed(0)}% | ${(aiPct*100).toFixed(1)}% × $${bankSize.toFixed(2)} = $${amount.toFixed(2)}`);
         
         // 🔺 RECOVERY STAKE — calcular stake baseado no déficit a recuperar
         // Objetivo: um único trade bem-sucedido cobre o déficit + 15% de lucro extra.
@@ -3474,17 +3496,17 @@ export class AutoTradingScheduler {
           }
         }
 
-        // 🚀 APLICAR FLEXIBILIDADE DINÂMICA (se consenso fornecido)
-        // Em recovery: sem cushion amplification (calculateDynamicStake detecta o modo)
-        if (consensoStrength !== undefined) {
-          amount = this.calculateDynamicStake(amount, consensoStrength, volatility || 0.5);
-        }
+        // calculateDynamicStake() removido: calculateAIStakePercentage() já incorpora
+        // consenso, volatilidade, regime e win rate — segunda passagem causaria over-amplification.
 
-        // 🛡️ SAFETY CAP — em recovery: 12% da banca (seguro abaixo do limite de proteção de 15%); normal: 4%
-        // 4% permite amplificação ×1.6 em bancas acima de $8.75 sem corte, preservando a banca menor
+        // 🛡️ SAFETY CAP ADAPTATIVO — alinhado com calculateAIStakePercentage (teto da IA)
+        // Bancas pequenas têm teto % maior para permitir superar o mínimo Deriv ($0.35-$1)
         const inRecovery = realStatsTracker.isPostLossMode();
-        const capPct = inRecovery ? 0.12 : 0.04;
-        // Em recovery: mínimo de $1.00 (mínimo do ACCU); normal: $0.35
+        const capPct = bankSize <= 20  ? 0.25  // ≤$20: até 25% ($5 max em $20)
+                     : bankSize <= 50  ? 0.18  // $20-50: 18%
+                     : bankSize <= 200 ? 0.12  // $50-200: 12%
+                     : bankSize <= 1000? 0.08  // $200-1000: 8%
+                     :                  0.06;  // >$1000: 6%
         const minFloor = inRecovery ? 1.00 : 0.35;
         const maxSafeStake = Math.max(minFloor, bankSize * capPct);
         if (amount > maxSafeStake) {
