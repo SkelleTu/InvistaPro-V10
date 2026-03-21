@@ -663,7 +663,7 @@ export class SupremeMarketAnalyzer extends EventEmitter {
     oppDir:   'up' | 'down' | 'neutral',
     symbol:   string
   ): AdaptiveContractParams {
-    const isSymbolDigit = /^(R_|1HZ|JD|RDBULL|RDBEAR)/.test(symbol);
+    const isSymbolDigit = /^(R_|JD|RDBULL|RDBEAR)/.test(symbol);
 
     // ── Escolha de Modalidade ──
     const { modality, modalityScore } = this.selectBestModality(regime, stats, mtf, micro, oppScore, oppDir, isSymbolDigit);

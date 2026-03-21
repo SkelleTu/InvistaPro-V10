@@ -39,7 +39,8 @@ export class AutoTradingScheduler {
   private isInitialized: boolean = false;
   
   // 🚫 BLOQUEADO 100%: Ativos causadores de loss - NUNCA serão operados
-  private static readonly BLOCKED_SYMBOLS_PATTERN = /\(1s\)/i;
+  // Cobre tanto o formato "(1s)" quanto o formato de API "1HZ*" (são os mesmos ativos)
+  private static readonly BLOCKED_SYMBOLS_PATTERN = /\(1s\)|^1HZ/i;
   
   /**
    * Validar se símbolo está bloqueado (causador de loss)
@@ -674,7 +675,6 @@ export class AutoTradingScheduler {
     // 3. Escanear todos os ativos com análise recente (< 90s) buscando condição excepcional
     const ACCU_SYMBOLS = [
       'R_10','R_25','R_50','R_75','R_100',
-      '1HZ10V','1HZ25V','1HZ50V','1HZ75V','1HZ100V',
       'JD10','JD25','JD50','JD75','JD100',
       'RDBULL','RDBEAR',
     ];
@@ -1724,11 +1724,6 @@ export class AutoTradingScheduler {
         // Volatility Indices (R_10, R_25, R_50, R_75, R_100):
         //   suportam tudo exceto Turbos e Vanillas (disponíveis apenas em conta real/forex)
         const VOL_BASE   = [...DIGIT_KEYS, ...RISFALL_KEYS, ...INOUT_KEYS, ...TOUCH_KEYS, ...MULT_KEYS, ...ACCU_KEYS, ...LB_KEYS];
-        // 1HZ Indices com suporte completo (10, 25, 50, 75, 100):
-        //   suportam dígitos, rise/fall, in/out, touch, multiplicadores, acumuladores
-        const HZ_FULL    = [...DIGIT_KEYS, ...RISFALL_KEYS, ...INOUT_KEYS, ...TOUCH_KEYS, ...MULT_KEYS, ...ACCU_KEYS];
-        // 1HZ Indices básicos (15, 30, 90): sem multiplicadores/acumuladores
-        const HZ_BASIC   = [...DIGIT_KEYS, ...RISFALL_KEYS, ...INOUT_KEYS, ...TOUCH_KEYS];
         // Jump Indices (JD10..JD100): apenas dígitos e rise/fall (Deriv não suporta INOUT/TOUCH nesses)
         const JUMP_OK    = [...DIGIT_KEYS, ...RISFALL_KEYS];
         // Range Break (RDBULL, RDBEAR): apenas dígitos e rise/fall
@@ -1739,9 +1734,6 @@ export class AutoTradingScheduler {
         const SYMBOL_COMPAT: Record<string, string[]> = {
           'R_10': VOL_BASE,   'R_25': VOL_BASE,   'R_50': VOL_BASE,
           'R_75': VOL_BASE,   'R_100': VOL_100,
-          '1HZ10V': HZ_FULL,  '1HZ25V': HZ_FULL,  '1HZ50V': HZ_FULL,
-          '1HZ75V': HZ_FULL,  '1HZ100V': HZ_FULL,
-          '1HZ15V': HZ_BASIC, '1HZ30V': HZ_BASIC, '1HZ90V': HZ_BASIC,
           'JD10': JUMP_OK,    'JD25': JUMP_OK,    'JD50': JUMP_OK,
           'JD75': JUMP_OK,    'JD100': JUMP_OK,
           'RDBULL': RDB_OK,   'RDBEAR': RDB_OK,
@@ -2000,22 +1992,11 @@ export class AutoTradingScheduler {
 
           // Volatilidade extrema: R_75 e R_100 têm volatilidade inerentemente alta — 
           // só entrar se o regime for CONFIRMADO (não 'unknown')
-          const isHighVolSymbol = /R_75|R_100|1HZ75V|1HZ100V/.test(selectedSymbol);
+          const isHighVolSymbol = /R_75|R_100/.test(selectedSymbol);
           if (isHighVolSymbol && regimeUnknown) {
             console.warn(`⛔ [${operationId}] ACCU BLOQUEADO: ${selectedSymbol} tem alta volatilidade nativa e regime desconhecido — risco de knockout elevado.`);
             this.setPhase('AGUARDANDO', `⛔ ACCU bloqueado: ${selectedSymbol} é de alta volatilidade e regime está desconhecido`, 'warning');
             return { success: false, error: `ACCU: ${selectedSymbol} (alta volatilidade) com regime desconhecido — bloqueado por segurança` };
-          }
-
-          // 🚫 BLOQUEIO 1HZ EM ACCU: índices 1s têm barreiras de knockout muito próximas
-          // Com 1 tick/segundo, a barreira é atingida muito mais facilmente → alta taxa de loss
-          // Só permitir 1HZ em ACCU se o regime for strong_trend (tendência clara e confirmada)
-          const is1HzSymbol = /^1HZ/.test(selectedSymbol);
-          const supremeRegime = supremeAnalysis?.regime ?? 'unknown';
-          if (is1HzSymbol && supremeRegime !== 'strong_trend') {
-            console.warn(`⛔ [${operationId}] ACCU BLOQUEADO: ${selectedSymbol} é índice 1s (1Hz) — barreiras apertadas demais. Regime atual: ${supremeRegime} (exige strong_trend para ACCU).`);
-            this.setPhase('AGUARDANDO', `⛔ ACCU bloqueado: ${selectedSymbol} (1Hz) requer regime strong_trend`, 'warning');
-            return { success: false, error: `ACCU: ${selectedSymbol} (índice 1s) bloqueado em regime ${supremeRegime} — exige strong_trend para operar acumulador` };
           }
 
           // 🧠 ACCU: stake inteligente — IA decide por operação (síncrono, zero latência)
@@ -2525,17 +2506,12 @@ export class AutoTradingScheduler {
       const _VANILLA_K = ['vanilla_call','vanilla_put'];
       const _LB_K      = ['lookback_high_close','lookback_close_low','lookback_high_low'];
       const _VOL_BASE  = [..._DIGIT_K, ..._RF_K, ..._INOUT_K, ..._TOUCH_K, ..._MULT_K, ..._ACCU_K, ..._LB_K];
-      const _HZ_FULL   = [..._DIGIT_K, ..._RF_K, ..._INOUT_K, ..._TOUCH_K, ..._MULT_K, ..._ACCU_K];
-      const _HZ_BASIC  = [..._DIGIT_K, ..._RF_K, ..._INOUT_K, ..._TOUCH_K];
       const _JUMP_OK   = [..._DIGIT_K, ..._RF_K];
       const _RDB_OK    = [..._DIGIT_K, ..._RF_K];
       const _VOL_100   = [..._VOL_BASE, ..._TURBO_K, ..._VANILLA_K];
       const _COMPAT: Record<string, string[]> = {
         'R_10': _VOL_BASE,  'R_25': _VOL_BASE,   'R_50': _VOL_BASE,
         'R_75': _VOL_BASE,  'R_100': _VOL_100,
-        '1HZ10V': _HZ_FULL, '1HZ25V': _HZ_FULL,  '1HZ50V': _HZ_FULL,
-        '1HZ75V': _HZ_FULL, '1HZ100V': _HZ_FULL,
-        '1HZ15V': _HZ_BASIC,'1HZ30V': _HZ_BASIC, '1HZ90V': _HZ_BASIC,
         'JD10': _JUMP_OK,   'JD25': _JUMP_OK,    'JD50': _JUMP_OK,
         'JD75': _JUMP_OK,   'JD100': _JUMP_OK,
         'RDBULL': _RDB_OK,  'RDBEAR': _RDB_OK,

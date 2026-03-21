@@ -2904,15 +2904,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         { symbol: 'R_100', displayName: 'Volatility 100', category: 'Volatility Indices', supportsDigitDiff: true },
         { symbol: 'R_250', displayName: 'Volatility 250', category: 'Volatility Indices', supportsDigitDiff: true },
         
-        // 1Hz Volatility
-        { symbol: '1HZ10V', displayName: '1Hz Volatility 10', category: 'High Frequency', supportsDigitDiff: true },
-        { symbol: '1HZ25V', displayName: '1Hz Volatility 25', category: 'High Frequency', supportsDigitDiff: true },
-        { symbol: '1HZ50V', displayName: '1Hz Volatility 50', category: 'High Frequency', supportsDigitDiff: true },
-        { symbol: '1HZ75V', displayName: '1Hz Volatility 75', category: 'High Frequency', supportsDigitDiff: true },
-        { symbol: '1HZ100V', displayName: '1Hz Volatility 100', category: 'High Frequency', supportsDigitDiff: true },
-        { symbol: '1HZ15V', displayName: '1Hz Volatility 15', category: 'High Frequency', supportsDigitDiff: true },
-        { symbol: '1HZ30V', displayName: '1Hz Volatility 30', category: 'High Frequency', supportsDigitDiff: true },
-        { symbol: '1HZ90V', displayName: '1Hz Volatility 90', category: 'High Frequency', supportsDigitDiff: true },
         
         // Crash/Boom Indices
         { symbol: 'Crash 300', displayName: 'Crash 300 Index', category: 'Crash/Boom', supportsDigitDiff: true },

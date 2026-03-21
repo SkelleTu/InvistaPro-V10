@@ -26,11 +26,11 @@ export class MarketDataCollector extends EventEmitter {
   // 🎯 FALLBACK SEGURO: Símbolos que SEMPRE suportam DIGITDIFF (garantido pela Deriv)
   private static readonly FALLBACK_SYMBOLS = [
     'R_10', 'R_25', 'R_50', 'R_75', 'R_100',
-    '1HZ10V', '1HZ25V', '1HZ50V', '1HZ75V', '1HZ100V'
   ];
   
   // 🚫 BLOQUEADO 100%: Ativos causadores de loss - NUNCA serão operados
-  private static readonly BLOCKED_SYMBOLS_PATTERN = /\(1s\)/i;
+  // Cobre tanto o formato "(1s)" quanto o formato de API "1HZ*" (são os mesmos ativos)
+  private static readonly BLOCKED_SYMBOLS_PATTERN = /\(1s\)|^1HZ/i;
   
   // 🎯 DINÂMICO: CARREGADO DA DERIV EM TEMPO REAL
   // Sistema agora descobri automaticamente TODOS os ativos que suportam DIGITDIFF

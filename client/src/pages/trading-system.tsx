@@ -537,9 +537,6 @@ function getContractInfo(op: any): {
 function getAssetLabel(symbol: string): string {
   const MAP: Record<string, string> = {
     'R_10': 'Vol. 10', 'R_25': 'Vol. 25', 'R_50': 'Vol. 50', 'R_75': 'Vol. 75', 'R_100': 'Vol. 100',
-    '1HZ10V': '1s Vol. 10', '1HZ25V': '1s Vol. 25', '1HZ50V': '1s Vol. 50',
-    '1HZ75V': '1s Vol. 75', '1HZ100V': '1s Vol. 100',
-    '1HZ15V': '1s Vol. 15', '1HZ30V': '1s Vol. 30', '1HZ90V': '1s Vol. 90',
     'JD10': 'Jump 10', 'JD25': 'Jump 25', 'JD50': 'Jump 50', 'JD75': 'Jump 75', 'JD100': 'Jump 100',
     'RDBULL': 'Range Break Bull', 'RDBEAR': 'Range Break Bear',
   };
@@ -2367,7 +2364,7 @@ export default function TradingSystemPage() {
                     <span>Símbolos para Digit Differs</span>
                   </h4>
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                    {['R_50', 'R_75', 'R_100', '1HZ50V', '1HZ75V', '1HZ100V'].map((symbol) => (
+                    {['R_50', 'R_75', 'R_100', 'JD50', 'JD75', 'JD100'].map((symbol) => (
                       <div key={symbol} className="p-2 border rounded-lg text-center">
                         <div className="text-sm font-medium">{symbol}</div>
                         <div className="text-xs text-green-600">✓ Ativo</div>

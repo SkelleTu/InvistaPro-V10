@@ -112,7 +112,7 @@ export class QuantumNeuralSystem {
     console.log('🌌 [QUANTUM] Inicializando estados quânticos...');
     
     // Criar estados quânticos para cada símbolo
-    const symbols = ['R_50', 'R_75', 'R_100', '1HZ50V', '1HZ75V', '1HZ100V'];
+    const symbols = ['R_50', 'R_75', 'R_100', 'JD50', 'JD75', 'JD100'];
     
     for (const symbol of symbols) {
       const quantumState = [];
