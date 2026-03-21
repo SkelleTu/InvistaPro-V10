@@ -2067,7 +2067,7 @@ export class AutoTradingScheduler {
             } else {
               // Shannon Entropy como proxy de volatilidade (0=previsível=baixa vol, 1=caótico=alta vol)
               const mktVol = supremeAnalysis?.statistics?.shannonEntropy ?? 0.5;
-              const { rate, reason } = this.selectAccumulatorGrowthRate(mktVol, consensus);
+              const { rate, reason } = this.selectAccumulatorGrowthRate(mktVol, consensus, allowedAccuGrowthRates);
               adaptiveGrowth = rate;
               growthModeLabel = `IA (${reason})`;
             }
