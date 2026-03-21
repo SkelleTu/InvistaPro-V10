@@ -1495,8 +1495,12 @@ class MetaTraderBridge extends EventEmitter {
 
   recordHeartbeat(accountData: { accountId: string; broker: string; balance: number; equity: number; freeMargin: number }): void {
     this.status.lastHeartbeat = Date.now();
-    this.status.accountId = accountData.accountId;
-    this.status.broker = accountData.broker;
+    // Só sobrescrever accountId/broker se trouxer valor real (não o placeholder automático)
+    const isRealId = accountData.accountId && accountData.accountId !== 'EA_AUTO';
+    const isRealBroker = accountData.broker && accountData.broker !== 'MT5' && accountData.broker !== 'Unknown';
+    if (isRealId) this.status.accountId = accountData.accountId;
+    else if (!this.status.accountId) this.status.accountId = accountData.accountId;
+    if (isRealBroker) this.status.broker = accountData.broker;
     // Salvar saldo em tempo real — usado pela memória de contexto de posições
     if (accountData.balance > 0) this.currentBalance = accountData.balance;
     if (accountData.equity > 0) this.currentEquity = accountData.equity;

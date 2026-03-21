@@ -46,9 +46,10 @@ router.get('/signal', (req: Request, res: Response) => {
     if (config.apiToken && token !== config.apiToken) {
       return res.status(401).json({ error: 'Token inválido' });
     }
-    // Auto-registrar conexão quando o EA chama o endpoint de sinal
-    // Funciona mesmo sem heartbeat explícito (compatível com qualquer versão do EA)
-    if (!config.enabled) {
+    // Registrar heartbeat apenas quando o EA faz polling (tem parâmetro symbol)
+    // Isso evita que o dashboard (sem symbol) mantenha o heartbeat vivo falsamente
+    const symbolStr = (symbol as string) || '';
+    if (symbolStr) {
       const accId = (accountId as string) || 'EA_AUTO';
       metaTraderBridge.recordHeartbeat({
         accountId: accId,
@@ -57,10 +58,21 @@ router.get('/signal', (req: Request, res: Response) => {
         equity: 0,
         freeMargin: 0
       });
-      console.log(`[MT5Bridge] 🔌 Conexão auto-registrada via sinal (accountId: ${accId})`);
     }
-    const symbolStr = (symbol as string) || config.symbols[0] || 'EURUSD';
-    const signal = metaTraderBridge.getPendingSignal(symbolStr);
+    const resolvedSymbol = symbolStr || config.symbols[0] || 'EURUSD';
+    const signal = metaTraderBridge.getPendingSignal(resolvedSymbol);
+
+    // Se não há sinal pendente mas há dados de mercado disponíveis, gerar sob demanda
+    if ((!signal || signal.action === 'HOLD') && symbolStr && config.enabled) {
+      const hasData = metaTraderBridge.getMarketData(resolvedSymbol).length >= 15;
+      if (hasData) {
+        // Dispara geração em segundo plano; próximo poll do EA receberá o sinal
+        setImmediate(() => {
+          metaTraderBridge.generateSignal(resolvedSymbol).catch(() => {});
+        });
+      }
+    }
+
     if (!signal || signal.action === 'HOLD') {
       return res.json({
         action: 'HOLD',
@@ -107,6 +119,7 @@ router.post('/signal-with-indicators', async (req: Request, res: Response) => {
       indicatorSignals,   // { girassol: {...}, fibonacci: {...} }
       indicatorBuffers,   // array bruto de todos os buffers
       indicatorCount,
+      accountId: bodyAccountId,
       token
     } = req.body;
 
@@ -114,11 +127,21 @@ router.post('/signal-with-indicators', async (req: Request, res: Response) => {
     if (config.apiToken && token && token !== config.apiToken) {
       return res.status(401).json({ error: 'Token inválido' });
     }
-    if (!config.enabled) {
-      return res.json({ action: 'HOLD', reason: 'Sistema desabilitado', confidence: 0 });
-    }
     if (!symbol) {
       return res.status(400).json({ error: 'symbol é obrigatório' });
+    }
+
+    // Registrar heartbeat — EA v5.0 usa este endpoint como canal principal
+    metaTraderBridge.recordHeartbeat({
+      accountId: bodyAccountId || 'EA_AUTO',
+      broker: 'MT5',
+      balance: 0,
+      equity: 0,
+      freeMargin: 0
+    });
+
+    if (!config.enabled) {
+      return res.json({ action: 'HOLD', reason: 'Sistema desabilitado', confidence: 0 });
     }
 
     const sym = symbol as string;
@@ -952,8 +975,8 @@ void UpdateOpenPositions() {
       double current = posInfo.PriceCurrent();
       
       string closeReason = "";
-      if(dailyLoss >= MaxDailyLoss)     closeReason = "SL";
-      if(dailyProfit >= MaxDailyProfit) closeReason = "TP";
+      if(dailyLoss >= GetEffectiveMaxDailyLoss())     closeReason = "SL";
+      if(dailyProfit >= GetEffectiveMaxDailyProfit()) closeReason = "TP";
       
       if(closeReason != "") {
          trade.PositionClose(ticket);
