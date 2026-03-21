@@ -3,10 +3,28 @@
 ## 🤖 METATRADER INTEGRATION - Março 2026
 
 ### Arquitetura MT4/MT5
-- **`server/services/metatrader-bridge.ts`** - Serviço bridge central: gera sinais via 5 IAs, gerencia posições e resultados
-- **`server/routes/metatrader-routes.ts`** - Endpoints REST `/api/mt5/*` consumidos pelo EA
+- **`server/services/metatrader-bridge.ts`** - Serviço bridge central: gera sinais via 5 IAs, gerencia posições e resultados. Inclui DERIV_SYNTHETIC_PROFILES (base de conhecimento completa de todos os ativos sintéticos Deriv), calcIndicatorDrivenSLTP() (SL/TP guiado pelos indicadores reais instalados no MT5), runAssetAdaptedTechnicalAnalysis() (análise técnica com limiares adaptados por ativo), getAssetAIContext() e getDerivSyntheticProfile()
+- **`server/routes/metatrader-routes.ts`** - Endpoints REST `/api/mt5/*` consumidos pelo EA. Inclui `/asset-profile/:symbol` para retornar perfil completo do ativo, e refinamento de SL/TP via indicadores reais no endpoint `signal-with-indicators`
 - **`client/src/pages/metatrader-page.tsx`** - Dashboard completo: status, sinais, posições, configuração, download do EA
 - Rota frontend: `/metatrader`
+
+### Deriv Synthetic Asset Knowledge Base
+Perfis completos e específicos para todos os ativos sintéticos da Deriv:
+- **Volatility Indices**: R_10, R_25, R_50, R_75, R_100 (e variantes HZ 1s)
+- **Crash Indices**: Crash 300, 500, 1000 (spike-dominant, direção DOWN)
+- **Boom Indices**: Boom 300, 500, 1000 (spike-dominant, direção UP)
+- **Step Index**: range-bound, movimento 0.1 por tick
+- **Jump Indices**: Jump 10, Jump 25
+- **Range Break**: RDBEAR, RDBULL (range-bound com breakout)
+- **DEX Indices**: DEX 600 Up/Down
+
+Cada perfil inclui: RSI thresholds específicos, SL/TP ATR multipliers, comportamentos, indicadores ideais e contexto para as IAs.
+
+### Indicator-Driven SL/TP (4-Priority System)
+1. Níveis reais do indicador Girassol (suporte/resistência) instalado no MT5
+2. Níveis Fibonacci do indicador automático instalado no gráfico
+3. Buffers brutos de qualquer indicador (SL/TP diretamente do buffer)
+4. Perfil do ativo + ATR (fallback inteligente por ativo)
 
 ### Fluxo de Comunicação
 ```

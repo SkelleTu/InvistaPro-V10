@@ -302,6 +302,664 @@ export interface AIAnalysisEntry {
   candlesAvailable?: number;
 }
 
+// ============================================================
+// DERIV SYNTHETIC ASSET KNOWLEDGE BASE
+// Perfil completo de cada ativo sintético da Deriv.
+// As IAs usam isso para adaptar indicadores, SL/TP e entradas.
+// ============================================================
+
+export interface DerivSyntheticProfile {
+  family: string;
+  description: string;
+  alwaysOpen: boolean;
+  spikeIndex: boolean;
+  volClass: 'ultra-low' | 'low' | 'medium' | 'high' | 'ultra-high';
+  slAtrMultiplier: number;
+  tpAtrMultiplier: number;
+  minSlPips: number;
+  maxSlPips: number;
+  minTpPips: number;
+  maxTpPips: number;
+  rsiOversold: number;
+  rsiOverbought: number;
+  trendType: 'directional' | 'mean-reverting' | 'spike-dominant' | 'range-bound' | 'hybrid';
+  indicatorNotes: string;
+  behaviorKnowledge: string[];
+  optimalTimeframe: string;
+  useFibonacci: boolean;
+  spikeFrequency?: string;
+  spikeDirection?: 'both' | 'down' | 'up';
+  jumpProbability?: number;
+  aiContextHint: string;
+  tickSize: number;
+  avgDailyRange: number;
+}
+
+const DERIV_SYNTHETIC_PROFILES: Record<string, DerivSyntheticProfile> = {
+  // ── VOLATILITY INDICES ──────────────────────────────────────
+  'R_10': {
+    family: 'Volatility Index',
+    description: 'Volatility 10 Index — volatilidade sintética de 10%, mercado mais calmo e previsível da família',
+    alwaysOpen: true,
+    spikeIndex: false,
+    volClass: 'ultra-low',
+    slAtrMultiplier: 1.2,
+    tpAtrMultiplier: 2.5,
+    minSlPips: 3, maxSlPips: 15, minTpPips: 6, maxTpPips: 40,
+    rsiOversold: 35, rsiOverbought: 65,
+    trendType: 'mean-reverting',
+    indicatorNotes: 'RSI funciona bem entre 35-65. Bollinger Bands são excelentes — o preço retorna à média com alta frequência. EMAs respondem lentamente. Girassol tem excelente taxa de acerto neste ativo.',
+    behaviorKnowledge: [
+      'O V10 é o ativo de menor volatilidade da família — movimentos pequenos e contínuos',
+      'Reversões à média muito frequentes — RSI <35 ou >65 são sinais fortes de reversão',
+      'Bollinger Bands squeeze seguido de expansão é padrão recorrente',
+      'Tendências são curtas — raramente mantém direção por mais de 20-30 candles',
+      'ADX raramente supera 25 — operar contra ADX alto é seguro neste ativo',
+      'Ideal para estratégias de range trading com Girassol como confirmador',
+      'SL pequeno (3-15 pips) funciona bem pela baixa volatilidade',
+      'O ativo opera 24/7 sem gaps — perfeito para automação contínua',
+    ],
+    optimalTimeframe: 'M1, M5',
+    useFibonacci: true,
+    aiContextHint: 'Ativo de baixíssima volatilidade (10%). IAs devem priorizar sinais de reversão à média. RSI e Bollinger são os indicadores mais confiáveis. Evitar seguir tendências longas.',
+    tickSize: 0.01,
+    avgDailyRange: 15,
+  },
+  'R_25': {
+    family: 'Volatility Index',
+    description: 'Volatility 25 Index — volatilidade sintética de 25%, bom equilíbrio entre tendência e reversão',
+    alwaysOpen: true,
+    spikeIndex: false,
+    volClass: 'low',
+    slAtrMultiplier: 1.4,
+    tpAtrMultiplier: 2.8,
+    minSlPips: 5, maxSlPips: 25, minTpPips: 10, maxTpPips: 60,
+    rsiOversold: 33, rsiOverbought: 67,
+    trendType: 'hybrid',
+    indicatorNotes: 'Bom equilíbrio entre trend-following e mean-reversion. MACD funciona bem para tendências. RSI dá bons sinais de entrada em reversões. Girassol e Fibonacci combinam bem.',
+    behaviorKnowledge: [
+      'V25 tem movimentos maiores que V10 mas ainda gerenciáveis com SL médio',
+      'Tendências de médio prazo são mais frequentes — MACD é confiável',
+      'RSI <33 e >67 são zonas de alta probabilidade de reversão',
+      'Cruzamentos de EMA20/EMA50 funcionam bem neste ativo',
+      'Fibonacci multi-layer tem boa efetividade — confluências de 2+ camadas são muito confiáveis',
+      'ADX acima de 25 indica tendência forte — seguir a direção com TP maior',
+      'Bollinger Bands mais amplas que o V10 — squeeze são menos frequentes mas muito poderosos',
+      'Opera 24/7 — sem horários preferenciais',
+    ],
+    optimalTimeframe: 'M5, M15',
+    useFibonacci: true,
+    aiContextHint: 'Volatilidade 25%. IAs devem balancear entre sinais de tendência (MACD, EMA) e reversão (RSI, Bollinger). Alta efetividade do Fibonacci. Confluência de 2+ indicadores é mandatória.',
+    tickSize: 0.01,
+    avgDailyRange: 40,
+  },
+  'R_50': {
+    family: 'Volatility Index',
+    description: 'Volatility 50 Index — volatilidade sintética de 50%, ativo balanceado com tendências claras',
+    alwaysOpen: true,
+    spikeIndex: false,
+    volClass: 'medium',
+    slAtrMultiplier: 1.5,
+    tpAtrMultiplier: 3.0,
+    minSlPips: 8, maxSlPips: 40, minTpPips: 16, maxTpPips: 100,
+    rsiOversold: 30, rsiOverbought: 70,
+    trendType: 'directional',
+    indicatorNotes: 'Excelente para trend-following com EMAs e MACD. RSI 30/70 são os limiares clássicos e funcionam bem. ADX acima de 25 confirma tendência forte. Girassol tem boa performance. Fibonacci válido em todos os tempos.',
+    behaviorKnowledge: [
+      'V50 é o ativo mais popular da família Volatility — boa liquidez sintética',
+      'Tendências claras e duradouras — seguir EMA20/EMA50 é muito efetivo',
+      'RSI 30/70 funciona perfeitamente como em Forex tradicional',
+      'MACD crossover é muito confiável — especialmente quando confirmado por EMA',
+      'Bollinger Bands de largura média — squeezem seguidos de breakout são comuns',
+      'Fibonacci 38.2%, 50%, 61.8% são zonas de reação muito confiáveis',
+      'ADX raramente fica em zona lateral prolongada — tendências são dominantes',
+      'Patterns de candle (engulfing, pin bar) funcionam neste ativo',
+    ],
+    optimalTimeframe: 'M5, M15, H1',
+    useFibonacci: true,
+    aiContextHint: 'Volatilidade 50%. O V50 é o mais "normal" da família — indica comportamentos parecidos com Forex. IAs podem usar todos os indicadores com confiança. MACD + RSI + EMA = tripla confirmação ideal.',
+    tickSize: 0.01,
+    avgDailyRange: 80,
+  },
+  'R_75': {
+    family: 'Volatility Index',
+    description: 'Volatility 75 Index — alta volatilidade de 75%, movimentos rápidos e intensos',
+    alwaysOpen: true,
+    spikeIndex: false,
+    volClass: 'high',
+    slAtrMultiplier: 1.8,
+    tpAtrMultiplier: 3.5,
+    minSlPips: 15, maxSlPips: 80, minTpPips: 30, maxTpPips: 200,
+    rsiOversold: 28, rsiOverbought: 72,
+    trendType: 'directional',
+    indicatorNotes: 'Alta volatilidade exige SL maior. ATR é fundamental — SL deve ser pelo menos 1.8×ATR. EMAs funcionam mas com lag maior. ADX frequentemente >30 — tendências fortes são comuns. Fibonacci com confluência de 3 camadas é necessário para alta confiança.',
+    behaviorKnowledge: [
+      'V75 tem movimentos amplos — SL deve ser generoso para evitar stop premature',
+      'Reversões são bruscas e rápidas — TP deve ser tomado rapidamente quando atingido',
+      'RSI pode ficar em sobrecompra/sobrevenda prolongada em tendências fortes',
+      'EMA200 é suporte/resistência muito respeitado neste ativo',
+      'Bollinger Bands frecuentemente tocadas — volatilidade alta gera expansão constante',
+      'ATR elevado — usar SL baseado em 1.5-2x ATR é mandatório',
+      'Fibonacci macro (máximos/mínimos de 200+ candles) é mais confiável que micro',
+      'MACD divergência é sinal poderoso de reversão neste ativo',
+    ],
+    optimalTimeframe: 'M15, H1',
+    useFibonacci: true,
+    aiContextHint: 'Volatilidade 75%. IAs devem ser mais conservadoras no tamanho do SL. Confluência tripla de indicadores é necessária. ATR deve ser o principal guia de SL/TP. Tendências fortes e rápidas — priorizar MACD + EMA + ADX.',
+    tickSize: 0.01,
+    avgDailyRange: 150,
+  },
+  'R_100': {
+    family: 'Volatility Index',
+    description: 'Volatility 100 Index — máxima volatilidade da família (100%), movimento extremamente rápido',
+    alwaysOpen: true,
+    spikeIndex: false,
+    volClass: 'ultra-high',
+    slAtrMultiplier: 2.0,
+    tpAtrMultiplier: 4.0,
+    minSlPips: 20, maxSlPips: 120, minTpPips: 40, maxTpPips: 300,
+    rsiOversold: 25, rsiOverbought: 75,
+    trendType: 'directional',
+    indicatorNotes: 'Ativo de extrema volatilidade. SL mínimo de 2x ATR. RSI pode passar longos períodos em zonas extremas. EMAs lentas (50, 200) são mais confiáveis que rápidas. ADX quase sempre >25. Fibonacci macro obrigatório.',
+    behaviorKnowledge: [
+      'V100 é o ativo mais volátil da família — requer gestão rigorosa de risco',
+      'SL grande é mandatório — stop premature é o erro mais comum neste ativo',
+      'Tendências muito fortes e rápidas — RSI pode ficar >70 por longos períodos',
+      'EMA200 é o nível mais respeitado — preço sempre volta para testá-la',
+      'Bollinger Bands com squeeze seguido de breakout explosivo é padrão dominante',
+      'MACD divergência de alta/baixa frequência é mais confiável que crossover simples',
+      'ATR elevadíssimo — usar calculadora de lote baseada em ATR é essencial',
+      'Fibonacci deve usar timeframes maiores (H1, H4) para ser efetivo',
+    ],
+    optimalTimeframe: 'M15, H1, H4',
+    useFibonacci: true,
+    aiContextHint: 'Volatilidade 100%. O ativo mais arriscado da família. IAs devem exigir confluência máxima de indicadores (5+). SL/TP baseados em ATR são mandatórios. Risco por operação deve ser menor que em outros ativos.',
+    tickSize: 0.01,
+    avgDailyRange: 250,
+  },
+  // ── VOLATILITY HZ VARIANTS ──────────────────────────────────
+  '1HZ10V': {
+    family: 'Volatility HZ Index',
+    description: 'Volatility 10 (1s) Index — mesmo comportamento do V10 mas com ticks a cada 1 segundo',
+    alwaysOpen: true,
+    spikeIndex: false,
+    volClass: 'ultra-low',
+    slAtrMultiplier: 1.2,
+    tpAtrMultiplier: 2.5,
+    minSlPips: 2, maxSlPips: 10, minTpPips: 4, maxTpPips: 25,
+    rsiOversold: 35, rsiOverbought: 65,
+    trendType: 'mean-reverting',
+    indicatorNotes: 'Versão de 1 segundo do V10. Ticks muito rápidos — indicadores de curto prazo são mais relevantes. RSI de período 7 funciona melhor que período 14.',
+    behaviorKnowledge: [
+      'Ticks a cada 1 segundo — ideal para scalping de curtíssimo prazo',
+      'Comportamento idêntico ao V10 mas em escala de tempo 10x mais rápida',
+      'Reversão à média muito frequente e rápida',
+      'Girassol funciona bem em M1 com entradas rápidas',
+    ],
+    optimalTimeframe: 'M1, M5',
+    useFibonacci: false,
+    aiContextHint: 'Versão 1s do V10. Ideal para scalping. IAs devem focar em reversões rápidas à média.',
+    tickSize: 0.001,
+    avgDailyRange: 15,
+  },
+  '1HZ25V': {
+    family: 'Volatility HZ Index',
+    description: 'Volatility 25 (1s) Index — V25 com ticks de 1 segundo',
+    alwaysOpen: true,
+    spikeIndex: false,
+    volClass: 'low',
+    slAtrMultiplier: 1.4,
+    tpAtrMultiplier: 2.8,
+    minSlPips: 3, maxSlPips: 15, minTpPips: 6, maxTpPips: 40,
+    rsiOversold: 33, rsiOverbought: 67,
+    trendType: 'hybrid',
+    indicatorNotes: 'V25 com ticks de 1 segundo. Comportamento híbrido entre tendência e reversão.',
+    behaviorKnowledge: ['Comportamento idêntico ao V25 em escala 1s', 'Bom equilíbrio tendência/reversão'],
+    optimalTimeframe: 'M1, M5',
+    useFibonacci: true,
+    aiContextHint: 'V25 em 1 segundo. IAs devem balancear trend e reversão.',
+    tickSize: 0.001,
+    avgDailyRange: 40,
+  },
+  '1HZ50V': {
+    family: 'Volatility HZ Index',
+    description: 'Volatility 50 (1s) Index — V50 com ticks de 1 segundo',
+    alwaysOpen: true,
+    spikeIndex: false,
+    volClass: 'medium',
+    slAtrMultiplier: 1.5,
+    tpAtrMultiplier: 3.0,
+    minSlPips: 5, maxSlPips: 25, minTpPips: 10, maxTpPips: 60,
+    rsiOversold: 30, rsiOverbought: 70,
+    trendType: 'directional',
+    indicatorNotes: 'V50 com ticks de 1 segundo. Melhor da família HZ para trend-following.',
+    behaviorKnowledge: ['Idêntico ao V50 — tendências claras', 'MACD + EMA são os indicadores primários'],
+    optimalTimeframe: 'M1, M5, M15',
+    useFibonacci: true,
+    aiContextHint: 'V50 em 1 segundo. Trend-following é dominante.',
+    tickSize: 0.001,
+    avgDailyRange: 80,
+  },
+  '1HZ75V': {
+    family: 'Volatility HZ Index',
+    description: 'Volatility 75 (1s) Index — V75 com ticks de 1 segundo, alta volatilidade',
+    alwaysOpen: true,
+    spikeIndex: false,
+    volClass: 'high',
+    slAtrMultiplier: 1.8,
+    tpAtrMultiplier: 3.5,
+    minSlPips: 10, maxSlPips: 60, minTpPips: 20, maxTpPips: 150,
+    rsiOversold: 28, rsiOverbought: 72,
+    trendType: 'directional',
+    indicatorNotes: 'Alta volatilidade — SL generoso obrigatório. ATR-based SL é essencial.',
+    behaviorKnowledge: ['Idêntico ao V75 mas em ticks 1s', 'Tendências fortes e rápidas'],
+    optimalTimeframe: 'M5, M15',
+    useFibonacci: true,
+    aiContextHint: 'V75 em 1 segundo. SL baseado em ATR é mandatório.',
+    tickSize: 0.001,
+    avgDailyRange: 150,
+  },
+  '1HZ100V': {
+    family: 'Volatility HZ Index',
+    description: 'Volatility 100 (1s) Index — máxima volatilidade com ticks de 1 segundo',
+    alwaysOpen: true,
+    spikeIndex: false,
+    volClass: 'ultra-high',
+    slAtrMultiplier: 2.0,
+    tpAtrMultiplier: 4.0,
+    minSlPips: 15, maxSlPips: 100, minTpPips: 30, maxTpPips: 250,
+    rsiOversold: 25, rsiOverbought: 75,
+    trendType: 'directional',
+    indicatorNotes: 'Extremamente volátil. Apenas operar com confluência máxima de todos os indicadores.',
+    behaviorKnowledge: ['Idêntico ao V100 — máxima volatilidade', 'Exige gestão rigorosa de risco'],
+    optimalTimeframe: 'M5, M15',
+    useFibonacci: true,
+    aiContextHint: 'V100 em 1 segundo. Máxima cautela. Confluência total de indicadores obrigatória.',
+    tickSize: 0.001,
+    avgDailyRange: 250,
+  },
+  // ── CRASH INDICES ────────────────────────────────────────────
+  'CRASH300': {
+    family: 'Crash Index',
+    description: 'Crash 300 Index — spikes de queda a cada ~300 ticks, mais frequente da família Crash',
+    alwaysOpen: true,
+    spikeIndex: true,
+    volClass: 'high',
+    slAtrMultiplier: 0.5,
+    tpAtrMultiplier: 2.0,
+    minSlPips: 5, maxSlPips: 30, minTpPips: 10, maxTpPips: 80,
+    rsiOversold: 20, rsiOverbought: 80,
+    trendType: 'spike-dominant',
+    indicatorNotes: 'Ativo dominado por spikes de queda repentinos. Indicadores convencionais são secundários ao detector de spike. Girassol detecta padrões pré-spike bem. RSI em sobrecompra é forte sinal de spike iminente.',
+    behaviorKnowledge: [
+      'Spikes de QUEDA a cada ~300 ticks — o mais frequente da família Crash',
+      'Entre spikes: tendência de ALTA contínua e suave',
+      'Padrão: alta gradual → spike abrupto de queda → retomada da alta',
+      'RSI >75 antes do spike é padrão típico — mercado "tensiona" antes de cair',
+      'Volume de ticks aumenta antes do spike — momentum comprova iminência',
+      'SL muito curto para trades de spike (pegar a queda rápida)',
+      'Para trades de continuidade (tendência de alta): SL acima do último spike',
+      'Girassol em M1 detecta início da alta pós-spike com alta precisão',
+      'Nunca segurar uma posição SELL durante a retomada de alta pós-spike',
+    ],
+    spikeFrequency: 'A cada ~300 ticks (aprox. 30 velas M1)',
+    spikeDirection: 'down',
+    optimalTimeframe: 'M1, M5',
+    useFibonacci: false,
+    aiContextHint: 'Crash 300: spikes de queda a cada ~300 ticks. IA deve detectar iminência de spike (RSI alto + momentum) para SELL curto. Para continuidade: BUY na retomada pós-spike com SL abaixo do spike.',
+    tickSize: 0.01,
+    avgDailyRange: 200,
+  },
+  'CRASH500': {
+    family: 'Crash Index',
+    description: 'Crash 500 Index — spikes de queda a cada ~500 ticks',
+    alwaysOpen: true,
+    spikeIndex: true,
+    volClass: 'high',
+    slAtrMultiplier: 0.6,
+    tpAtrMultiplier: 2.2,
+    minSlPips: 8, maxSlPips: 40, minTpPips: 15, maxTpPips: 100,
+    rsiOversold: 20, rsiOverbought: 80,
+    trendType: 'spike-dominant',
+    indicatorNotes: 'Spikes menos frequentes que o 300 mas de amplitude similar. A tendência de alta entre spikes é mais longa e forte — mais oportunidades de continuidade.',
+    behaviorKnowledge: [
+      'Spikes de QUEDA a cada ~500 ticks (~50 velas M1)',
+      'Tendência de alta mais prolongada entre spikes — bom para trades de continuidade',
+      'RSI pode ficar em sobrecompra por longos períodos entre spikes',
+      'EMA20 serve como suporte dinâmico durante a tendência de alta',
+      'Após o spike: recuperação quase imediata — janela de entrada pós-spike é curta',
+      'MACD bullish é dominante entre os spikes — confirma tendência de alta',
+    ],
+    spikeFrequency: 'A cada ~500 ticks (aprox. 50 velas M1)',
+    spikeDirection: 'down',
+    optimalTimeframe: 'M1, M5',
+    useFibonacci: false,
+    aiContextHint: 'Crash 500: spikes de queda menos frequentes. IA deve focar em trades de continuidade (BUY) na tendência de alta entre spikes, e SELL rápido quando spike é iminente.',
+    tickSize: 0.01,
+    avgDailyRange: 300,
+  },
+  'CRASH1000': {
+    family: 'Crash Index',
+    description: 'Crash 1000 Index — spikes de queda a cada ~1000 ticks, menos frequente',
+    alwaysOpen: true,
+    spikeIndex: true,
+    volClass: 'ultra-high',
+    slAtrMultiplier: 0.7,
+    tpAtrMultiplier: 2.5,
+    minSlPips: 10, maxSlPips: 60, minTpPips: 20, maxTpPips: 150,
+    rsiOversold: 20, rsiOverbought: 80,
+    trendType: 'spike-dominant',
+    indicatorNotes: 'Spikes raros mas de maior amplitude. Longa tendência de alta entre spikes — ideal para trades de continuidade de médio prazo.',
+    behaviorKnowledge: [
+      'Spike de QUEDA a cada ~1000 ticks (~100 velas M1)',
+      'Tendência de alta muito longa e estável entre spikes — ótima para swing trading',
+      'EMA50 e EMA200 são suportes muito respeitados durante a tendência',
+      'Fibonacci funciona bem na tendência de alta prolongada',
+      'Amplitude do spike é geralmente maior que no 300 e 500',
+      'Detecção de spike: RSI extremo + padrão de candle de reversão + imminência >80%',
+    ],
+    spikeFrequency: 'A cada ~1000 ticks (aprox. 100 velas M1)',
+    spikeDirection: 'down',
+    optimalTimeframe: 'M5, M15',
+    useFibonacci: true,
+    aiContextHint: 'Crash 1000: tendência de alta longa. IA deve operar BUY com SL abaixo de EMA50. Fibonacci válido para TP. SELL apenas quando spike for muito iminente (>85% de iminência).',
+    tickSize: 0.01,
+    avgDailyRange: 500,
+  },
+  // ── BOOM INDICES ─────────────────────────────────────────────
+  'BOOM300': {
+    family: 'Boom Index',
+    description: 'Boom 300 Index — spikes de alta a cada ~300 ticks, mais frequente da família Boom',
+    alwaysOpen: true,
+    spikeIndex: true,
+    volClass: 'high',
+    slAtrMultiplier: 0.5,
+    tpAtrMultiplier: 2.0,
+    minSlPips: 5, maxSlPips: 30, minTpPips: 10, maxTpPips: 80,
+    rsiOversold: 20, rsiOverbought: 80,
+    trendType: 'spike-dominant',
+    indicatorNotes: 'Espelho do Crash 300 mas com spikes de ALTA. Tendência de baixa gradual entre spikes. RSI em sobrevenda é sinal forte de spike de alta iminente.',
+    behaviorKnowledge: [
+      'Spikes de ALTA a cada ~300 ticks',
+      'Entre spikes: tendência de BAIXA contínua e suave',
+      'Padrão: queda gradual → spike abrupto de alta → retomada da queda',
+      'RSI <25 antes do spike é padrão típico',
+      'Para trades de spike: BUY muito rápido e sair logo',
+      'Para continuidade: SELL na tendência de queda com SL abaixo do último spike',
+      'Girassol detecta início da queda pós-spike bem',
+    ],
+    spikeFrequency: 'A cada ~300 ticks',
+    spikeDirection: 'up',
+    optimalTimeframe: 'M1, M5',
+    useFibonacci: false,
+    aiContextHint: 'Boom 300: spikes de ALTA frequentes. IA deve detectar iminência de spike para BUY rápido. Continuidade: SELL na tendência de queda entre spikes.',
+    tickSize: 0.01,
+    avgDailyRange: 200,
+  },
+  'BOOM500': {
+    family: 'Boom Index',
+    description: 'Boom 500 Index — spikes de alta a cada ~500 ticks',
+    alwaysOpen: true,
+    spikeIndex: true,
+    volClass: 'high',
+    slAtrMultiplier: 0.6,
+    tpAtrMultiplier: 2.2,
+    minSlPips: 8, maxSlPips: 40, minTpPips: 15, maxTpPips: 100,
+    rsiOversold: 20, rsiOverbought: 80,
+    trendType: 'spike-dominant',
+    indicatorNotes: 'Tendência de baixa mais prolongada entre spikes. Mais oportunidades de SELL de continuidade.',
+    behaviorKnowledge: ['Spikes de ALTA a cada ~500 ticks', 'Tendência de baixa mais longa — bom para SELL de continuidade'],
+    spikeFrequency: 'A cada ~500 ticks',
+    spikeDirection: 'up',
+    optimalTimeframe: 'M1, M5',
+    useFibonacci: false,
+    aiContextHint: 'Boom 500: SELL de continuidade é a estratégia primária. BUY apenas em spike iminente.',
+    tickSize: 0.01,
+    avgDailyRange: 300,
+  },
+  'BOOM1000': {
+    family: 'Boom Index',
+    description: 'Boom 1000 Index — spikes de alta a cada ~1000 ticks, tendência de baixa longa',
+    alwaysOpen: true,
+    spikeIndex: true,
+    volClass: 'ultra-high',
+    slAtrMultiplier: 0.7,
+    tpAtrMultiplier: 2.5,
+    minSlPips: 10, maxSlPips: 60, minTpPips: 20, maxTpPips: 150,
+    rsiOversold: 20, rsiOverbought: 80,
+    trendType: 'spike-dominant',
+    indicatorNotes: 'Espelho do Crash 1000 com spikes de alta. Longa tendência de baixa entre spikes — boa para SELL de médio prazo.',
+    behaviorKnowledge: ['Spikes de ALTA a cada ~1000 ticks', 'Tendência de baixa longa e estável', 'EMA50/200 como resistências durante a queda'],
+    spikeFrequency: 'A cada ~1000 ticks',
+    spikeDirection: 'up',
+    optimalTimeframe: 'M5, M15',
+    useFibonacci: true,
+    aiContextHint: 'Boom 1000: SELL com SL acima de EMA50. Fibonacci válido para TP. BUY apenas com iminência de spike >85%.',
+    tickSize: 0.01,
+    avgDailyRange: 500,
+  },
+  // ── STEP INDEX ───────────────────────────────────────────────
+  'STEPINDEX': {
+    family: 'Step Index',
+    description: 'Step Index — move exatamente 0.1 para cima ou para baixo a cada tick, probabilidade 50/50',
+    alwaysOpen: true,
+    spikeIndex: false,
+    volClass: 'low',
+    slAtrMultiplier: 2.0,
+    tpAtrMultiplier: 2.0,
+    minSlPips: 10, maxSlPips: 50, minTpPips: 10, maxTpPips: 50,
+    rsiOversold: 30, rsiOverbought: 70,
+    trendType: 'range-bound',
+    indicatorNotes: 'O Step Index é único: move EXATAMENTE 0.1 por tick em qualquer direção, 50/50. RSI e MACD funcionam diferentemente. Bollinger Bands são muito efetivas. Streaks (sequências de direção) são detectáveis e exploráveis.',
+    behaviorKnowledge: [
+      'Cada tick move exatamente 0.1 ponto — sem variação de tamanho',
+      'Probabilidade 50/50 por tick — mas streaks ocorrem e podem ser explorados',
+      'Bollinger Bands são o indicador mais efetivo — squeeze é muito confiável',
+      'RSI funciona bem para detectar streaks prolongados em uma direção',
+      'MACD é menos efetivo — o movimento uniforme distorce as médias',
+      'Fibonacci pode ser aplicado mas com menos efetividade que em outros ativos',
+      'Girassol funciona detectando streaks e momentum direcional',
+      'SL e TP devem ser simétricos — a natureza do ativo é 50/50',
+      'Maior janela de observação = melhor para detectar momentum',
+    ],
+    optimalTimeframe: 'M1, M5',
+    useFibonacci: false,
+    aiContextHint: 'Step Index: movimento 0.1 por tick, 50/50. IA deve detectar streaks direcionais via RSI e Bollinger. Streaks de 20+ ticks são exploráveis mas risco é alto. SL/TP simétricos.',
+    tickSize: 0.1,
+    avgDailyRange: 50,
+  },
+  // ── JUMP INDICES ─────────────────────────────────────────────
+  'JUMP10': {
+    family: 'Jump Index',
+    description: 'Jump 10 Index — jumps de 10% de probabilidade a cada tick em qualquer direção',
+    alwaysOpen: true,
+    spikeIndex: false,
+    volClass: 'medium',
+    slAtrMultiplier: 1.5,
+    tpAtrMultiplier: 3.0,
+    minSlPips: 8, maxSlPips: 40, minTpPips: 15, maxTpPips: 80,
+    rsiOversold: 30, rsiOverbought: 70,
+    trendType: 'hybrid',
+    jumpProbability: 0.10,
+    indicatorNotes: 'Jump 10 tem jumps aleatórios de amplitude maior a cada ~10 ticks. Indicadores standard funcionam entre os jumps. Girassol detecta tendência entre jumps bem.',
+    behaviorKnowledge: [
+      'Jumps de amplitude 10% ocorrem aleatoriamente — preparar SL para absorver',
+      'Entre jumps: comportamento normal e tendencial',
+      'RSI e MACD funcionam bem para capturar tendências entre jumps',
+      'SL deve ser maior que a amplitude típica do jump para evitar stop premature',
+      'Girassol é efetivo para detectar direção dominante entre jumps',
+    ],
+    optimalTimeframe: 'M1, M5',
+    useFibonacci: true,
+    aiContextHint: 'Jump 10: jumps aleatórios de grande amplitude. IA deve detectar tendência entre jumps. SL deve ser maior que amplitude típica do jump.',
+    tickSize: 0.01,
+    avgDailyRange: 100,
+  },
+  'JUMP25': {
+    family: 'Jump Index',
+    description: 'Jump 25 Index — jumps de 25% de probabilidade, mais frequentes',
+    alwaysOpen: true,
+    spikeIndex: false,
+    volClass: 'high',
+    slAtrMultiplier: 1.8,
+    tpAtrMultiplier: 3.5,
+    minSlPips: 12, maxSlPips: 60, minTpPips: 20, maxTpPips: 120,
+    rsiOversold: 28, rsiOverbought: 72,
+    trendType: 'hybrid',
+    jumpProbability: 0.25,
+    indicatorNotes: 'Jumps mais frequentes que o Jump 10 — SL maior necessário. ATR-based SL é mandatório.',
+    behaviorKnowledge: ['Jumps mais frequentes — 25% por tick', 'ATR é a métrica mais importante para SL', 'Tendências entre jumps são curtas'],
+    optimalTimeframe: 'M5, M15',
+    useFibonacci: true,
+    aiContextHint: 'Jump 25: jumps frequentes. SL ATR-based mandatório. Tendências curtas entre jumps.',
+    tickSize: 0.01,
+    avgDailyRange: 150,
+  },
+  // ── RANGE BREAK INDICES ──────────────────────────────────────
+  'RDBEAR': {
+    family: 'Range Break Index',
+    description: 'Range Break Bear Index — move em ranges laterais e quebra para baixo quando o range é rompido',
+    alwaysOpen: true,
+    spikeIndex: false,
+    volClass: 'medium',
+    slAtrMultiplier: 1.6,
+    tpAtrMultiplier: 3.0,
+    minSlPips: 10, maxSlPips: 50, minTpPips: 20, maxTpPips: 120,
+    rsiOversold: 30, rsiOverbought: 70,
+    trendType: 'range-bound',
+    indicatorNotes: 'O RDBEAR alterna entre movimentos laterais (range) e quebras de direção. Bollinger Bands são excelentes — squeeze indica breakout iminente. ADX identifica quando está em range vs tendência. Girassol detecta breakout preciso.',
+    behaviorKnowledge: [
+      'Padrão: range lateral por período → quebra abrupta para baixo → novo range',
+      'Bollinger squeeze é o melhor indicador de breakout iminente',
+      'ADX <20 = mercado em range; ADX >30 = breakout em andamento',
+      'RSI em zona neutra (40-60) durante range; diverge no breakout',
+      'SELL no breakout com SL acima do range anterior',
+      'BUY dentro do range testando limite inferior (reversão ao meio do range)',
+      'Volume/amplitude de candle aumenta no breakout — confirmador importante',
+      'Girassol detecta início do breakout com precisão',
+    ],
+    optimalTimeframe: 'M5, M15',
+    useFibonacci: true,
+    aiContextHint: 'RDBEAR: detectar via Bollinger squeeze quando breakout de baixa é iminente. SELL no breakout confirmado por ADX >25. BUY apenas dentro do range com RSI neutro.',
+    tickSize: 0.01,
+    avgDailyRange: 100,
+  },
+  'RDBULL': {
+    family: 'Range Break Index',
+    description: 'Range Break Bull Index — move em ranges e quebra para cima quando o range é rompido',
+    alwaysOpen: true,
+    spikeIndex: false,
+    volClass: 'medium',
+    slAtrMultiplier: 1.6,
+    tpAtrMultiplier: 3.0,
+    minSlPips: 10, maxSlPips: 50, minTpPips: 20, maxTpPips: 120,
+    rsiOversold: 30, rsiOverbought: 70,
+    trendType: 'range-bound',
+    indicatorNotes: 'Espelho do RDBEAR mas com quebra para cima. Bollinger squeeze é o sinal primário. BUY no breakout de alta confirmado por ADX.',
+    behaviorKnowledge: [
+      'Padrão: range lateral → quebra para CIMA → novo range',
+      'BUY no breakout com SL abaixo do range anterior',
+      'Bollinger squeeze precede o breakout de alta',
+      'ADX >25 confirma que o breakout tem força para continuar',
+      'RSI <40 dentro do range → bounce de alta provável',
+      'Girassol detecta início do breakout de alta com precisão',
+    ],
+    optimalTimeframe: 'M5, M15',
+    useFibonacci: true,
+    aiContextHint: 'RDBULL: detectar Bollinger squeeze para breakout de alta. BUY no breakout com ADX >25. SELL apenas dentro do range com RSI neutro.',
+    tickSize: 0.01,
+    avgDailyRange: 100,
+  },
+  // ── DEX INDICES ──────────────────────────────────────────────
+  'DEX600UP': {
+    family: 'DEX Index',
+    description: 'DEX 600 Up — índice derivado de Forex, tendência ascendente com volatilidade 600',
+    alwaysOpen: true,
+    spikeIndex: false,
+    volClass: 'medium',
+    slAtrMultiplier: 1.5,
+    tpAtrMultiplier: 3.0,
+    minSlPips: 5, maxSlPips: 30, minTpPips: 10, maxTpPips: 80,
+    rsiOversold: 30, rsiOverbought: 70,
+    trendType: 'directional',
+    indicatorNotes: 'DEX índices se comportam como Forex derivado. Todos os indicadores padrão funcionam bem. Tendência upward dominante no DEX600UP.',
+    behaviorKnowledge: ['Comportamento similar ao Forex', 'Tendência ascendente dominante', 'RSI, MACD, EMA funcionam normalmente'],
+    optimalTimeframe: 'M5, M15',
+    useFibonacci: true,
+    aiContextHint: 'DEX600UP: comportamento Forex com tendência ascendente. IAs podem usar indicadores padrão normalmente.',
+    tickSize: 0.001,
+    avgDailyRange: 60,
+  },
+  'DEX600DN': {
+    family: 'DEX Index',
+    description: 'DEX 600 Down — tendência descendente com volatilidade 600',
+    alwaysOpen: true,
+    spikeIndex: false,
+    volClass: 'medium',
+    slAtrMultiplier: 1.5,
+    tpAtrMultiplier: 3.0,
+    minSlPips: 5, maxSlPips: 30, minTpPips: 10, maxTpPips: 80,
+    rsiOversold: 30, rsiOverbought: 70,
+    trendType: 'directional',
+    indicatorNotes: 'Tendência descendente dominante. Indicadores padrão funcionam bem.',
+    behaviorKnowledge: ['Comportamento similar ao Forex', 'Tendência descendente dominante'],
+    optimalTimeframe: 'M5, M15',
+    useFibonacci: true,
+    aiContextHint: 'DEX600DN: comportamento Forex com tendência descendente. Indicadores padrão válidos.',
+    tickSize: 0.001,
+    avgDailyRange: 60,
+  },
+};
+
+/**
+ * Resolve o perfil de um ativo sintético da Deriv pelo símbolo.
+ * Aceita variações de nome (ex: "Crash 1000 Index", "CRASH1000", "crash_1000")
+ */
+function resolveDerivProfile(symbol: string): DerivSyntheticProfile | null {
+  const sym = symbol.toUpperCase().replace(/[\s_\-\.]/g, '');
+
+  // Volatility
+  if (sym === 'R10' || sym === 'R_10' || sym.includes('VOLATILITY10') || sym.includes('V10')) return DERIV_SYNTHETIC_PROFILES['R_10'];
+  if (sym === 'R25' || sym === 'R_25' || sym.includes('VOLATILITY25') || sym.includes('V25')) return DERIV_SYNTHETIC_PROFILES['R_25'];
+  if (sym === 'R50' || sym === 'R_50' || sym.includes('VOLATILITY50') || sym.includes('V50')) return DERIV_SYNTHETIC_PROFILES['R_50'];
+  if (sym === 'R75' || sym === 'R_75' || sym.includes('VOLATILITY75') || sym.includes('V75')) return DERIV_SYNTHETIC_PROFILES['R_75'];
+  if (sym === 'R100' || sym === 'R_100' || sym.includes('VOLATILITY100') || sym.includes('V100')) return DERIV_SYNTHETIC_PROFILES['R_100'];
+
+  // HZ variants
+  if (sym.includes('1HZ10') || sym === '1HZ10V') return DERIV_SYNTHETIC_PROFILES['1HZ10V'];
+  if (sym.includes('1HZ25') || sym === '1HZ25V') return DERIV_SYNTHETIC_PROFILES['1HZ25V'];
+  if (sym.includes('1HZ50') || sym === '1HZ50V') return DERIV_SYNTHETIC_PROFILES['1HZ50V'];
+  if (sym.includes('1HZ75') || sym === '1HZ75V') return DERIV_SYNTHETIC_PROFILES['1HZ75V'];
+  if (sym.includes('1HZ100') || sym === '1HZ100V') return DERIV_SYNTHETIC_PROFILES['1HZ100V'];
+
+  // Crash
+  if (sym.includes('CRASH300') || sym.includes('CRASH_300')) return DERIV_SYNTHETIC_PROFILES['CRASH300'];
+  if (sym.includes('CRASH500') || sym.includes('CRASH_500')) return DERIV_SYNTHETIC_PROFILES['CRASH500'];
+  if (sym.includes('CRASH1000') || sym.includes('CRASH_1000') || (sym.includes('CRASH') && !sym.includes('300') && !sym.includes('500'))) return DERIV_SYNTHETIC_PROFILES['CRASH1000'];
+
+  // Boom
+  if (sym.includes('BOOM300') || sym.includes('BOOM_300')) return DERIV_SYNTHETIC_PROFILES['BOOM300'];
+  if (sym.includes('BOOM500') || sym.includes('BOOM_500')) return DERIV_SYNTHETIC_PROFILES['BOOM500'];
+  if (sym.includes('BOOM1000') || sym.includes('BOOM_1000') || (sym.includes('BOOM') && !sym.includes('300') && !sym.includes('500'))) return DERIV_SYNTHETIC_PROFILES['BOOM1000'];
+
+  // Step
+  if (sym.includes('STEP')) return DERIV_SYNTHETIC_PROFILES['STEPINDEX'];
+
+  // Jump
+  if (sym.includes('JUMP10') || sym.includes('JUMP_10')) return DERIV_SYNTHETIC_PROFILES['JUMP10'];
+  if (sym.includes('JUMP25') || sym.includes('JUMP_25')) return DERIV_SYNTHETIC_PROFILES['JUMP25'];
+
+  // Range Break
+  if (sym.includes('RDBEAR') || sym.includes('RANGEBREAK') && sym.includes('BEAR')) return DERIV_SYNTHETIC_PROFILES['RDBEAR'];
+  if (sym.includes('RDBULL') || sym.includes('RANGEBREAK') && sym.includes('BULL')) return DERIV_SYNTHETIC_PROFILES['RDBULL'];
+
+  // DEX
+  if (sym.includes('DEX600') && sym.includes('UP')) return DERIV_SYNTHETIC_PROFILES['DEX600UP'];
+  if (sym.includes('DEX600') && (sym.includes('DN') || sym.includes('DOWN'))) return DERIV_SYNTHETIC_PROFILES['DEX600DN'];
+
+  return null;
+}
+
 class MetaTraderBridge extends EventEmitter {
   private config: MT5Config = { ...DEFAULT_CONFIG };
   private status: MT5Status;
@@ -537,6 +1195,287 @@ class MetaTraderBridge extends EventEmitter {
       openPositions: this.openPositions.size,
       cachedSymbols: this.getCachedSymbols()
     };
+  }
+
+  /**
+   * Retorna o perfil completo do ativo sintético da Deriv.
+   * Encapsula todo o conhecimento específico do ativo para uso pelas IAs.
+   */
+  getDerivSyntheticProfile(symbol: string): DerivSyntheticProfile | null {
+    return resolveDerivProfile(symbol);
+  }
+
+  /**
+   * Retorna o ATR atual do símbolo baseado nos dados de mercado em cache.
+   * Método público para uso nas rotas.
+   */
+  getSymbolATR(symbol: string): number {
+    const marketData = this.getMarketDataForSymbol(symbol);
+    if (marketData.length < 5) return 0;
+    const prices = marketData.map(d => d.close);
+    const highs  = marketData.map(d => d.high || d.close);
+    const lows   = marketData.map(d => d.low  || d.close);
+    const atr = this.calcATR(highs, lows, prices, Math.min(14, marketData.length - 1));
+    return atr;
+  }
+
+  /**
+   * Retorna o contexto de ativo para uso na análise das IAs.
+   * Adapta os parâmetros de indicadores ao comportamento específico do ativo.
+   */
+  getAssetAIContext(symbol: string): string {
+    const profile = resolveDerivProfile(symbol);
+    if (!profile) return `Ativo ${symbol}: sem perfil específico — usando parâmetros padrão.`;
+
+    return [
+      `=== CONHECIMENTO ESPECIALIZADO: ${symbol} ===`,
+      `Família: ${profile.family} | ${profile.description}`,
+      `Volatilidade: ${profile.volClass.toUpperCase()} | Tipo de mercado: ${profile.trendType}`,
+      ``,
+      `COMO ESTE ATIVO SE COMPORTA:`,
+      ...profile.behaviorKnowledge.map(b => `• ${b}`),
+      ``,
+      `USO DOS INDICADORES NESTE ATIVO:`,
+      profile.indicatorNotes,
+      ``,
+      `RSI: sobrevenda <${profile.rsiOversold} | sobrecompra >${profile.rsiOverbought}`,
+      `SL ideal: ${profile.slAtrMultiplier}× ATR (${profile.minSlPips}–${profile.maxSlPips} pips)`,
+      `TP ideal: ${profile.tpAtrMultiplier}× ATR (${profile.minTpPips}–${profile.maxTpPips} pips)`,
+      profile.spikeIndex ? `⚡ ÍNDICE DE SPIKE: ${profile.spikeFrequency} na direção ${profile.spikeDirection?.toUpperCase()}` : '',
+      ``,
+      `INSTRUÇÃO PARA IA: ${profile.aiContextHint}`,
+    ].filter(Boolean).join('\n');
+  }
+
+  /**
+   * Calcula SL e TP usando os dados reais dos indicadores instalados no MT5.
+   * Prioridade: 1) Níveis dos indicadores instalados (Girassol, Fib do EA)
+   *             2) Perfil do ativo sintético Deriv
+   *             3) ATR + configuração padrão
+   */
+  calcIndicatorDrivenSLTP(params: {
+    symbol: string;
+    action: 'BUY' | 'SELL';
+    entryPrice: number;
+    atr: number;
+    // Dados reais dos indicadores instalados no gráfico do MT5
+    girassolSupportLevel?: number;
+    girassolResistanceLevel?: number;
+    girassolBuySignalPrice?: number;
+    girassolSellSignalPrice?: number;
+    fibonacciLevels?: Array<{ level: string; price: number }>;
+    customSupportLevel?: number;
+    customResistanceLevel?: number;
+    indicatorBuffers?: Array<{ name: string; value: number; bar: number }>;
+  }): { stopLoss: number; takeProfit: number; slPips: number; tpPips: number; source: string } {
+    const { symbol, action, entryPrice, atr } = params;
+    const profile = resolveDerivProfile(symbol);
+    const pipSize = this.getPipSize(symbol, entryPrice);
+
+    let slPrice = 0;
+    let tpPrice = 0;
+    let source = 'atr_default';
+
+    // ── PRIORIDADE 1: Níveis reais dos indicadores do MT5 ──────────────
+    // Se o indicador Girassol enviou níveis de suporte/resistência reais
+    if (params.girassolSupportLevel && params.girassolResistanceLevel && action) {
+      const support = params.girassolSupportLevel;
+      const resistance = params.girassolResistanceLevel;
+
+      if (action === 'BUY') {
+        // SL abaixo do suporte do Girassol + buffer de segurança (0.5 ATR)
+        slPrice = support - atr * 0.5;
+        // TP na resistência do Girassol - buffer (0.3 ATR)
+        tpPrice = resistance - atr * 0.3;
+        source = 'girassol_levels';
+      } else {
+        // SL acima da resistência do Girassol + buffer
+        slPrice = resistance + atr * 0.5;
+        // TP no suporte do Girassol + buffer
+        tpPrice = support + atr * 0.3;
+        source = 'girassol_levels';
+      }
+    }
+
+    // ── PRIORIDADE 2: Níveis Fibonacci do indicador MT5 ─────────────────
+    if ((!slPrice || !tpPrice) && params.fibonacciLevels && params.fibonacciLevels.length >= 2) {
+      const sortedLevels = [...params.fibonacciLevels].sort((a, b) => a.price - b.price);
+      const levelsBelow = sortedLevels.filter(l => l.price < entryPrice);
+      const levelsAbove = sortedLevels.filter(l => l.price > entryPrice);
+
+      if (action === 'BUY' && levelsBelow.length > 0 && levelsAbove.length > 0) {
+        const nearestBelow = levelsBelow[levelsBelow.length - 1];
+        const nearestAbove = levelsAbove[0];
+        slPrice = nearestBelow.price - atr * 0.3;
+        tpPrice = nearestAbove.price - atr * 0.3;
+        source = 'fibonacci_indicator_levels';
+      } else if (action === 'SELL' && levelsBelow.length > 0 && levelsAbove.length > 0) {
+        const nearestBelow = levelsBelow[levelsBelow.length - 1];
+        const nearestAbove = levelsAbove[0];
+        slPrice = nearestAbove.price + atr * 0.3;
+        tpPrice = nearestBelow.price + atr * 0.3;
+        source = 'fibonacci_indicator_levels';
+      }
+    }
+
+    // ── PRIORIDADE 3: Buffers brutos de qualquer indicador instalado ────
+    if ((!slPrice || !tpPrice) && params.indicatorBuffers && params.indicatorBuffers.length > 0) {
+      // Tenta identificar buffers de suporte/resistência por nome ou posição
+      const slBuf = params.indicatorBuffers.find(b =>
+        b.bar === 0 && (b.name?.toLowerCase().includes('stop') || b.name?.toLowerCase().includes('sl'))
+      );
+      const tpBuf = params.indicatorBuffers.find(b =>
+        b.bar === 0 && (b.name?.toLowerCase().includes('profit') || b.name?.toLowerCase().includes('tp'))
+      );
+      if (slBuf && slBuf.value > 0 && tpBuf && tpBuf.value > 0) {
+        slPrice = slBuf.value;
+        tpPrice = tpBuf.value;
+        source = 'indicator_buffer_sltp';
+      }
+    }
+
+    // ── PRIORIDADE 4: Perfil do ativo + ATR ─────────────────────────────
+    if (!slPrice || !tpPrice) {
+      const slMult = profile?.slAtrMultiplier ?? 1.5;
+      const tpMult = profile?.tpAtrMultiplier ?? 3.0;
+      const slDist = atr * slMult;
+      const tpDist = atr * tpMult;
+
+      if (action === 'BUY') {
+        slPrice = entryPrice - slDist;
+        tpPrice = entryPrice + tpDist;
+      } else {
+        slPrice = entryPrice + slDist;
+        tpPrice = entryPrice - tpDist;
+      }
+      source = profile ? `asset_profile_${profile.volClass}` : 'atr_default';
+    }
+
+    // Garantir que SL/TP respeitam o perfil do ativo
+    if (profile) {
+      const minSl = profile.minSlPips * pipSize;
+      const maxSl = profile.maxSlPips * pipSize;
+      const minTp = profile.minTpPips * pipSize;
+      const maxTp = profile.maxTpPips * pipSize;
+
+      const slDist = Math.abs(slPrice - entryPrice);
+      const tpDist = Math.abs(tpPrice - entryPrice);
+
+      const clampedSl = Math.max(minSl, Math.min(maxSl, slDist));
+      const clampedTp = Math.max(minTp, Math.min(maxTp, tpDist));
+
+      slPrice = action === 'BUY' ? entryPrice - clampedSl : entryPrice + clampedSl;
+      tpPrice = action === 'BUY' ? entryPrice + clampedTp : entryPrice - clampedTp;
+    }
+
+    const slPips = Math.max(1, Math.round(Math.abs(slPrice - entryPrice) / pipSize));
+    const tpPips = Math.max(1, Math.round(Math.abs(tpPrice - entryPrice) / pipSize));
+
+    return { stopLoss: slPrice, takeProfit: tpPrice, slPips, tpPips, source };
+  }
+
+  /**
+   * Adapta a análise técnica ao perfil específico do ativo sintético.
+   * Usa os limiares de RSI, ADX e volatilidade específicos de cada ativo.
+   */
+  private runAssetAdaptedTechnicalAnalysis(symbol: string, marketData: any[]): { action: string; confidence: number; source: string; fibScore: number; fibZone: string; spikeInfo?: SpikeInfo; profileNotes: string } {
+    const profile = resolveDerivProfile(symbol);
+    const prices = marketData.map(d => d.close);
+    const highs  = marketData.map(d => d.high || d.close);
+    const lows   = marketData.map(d => d.low  || d.close);
+    const last   = prices[prices.length - 1];
+
+    const rsi   = this.calcRSI(prices, 14);
+    const ema20 = this.calcEMA(prices, 20);
+    const ema50 = this.calcEMA(prices, 50);
+    const macd  = this.calcMACD(prices);
+    const adx   = this.calcADX(highs, lows, prices, 14);
+
+    // Usar limiares de RSI específicos do ativo (default Forex se sem perfil)
+    const rsiOversold   = profile?.rsiOversold   ?? 30;
+    const rsiOverbought = profile?.rsiOverbought  ?? 70;
+
+    let score = 0;
+    const profileNotesParts: string[] = [];
+
+    // RSI adaptado ao perfil
+    if (rsi < rsiOversold) {
+      score += profile?.trendType === 'mean-reverting' ? 3 : 2;
+      profileNotesParts.push(`RSI ${rsi.toFixed(1)} < ${rsiOversold} (sobrevenda ${profile?.family ?? 'padrão'})`);
+    } else if (rsi > rsiOverbought) {
+      score -= profile?.trendType === 'mean-reverting' ? 3 : 2;
+      profileNotesParts.push(`RSI ${rsi.toFixed(1)} > ${rsiOverbought} (sobrecompra ${profile?.family ?? 'padrão'})`);
+    } else if (rsi < (rsiOversold + 10)) {
+      score += 1;
+    } else if (rsi > (rsiOverbought - 10)) {
+      score -= 1;
+    }
+
+    // EMA trend
+    if (ema20 > ema50) {
+      score += profile?.trendType === 'directional' ? 2 : 1;
+    } else {
+      score -= profile?.trendType === 'directional' ? 2 : 1;
+    }
+
+    // MACD
+    if (macd.macd > macd.signal) score += 1;
+    else score -= 1;
+
+    // ADX — ativo direcional: ADX alto confirma tendência; range-bound: ignora
+    if (profile?.trendType !== 'range-bound' && adx > 25) {
+      profileNotesParts.push(`ADX ${adx.toFixed(0)} — tendência forte confirmada`);
+      score += ema20 > ema50 ? 2 : -2;
+    } else if (profile?.trendType === 'range-bound' && adx < 20) {
+      profileNotesParts.push(`ADX ${adx.toFixed(0)} — mercado em range (normal para ${profile.family})`);
+    }
+
+    // Range-bound: Bollinger squeeze como sinal primário
+    if (profile?.trendType === 'range-bound') {
+      const bb = this.calcBollinger(prices, 20, 2);
+      const bbWidth = (bb.upper - bb.lower) / bb.mid;
+      if (bbWidth < 0.005) {
+        profileNotesParts.push(`Bollinger squeeze (${(bbWidth * 100).toFixed(3)}%) — breakout iminente`);
+        score += last > bb.mid ? -1 : 1; // pressão em direção ao breakout
+      }
+    }
+
+    // Fibonacci
+    let fibScore = 0;
+    let fibZoneDesc = 'Sem confluência Fibonacci próxima';
+    if (profile?.useFibonacci !== false && marketData.length >= 15) {
+      const fib = this.calcMultiLayerFibonacci(marketData, last);
+      if (fib) {
+        fibZoneDesc = fib.confluenceNarrative;
+        if (fib.confluenceScore > 0 && fib.zoneType !== 'neutral') {
+          if (fib.zoneType === 'support') { fibScore += 3; score += 2; }
+          else if (fib.zoneType === 'resistance') { fibScore -= 3; score -= 2; }
+          const layers = new Set(fib.nearestLevels.map(l => l.layer)).size;
+          if (layers >= 2) { fibScore += layers; score += layers; }
+          const keyHits = fib.nearestLevels.filter(l => ['38.2%', '50%', '61.8%'].includes(l.level)).length;
+          if (keyHits > 0) { score += keyHits; fibScore += keyHits * 2; }
+        }
+      }
+    }
+
+    // Spike index detection
+    const spikeInfo = this.isSpikeIndex(symbol) ? this.detectSpikePattern(marketData, symbol) : undefined;
+    if (spikeInfo?.expected && spikeInfo.confidence >= 50) {
+      const spikeAction = spikeInfo.direction === 'down' ? 'SELL' : 'BUY';
+      const spikeConf = 0.5 + spikeInfo.confidence / 200;
+      return { action: spikeAction, confidence: Math.min(0.92, spikeConf), source: 'technical_spike', fibScore, fibZone: fibZoneDesc, spikeInfo, profileNotes: profileNotesParts.join(' | ') };
+    }
+
+    const action     = score > 0 ? 'BUY' : score < 0 ? 'SELL' : 'HOLD';
+    const baseConf   = 0.4 + Math.abs(score) * 0.08;
+    const fibBoost   = Math.abs(fibScore) > 0 ? 0.05 * Math.min(Math.abs(fibScore), 3) : 0;
+    const confidence = Math.min(0.92, baseConf + fibBoost);
+    const profileNotes = [
+      profile ? `[${profile.family}] ${profile.trendType}` : '',
+      ...profileNotesParts,
+    ].filter(Boolean).join(' | ');
+
+    return { action, confidence, source: profile ? `technical_${profile.trendType}` : 'technical', fibScore, fibZone: fibZoneDesc, spikeInfo, profileNotes };
   }
 
   recordHeartbeat(accountData: { accountId: string; broker: string; balance: number; equity: number; freeMargin: number }): void {
@@ -837,22 +1776,33 @@ class MetaTraderBridge extends EventEmitter {
       }
 
       // ============================================================
-      // VALIDAÇÃO TÉCNICA
+      // VALIDAÇÃO TÉCNICA ADAPTADA AO ATIVO SINTÉTICO
+      // Usa perfis específicos de cada ativo Deriv para limiares de RSI,
+      // ADX, Fibonacci e detecção de spike.
       // ============================================================
-      const technicalSignal = this.runTechnicalAnalysis(symbol, marketData);
+      const assetContext = this.getAssetAIContext(symbol);
+      const derivProfile = resolveDerivProfile(symbol);
+
+      const technicalSignal = this.runAssetAdaptedTechnicalAnalysis(symbol, marketData);
       const technicalAgrees =
         (aiDirection === 'up' && technicalSignal.action === 'BUY') ||
         (aiDirection === 'down' && technicalSignal.action === 'SELL');
 
       // Build indicators for the log
       const prices = marketData.map((d: any) => d.close);
-      const indicators = this.buildIndicators(prices, marketData);
+      const indicators = this.buildIndicators(prices, marketData, symbol);
       const technicalNarrative = this.buildTechnicalNarrative(indicators, prices);
 
       // Enrich model results with individual narratives
       const enrichedModelResults = modelResults.length > 0
         ? this.buildModelNarratives(modelResults, indicators, aiDirection, aiConsensus, symbol)
         : modelResults;
+
+      const techDecisionReason = !technicalAgrees && aiConsensus < 80
+        ? `Divergência: IA diz ${aiDirection.toUpperCase()} mas análise técnica diz ${technicalSignal.action}. Consenso ${aiConsensus.toFixed(1)}% < 80% — sem trade. ${technicalSignal.profileNotes}`
+        : technicalAgrees
+          ? `Confirmação técnica (${derivProfile?.family ?? 'padrão'}): RSI=${indicators.rsi.toFixed(1)} [thr: ${derivProfile?.rsiOversold ?? 30}/${derivProfile?.rsiOverbought ?? 70}] | EMA20 ${indicators.ema20 > indicators.ema50 ? '>' : '<'} EMA50 | ADX=${indicators.adx.toFixed(1)} | ${technicalSignal.profileNotes}`
+          : `Alta confiança (${aiConsensus.toFixed(1)}% ≥ 80%) — override da análise técnica divergente | ${technicalSignal.profileNotes}`;
 
       this.logAnalysis({
         id: `${entryId}_tech`,
@@ -864,15 +1814,11 @@ class MetaTraderBridge extends EventEmitter {
         technicalAgrees,
         technicalScore: Math.round(technicalSignal.confidence * 100),
         indicators,
-        technicalNarrative,
+        technicalNarrative: `${technicalNarrative}\n\n${assetContext}`,
         aiConsensus,
         aiDirection,
         modelResults: enrichedModelResults,
-        decisionReason: !technicalAgrees && aiConsensus < 80
-          ? `Divergência: IA diz ${aiDirection.toUpperCase()} mas análise técnica diz ${technicalSignal.action}. Consenso ${aiConsensus.toFixed(1)}% < 80% — sem trade`
-          : technicalAgrees
-            ? `Confirmação técnica: RSI=${indicators.rsi.toFixed(1)} | EMA20 ${indicators.ema20 > indicators.ema50 ? '>' : '<'} EMA50 | Tendência: ${indicators.trend} | ADX=${indicators.adx.toFixed(1)}`
-            : `Alta confiança (${aiConsensus.toFixed(1)}% ≥ 80%) — override da análise técnica divergente`
+        decisionReason: techDecisionReason
       });
 
       if (!technicalAgrees && aiConsensus < 80) {
@@ -885,7 +1831,7 @@ class MetaTraderBridge extends EventEmitter {
 
       const signals = [
         { action, confidence: finalConfidence, source: 'huggingface_ai' },
-        { action: technicalSignal.action, confidence: technicalSignal.confidence, source: 'technical' }
+        { action: technicalSignal.action, confidence: technicalSignal.confidence, source: `technical_${derivProfile?.family ?? 'standard'}` }
       ];
 
       const signal = this.fuseSignals(symbol, signals, marketData, aiReasoning, finalConfidence);
@@ -1029,41 +1975,10 @@ class MetaTraderBridge extends EventEmitter {
     const indicators = this.buildIndicators(prices, marketData, symbol);
     const lastPrice = prices[prices.length - 1];
     const atr = indicators.atr || lastPrice * 0.001;
-
-    const pipSize = this.getPipSize(symbol, lastPrice);
-
-    // Fibonacci-aware SL/TP: place SL beyond the nearest Fibonacci level
     const fib = indicators.fibonacci;
-    let slPips: number;
-    let tpPips: number;
-
-    if (fib && fib.nearestLevels.length > 0 && this.config.useAIStopLoss) {
-      // SL just beyond the Fibonacci zone (1.2× ATR past nearest level)
-      const nearestFibPrice = fib.nearestLevels[0].price;
-      const fibDist = Math.abs(lastPrice - nearestFibPrice);
-      const fibSlDist = fibDist + atr * 1.2;
-      slPips = Math.max(Math.round(fibSlDist / pipSize), 1);
-      // TP at next major Fibonacci level (or 2× SL as minimum)
-      const nextLevelIdx = fib.nearestLevels.findIndex(l => l.distancePct > fib.nearestLevels[0].distancePct + 0.1);
-      if (nextLevelIdx >= 0) {
-        const nextFibDist = Math.abs(lastPrice - fib.nearestLevels[nextLevelIdx].price);
-        tpPips = Math.max(Math.round(nextFibDist / pipSize), slPips * 2);
-      } else {
-        tpPips = slPips * 2;
-      }
-    } else if (this.config.useAIStopLoss) {
-      slPips = Math.max(Math.round(atr * 1.5 / pipSize), 1);
-      tpPips = Math.max(Math.round(atr * 3.0 / pipSize), 1);
-    } else {
-      slPips = Math.max(this.config.stopLossPips, 1);
-      tpPips = Math.max(this.config.takeProfitPips, 1);
-    }
 
     const isSpikeIdx = this.isSpikeIndex(symbol);
     const spike = spikeOverride || indicators.spike;
-
-    // Spike trade: no fixed SL/TP (spike moves too fast for traditional stops)
-    // Continuity trade on Crash/Boom: tight SL to exit on spike
     const isSpikeOpportunity = isSpikeIdx && spike?.expected && spike.confidence >= 50;
     const isContinuityOnSpikeIdx = isSpikeIdx && !isSpikeOpportunity;
 
@@ -1071,28 +1986,43 @@ class MetaTraderBridge extends EventEmitter {
     let takeProfitPrice = 0;
     let stopLossPipsFinal = 0;
     let takeProfitPipsFinal = 0;
+    let slTpSource = 'atr_default';
 
     if (isSpikeOpportunity) {
       // Spike trade: very tight TP (grab quick spike profit), very tight SL (if spike doesn't happen, exit fast)
+      const pipSize = this.getPipSize(symbol, lastPrice);
       const spikeSl = Math.max(Math.round(atr * 0.5 / pipSize), 1);
       const spikeTp = Math.max(Math.round(atr * 2.0 / pipSize), spikeSl);
       stopLossPrice       = action === 'BUY' ? lastPrice - spikeSl * pipSize : lastPrice + spikeSl * pipSize;
       takeProfitPrice     = action === 'BUY' ? lastPrice + spikeTp * pipSize : lastPrice - spikeTp * pipSize;
       stopLossPipsFinal   = spikeSl;
       takeProfitPipsFinal = spikeTp;
+      slTpSource = 'spike_atr';
     } else if (isContinuityOnSpikeIdx) {
       // Continuity on Crash/Boom: tight SL to exit if spike fires
+      const pipSize = this.getPipSize(symbol, lastPrice);
       const contSl = Math.max(Math.round(atr * 0.8 / pipSize), 1);
       const contTp = Math.max(Math.round(atr * 2.5 / pipSize), contSl * 2);
       stopLossPrice       = action === 'BUY' ? lastPrice - contSl * pipSize : lastPrice + contSl * pipSize;
       takeProfitPrice     = action === 'BUY' ? lastPrice + contTp * pipSize : lastPrice - contTp * pipSize;
       stopLossPipsFinal   = contSl;
       takeProfitPipsFinal = contTp;
-    } else {
-      stopLossPrice       = action === 'BUY' ? lastPrice - slPips * pipSize : lastPrice + slPips * pipSize;
-      takeProfitPrice     = action === 'BUY' ? lastPrice + tpPips * pipSize : lastPrice - tpPips * pipSize;
-      stopLossPipsFinal   = slPips;
-      takeProfitPipsFinal = tpPips;
+      slTpSource = 'spike_continuity_atr';
+    } else if (action !== 'HOLD') {
+      // ── Calcular SL/TP guiado pelo perfil do ativo + Fibonacci do sistema
+      const fibLevels = fib?.nearestLevels?.map(l => ({ level: l.level, price: l.price }));
+      const sltp = this.calcIndicatorDrivenSLTP({
+        symbol,
+        action: action as 'BUY' | 'SELL',
+        entryPrice: lastPrice,
+        atr,
+        fibonacciLevels: this.config.useAIStopLoss ? fibLevels : undefined,
+      });
+      stopLossPrice       = sltp.stopLoss;
+      takeProfitPrice     = sltp.takeProfit;
+      stopLossPipsFinal   = sltp.slPips;
+      takeProfitPipsFinal = sltp.tpPips;
+      slTpSource          = sltp.source;
     }
 
     const fibZoneLabel = fib && fib.nearestLevels.length > 0

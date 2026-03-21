@@ -182,10 +182,42 @@ router.post('/signal-with-indicators', async (req: Request, res: Response) => {
     // ── Consulta sinal pendente da IA ────────────────────────────────────
     const baseSignal = metaTraderBridge.getPendingSignal(sym);
 
+    // ── Perfil do ativo sintético Deriv ──────────────────────────────────
+    const derivProfile = metaTraderBridge.getDerivSyntheticProfile(sym);
+    const assetContext = metaTraderBridge.getAssetAIContext(sym);
+    if (derivProfile) {
+      console.log(`[MT5-Indicators] 📊 Ativo: ${derivProfile.family} | ${derivProfile.volClass} | ${derivProfile.trendType}`);
+    }
+
+    // ── Extração de níveis de suporte/resistência dos buffers brutos ──────
+    let girassolSupportLevel: number | undefined;
+    let girassolResistanceLevel: number | undefined;
+
+    if (girassol?.detected && Array.isArray(girassol.support_resistance_levels)) {
+      const srLevels = girassol.support_resistance_levels as Array<{ type: string; price: number }>;
+      const supportEntry = srLevels.find(l => l.type === 'support' || l.type === 'S');
+      const resistEntry  = srLevels.find(l => l.type === 'resistance' || l.type === 'R');
+      if (supportEntry && supportEntry.price > 0) girassolSupportLevel = supportEntry.price;
+      if (resistEntry  && resistEntry.price  > 0) girassolResistanceLevel = resistEntry.price;
+    }
+
+    // Tentar extrair também de buffer bruto
+    const rawBuffers = Array.isArray(indicatorBuffers)
+      ? (indicatorBuffers as Array<{ name?: string; buffer?: number; value?: number; bar?: number; index?: number }>)
+          .filter(b => b.bar === 0 || b.index === 0)
+          .map(b => ({ name: b.name ?? '', value: b.value ?? b.buffer ?? 0, bar: b.bar ?? 0 }))
+      : [];
+
+    if (!girassolSupportLevel) {
+      const supBuf = rawBuffers.find(b => b.name?.toLowerCase().includes('support') || b.name?.toLowerCase().includes('suporte'));
+      if (supBuf && supBuf.value > 0) girassolSupportLevel = supBuf.value;
+    }
+    if (!girassolResistanceLevel) {
+      const resBuf = rawBuffers.find(b => b.name?.toLowerCase().includes('resistance') || b.name?.toLowerCase().includes('resistencia'));
+      if (resBuf && resBuf.value > 0) girassolResistanceLevel = resBuf.value;
+    }
+
     // ── Aplica filtro do Girassol ────────────────────────────────────────
-    // Se o Girassol estiver ativo E der sinal contrário ao da IA → HOLD
-    // Se o Girassol confirmar → aumenta confiança
-    // Se o Girassol não tiver sinal novo → mantém sinal original da IA
     let finalAction: string = baseSignal?.action || 'HOLD';
     let finalConfidence: number = baseSignal?.confidence || 0;
     let finalReason: string = baseSignal?.reason || 'Aguardando sinal';
@@ -193,14 +225,15 @@ router.post('/signal-with-indicators', async (req: Request, res: Response) => {
 
     if (girassol?.detected && girassolBias !== 'NEUTRAL') {
       if (girassolBias === finalAction) {
-        // Girassol CONFIRMA o sinal da IA
-        finalConfidence = Math.min(100, finalConfidence * 1.15);
-        indicatorNotes.push(`✅ Girassol CONFIRMA ${finalAction} — confiança elevada`);
+        // Girassol CONFIRMA o sinal da IA — aumentar confiança
+        const girassolBoost = derivProfile?.trendType === 'mean-reverting' ? 1.20 : 1.15;
+        finalConfidence = Math.min(100, finalConfidence * girassolBoost);
+        indicatorNotes.push(`✅ Girassol CONFIRMA ${finalAction} — confiança elevada (+${((girassolBoost - 1) * 100).toFixed(0)}%)`);
         finalReason = `${finalReason} | ${girassolDesc}`;
       } else if (finalAction !== 'HOLD' && girassolBias !== finalAction) {
         // Girassol CONTRADIZ o sinal da IA → filtra (HOLD)
         indicatorNotes.push(`🚫 Girassol CONTRADIZ IA (${finalAction}→${girassolBias}) — operação bloqueada`);
-        console.log(`[MT5-Indicators] 🚫 Sinal ${finalAction} BLOQUEADO pelo Girassol (indicador diz ${girassolBias})`);
+        console.log(`[MT5-Indicators] 🚫 Sinal ${finalAction} BLOQUEADO pelo Girassol (indicador diz ${girassolBias}) | ${sym}`);
         finalAction     = 'HOLD';
         finalConfidence = 0;
         finalReason     = `Bloqueado: ${girassolDesc}`;
@@ -210,7 +243,6 @@ router.post('/signal-with-indicators', async (req: Request, res: Response) => {
     }
 
     // ── Aplica filtro do Fibonacci ───────────────────────────────────────
-    // Se preço está muito próximo de um nível de Fibonacci → zona de decisão
     if (fibonacci?.detected && fibNearestLevel !== null) {
       const currentPrice = ask || bid || 0;
       if (currentPrice > 0) {
@@ -220,6 +252,50 @@ router.post('/signal-with-indicators', async (req: Request, res: Response) => {
         }
       }
       indicatorNotes.push(fibDesc);
+    }
+
+    // ── Recalcular SL/TP usando indicadores reais do EA ──────────────────
+    let refinedSL   = baseSignal?.stopLoss    ?? 0;
+    let refinedTP   = baseSignal?.takeProfit  ?? 0;
+    let refinedSLPips = baseSignal?.stopLossPips   ?? 0;
+    let refinedTPPips = baseSignal?.takeProfitPips  ?? 0;
+    let slTpSource  = 'signal_original';
+
+    if (baseSignal && finalAction !== 'HOLD' && (finalAction === 'BUY' || finalAction === 'SELL')) {
+      const currentPrice = ask || bid || baseSignal.entryPrice || 0;
+
+      if (currentPrice > 0) {
+        const atr = metaTraderBridge.getSymbolATR(sym) || currentPrice * 0.002;
+
+        const fibLevels = fibonacci?.detected && Array.isArray(fibonacci.levels)
+          ? (fibonacci.levels as Array<{ level: string; price: number }>).filter(l => l.price > 0)
+          : undefined;
+
+        const sltp = metaTraderBridge.calcIndicatorDrivenSLTP({
+          symbol:                sym,
+          action:                finalAction as 'BUY' | 'SELL',
+          entryPrice:            currentPrice,
+          atr,
+          girassolSupportLevel,
+          girassolResistanceLevel,
+          fibonacciLevels:       fibLevels,
+          indicatorBuffers:      rawBuffers,
+        });
+
+        refinedSL     = sltp.stopLoss;
+        refinedTP     = sltp.takeProfit;
+        refinedSLPips = sltp.slPips;
+        refinedTPPips = sltp.tpPips;
+        slTpSource    = sltp.source;
+
+        indicatorNotes.push(`📍 SL/TP recalculado via indicadores reais (${sltp.source}): SL=${sltp.stopLoss.toFixed(5)} TP=${sltp.takeProfit.toFixed(5)}`);
+        console.log(`[MT5-Indicators] 📍 ${sym} SL/TP: ${sltp.source} | SL=${sltp.stopLoss.toFixed(5)} (${sltp.slPips}pip) | TP=${sltp.takeProfit.toFixed(5)} (${sltp.tpPips}pip)`);
+      }
+    }
+
+    // Adicionar contexto do ativo ao log
+    if (derivProfile) {
+      indicatorNotes.push(`📊 ${derivProfile.family} (${derivProfile.volClass}) — ${derivProfile.trendType} | RSI thr: ${derivProfile.rsiOversold}/${derivProfile.rsiOverbought}`);
     }
 
     // Monta resposta final
@@ -232,6 +308,9 @@ router.post('/signal-with-indicators', async (req: Request, res: Response) => {
         girassolBias,
         fibonacciNearestLevel: fibNearestLevel,
         indicatorsDetected: indicatorCount || 0,
+        assetFamily:  derivProfile?.family      ?? null,
+        assetTrend:   derivProfile?.trendType   ?? null,
+        assetVolClass: derivProfile?.volClass   ?? null,
         timestamp: Date.now()
       });
     }
@@ -241,25 +320,78 @@ router.post('/signal-with-indicators', async (req: Request, res: Response) => {
       symbol:                baseSignal.symbol,
       action:                finalAction,
       lotSize:               baseSignal.lotSize,
-      stopLoss:              baseSignal.stopLoss,
-      takeProfit:            baseSignal.takeProfit,
-      stopLossPips:          baseSignal.stopLossPips,
-      takeProfitPips:        baseSignal.takeProfitPips,
+      stopLoss:              refinedSL,
+      takeProfit:            refinedTP,
+      stopLossPips:          refinedSLPips,
+      takeProfitPips:        refinedTPPips,
+      slTpSource,
       entryPrice:            baseSignal.entryPrice,
       confidence:            Math.round(finalConfidence * 10) / 10,
       reason:                finalReason,
       indicatorNotes,
       girassolBias,
       girassolDescription:   girassolDesc,
+      girassolSupportLevel:  girassolSupportLevel ?? null,
+      girassolResistLevel:   girassolResistanceLevel ?? null,
       fibonacciDescription:  fibDesc,
       fibonacciNearestLevel: fibNearestLevel,
       indicatorsDetected:    indicatorCount || 0,
+      assetFamily:           derivProfile?.family      ?? null,
+      assetTrend:            derivProfile?.trendType   ?? null,
+      assetVolClass:         derivProfile?.volClass    ?? null,
+      assetRsiThresholds:    derivProfile ? { oversold: derivProfile.rsiOversold, overbought: derivProfile.rsiOverbought } : null,
+      assetContext,
       aiSources:             baseSignal.aiSources,
       timestamp:             baseSignal.timestamp,
       expiresAt:             baseSignal.expiresAt
     });
   } catch (err: any) {
     console.error('[MT5-Indicators] Erro:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/metatrader/asset-profile/:symbol
+ * Retorna o perfil completo do ativo sintético Deriv, incluindo
+ * comportamento, limiares de indicadores, parâmetros de SL/TP e contexto IA.
+ */
+router.get('/asset-profile/:symbol', (req: Request, res: Response) => {
+  try {
+    const symbol = req.params.symbol;
+    const profile = metaTraderBridge.getDerivSyntheticProfile(symbol);
+    const aiContext = metaTraderBridge.getAssetAIContext(symbol);
+    const atr = metaTraderBridge.getSymbolATR(symbol);
+
+    if (!profile) {
+      return res.json({
+        symbol,
+        found: false,
+        message: `Nenhum perfil encontrado para ${symbol}. O ativo pode ser um par Forex ou símbolo não reconhecido.`,
+        aiContext,
+        atr: atr || null
+      });
+    }
+
+    res.json({
+      symbol,
+      found: true,
+      profile,
+      aiContext,
+      atr: atr || null,
+      indicatorGuidance: {
+        rsiOversold:   profile.rsiOversold,
+        rsiOverbought: profile.rsiOverbought,
+        slAtrMultiplier: profile.slAtrMultiplier,
+        tpAtrMultiplier: profile.tpAtrMultiplier,
+        suggestedSLPips: atr > 0 ? Math.round(atr * profile.slAtrMultiplier / 0.0001) : null,
+        suggestedTPPips: atr > 0 ? Math.round(atr * profile.tpAtrMultiplier / 0.0001) : null,
+        useFibonacci: profile.useFibonacci,
+        optimalTimeframe: profile.optimalTimeframe,
+        spikeAlert: profile.spikeIndex ? { direction: profile.spikeDirection, frequency: profile.spikeFrequency } : null,
+      }
+    });
+  } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
