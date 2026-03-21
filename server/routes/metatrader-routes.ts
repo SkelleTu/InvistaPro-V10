@@ -534,16 +534,20 @@ router.get('/download-ea', (req: Request, res: Response) => {
 });
 
 function generateEAContent(serverUrl: string, token: string, config: any): string {
-  const lotSize        = config.defaultLotSize    ?? 0.01;
-  const stopLoss       = config.stopLossPips       ?? 30;
-  const takeProfit     = config.takeProfitPips     ?? 60;
-  const maxPositions   = config.maxOpenPositions   ?? 5;
-  const maxDailyLoss   = config.maxDailyLoss       ?? 100;
-  const maxDailyProfit = config.maxDailyProfit     ?? 500;
-  const useAISL        = config.useAIStopLoss      ? 'true' : 'false';
-  const useTrailing    = config.useTrailingStop    ? 'true' : 'false';
-  const trailingPips   = config.trailingStopPips   ?? 15;
-  const signalTimeout  = config.signalTimeoutSeconds ?? 60;
+  const lotSize           = config.defaultLotSize       ?? 0.01;
+  const stopLoss          = config.stopLossPips          ?? 30;
+  const takeProfit        = config.takeProfitPips        ?? 60;
+  const maxPositions      = config.maxOpenPositions      ?? 5;
+  const maxDailyLoss      = config.maxDailyLoss          ?? 100;
+  const maxDailyProfit    = config.maxDailyProfit        ?? 500;
+  const useAISL           = config.useAIStopLoss         ? 'true' : 'false';
+  const useTrailing       = config.useTrailingStop       ? 'true' : 'false';
+  const trailingPips      = config.trailingStopPips      ?? 15;
+  const signalTimeout     = config.signalTimeoutSeconds  ?? 60;
+  const fullAIMode        = config.fullAIMode            ? 'true' : 'false';
+  const useAILotSize      = config.useAILotSize          ? 'true' : 'false';
+  const useAITrailing     = config.useAITrailing         ? 'true' : 'false';
+  const useAIRiskLimits   = config.useAIRiskLimits       ? 'true' : 'false';
 
   return `//+------------------------------------------------------------------+
 //|                                              InvistaPRO_EA.mq5   |
@@ -558,23 +562,53 @@ function generateEAContent(serverUrl: string, token: string, config: any): strin
 #include <Trade\\Trade.mqh>
 #include <Trade\\PositionInfo.mqh>
 
-//--- Input Parameters
-input string   ServerURL       = "${serverUrl}";
-input string   ApiToken        = "${token}";
-input string   TradingSymbol   = "";  // Vazio = par atual
-input double   LotSize         = ${lotSize};
-input int      StopLoss        = ${stopLoss};
-input int      TakeProfit      = ${takeProfit};
-input int      MaxPositions    = ${maxPositions};
-input double   MaxDailyLoss    = ${maxDailyLoss};
-input double   MaxDailyProfit  = ${maxDailyProfit};
-input bool     UseAIStopLoss   = ${useAISL};
-input bool     UseTrailing     = ${useTrailing};
-input int      TrailingPips    = ${trailingPips};
-input int      SignalTimeout   = ${signalTimeout};
-input int      PollIntervalSec = 5;
-input int      HeartbeatSec    = 15;
-input int      CandlesHistory  = 200;
+//--- ══════════════════════════════════════════════════════════════
+//--- MODO DE OPERAÇÃO
+//--- ══════════════════════════════════════════════════════════════
+input bool     FullAIMode       = ${fullAIMode};  // ✅ IA controla 100% de tudo (lote, SL, TP, trailing, limites)
+
+//--- ══════════════════════════════════════════════════════════════
+//--- CONEXÃO COM O SERVIDOR
+//--- ══════════════════════════════════════════════════════════════
+input string   ServerURL        = "${serverUrl}";
+input string   ApiToken         = "${token}";
+input string   TradingSymbol    = "";               // Vazio = par atual do gráfico
+
+//--- ══════════════════════════════════════════════════════════════
+//--- LOTE
+//--- ══════════════════════════════════════════════════════════════
+input bool     UseAILotSize     = ${useAILotSize};  // IA define o lote ideal por operação
+input double   LotSize          = ${lotSize};        // Lote fixo (ignorado se UseAILotSize=true ou FullAIMode=true)
+
+//--- ══════════════════════════════════════════════════════════════
+//--- STOP LOSS / TAKE PROFIT
+//--- ══════════════════════════════════════════════════════════════
+input bool     UseAIStopLoss    = ${useAISL};        // IA calcula SL/TP baseado em ATR e volatilidade
+input int      StopLoss         = ${stopLoss};        // SL em pips (ignorado se UseAIStopLoss=true ou FullAIMode=true)
+input int      TakeProfit       = ${takeProfit};      // TP em pips (ignorado se UseAIStopLoss=true ou FullAIMode=true)
+
+//--- ══════════════════════════════════════════════════════════════
+//--- TRAILING STOP
+//--- ══════════════════════════════════════════════════════════════
+input bool     UseAITrailing    = ${useAITrailing};  // IA ativa trailing quando a operação está lucrativa
+input bool     UseTrailing      = ${useTrailing};     // Trailing fixo (ignorado se UseAITrailing=true ou FullAIMode=true)
+input int      TrailingPips     = ${trailingPips};    // Distância trailing em pips
+
+//--- ══════════════════════════════════════════════════════════════
+//--- GESTÃO DE RISCO
+//--- ══════════════════════════════════════════════════════════════
+input bool     UseAIRiskLimits  = ${useAIRiskLimits}; // IA gerencia posições máx. e limites diários
+input int      MaxPositions     = ${maxPositions};     // Máx. posições simultâneas (ignorado se UseAIRiskLimits=true ou FullAIMode=true)
+input double   MaxDailyLoss     = ${maxDailyLoss};     // Perda máx. diária em $ (ignorado se UseAIRiskLimits=true ou FullAIMode=true)
+input double   MaxDailyProfit   = ${maxDailyProfit};   // Lucro alvo diário em $ (ignorado se UseAIRiskLimits=true ou FullAIMode=true)
+
+//--- ══════════════════════════════════════════════════════════════
+//--- TÉCNICO
+//--- ══════════════════════════════════════════════════════════════
+input int      SignalTimeout    = ${signalTimeout};
+input int      PollIntervalSec  = 5;
+input int      HeartbeatSec     = 15;
+input int      CandlesHistory   = 200;
 
 //--- Global Variables
 CTrade         trade;
@@ -588,6 +622,18 @@ double         startDayBalance  = 0;   // saldo no início do dia
 datetime       lastDayReset     = 0;   // último reset diário
 string         lastSignalId     = "";
 string         accountId        = "";
+
+//--- Variáveis de modo IA (atualizadas via sinal e heartbeat)
+bool   aiTrailingEnabled  = false;   // IA recomenda trailing para o trade atual
+int    aiTrailingPips     = 15;      // Pips de trailing recomendados pela IA
+int    aiMaxPositions     = 5;       // Máx. posições da IA (via heartbeat)
+double aiMaxDailyLoss     = 100.0;   // Perda máx. da IA (via sinal)
+double aiMaxDailyProfit   = 500.0;   // Lucro alvo da IA (via sinal)
+
+//--- Helpers: obter limite de posições e limites diários conforme o modo ativo
+int    GetEffectiveMaxPositions()  { return (FullAIMode || UseAIRiskLimits)  ? aiMaxPositions   : MaxPositions;  }
+double GetEffectiveMaxDailyLoss()  { return (FullAIMode || UseAIRiskLimits)  ? aiMaxDailyLoss   : MaxDailyLoss;  }
+double GetEffectiveMaxDailyProfit(){ return (FullAIMode || UseAIRiskLimits)  ? aiMaxDailyProfit : MaxDailyProfit; }
 
 //+------------------------------------------------------------------+
 //| Expert initialization                                            |
@@ -609,6 +655,20 @@ int OnInit() {
    Print("✅ InvistaPRO EA iniciado | Servidor: ", ServerURL);
    Print("📡 Conta: ", accountId, " | Par: ", GetSymbol());
    Print("💰 Saldo inicial do dia: $", DoubleToString(startDayBalance, 2));
+
+   // Resumo do modo de operação ativo
+   if(FullAIMode) {
+      Print("🤖 MODO COMPLETO IA — A IA controla: lote, SL/TP, trailing, limites");
+   } else {
+      if(UseAILotSize)    Print("🤖 Lote: controlado pela IA");
+      else                Print("💰 Lote: fixo em ", DoubleToString(LotSize, 2));
+      if(UseAIStopLoss)   Print("🛡️ SL/TP: dinâmico pela IA");
+      else                Print("🛡️ SL/TP: fixo ", StopLoss, "/", TakeProfit, " pips");
+      if(UseAITrailing)   Print("📈 Trailing: controlado pela IA");
+      else if(UseTrailing) Print("📈 Trailing: fixo em ", TrailingPips, " pips");
+      if(UseAIRiskLimits) Print("⚠️ Limites: controlados pela IA");
+      else                Print("⚠️ Limites: Máx.", MaxPositions, " pos | SL $", DoubleToString(MaxDailyLoss,2), " | TP $", DoubleToString(MaxDailyProfit,2));
+   }
    
    SendHeartbeat();
    return INIT_SUCCEEDED;
@@ -655,7 +715,9 @@ void OnTick() {
    UpdateOpenPositions();
    
    // Verificar trailing stop
-   if(UseTrailing) ManageTrailingStop();
+   // Usar trailing se: manual ativado OU (modo IA ativado E IA recomendou trailing)
+   bool doTrailing = UseTrailing || ((FullAIMode || UseAITrailing) && aiTrailingEnabled);
+   if(doTrailing) ManageTrailingStop();
    
    // Checar limites diários
    if(!CheckDailyLimits()) return;
@@ -727,7 +789,7 @@ void UploadMarketData() {
 //| Consulta e executa sinal das IAs                                 |
 //+------------------------------------------------------------------+
 void CheckAndExecuteSignal() {
-   if(CountOpenPositions() >= MaxPositions) return;
+   if(CountOpenPositions() >= GetEffectiveMaxPositions()) return;
    
    string symbol  = GetSymbol();
    string url     = ServerURL + "/api/mt5/signal?symbol=" + symbol + "&token=" + ApiToken;
@@ -739,17 +801,38 @@ void CheckAndExecuteSignal() {
    
    string response = CharArrayToString(res);
    
-   string action     = ExtractJsonString(response, "action");
-   string signalId   = ExtractJsonString(response, "id");
-   double confidence = ExtractJsonDouble(response, "confidence");
-   double slPrice    = ExtractJsonDouble(response, "stopLoss");
-   double tpPrice    = ExtractJsonDouble(response, "takeProfit");
-   double lotSize    = ExtractJsonDouble(response, "lotSize");
-   string reason     = ExtractJsonString(response, "reason");
-   
+   string action            = ExtractJsonString(response, "action");
+   string signalId          = ExtractJsonString(response, "id");
+   double confidence        = ExtractJsonDouble(response, "confidence");
+   double slPrice           = ExtractJsonDouble(response, "stopLoss");
+   double tpPrice           = ExtractJsonDouble(response, "takeProfit");
+   double aiLotSize         = ExtractJsonDouble(response, "lotSize");
+   string reason            = ExtractJsonString(response, "reason");
+   // Campos de controle autônomo da IA
+   bool   sigAITrail        = ExtractJsonBool(response, "aiTrailingEnabled");
+   int    sigAITrailPips    = (int)ExtractJsonDouble(response, "aiTrailingPips");
+   double sigAIMaxLoss      = ExtractJsonDouble(response, "aiMaxDailyLoss");
+   double sigAIMaxProfit    = ExtractJsonDouble(response, "aiMaxDailyProfit");
+   int    sigAIMaxPos       = (int)ExtractJsonDouble(response, "aiMaxPositions");
+
    if(signalId == lastSignalId || action == "HOLD" || action == "") return;
-   
-   Print("🔔 Sinal recebido: ", action, " ", symbol, " | Confiança: ", DoubleToString(confidence * 100, 1), "% | ", reason);
+
+   // Atualizar limites da IA com valores do sinal (quando modo IA ativo)
+   if(FullAIMode || UseAITrailing) {
+      aiTrailingEnabled = sigAITrail;
+      if(sigAITrailPips > 0) aiTrailingPips = sigAITrailPips;
+   }
+   if(FullAIMode || UseAIRiskLimits) {
+      if(sigAIMaxLoss   > 0) aiMaxDailyLoss   = sigAIMaxLoss;
+      if(sigAIMaxProfit > 0) aiMaxDailyProfit  = sigAIMaxProfit;
+      if(sigAIMaxPos    > 0) aiMaxPositions    = sigAIMaxPos;
+   }
+
+   // Determinar lote efetivo
+   double lotSize = (FullAIMode || UseAILotSize) ? (aiLotSize > 0 ? aiLotSize : LotSize) : LotSize;
+
+   Print("🔔 Sinal recebido: ", action, " ", symbol, " | Confiança: ", DoubleToString(confidence * 100, 1), "% | Lote: ", DoubleToString(lotSize, 2), " | ", reason);
+   if(FullAIMode) Print("🤖 Modo IA: trailing=", aiTrailingEnabled ? "SIM" : "NÃO", " pips=", aiTrailingPips, " | MaxPos=", aiMaxPositions);
    
    double entryPrice = (action == "BUY") ? SymbolInfoDouble(symbol, SYMBOL_ASK) : SymbolInfoDouble(symbol, SYMBOL_BID);
    double point      = SymbolInfoDouble(symbol, SYMBOL_POINT);
@@ -765,10 +848,11 @@ void CheckAndExecuteSignal() {
    //---  • CONTINUIDADE em Crash/Boom: SL/TP moderados para seguir a tendência natural
    //---  • SPIKE em Crash/Boom: SL/TP apertados para capturar o movimento rápido
    //--- Se a IA não forneceu valores, usar os parâmetros manuais configurados.
-   if(!UseAIStopLoss || slPrice <= 0) {
+   bool useAISL = (FullAIMode || UseAIStopLoss);
+   if(!useAISL || slPrice <= 0) {
       slPrice = (action == "BUY") ? entryPrice - StopLoss * point : entryPrice + StopLoss * point;
    }
-   if(!UseAIStopLoss || tpPrice <= 0) {
+   if(!useAISL || tpPrice <= 0) {
       tpPrice = (action == "BUY") ? entryPrice + TakeProfit * point : entryPrice - TakeProfit * point;
    }
 
@@ -941,17 +1025,21 @@ bool CheckDailyLimits() {
    double netDayPL       = currentBalance - startDayBalance;
    double netDayLoss     = netDayPL < 0 ? MathAbs(netDayPL) : 0;
    double netDayProfit   = netDayPL > 0 ? netDayPL          : 0;
-   
-   if(netDayLoss >= MaxDailyLoss) {
+   double effLoss        = GetEffectiveMaxDailyLoss();
+   double effProfit      = GetEffectiveMaxDailyProfit();
+
+   if(netDayLoss >= effLoss) {
       Print("🛑 Limite diário de PERDA LÍQUIDA atingido: -$", DoubleToString(netDayLoss, 2),
             " | Início: $", DoubleToString(startDayBalance, 2),
             " | Atual: $",  DoubleToString(currentBalance, 2),
-            " | Limite: $", DoubleToString(MaxDailyLoss, 2));
+            " | Limite: $", DoubleToString(effLoss, 2),
+            (FullAIMode || UseAIRiskLimits) ? " [IA]" : " [Manual]");
       return false;
    }
-   if(netDayProfit >= MaxDailyProfit) {
+   if(netDayProfit >= effProfit) {
       Print("🎯 Meta diária de LUCRO LÍQUIDO atingida: +$", DoubleToString(netDayProfit, 2),
-            " | Limite: $", DoubleToString(MaxDailyProfit, 2));
+            " | Limite: $", DoubleToString(effProfit, 2),
+            (FullAIMode || UseAIRiskLimits) ? " [IA]" : " [Manual]");
       return false;
    }
    return true;

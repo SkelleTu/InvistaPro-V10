@@ -31,6 +31,12 @@ export interface MT5Signal {
   spikeExitRequired?: boolean;
   fibZone?: string;
   fibConfluence?: number;
+  // Campos para controle autônomo da IA
+  aiTrailingEnabled?: boolean;  // IA recomenda ativar trailing para este trade
+  aiTrailingPips?: number;      // Pips de trailing recomendados pela IA
+  aiMaxPositions?: number;      // Limite de posições recomendado pela IA
+  aiMaxDailyLoss?: number;      // Perda máx. diária recomendada pela IA
+  aiMaxDailyProfit?: number;    // Lucro alvo diário recomendado pela IA
 }
 
 export interface FibZoneInfo {
@@ -172,6 +178,11 @@ export interface MT5Config {
   enabledAIs: string[];
   riskPercent: number;
   apiToken: string;
+  // Modos de controle da IA
+  fullAIMode: boolean;      // IA controla 100% de tudo
+  useAILotSize: boolean;    // IA define o lote ideal por operação
+  useAITrailing: boolean;   // IA ativa/controla trailing stop
+  useAIRiskLimits: boolean; // IA gerencia limites de risco (posições, perda, lucro)
 }
 
 export interface MT5Status {
@@ -212,7 +223,11 @@ const DEFAULT_CONFIG: MT5Config = {
   pollingIntervalMs: 5000,
   enabledAIs: ['quantum', 'advanced', 'microscopic', 'huggingface', 'supreme'],
   riskPercent: 1,
-  apiToken: ''
+  apiToken: '',
+  fullAIMode: false,
+  useAILotSize: false,
+  useAITrailing: false,
+  useAIRiskLimits: false,
 };
 
 export interface ConnectionEvent {
@@ -2150,7 +2165,13 @@ class MetaTraderBridge extends EventEmitter {
       spikeOpportunity: isSpikeOpportunity,
       spikeExitRequired: isContinuityOnSpikeIdx && (spike?.imminencePercent || 0) >= 60,
       fibZone:          fibZoneLabel,
-      fibConfluence:    fib?.confluenceScore
+      fibConfluence:    fib?.confluenceScore,
+      // Recomendações da IA para modos autônomos
+      aiTrailingEnabled: action !== 'HOLD' && finalConfidence >= 0.75,
+      aiTrailingPips:    Math.round(stopLossPipsFinal * 0.6),
+      aiMaxPositions:    3,
+      aiMaxDailyLoss:    this.config.maxDailyLoss,
+      aiMaxDailyProfit:  this.config.maxDailyProfit,
     };
 
     if (action !== 'HOLD') {
