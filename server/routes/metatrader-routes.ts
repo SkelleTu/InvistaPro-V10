@@ -162,10 +162,11 @@ router.post('/signal-with-indicators', async (req: Request, res: Response) => {
       const sellSigs = girassol.signals?.sell_signals || [];
       const exitSigs = girassol.signals?.exit_signals || [];
 
-      // Sinal mais recente (bar=0 = barra atual, bar=1 = anterior, etc.)
-      const recentBuy  = buySigs.find((s: any)  => s.bar <= 1);
-      const recentSell = sellSigs.find((s: any) => s.bar <= 1);
-      const recentExit = exitSigs.find((s: any) => s.bar <= 1);
+      // Sinal mais recente (bar=0 = barra atual, bar=1 = anterior, bar=2 = anterior a este)
+      // Janela de 3 barras para capturar formações recentes com segurança
+      const recentBuy  = buySigs.find((s: any)  => s.bar <= 2 && s.value !== 0);
+      const recentSell = sellSigs.find((s: any) => s.bar <= 2 && s.value !== 0);
+      const recentExit = exitSigs.find((s: any) => s.bar <= 2 && s.value !== 0);
 
       if (recentExit) {
         girassolBias = 'NEUTRAL';

@@ -311,7 +311,9 @@ string ReadStructuredIndicatorSignals()
 
             for (int v = 0; v < lookback; v++)
             {
+               // Filtra: valor vazio (EMPTY_VALUE) ou zero (sem sinal)
                if (buf[v] >= 1e20 || buf[v] <= -1e20) continue;
+               if (buf[v] == 0.0) continue; // zero = sem sinal nesta barra
 
                string entry = "{\"bar\":" + IntegerToString(v) +
                               ",\"buffer\":" + IntegerToString(b) +
