@@ -809,7 +809,7 @@ void CheckAndExecuteSignal() {
    double aiLotSize         = ExtractJsonDouble(response, "lotSize");
    string reason            = ExtractJsonString(response, "reason");
    // Campos de controle autônomo da IA
-   bool   sigAITrail        = ExtractJsonBool(response, "aiTrailingEnabled");
+   bool   sigAITrail        = (StringFind(response, "\\"aiTrailingEnabled\\":true") >= 0);
    int    sigAITrailPips    = (int)ExtractJsonDouble(response, "aiTrailingPips");
    double sigAIMaxLoss      = ExtractJsonDouble(response, "aiMaxDailyLoss");
    double sigAIMaxProfit    = ExtractJsonDouble(response, "aiMaxDailyProfit");
