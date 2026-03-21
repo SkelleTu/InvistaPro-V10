@@ -1,12 +1,15 @@
 //+------------------------------------------------------------------+
 //|                                              InvistaPRO_EA.mq5    |
 //|                                 InvistaPRO - Auto-Discovery URL   |
-//|   Versão 6.0 — Perfil de Ativo + SL/TP por Indicadores Reais     |
-//|   Detecta: Girassol, Fibonacci automático e qualquer indicador    |
-//|   Calcula SL/TP usando os níveis REAIS dos indicadores instalados |
+//|   Versão 7.0 — 3 Níveis Girassol + Bolinhas Semáforo             |
+//|   Girassol: LowSymbol(azul/compra) e HighSymbol(vermelho/venda)  |
+//|   Nível 1: Girassol extremo (buf 0=compra, 1=venda)              |
+//|   Nível 2: Bolinha média pivot (buf 2=compra, 3=venda)           |
+//|   Nível 3: Bolinha pequena micro (buf 4=compra, 5=venda)         |
+//|   Detecta também Semáforo/Bolinha como indicador separado         |
 //+------------------------------------------------------------------+
 #property copyright "InvistaPRO"
-#property version   "6.0"
+#property version   "7.0"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -257,103 +260,211 @@ string ReadAllIndicatorBuffers()
 }
 
 //+------------------------------------------------------------------+
-//| Identifica sinais estruturados do Girassol, Fibonacci e outros   |
-//| v6.0: inclui support_resistance_levels para SL/TP baseado em    |
-//|        indicadores reais instalados no gráfico                   |
+//| Identifica sinais estruturados do Girassol (3 níveis)            |
+//| e Fibonacci automático — o Girassol É o próprio semáforo        |
+//|                                                                  |
+//| GIRASSOL — 3 níveis de sinal (o próprio Girassol É o semáforo) |
+//|                                                                  |
+//|   Nível 1 — Girassol extremo (topos/fundos extremos)            |
+//|     Buffer 0 = LowSymbol  → compra  (centro AZUL)              |
+//|     Buffer 1 = HighSymbol → venda   (centro VERMELHO)           |
+//|                                                                  |
+//|   Nível 2 — Bolinha média pivot (topos/fundos de pivot)         |
+//|     Buffer 2 = LowSymbol/compra (azul)                          |
+//|     Buffer 3 = HighSymbol/venda (vermelho)                      |
+//|                                                                  |
+//|   Nível 3 — Bolinha pequena micro (micro-estruturas)            |
+//|     Buffer 4 = LowSymbol/compra (azul)                          |
+//|     Buffer 5 = HighSymbol/venda (vermelho)                      |
+//|                                                                  |
+//| v7.0: support_resistance_levels para SL/TP baseado em níveis    |
+//|        reais dos indicadores instalados no gráfico               |
 //+------------------------------------------------------------------+
 string ReadStructuredIndicatorSignals()
 {
    string json = "{";
 
-   bool girassolFound = false;
-   bool fibFound      = false;
+   bool girassolFound  = false;
+   bool fibFound       = false;
 
    for (int i = 0; i < g_indicatorCount; i++)
    {
       string nameLower = g_indicators[i].name;
       StringToLower(nameLower);
 
-      bool isGirassol = (StringFind(nameLower, "girassol") >= 0 ||
-                         StringFind(nameLower, "sunflower") >= 0 ||
-                         StringFind(nameLower, "gira")     >= 0);
+      bool isGirassol  = (StringFind(nameLower, "girassol")  >= 0 ||
+                          StringFind(nameLower, "sunflower")  >= 0 ||
+                          StringFind(nameLower, "gira")       >= 0);
 
-      bool isFibonacci = (StringFind(nameLower, "fib")      >= 0 ||
-                          StringFind(nameLower, "fibonacci") >= 0 ||
-                          StringFind(nameLower, "retr")      >= 0);
+      bool isFibonacci = (StringFind(nameLower, "fib")        >= 0 ||
+                          StringFind(nameLower, "fibonacci")   >= 0 ||
+                          StringFind(nameLower, "retr")        >= 0);
 
-      // === LEITURA DO GIRASSOL ===
+      // ================================================================
+      // === LEITURA DO GIRASSOL — 3 NÍVEIS ===
+      // ================================================================
       if (isGirassol && !girassolFound)
       {
          girassolFound = true;
          int    totalBufs = g_indicators[i].totalBuffers;
          int    lookback  = IndicatorBars;
-         double ask = SymbolInfoDouble(g_symbol, SYMBOL_ASK);
+         double ask       = SymbolInfoDouble(g_symbol, SYMBOL_ASK);
 
          json += "\"girassol\":{";
          json += "\"detected\":true,";
          json += "\"name\":\"" + g_indicators[i].name + "\",";
-         json += "\"signals\":{";
+         json += "\"total_buffers\":" + IntegerToString(totalBufs) + ",";
 
-         string buySignals  = "\"buy_signals\":[";
-         string sellSignals = "\"sell_signals\":[";
-         string exitSignals = "\"exit_signals\":[";
+         // -----------------------------------------------------------
+         // Mapa dos 3 níveis — pares de buffers (par=compra, ímpar=venda)
+         // Nível 0: buf 0 (LowSymbol/buy, azul) e buf 1 (HighSymbol/sell, vermelho) → Girassol extremo
+         // Nível 1: buf 2 (buy, azul) e buf 3 (sell, vermelho) → Bolinha média pivot
+         // Nível 2: buf 4 (buy, azul) e buf 5 (sell, vermelho) → Bolinha pequena micro
+         // -----------------------------------------------------------
+         string levelNames[];
+         ArrayResize(levelNames, 3);
+         levelNames[0] = "girassol_extremo";
+         levelNames[1] = "bolinha_media_pivot";
+         levelNames[2] = "bolinha_pequena_micro";
 
-         // Para SL/TP baseado em indicador real:
-         // Buffers abaixo do preço são suporte (potencial SL para SELL / TP para BUY)
-         // Buffers acima do preço são resistência (potencial TP para BUY / SL para SELL)
+         string levelsJson = "\"levels\":[";
+         bool   firstLevel = true;
+
+         // Suporte/resistência para SL/TP
          string srLevels = "\"support_resistance_levels\":[";
-         bool firstSR    = true;
+         bool   firstSR  = true;
 
-         for (int b = 0; b < MathMin(totalBufs, 8); b++)
+         // Dados resumidos de todos os sinais combinados
+         string allBuyJson  = "\"all_buy_signals\":[";
+         string allSellJson = "\"all_sell_signals\":[";
+         bool   firstBuy    = true;
+         bool   firstSell   = true;
+
+         for (int lvl = 0; lvl < 3; lvl++)
          {
-            double buf[];
-            if (CopyBuffer(g_indicators[i].handle, b, 0, lookback, buf) < 1) continue;
+            int bufBuy  = lvl * 2;       // 0, 2, 4
+            int bufSell = lvl * 2 + 1;   // 1, 3, 5
 
-            for (int v = 0; v < lookback; v++)
+            if (bufBuy  >= totalBufs && bufSell >= totalBufs) continue;
+
+            if (!firstLevel) levelsJson += ",";
+            firstLevel = false;
+
+            levelsJson += "{";
+            levelsJson += "\"level_id\":" + IntegerToString(lvl) + ",";
+            levelsJson += "\"level_name\":\"" + levelNames[lvl] + "\",";
+
+            // --- BUY side (LowSymbol / azul) ---
+            levelsJson += "\"buy_symbol\":\"LowSymbol\",";
+            levelsJson += "\"buy_color\":\"blue\",";
+            levelsJson += "\"buy_buffer\":" + IntegerToString(bufBuy) + ",";
+            levelsJson += "\"buy_signals\":[";
+            bool firstEntry = true;
+
+            if (bufBuy < totalBufs)
             {
-               // Filtra: valor vazio (EMPTY_VALUE) ou zero (sem sinal)
-               if (buf[v] >= 1e20 || buf[v] <= -1e20) continue;
-               if (buf[v] == 0.0) continue; // zero = sem sinal nesta barra
-
-               string entry = "{\"bar\":" + IntegerToString(v) +
-                              ",\"buffer\":" + IntegerToString(b) +
-                              ",\"value\":" + DoubleToString(buf[v], _Digits) + "}";
-
-               if (b == 0)      { if (StringLen(buySignals)  > 14) buySignals  += ","; buySignals  += entry; }
-               else if (b == 1) { if (StringLen(sellSignals) > 15) sellSignals += ","; sellSignals += entry; }
-               else             { if (StringLen(exitSignals) > 15) exitSignals += ","; exitSignals += entry; }
-
-               // Classificar como suporte ou resistência com base na posição relativa ao preço
-               // Apenas barra 0 (atual) é relevante para SL/TP
-               if (v == 0 && buf[v] > 0 && ask > 0)
+               double bufB[];
+               if (CopyBuffer(g_indicators[i].handle, bufBuy, 0, lookback, bufB) >= 1)
                {
-                  string srType = (buf[v] < ask) ? "support" : "resistance";
-                  if (!firstSR) srLevels += ",";
-                  firstSR = false;
-                  srLevels += "{\"type\":\"" + srType + "\",";
-                  srLevels += "\"price\":" + DoubleToString(buf[v], _Digits) + ",";
-                  srLevels += "\"buffer\":" + IntegerToString(b) + "}";
+                  for (int v = 0; v < lookback; v++)
+                  {
+                     if (bufB[v] >= 1e20 || bufB[v] <= -1e20) continue;
+                     if (bufB[v] == 0.0) continue;
+
+                     if (!firstEntry) levelsJson += ",";
+                     firstEntry = false;
+                     string entry = "{\"bar\":" + IntegerToString(v) +
+                                    ",\"value\":" + DoubleToString(bufB[v], _Digits) +
+                                    ",\"direction\":\"buy\",\"color\":\"blue\"}";
+                     levelsJson += entry;
+
+                     // Adiciona ao resumo geral
+                     if (!firstBuy) allBuyJson += ",";
+                     firstBuy = false;
+                     allBuyJson += "{\"level\":\"" + levelNames[lvl] + "\",\"bar\":" +
+                                   IntegerToString(v) + ",\"value\":" +
+                                   DoubleToString(bufB[v], _Digits) + "}";
+
+                     // Suporte/resistência (apenas barra 0)
+                     if (v == 0 && ask > 0)
+                     {
+                        string srType = (bufB[v] < ask) ? "support" : "resistance";
+                        if (!firstSR) srLevels += ",";
+                        firstSR = false;
+                        srLevels += "{\"type\":\"" + srType + "\",";
+                        srLevels += "\"price\":" + DoubleToString(bufB[v], _Digits) + ",";
+                        srLevels += "\"level\":\"" + levelNames[lvl] + "\",";
+                        srLevels += "\"direction\":\"buy\",\"buffer\":" + IntegerToString(bufBuy) + "}";
+                     }
+                  }
                }
             }
+            levelsJson += "],"; // fecha buy_signals
+
+            // --- SELL side (HighSymbol / vermelho) ---
+            levelsJson += "\"sell_symbol\":\"HighSymbol\",";
+            levelsJson += "\"sell_color\":\"red\",";
+            levelsJson += "\"sell_buffer\":" + IntegerToString(bufSell) + ",";
+            levelsJson += "\"sell_signals\":[";
+            firstEntry = true;
+
+            if (bufSell < totalBufs)
+            {
+               double bufS[];
+               if (CopyBuffer(g_indicators[i].handle, bufSell, 0, lookback, bufS) >= 1)
+               {
+                  for (int v = 0; v < lookback; v++)
+                  {
+                     if (bufS[v] >= 1e20 || bufS[v] <= -1e20) continue;
+                     if (bufS[v] == 0.0) continue;
+
+                     if (!firstEntry) levelsJson += ",";
+                     firstEntry = false;
+                     string entry = "{\"bar\":" + IntegerToString(v) +
+                                    ",\"value\":" + DoubleToString(bufS[v], _Digits) +
+                                    ",\"direction\":\"sell\",\"color\":\"red\"}";
+                     levelsJson += entry;
+
+                     // Adiciona ao resumo geral
+                     if (!firstSell) allSellJson += ",";
+                     firstSell = false;
+                     allSellJson += "{\"level\":\"" + levelNames[lvl] + "\",\"bar\":" +
+                                    IntegerToString(v) + ",\"value\":" +
+                                    DoubleToString(bufS[v], _Digits) + "}";
+
+                     // Suporte/resistência (apenas barra 0)
+                     if (v == 0 && ask > 0)
+                     {
+                        string srType = (bufS[v] < ask) ? "support" : "resistance";
+                        if (!firstSR) srLevels += ",";
+                        firstSR = false;
+                        srLevels += "{\"type\":\"" + srType + "\",";
+                        srLevels += "\"price\":" + DoubleToString(bufS[v], _Digits) + ",";
+                        srLevels += "\"level\":\"" + levelNames[lvl] + "\",";
+                        srLevels += "\"direction\":\"sell\",\"buffer\":" + IntegerToString(bufSell) + "}";
+                     }
+                  }
+               }
+            }
+            levelsJson += "]"; // fecha sell_signals
+            levelsJson += "}"; // fecha level
          }
+         levelsJson   += "]"; // fecha levels array
+         allBuyJson   += "]";
+         allSellJson  += "]";
+         srLevels     += "]";
 
-         buySignals += "]";
-         sellSignals += "]";
-         exitSignals += "]";
-         srLevels    += "]";
-
-         json += buySignals  + ",";
-         json += sellSignals + ",";
-         json += exitSignals;
-         json += "},"; // fecha signals
-
-         json += srLevels + ","; // níveis de suporte/resistência para SL/TP
-
+         json += levelsJson  + ",";
+         json += allBuyJson  + ",";
+         json += allSellJson + ",";
+         json += srLevels    + ",";
          json += "\"raw_buffers\":" + BuildRawBuffersJson(i, lookback);
          json += "},"; // fecha girassol
       }
 
+      // ================================================================
       // === LEITURA DO FIBONACCI AUTOMÁTICO ===
+      // ================================================================
       if (isFibonacci && !fibFound)
       {
          fibFound  = true;

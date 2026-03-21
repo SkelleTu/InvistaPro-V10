@@ -148,7 +148,11 @@ router.post('/signal-with-indicators', async (req: Request, res: Response) => {
       metaTraderBridge.addMarketData(sym, candles);
     }
 
-    // ── Analisa sinais do Girassol ───────────────────────────────────────
+    // ── Analisa sinais do Girassol (v7.0 — 3 níveis = o semáforo) ────────
+    // O Girassol É o semáforo: seus 3 níveis representam 3 graus de sinal:
+    // Nível 1: girassol_extremo      — LowSymbol(azul/compra) + HighSymbol(vermelho/venda)
+    // Nível 2: bolinha_media_pivot   — topos e fundos de pivot (mesmo indicador)
+    // Nível 3: bolinha_pequena_micro — micro-estruturas de mercado (mesmo indicador)
     const girassol = indicatorSignals?.girassol;
     const fibonacci = indicatorSignals?.fibonacci;
 
@@ -157,53 +161,123 @@ router.post('/signal-with-indicators', async (req: Request, res: Response) => {
     let fibDesc      = 'Fibonacci não detectado no gráfico';
     let fibNearestLevel: number | null = null;
 
-    // Monta diagnóstico dos buffers brutos do Girassol para exibir no painel
+    // Diagnóstico dos buffers brutos do Girassol para exibir no painel
     let girassolRawBufferDiag: { buffer: number; bar: number; value: number }[] = [];
+
+    // Metadados dos 3 níveis detectados (para enriquecer resposta à IA)
+    let girassolLevelSummary: {
+      level_id: number;
+      level_name: string;
+      recent_buy: any;
+      recent_sell: any;
+      active: boolean;
+    }[] = [];
 
     if (girassol?.detected) {
       const invertBuffers = metaTraderBridge.getConfig().invertGirassolBuffers;
 
-      // Buffer 0 = BUY por padrão (buffer 1 = SELL).
-      // Se o indicador usar a ordem inversa (topo=buffer0=SELL), inverta com a opção acima.
-      let rawBuySigs  = girassol.signals?.buy_signals  || [];
-      let rawSellSigs = girassol.signals?.sell_signals || [];
-      const exitSigs  = girassol.signals?.exit_signals || [];
+      // ── Leitura nova (v7.0): usa estrutura levels[] com buy_signals/sell_signals por nível
+      const levels = Array.isArray(girassol.levels) ? girassol.levels : [];
 
-      if (invertBuffers) {
-        // Swap: o que era buffer0→BUY agora vira SELL e vice-versa
-        [rawBuySigs, rawSellSigs] = [rawSellSigs, rawBuySigs];
-        console.log(`[MT5-Indicators] 🔄 Buffers do Girassol INVERTIDOS (BUY↔SELL)`);
-      }
+      // ── Compatibilidade retroativa (v6.0 e anteriores): usa signals.buy_signals/sell_signals
+      let legacyBuySigs  = girassol.signals?.buy_signals  || [];
+      let legacySellSigs = girassol.signals?.sell_signals || [];
+      const legacyExitSigs = girassol.signals?.exit_signals || [];
 
-      const buySigs  = rawBuySigs;
-      const sellSigs = rawSellSigs;
+      // Se temos a estrutura de 3 níveis (v7.0), extraímos por nível
+      if (levels.length > 0) {
+        const levelPriority = ['girassol_extremo', 'bolinha_media_pivot', 'bolinha_pequena_micro'];
 
-      // Coleta diagnóstico dos valores nas barras 0–2 de todos os buffers
-      [...buySigs, ...sellSigs, ...exitSigs]
-        .filter((s: any) => s.bar <= 4 && s.value !== 0)
-        .forEach((s: any) => girassolRawBufferDiag.push({ buffer: s.buffer, bar: s.bar, value: s.value }));
+        for (const lv of levels) {
+          let buySigs  = (lv.buy_signals  || []) as any[];
+          let sellSigs = (lv.sell_signals || []) as any[];
 
-      // Sinal mais recente (bar=0 = barra atual, bar=1 = anterior, bar=2 = anterior a este)
-      // Janela de 3 barras para capturar formações recentes com segurança
-      const recentBuy  = buySigs.find((s: any)  => s.bar <= 2 && s.value !== 0);
-      const recentSell = sellSigs.find((s: any) => s.bar <= 2 && s.value !== 0);
-      const recentExit = exitSigs.find((s: any) => s.bar <= 2 && s.value !== 0);
+          if (invertBuffers) {
+            [buySigs, sellSigs] = [sellSigs, buySigs];
+          }
 
-      if (recentExit) {
-        girassolBias = 'NEUTRAL';
-        girassolDesc = `Girassol: sinal de SAÍDA na barra ${recentExit.bar} (buffer ${recentExit.buffer}, valor ${recentExit.value})`;
-      } else if (recentBuy && !recentSell) {
-        girassolBias = 'BUY';
-        girassolDesc = `Girassol: COMPRA detectada na barra ${recentBuy.bar} (valor ${recentBuy.value})`;
-      } else if (recentSell && !recentBuy) {
-        girassolBias = 'SELL';
-        girassolDesc = `Girassol: VENDA detectada na barra ${recentSell.bar} (valor ${recentSell.value})`;
-      } else if (recentBuy && recentSell) {
-        girassolBias = 'NEUTRAL';
-        girassolDesc = `Girassol: sinais conflitantes (compra e venda simultâneas) — aguardando confirmação`;
+          const recentBuy  = buySigs.find((s: any)  => s.bar <= 2 && s.value !== 0);
+          const recentSell = sellSigs.find((s: any) => s.bar <= 2 && s.value !== 0);
+
+          girassolLevelSummary.push({
+            level_id:    lv.level_id,
+            level_name:  lv.level_name,
+            recent_buy:  recentBuy  || null,
+            recent_sell: recentSell || null,
+            active:      !!(recentBuy || recentSell)
+          });
+
+          // Diagnóstico: adiciona entradas de barra <= 4
+          [...buySigs, ...sellSigs]
+            .filter((s: any) => s.bar <= 4 && s.value !== 0)
+            .forEach((s: any) => girassolRawBufferDiag.push({ buffer: lv.level_id * 2, bar: s.bar, value: s.value }));
+        }
+
+        // Determina viés por PRIORIDADE: Girassol extremo > Bolinha média > Bolinha pequena
+        let decisiveLevel: typeof girassolLevelSummary[0] | undefined;
+        for (const ln of levelPriority) {
+          const lv = girassolLevelSummary.find(l => l.level_name === ln);
+          if (lv && lv.active) { decisiveLevel = lv; break; }
+        }
+
+        if (decisiveLevel) {
+          const { recent_buy, recent_sell, level_name } = decisiveLevel;
+          const friendlyName = level_name === 'girassol_extremo'      ? '🌻 Girassol extremo'
+                             : level_name === 'bolinha_media_pivot'    ? '🔵 Bolinha média (pivot)'
+                             :                                            '⚪ Bolinha pequena (micro)';
+
+          if (recent_buy && !recent_sell) {
+            girassolBias = 'BUY';
+            girassolDesc = `${friendlyName}: COMPRA (LowSymbol/azul) na barra ${recent_buy.bar} @ ${recent_buy.value}`;
+          } else if (recent_sell && !recent_buy) {
+            girassolBias = 'SELL';
+            girassolDesc = `${friendlyName}: VENDA (HighSymbol/vermelho) na barra ${recent_sell.bar} @ ${recent_sell.value}`;
+          } else if (recent_buy && recent_sell) {
+            girassolBias = 'NEUTRAL';
+            girassolDesc = `${friendlyName}: sinais conflitantes (compra e venda simultâneas) — aguardando confirmação`;
+          }
+        } else {
+          girassolBias = 'NEUTRAL';
+          girassolDesc = `Girassol ativo (${girassol.name}) — sem sinal novo nos 3 níveis nas últimas 2 barras`;
+        }
+
+        // Conta sinais ativos por nível para informar a IA
+        const activeLevels = girassolLevelSummary.filter(l => l.active).length;
+        if (activeLevels > 1) {
+          girassolDesc += ` | Confluência: ${activeLevels}/3 níveis ativos`;
+        }
+
       } else {
-        girassolBias = 'NEUTRAL';
-        girassolDesc = `Girassol ativo (${girassol.name}) — sem sinal novo nas últimas 2 barras`;
+        // ── Compatibilidade v6.0: usa formato antigo se não há levels
+        if (invertBuffers) {
+          [legacyBuySigs, legacySellSigs] = [legacySellSigs, legacyBuySigs];
+          console.log(`[MT5-Indicators] 🔄 Buffers do Girassol INVERTIDOS (modo legado)`);
+        }
+
+        [...legacyBuySigs, ...legacySellSigs, ...legacyExitSigs]
+          .filter((s: any) => s.bar <= 4 && s.value !== 0)
+          .forEach((s: any) => girassolRawBufferDiag.push({ buffer: s.buffer, bar: s.bar, value: s.value }));
+
+        const recentBuy  = legacyBuySigs.find((s: any)  => s.bar <= 2 && s.value !== 0);
+        const recentSell = legacySellSigs.find((s: any) => s.bar <= 2 && s.value !== 0);
+        const recentExit = legacyExitSigs.find((s: any) => s.bar <= 2 && s.value !== 0);
+
+        if (recentExit) {
+          girassolBias = 'NEUTRAL';
+          girassolDesc = `Girassol: sinal de SAÍDA na barra ${recentExit.bar} (buffer ${recentExit.buffer})`;
+        } else if (recentBuy && !recentSell) {
+          girassolBias = 'BUY';
+          girassolDesc = `Girassol: COMPRA na barra ${recentBuy.bar} (valor ${recentBuy.value})`;
+        } else if (recentSell && !recentBuy) {
+          girassolBias = 'SELL';
+          girassolDesc = `Girassol: VENDA na barra ${recentSell.bar} (valor ${recentSell.value})`;
+        } else if (recentBuy && recentSell) {
+          girassolBias = 'NEUTRAL';
+          girassolDesc = `Girassol: sinais conflitantes — aguardando confirmação`;
+        } else {
+          girassolBias = 'NEUTRAL';
+          girassolDesc = `Girassol ativo (${girassol.name}) — sem sinal novo nas últimas 2 barras`;
+        }
       }
 
       console.log(`[MT5-Indicators] 🌻 ${girassolDesc}`);
@@ -381,12 +455,13 @@ router.post('/signal-with-indicators', async (req: Request, res: Response) => {
         indicatorNotes,
         girassolBias,
         girassolDescription:   girassolDesc,
+        girassolLevels:        girassolLevelSummary,
         girassolSupportLevel:  girassolSupportLevel ?? null,
         girassolResistLevel:   girassolResistanceLevel ?? null,
         girassolRawBuffers:    girassolRawBufferDiag,
         fibonacciDescription:  fibDesc,
         fibonacciNearestLevel: fibNearestLevel,
-        indicatorsDetected: indicatorCount || 0,
+        indicatorsDetected:    indicatorCount || 0,
         assetFamily:  derivProfile?.family      ?? null,
         assetTrend:   derivProfile?.trendType   ?? null,
         assetVolClass: derivProfile?.volClass   ?? null,
@@ -410,6 +485,7 @@ router.post('/signal-with-indicators', async (req: Request, res: Response) => {
       indicatorNotes,
       girassolBias,
       girassolDescription:   girassolDesc,
+      girassolLevels:        girassolLevelSummary,
       girassolSupportLevel:  girassolSupportLevel ?? null,
       girassolResistLevel:   girassolResistanceLevel ?? null,
       girassolRawBuffers:    girassolRawBufferDiag,
