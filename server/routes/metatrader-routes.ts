@@ -157,10 +157,31 @@ router.post('/signal-with-indicators', async (req: Request, res: Response) => {
     let fibDesc      = 'Fibonacci não detectado no gráfico';
     let fibNearestLevel: number | null = null;
 
+    // Monta diagnóstico dos buffers brutos do Girassol para exibir no painel
+    let girassolRawBufferDiag: { buffer: number; bar: number; value: number }[] = [];
+
     if (girassol?.detected) {
-      const buySigs  = girassol.signals?.buy_signals  || [];
-      const sellSigs = girassol.signals?.sell_signals || [];
-      const exitSigs = girassol.signals?.exit_signals || [];
+      const invertBuffers = metaTraderBridge.getConfig().invertGirassolBuffers;
+
+      // Buffer 0 = BUY por padrão (buffer 1 = SELL).
+      // Se o indicador usar a ordem inversa (topo=buffer0=SELL), inverta com a opção acima.
+      let rawBuySigs  = girassol.signals?.buy_signals  || [];
+      let rawSellSigs = girassol.signals?.sell_signals || [];
+      const exitSigs  = girassol.signals?.exit_signals || [];
+
+      if (invertBuffers) {
+        // Swap: o que era buffer0→BUY agora vira SELL e vice-versa
+        [rawBuySigs, rawSellSigs] = [rawSellSigs, rawBuySigs];
+        console.log(`[MT5-Indicators] 🔄 Buffers do Girassol INVERTIDOS (BUY↔SELL)`);
+      }
+
+      const buySigs  = rawBuySigs;
+      const sellSigs = rawSellSigs;
+
+      // Coleta diagnóstico dos valores nas barras 0–2 de todos os buffers
+      [...buySigs, ...sellSigs, ...exitSigs]
+        .filter((s: any) => s.bar <= 4 && s.value !== 0)
+        .forEach((s: any) => girassolRawBufferDiag.push({ buffer: s.buffer, bar: s.bar, value: s.value }));
 
       // Sinal mais recente (bar=0 = barra atual, bar=1 = anterior, bar=2 = anterior a este)
       // Janela de 3 barras para capturar formações recentes com segurança
@@ -359,6 +380,11 @@ router.post('/signal-with-indicators', async (req: Request, res: Response) => {
         confidence: finalConfidence,
         indicatorNotes,
         girassolBias,
+        girassolDescription:   girassolDesc,
+        girassolSupportLevel:  girassolSupportLevel ?? null,
+        girassolResistLevel:   girassolResistanceLevel ?? null,
+        girassolRawBuffers:    girassolRawBufferDiag,
+        fibonacciDescription:  fibDesc,
         fibonacciNearestLevel: fibNearestLevel,
         indicatorsDetected: indicatorCount || 0,
         assetFamily:  derivProfile?.family      ?? null,
@@ -386,6 +412,7 @@ router.post('/signal-with-indicators', async (req: Request, res: Response) => {
       girassolDescription:   girassolDesc,
       girassolSupportLevel:  girassolSupportLevel ?? null,
       girassolResistLevel:   girassolResistanceLevel ?? null,
+      girassolRawBuffers:    girassolRawBufferDiag,
       fibonacciDescription:  fibDesc,
       fibonacciNearestLevel: fibNearestLevel,
       indicatorsDetected:    indicatorCount || 0,

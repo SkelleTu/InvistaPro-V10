@@ -3216,6 +3216,28 @@ export default function TradingSystemPage() {
                               )}
                             </div>
                           )}
+                          {/* Diagnóstico de buffers brutos — mostra quais buffers têm valores */}
+                          {Array.isArray((mt5Signal as any).girassolRawBuffers) && (mt5Signal as any).girassolRawBuffers.length > 0 && (
+                            <div className="mt-2 p-2 rounded bg-black/20 border border-white/10">
+                              <p className="text-[10px] text-muted-foreground font-semibold mb-1 uppercase tracking-wide">
+                                🔬 Diagnóstico de Buffers (últimas 5 barras)
+                              </p>
+                              <div className="flex flex-wrap gap-1">
+                                {(mt5Signal as any).girassolRawBuffers.map((b: any, i: number) => (
+                                  <span key={i} className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+                                    b.buffer === 0 ? 'bg-green-900/60 text-green-300' :
+                                    b.buffer === 1 ? 'bg-red-900/60 text-red-300' :
+                                    'bg-gray-700 text-gray-300'
+                                  }`}>
+                                    buf{b.buffer} bar{b.bar}: {Number(b.value).toFixed(2)}
+                                  </span>
+                                ))}
+                              </div>
+                              <p className="text-[9px] text-muted-foreground mt-1">
+                                buf0=verde(BUY) · buf1=vermelho(SELL) · buf2+=saída — Se buf0 aparece em TOPO, ative "Inverter Buffers" na configuração MT5
+                              </p>
+                            </div>
+                          )}
                         </div>
                       </div>
                     )}

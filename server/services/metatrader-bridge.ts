@@ -188,6 +188,7 @@ export interface MT5Config {
   // Filtro Girassol
   requireGirassolConfirmation: boolean; // Exige sinal claro do Girassol para operar (BUY ou SELL — NEUTRO bloqueia)
   maxPositionsPerSymbol: number;        // Máximo de posições abertas por símbolo (0 = sem limite por símbolo)
+  invertGirassolBuffers: boolean;       // Inverte buffer 0 e 1 do Girassol (quando topo=buffer0=SELL mas sistema lê como BUY)
 }
 
 export interface MT5Status {
@@ -235,6 +236,7 @@ const DEFAULT_CONFIG: MT5Config = {
   useAIRiskLimits: false,
   requireGirassolConfirmation: false,
   maxPositionsPerSymbol: 1,
+  invertGirassolBuffers: false,
 };
 
 export interface ConnectionEvent {

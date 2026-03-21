@@ -59,6 +59,7 @@ interface MT5Config {
   apiToken: string;
   requireGirassolConfirmation: boolean;
   maxPositionsPerSymbol: number;
+  invertGirassolBuffers: boolean;
 }
 
 interface AIModelResult {
@@ -1328,6 +1329,23 @@ export default function MetaTraderPage() {
                     checked={cfg.requireGirassolConfirmation || false}
                     onCheckedChange={v => setConfigEdits(p => ({ ...p, requireGirassolConfirmation: v }))}
                     data-testid="switch-require-girassol"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between rounded-lg border border-orange-500/30 bg-orange-500/5 p-3">
+                  <div>
+                    <Label className="flex items-center gap-2">
+                      🔄 Inverter Buffers do Girassol
+                    </Label>
+                    <p className="text-sm text-muted-foreground">
+                      Ative se o painel de diagnóstico mostrar <strong>buf0</strong> com valor em TOPOS do mercado (quando deveria ser SELL, não BUY).
+                      Isso troca a leitura dos buffers 0 e 1.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={cfg.invertGirassolBuffers || false}
+                    onCheckedChange={v => setConfigEdits(p => ({ ...p, invertGirassolBuffers: v }))}
+                    data-testid="switch-invert-girassol"
                   />
                 </div>
 
