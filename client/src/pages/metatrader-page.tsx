@@ -57,6 +57,8 @@ interface MT5Config {
   pollingIntervalMs: number;
   riskPercent: number;
   apiToken: string;
+  requireGirassolConfirmation: boolean;
+  maxPositionsPerSymbol: number;
 }
 
 interface AIModelResult {
@@ -1239,13 +1241,24 @@ export default function MetaTraderPage() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label>Máx. Posições Simultâneas</Label>
+                    <Label>Máx. Posições Simultâneas (total)</Label>
                     <Input
                       type="number"
                       value={cfg.maxOpenPositions || 5}
                       onChange={e => setConfigEdits(p => ({ ...p, maxOpenPositions: Number(e.target.value) }))}
                       data-testid="input-max-positions"
                     />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Máx. Posições por Símbolo</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      value={cfg.maxPositionsPerSymbol ?? 1}
+                      onChange={e => setConfigEdits(p => ({ ...p, maxPositionsPerSymbol: Number(e.target.value) }))}
+                      data-testid="input-max-positions-per-symbol"
+                    />
+                    <p className="text-xs text-muted-foreground">0 = sem limite por símbolo. 1 = esperar fechar antes de nova entrada no mesmo ativo.</p>
                   </div>
                   <div className="space-y-2">
                     <Label>Risco por Trade (%)</Label>
@@ -1298,6 +1311,23 @@ export default function MetaTraderPage() {
                     checked={cfg.useTrailingStop || false}
                     onCheckedChange={v => setConfigEdits(p => ({ ...p, useTrailingStop: v }))}
                     data-testid="switch-trailing-stop"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between rounded-lg border border-yellow-500/30 bg-yellow-500/5 p-3">
+                  <div>
+                    <Label className="flex items-center gap-2">
+                      🌻 Girassol Obrigatório
+                    </Label>
+                    <p className="text-sm text-muted-foreground">
+                      Quando ativo, a IA só abre posição se o Girassol tiver sinal claro (BUY ou SELL).
+                      Sinal NEUTRO ou indicador ausente no gráfico bloqueia a entrada.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={cfg.requireGirassolConfirmation || false}
+                    onCheckedChange={v => setConfigEdits(p => ({ ...p, requireGirassolConfirmation: v }))}
+                    data-testid="switch-require-girassol"
                   />
                 </div>
 

@@ -40,6 +40,7 @@ input ENUM_AI_CONTROL_MODE AIControlMode = AI_FULL; // Modo de Controle da IA
 input double   ManualLotSize    = 0.01;  // Lote (manual)
 input int      ManualStopLoss   = 0;     // Stop Loss em pontos — 0 = desativado (manual)
 input int      ManualTakeProfit = 0;     // Take Profit em pontos — 0 = desativado (manual)
+input int      MaxPositions     = 1;     // Máximo de posições abertas simultâneas (1 = aguardar fechar antes de nova entrada)
 
 //--- Controle Parcial — marque o que a IA deve decidir (visível no modo Parcial)
 input bool     AI_Lote          = true;  // IA define o tamanho do lote
@@ -451,7 +452,7 @@ void OnTick()
       MonitorOpenPositions();
    }
 
-   if (PositionsTotal() == 0 && (now - g_lastSignal >= SignalSeconds))
+   if (PositionsTotal() < MaxPositions && (now - g_lastSignal >= SignalSeconds))
    {
       g_lastSignal = now;
       FetchAndProcessSignal();

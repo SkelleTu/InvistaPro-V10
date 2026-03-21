@@ -185,6 +185,9 @@ export interface MT5Config {
   useAILotSize: boolean;    // IA define o lote ideal por operação
   useAITrailing: boolean;   // IA ativa/controla trailing stop
   useAIRiskLimits: boolean; // IA gerencia limites de risco (posições, perda, lucro)
+  // Filtro Girassol
+  requireGirassolConfirmation: boolean; // Exige sinal claro do Girassol para operar (BUY ou SELL — NEUTRO bloqueia)
+  maxPositionsPerSymbol: number;        // Máximo de posições abertas por símbolo (0 = sem limite por símbolo)
 }
 
 export interface MT5Status {
@@ -230,6 +233,8 @@ const DEFAULT_CONFIG: MT5Config = {
   useAILotSize: false,
   useAITrailing: false,
   useAIRiskLimits: false,
+  requireGirassolConfirmation: false,
+  maxPositionsPerSymbol: 1,
 };
 
 export interface ConnectionEvent {
@@ -1695,10 +1700,11 @@ class MetaTraderBridge extends EventEmitter {
     if (this.isGeneratingSignal) return null;
     if (!this.config.enabled) return null;
 
-    // Bloquear novo sinal se já há posição aberta para o símbolo (evita empilhamento)
-    const hasOpenPositionForSymbol = Array.from(this.openPositions.values()).some(p => p.symbol === symbol);
-    if (hasOpenPositionForSymbol) {
-      console.log(`[MT5Bridge] 🔒 generateSignal bloqueado — posição aberta em ${symbol}`);
+    // Bloquear novo sinal se já atingiu o limite de posições por símbolo
+    const positionsForSymbol = Array.from(this.openPositions.values()).filter(p => p.symbol === symbol).length;
+    const maxPerSymbol = this.config.maxPositionsPerSymbol ?? 1;
+    if (maxPerSymbol > 0 && positionsForSymbol >= maxPerSymbol) {
+      console.log(`[MT5Bridge] 🔒 generateSignal bloqueado — ${symbol}: ${positionsForSymbol}/${maxPerSymbol} posições`);
       return null;
     }
 
@@ -2741,9 +2747,11 @@ class MetaTraderBridge extends EventEmitter {
   addMarketData(symbol: string, candles: any[]): void {
     this.marketDataCache.set(symbol, candles);
     const hasPending = !!this.getPendingSignal(symbol);
-    // Bloquear geração de sinal se já há posição aberta para este símbolo
-    const hasOpenPositionForSymbol = Array.from(this.openPositions.values()).some(p => p.symbol === symbol);
-    if (!hasPending && !hasOpenPositionForSymbol && this.config.enabled) {
+    // Bloquear geração de sinal se já atingiu o limite de posições por símbolo
+    const positionsForSymbol = Array.from(this.openPositions.values()).filter(p => p.symbol === symbol).length;
+    const maxPerSymbol = this.config.maxPositionsPerSymbol ?? 1;
+    const symbolAtLimit = maxPerSymbol > 0 && positionsForSymbol >= maxPerSymbol;
+    if (!hasPending && !symbolAtLimit && this.config.enabled) {
       setImmediate(() => {
         this.generateSignal(symbol).then(signal => {
           if (signal && signal.action !== 'HOLD') {
@@ -2751,8 +2759,8 @@ class MetaTraderBridge extends EventEmitter {
           }
         }).catch(() => {});
       });
-    } else if (hasOpenPositionForSymbol) {
-      console.log(`[MT5Bridge] 🔒 ${symbol}: posição já aberta — sinal bloqueado`);
+    } else if (symbolAtLimit) {
+      console.log(`[MT5Bridge] 🔒 ${symbol}: limite de posições atingido (${positionsForSymbol}/${maxPerSymbol}) — sinal bloqueado`);
     }
   }
 

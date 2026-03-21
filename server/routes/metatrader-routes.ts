@@ -253,6 +253,8 @@ router.post('/signal-with-indicators', async (req: Request, res: Response) => {
     let finalReason: string = baseSignal?.reason || 'Aguardando sinal';
     const indicatorNotes: string[] = [];
 
+    const requireGirassol = metaTraderBridge.getConfig().requireGirassolConfirmation;
+
     if (girassol?.detected && girassolBias !== 'NEUTRAL') {
       if (girassolBias === finalAction) {
         // Girassol CONFIRMA o sinal da IA — aumentar confiança
@@ -261,15 +263,35 @@ router.post('/signal-with-indicators', async (req: Request, res: Response) => {
         indicatorNotes.push(`✅ Girassol CONFIRMA ${finalAction} — confiança elevada (+${((girassolBoost - 1) * 100).toFixed(0)}%)`);
         finalReason = `${finalReason} | ${girassolDesc}`;
       } else if (finalAction !== 'HOLD' && girassolBias !== finalAction) {
-        // Girassol CONTRADIZ o sinal da IA → filtra (HOLD)
+        // Girassol CONTRADIZ o sinal da IA → filtra (HOLD) — sempre, independente da configuração
         indicatorNotes.push(`🚫 Girassol CONTRADIZ IA (${finalAction}→${girassolBias}) — operação bloqueada`);
         console.log(`[MT5-Indicators] 🚫 Sinal ${finalAction} BLOQUEADO pelo Girassol (indicador diz ${girassolBias}) | ${sym}`);
         finalAction     = 'HOLD';
         finalConfidence = 0;
         finalReason     = `Bloqueado: ${girassolDesc}`;
       }
-    } else if (girassol?.detected) {
+    } else if (girassol?.detected && girassolBias === 'NEUTRAL') {
+      // Girassol detectado mas sem sinal claro (NEUTRO)
       indicatorNotes.push(girassolDesc);
+      if (requireGirassol && finalAction !== 'HOLD') {
+        // Modo "Girassol Obrigatório": sem sinal do Girassol = não opera
+        indicatorNotes.push(`⏸️ Girassol NEUTRO — operação aguardando sinal claro do indicador`);
+        console.log(`[MT5-Indicators] ⏸️ ${sym}: Girassol obrigatório ativo — aguardando sinal (NEUTRO)`);
+        finalAction     = 'HOLD';
+        finalConfidence = 0;
+        finalReason     = `Aguardando: Girassol sem sinal direcional claro`;
+      }
+    } else if (!girassol?.detected) {
+      // Girassol não detectado no gráfico
+      if (requireGirassol && finalAction !== 'HOLD') {
+        indicatorNotes.push(`⚠️ Girassol NÃO DETECTADO no gráfico — operação bloqueada (modo Girassol Obrigatório ativo)`);
+        console.log(`[MT5-Indicators] ⚠️ ${sym}: Girassol obrigatório ativo mas indicador não encontrado no gráfico`);
+        finalAction     = 'HOLD';
+        finalConfidence = 0;
+        finalReason     = `Bloqueado: Girassol não detectado no gráfico MT5`;
+      } else {
+        indicatorNotes.push(`ℹ️ Girassol não detectado no gráfico — IA operando sem confirmação do indicador`);
+      }
     }
 
     // ── Aplica filtro do Fibonacci ───────────────────────────────────────
