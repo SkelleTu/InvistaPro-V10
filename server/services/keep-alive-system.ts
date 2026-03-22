@@ -1,9 +1,13 @@
-import * as cron from 'node-cron';
 import fetch from 'node-fetch';
+
+// 2 minutos e 30 segundos em ms — interleave com pings externos de 5 min
+const PULL_INTERVAL_MS = 2.5 * 60 * 1000; // 150 000 ms
 
 interface KeepAliveStatus {
   isActive: boolean;
+  // Último auto-pull (servidor puxando a si mesmo)
   lastPingAt: Date | null;
+  // Último ping recebido de serviço externo (Vercel, UptimeRobot, etc.)
   lastExternalPingAt: Date | null;
   lastExternalPingSource: string | null;
   totalPings: number;
@@ -16,9 +20,8 @@ interface KeepAliveStatus {
 
 class KeepAliveSystem {
   private status: KeepAliveStatus;
-  private pingJob: cron.ScheduledTask | null = null;
+  private pullInterval: NodeJS.Timeout | null = null;
   private uptimeInterval: NodeJS.Timeout | null = null;
-  private readonly PING_INTERVAL = '*/3 * * * *'; // A cada 3 minutos
   private static instance: KeepAliveSystem | null = null;
 
   constructor() {
@@ -44,12 +47,10 @@ class KeepAliveSystem {
   }
 
   private resolveTargetUrl(): string | null {
-    // 1. Domínio público do Replit (ambiente de desenvolvimento)
     const replitDomain = process.env.REPLIT_DEV_DOMAIN;
     if (replitDomain) {
       return `https://${replitDomain}/api/status`;
     }
-    // 2. URL customizada se configurada
     const customUrl = process.env.KEEP_ALIVE_URL;
     if (customUrl) {
       return customUrl.startsWith('http') ? customUrl : `https://${customUrl}`;
@@ -66,34 +67,31 @@ class KeepAliveSystem {
     this.status.targetUrl = this.resolveTargetUrl();
 
     console.log('🔌 Sistema Keep-Alive iniciado');
-    console.log('   • Intervalo de ping: a cada 3 minutos');
+    console.log(`   • Auto-pull interno: a cada ${PULL_INTERVAL_MS / 60000} min (interleave com pings externos de 5 min)`);
     console.log('   • URL alvo:', this.status.targetUrl || '⚠️ Não detectada (REPLIT_DEV_DOMAIN ausente)');
 
-    // Primeiro ping imediato para confirmar que está funcionando
-    setTimeout(() => this.doPing(), 5000);
+    // Primeiro pull após 5 segundos para confirmar funcionamento
+    setTimeout(() => this.doPull(), 5000);
 
-    // Pings recorrentes a cada 3 minutos via cron
-    this.pingJob = cron.schedule(this.PING_INTERVAL, () => {
-      // Re-resolve URL a cada ciclo (pode mudar após restart)
+    // Pull recorrente a cada 2 min 30 s
+    this.pullInterval = setInterval(() => {
       this.status.targetUrl = this.resolveTargetUrl();
-      this.doPing();
-    });
+      this.doPull();
+    }, PULL_INTERVAL_MS);
 
     // Uptime counter
     this.uptimeInterval = setInterval(() => {
       this.status.uptimeSeconds = Math.floor((Date.now() - this.status.startTime.getTime()) / 1000);
     }, 1000);
 
-    console.log('✅ Sistema Keep-Alive 24/7 ATIVO!');
+    console.log('✅ Sistema Keep-Alive 24/7 ATIVO! (pull a cada 2m30s + push externo a cada 5m = atividade máxima a cada ~2m30s)');
   }
 
-  private async doPing(): Promise<void> {
-    const url = this.status.targetUrl;
-    if (!url) {
-      // Sem URL configurada — tenta resolver de novo
+  private async doPull(): Promise<void> {
+    if (!this.status.targetUrl) {
       this.status.targetUrl = this.resolveTargetUrl();
       if (!this.status.targetUrl) {
-        console.log('⚠️ [Keep-Alive] URL não detectada — sem ping');
+        console.log('⚠️ [Keep-Alive] URL não detectada — sem pull');
         return;
       }
     }
@@ -102,31 +100,35 @@ class KeepAliveSystem {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 10000);
 
-      const response = await fetch(this.status.targetUrl!, {
+      const response = await fetch(this.status.targetUrl, {
         method: 'GET',
         signal: controller.signal as any,
-        headers: { 'X-Keep-Alive': 'ping', 'X-Timestamp': new Date().toISOString() }
+        headers: {
+          'X-Keep-Alive': 'pull',
+          'X-Ping-Type': 'internal-pull',
+          'X-Timestamp': new Date().toISOString()
+        }
       });
       clearTimeout(timeout);
 
       if (response.ok) {
         this.status.lastPingAt = new Date();
         this.status.totalPings++;
-        console.log(`💓 [Keep-Alive] Ping OK → ${this.status.targetUrl} | Total: ${this.status.totalPings}`);
+        console.log(`💓 [Keep-Alive] Auto-pull OK → ${this.status.targetUrl} | Pull #${this.status.totalPings}`);
       } else {
         this.status.totalFailures++;
-        console.log(`⚠️ [Keep-Alive] Ping falhou — HTTP ${response.status}`);
+        console.log(`⚠️ [Keep-Alive] Auto-pull falhou — HTTP ${response.status}`);
       }
     } catch (err: any) {
       this.status.totalFailures++;
       if (err.name !== 'AbortError') {
-        console.log('⚠️ [Keep-Alive] Erro de ping:', err.message);
+        console.log('⚠️ [Keep-Alive] Erro de auto-pull:', err.message);
       }
     }
   }
 
   private cleanup(): void {
-    if (this.pingJob) { this.pingJob.stop(); this.pingJob = null; }
+    if (this.pullInterval) { clearInterval(this.pullInterval); this.pullInterval = null; }
     if (this.uptimeInterval) { clearInterval(this.uptimeInterval); this.uptimeInterval = null; }
   }
 
@@ -141,11 +143,11 @@ class KeepAliveSystem {
     this.status.lastExternalPingAt = new Date();
     this.status.lastExternalPingSource = source;
     this.status.totalExternalPings++;
-    console.log(`📡 [Keep-Alive] Ping externo recebido de: ${source} | Total externos: ${this.status.totalExternalPings}`);
+    console.log(`📡 [Keep-Alive] Push externo recebido de: ${source} | Total externos: ${this.status.totalExternalPings}`);
     return { success: true, message: `Ping recebido de ${source}`, status: this.getStatus() };
   }
 
-  /** Compatibilidade com código legado que chamava setVercelUrl */
+  /** Compatibilidade com código legado */
   setVercelUrl(url: string): void {
     this.status.targetUrl = url;
     console.log(`🔗 [Keep-Alive] URL configurada: ${url}`);
@@ -165,6 +167,7 @@ class KeepAliveSystem {
       totalExternalPings: this.status.totalExternalPings,
       totalFailures: this.status.totalFailures,
       targetUrl: this.status.targetUrl,
+      pullIntervalMinutes: PULL_INTERVAL_MS / 60000,
       serverTime: new Date().toISOString()
     };
   }

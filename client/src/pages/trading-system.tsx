@@ -998,22 +998,36 @@ export default function TradingSystemPage() {
     refetchInterval: 2000, // Atualização a cada 2 segundos
   });
 
-  // Keep-Alive: polling do status de pings externos
+  // Keep-Alive: polling do status de pings (externos + pull interno)
   const [pingButtonClicking, setPingButtonClicking] = useState(false);
+  const [pingLabel, setPingLabel] = useState<string>('');
   const [lastKnownExternalPing, setLastKnownExternalPing] = useState<string | null>(null);
+  const [lastKnownPullPing, setLastKnownPullPing] = useState<string | null>(null);
 
   const { data: keepAliveStatus } = useQuery<any>({
     queryKey: ["/api/status"],
     refetchInterval: 3000,
   });
 
+  // Animar botão ao receber push externo
   useEffect(() => {
     if (!keepAliveStatus?.lastExternalPingAt) return;
     if (lastKnownExternalPing === keepAliveStatus.lastExternalPingAt) return;
     setLastKnownExternalPing(keepAliveStatus.lastExternalPingAt);
+    setPingLabel(`📡 push · ${keepAliveStatus.lastExternalPingSource || 'externo'}`);
     setPingButtonClicking(true);
     setTimeout(() => setPingButtonClicking(false), 600);
   }, [keepAliveStatus?.lastExternalPingAt]);
+
+  // Animar botão ao fazer pull interno
+  useEffect(() => {
+    if (!keepAliveStatus?.lastPingAt) return;
+    if (lastKnownPullPing === keepAliveStatus.lastPingAt) return;
+    setLastKnownPullPing(keepAliveStatus.lastPingAt);
+    setPingLabel('🔄 pull · auto');
+    setPingButtonClicking(true);
+    setTimeout(() => setPingButtonClicking(false), 600);
+  }, [keepAliveStatus?.lastPingAt]);
 
   // ⏱️ Countdown até próximo ciclo de análise
   const [nextCycleCountdown, setNextCycleCountdown] = useState<number>(0);
@@ -1254,7 +1268,7 @@ export default function TradingSystemPage() {
               </Alert>
             )}
 
-            {/* Keep-Alive: botão clicado pelos pings externos */}
+            {/* Keep-Alive: botão animado por pulls internos e pushes externos */}
             <Card className="border border-green-200 dark:border-green-800 bg-green-50/50 dark:bg-green-950/30">
               <CardContent className="py-3 px-4">
                 <div className="flex items-center gap-3">
@@ -1262,11 +1276,20 @@ export default function TradingSystemPage() {
                     <div className={`w-2 h-2 rounded-full flex-shrink-0 ${keepAliveStatus?.isActive ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`} />
                     <Wifi className="h-4 w-4 text-green-600 dark:text-green-400 flex-shrink-0" />
                     <div className="min-w-0">
-                      <p className="text-xs font-semibold text-green-700 dark:text-green-300 leading-none">Servidor Acordado 24/7</p>
+                      <p className="text-xs font-semibold text-green-700 dark:text-green-300 leading-none">
+                        Servidor Acordado 24/7
+                        {keepAliveStatus?.pullIntervalMinutes && (
+                          <span className="ml-1.5 font-normal text-green-500 dark:text-green-600">
+                            · pull a cada {keepAliveStatus.pullIntervalMinutes}min + push externo a cada 5min
+                          </span>
+                        )}
+                      </p>
                       <p className="text-xs text-green-600 dark:text-green-500 mt-0.5 truncate">
-                        {keepAliveStatus?.lastExternalPingAt
-                          ? `Último ping: ${new Date(keepAliveStatus.lastExternalPingAt).toLocaleTimeString('pt-BR')} · ${keepAliveStatus.lastExternalPingSource || 'externo'}`
-                          : 'Aguardando pings externos...'}
+                        {pingLabel
+                          ? `Última atividade: ${pingLabel}`
+                          : keepAliveStatus?.lastPingAt || keepAliveStatus?.lastExternalPingAt
+                          ? `Ativo · pulls: ${keepAliveStatus.totalPings ?? 0} · pushes: ${keepAliveStatus.totalExternalPings ?? 0}`
+                          : 'Iniciando sistema keep-alive...'}
                       </p>
                     </div>
                   </div>
@@ -1283,7 +1306,7 @@ export default function TradingSystemPage() {
                         : 'hover:bg-green-50 dark:hover:bg-green-900/60'
                       }
                     `}
-                    title="Pings externos clicam aqui automaticamente para manter o servidor acordado"
+                    title="Pulls internos (2m30s) + pushes externos (5min) mantêm o servidor acordado"
                   >
                     <Activity className={`h-3.5 w-3.5 ${pingButtonClicking ? 'text-green-600 scale-110' : 'text-green-500'} transition-transform duration-150`} />
                     💓 Manter Ativo
