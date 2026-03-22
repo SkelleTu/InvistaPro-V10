@@ -9,7 +9,7 @@
 //|   Detecta também Semáforo/Bolinha como indicador separado         |
 //+------------------------------------------------------------------+
 #property copyright "InvistaPRO"
-#property version   "7.1"
+#property version   "7.2"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -45,6 +45,7 @@ input double   ManualLotSize    = 0.01;  // Lote (manual)
 input int      ManualStopLoss   = 0;     // Stop Loss em pontos — 0 = desativado (manual)
 input int      ManualTakeProfit = 0;     // Take Profit em pontos — 0 = desativado (manual)
 input int      MaxPositions     = 1;     // Máximo de posições abertas simultâneas (1 = aguardar fechar antes de nova entrada)
+input int      WarmupSeconds   = 120;   // Período de aquecimento após instalação — EA só observa, NÃO abre ordens (segundos)
 
 //--- Controle Parcial — marque o que a IA deve decidir (visível no modo Parcial)
 input bool     AI_Lote          = true;  // IA define o tamanho do lote
@@ -65,6 +66,8 @@ bool     g_isDiscovering  = false;
 string   g_pendingSignalId= "";
 datetime g_lastMonitor    = 0;
 int      g_monitorSeconds = 2;
+datetime g_warmupUntil    = 0;   // Operações bloqueadas até este timestamp (aquecimento)
+datetime g_lastWarmupPrint= 0;   // Controle de spam do log de aquecimento
 
 // Perfil do ativo recebido do servidor
 string   g_assetFamily    = "";
@@ -103,19 +106,27 @@ int OnInit()
    trade.SetExpertMagicNumber(MagicNumber);
 
    // Inicializa os timers com o tempo atual para evitar execução imediata
-   // na primeira atualização de preço (tick) após a conexão.
-   // Sem isso, a condição (now - g_lastSignal >= SignalSeconds) seria sempre
-   // verdadeira no primeiro tick e dispararia uma operação antes mesmo da
-   // análise inicial estar completa.
    datetime now = TimeCurrent();
-   g_lastSignal   = now;  // aguarda SignalSeconds antes do 1º sinal
-   g_lastHeartbeat = now; // aguarda HeartbeatSeconds antes do 1º heartbeat
-   g_lastMonitor  = now;  // aguarda g_monitorSeconds antes do 1º monitor
+   g_lastSignal    = now;
+   g_lastHeartbeat = now;
+   g_lastMonitor   = now;
+   g_lastWarmupPrint = now;
 
-   Print("🚀 InvistaPRO EA v6.0 iniciado | Símbolo: ", g_symbol);
+   // Período de aquecimento: EA analisa o mercado mas NÃO abre posições
+   // até WarmupSeconds após a inicialização. Evita entrar em condições
+   // não analisadas logo após a instalação.
+   if (WarmupSeconds > 0)
+      g_warmupUntil = now + WarmupSeconds;
+   else
+      g_warmupUntil = now; // sem aquecimento se WarmupSeconds = 0
+
+   Print("🚀 InvistaPRO EA v7.2 iniciado | Símbolo: ", g_symbol);
    Print("   → Perfil de ativo Deriv | SL/TP por indicadores reais | ", CandleCount, " candles históricos");
-   Print("   → Aguardando ", SignalSeconds, "s antes do 1º sinal e ",
-         HeartbeatSeconds, "s antes do 1º heartbeat.");
+   if (WarmupSeconds > 0)
+      Print("   ⏳ AQUECIMENTO ATIVO: primeiras operações bloqueadas por ", WarmupSeconds,
+            "s (até ", TimeToString(g_warmupUntil, TIME_DATE|TIME_SECONDS), ")");
+   else
+      Print("   → Sem período de aquecimento (WarmupSeconds=0)");
 
    string modeLabel = "";
    if (AIControlMode == AI_MANUAL)
@@ -569,6 +580,7 @@ void OnTick()
 {
    datetime now = TimeCurrent();
 
+   // ── Heartbeat ─────────────────────────────────────────────────────────
    if (now - g_lastHeartbeat >= HeartbeatSeconds)
    {
       g_lastHeartbeat = now;
@@ -576,15 +588,33 @@ void OnTick()
          TryReconnect();
    }
 
+   // ── Monitor de posições abertas ────────────────────────────────────────
    if (PositionsTotal() > 0 && (now - g_lastMonitor >= g_monitorSeconds))
    {
       g_lastMonitor = now;
       MonitorOpenPositions();
    }
 
+   // ── Busca de sinal / abertura de posição ───────────────────────────────
    if (PositionsTotal() < MaxPositions && (now - g_lastSignal >= SignalSeconds))
    {
       g_lastSignal = now;
+
+      // Bloqueia entradas durante o período de aquecimento
+      if (now < g_warmupUntil)
+      {
+         int secsLeft = (int)(g_warmupUntil - now);
+         // Imprime aviso apenas 1x a cada 15s para não poluir o log
+         if (now - g_lastWarmupPrint >= 15)
+         {
+            g_lastWarmupPrint = now;
+            Print("⏳ AQUECIMENTO: nenhuma operação por mais ", secsLeft,
+                  "s — EA analisando mercado sem abrir posições");
+         }
+         return;
+      }
+
+      // Aquecimento concluído — opera normalmente
       FetchAndProcessSignal();
    }
 }
