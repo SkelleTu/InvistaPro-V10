@@ -4,6 +4,40 @@ import { errorTracker } from './error-tracker';
 import { dualStorage as storage } from '../storage-dual';
 import { resilienceSupervisor } from './resilience-supervisor';
 
+// ☠️ PROTOCOLO DE EXECUÇÃO IMEDIATA — tolerância zero para ativos criminosos
+// Qualquer símbolo que viole as regras é executado aqui: blacklistado, logado e morto.
+const CRIME_PATTERN = /\(1s\)|^1HZ|_1S/i;
+
+// Conjunto em memória de símbolos já executados nesta sessão (evita log duplicado)
+const _executadosNestaSessao = new Set<string>();
+
+async function executarCrime(symbol: string, contexto: string): Promise<null> {
+  const timestamp = new Date().toISOString();
+  console.error(`\n☠️ ══════════════════════════════════════════════════════`);
+  console.error(`☠️  EXECUÇÃO IMEDIATA — CRIME DETECTADO`);
+  console.error(`☠️  Símbolo criminoso : ${symbol}`);
+  console.error(`☠️  Contexto          : ${contexto}`);
+  console.error(`☠️  Timestamp         : ${timestamp}`);
+  console.error(`☠️  Sentença          : TRADE ABORTADO + BLACKLIST PERMANENTE`);
+  console.error(`☠️ ══════════════════════════════════════════════════════\n`);
+  // Blacklist permanente no banco de dados (uma vez por símbolo por sessão)
+  if (!_executadosNestaSessao.has(symbol)) {
+    _executadosNestaSessao.add(symbol);
+    try {
+      await storage.createAssetBlacklist({
+        userId: 'SYSTEM',
+        assetPattern: symbol,
+        patternType: 'exact',
+        reason: `☠️ EXECUÇÃO AUTOMÁTICA: ativo 1s detectado em [${contexto}] às ${timestamp}`,
+        isActive: true,
+      } as any);
+    } catch (_) {
+      // fallback silencioso — bloqueio em memória e em código já protege
+    }
+  }
+  return null;
+}
+
 export interface DerivTickData {
   symbol: string;
   quote: number;
@@ -883,11 +917,9 @@ export class DerivAPIService extends EventEmitter {
 
     console.log(`[DERIV_API] 🚀 Tentando abrir contrato: ${params.symbol}, Valor: ${params.amount}, Barreira: ${params.barrier}`);
 
-    // 🚫 VALIDAÇÃO DEFENSIVA: BLOQUEIO TOTAL DE ATIVOS 1s (formatos: "(1s)", "1HZ*", "_1S")
-    const BLOCKED_SYMBOLS_PATTERN = /\(1s\)|^1HZ|_1S/i;
-    if (BLOCKED_SYMBOLS_PATTERN.test(params.symbol)) {
-      console.error(`❌ [DERIV API] BLOQUEIO ATIVADO: Símbolo "${params.symbol}" é ativo 1s (CAUSADOR DE LOSS) - TRADE NÃO EXECUTADO`);
-      return null;
+    // ☠️ EXECUÇÃO IMEDIATA: CRIME = ativo 1s (formatos: "(1s)", "1HZ*", "_1S")
+    if (CRIME_PATTERN.test(params.symbol)) {
+      return executarCrime(params.symbol, 'buyDigitDifferContract');
     }
 
     const OPERATION_TIMEOUT = 15000; // 15 segundos timeout máximo
@@ -1095,10 +1127,9 @@ export class DerivAPIService extends EventEmitter {
   }): Promise<DerivContractInfo | null> {
     if (!this.isConnected) return null;
 
-    const BLOCKED = /\(1s\)|^1HZ|_1S/i;
-    if (BLOCKED.test(params.symbol)) {
-      console.error(`❌ Símbolo bloqueado (ativo 1s): ${params.symbol}`);
-      return null;
+    // ☠️ EXECUÇÃO IMEDIATA: CRIME = ativo 1s
+    if (CRIME_PATTERN.test(params.symbol)) {
+      return executarCrime(params.symbol, 'buyGenericDigitContract');
     }
 
     const TIMEOUT_MS = 15000;
@@ -1255,10 +1286,9 @@ export class DerivAPIService extends EventEmitter {
   }): Promise<DerivContractInfo | null> {
     if (!this.isConnected) return null;
 
-    const BLOCKED = /\(1s\)|^1HZ|_1S/i;
-    if (BLOCKED.test(params.symbol)) {
-      console.error(`❌ Símbolo bloqueado (ativo 1s): ${params.symbol}`);
-      return null;
+    // ☠️ EXECUÇÃO IMEDIATA: CRIME = ativo 1s
+    if (CRIME_PATTERN.test(params.symbol)) {
+      return executarCrime(params.symbol, 'buyFlexibleContract');
     }
 
     const TIMEOUT_MS = 8000; // Reduzido de 20s → 8s: preço que demora 8s já é inválido

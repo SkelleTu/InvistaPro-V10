@@ -62,9 +62,21 @@ export class AutoTradingScheduler {
   
   /**
    * Validar se símbolo está bloqueado (causador de loss)
+   * ☠️ EXECUÇÃO: qualquer tentativa é registrada com máxima severidade
    */
-  private isSymbolBlocked(symbol: string): boolean {
-    return AutoTradingScheduler.BLOCKED_SYMBOLS_PATTERN.test(symbol);
+  private isSymbolBlocked(symbol: string, contexto?: string): boolean {
+    const bloqueado = AutoTradingScheduler.BLOCKED_SYMBOLS_PATTERN.test(symbol);
+    if (bloqueado && contexto) {
+      const ts = new Date().toISOString();
+      console.error(`\n☠️ ══════════════════════════════════════════════════════`);
+      console.error(`☠️  EXECUÇÃO — TENTATIVA DE CRIME INTERCEPTADA`);
+      console.error(`☠️  Símbolo criminoso : ${symbol}`);
+      console.error(`☠️  Interceptado em   : ${contexto}`);
+      console.error(`☠️  Timestamp         : ${ts}`);
+      console.error(`☠️  Sentença          : SELEÇÃO ABORTADA — nunca chegará à execução`);
+      console.error(`☠️ ══════════════════════════════════════════════════════\n`);
+    }
+    return bloqueado;
   }
   
   // 🔧 ANTI-DEADLOCK: Rastreamento de operações em execução
@@ -1166,10 +1178,8 @@ export class AutoTradingScheduler {
       // 🔧 LIMPAR SÍMBOLO: Remover consenso formatado (ex: "R_50(45.0%)" → "R_50")
       let selectedSymbol = bestSymbolResult.symbol.split('(')[0].trim();
       
-      // 🚫 VALIDAÇÃO DEFENSIVA IMEDIATA: Verificar bloqueio de (1s) - CAMADA 1
-      if (this.isSymbolBlocked(selectedSymbol)) {
-        console.error(`❌ [${operationId}] BLOQUEIO ATIVADO: Símbolo "${selectedSymbol}" contém "(1s)" - CAUSADOR DE LOSS`);
-        console.error(`❌ [${operationId}] Pulando para alternativa...`);
+      // ☠️ EXECUÇÃO IMEDIATA: CAMADA 1 — símbolo criminoso interceptado na seleção
+      if (this.isSymbolBlocked(selectedSymbol, `CAMADA-1 seleção [${operationId}]`)) {
         
         // Tentar próximo símbolo na lista top5
         if (bestSymbolResult.top5Symbols && bestSymbolResult.top5Symbols.length > 1) {
@@ -2568,8 +2578,8 @@ export class AutoTradingScheduler {
       const filteredSymbolsData = allSymbolsData.filter((symbolData: any) => {
         const symbol = symbolData.symbol;
         
-        // 🚫 BLOQUEIO TOTAL: Ignorar ativos com "(1s)" no nome
-        if (AutoTradingScheduler.BLOCKED_SYMBOLS_PATTERN.test(symbol)) {
+        // ☠️ EXECUÇÃO: crime tentado na seleção de pool — eliminado silenciosamente
+        if (this.isSymbolBlocked(symbol)) {
           return false;
         }
 
