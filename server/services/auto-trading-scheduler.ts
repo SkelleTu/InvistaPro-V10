@@ -767,6 +767,24 @@ export class AutoTradingScheduler {
     const tokenData = await storage.getUserDerivToken(config.userId);
     if (!tokenData) return;
 
+    // 7b. Respeitar modalidades do usuário — Leverage só dispara ACCU se o usuário habilitou 'accumulator'
+    let levUserModalities: string[] = [];
+    try {
+      if (config.selectedModalities) {
+        const parsed = JSON.parse(config.selectedModalities);
+        if (Array.isArray(parsed)) levUserModalities = parsed;
+        else levUserModalities = config.selectedModalities.split(',').map((s: string) => s.trim()).filter(Boolean);
+      }
+    } catch {
+      levUserModalities = config.selectedModalities
+        ? config.selectedModalities.split(',').map((s: string) => s.trim()).filter(Boolean)
+        : [];
+    }
+    if (!levUserModalities.includes('accumulator')) {
+      console.log(`🚀 [LEVERAGE] Bloqueado: 'accumulator' não está nas modalidades ativas do usuário (${levUserModalities.join(', ') || 'nenhuma'}) — alavancagem suspensa`);
+      return;
+    }
+
     // 8. Calcular stake: 5% da banca, dentro do teto de segurança
     const bankBalance = this.cachedBalance?.value ?? 0;
     if (bankBalance <= 0) {
@@ -2086,13 +2104,16 @@ export class AutoTradingScheduler {
             console.log(`🧠 [ACCU STAKE] ${selectedSymbol} | consenso=${consensus.toFixed(0)}% | regime=${regime} | risco=${accuRisk} | WR=${(assetWinRate*100).toFixed(0)}% → ${(aiPct*100).toFixed(1)}% × $${bankBalance.toFixed(2)} = $${accuStake.toFixed(2)}`);
 
             // 🧠 SUPREMO: growth_rate totalmente dinâmico — IA escolhe 1%-5% conforme volatilidade real
-            // mercado em recuperação parcial → força 1% conservador
-            // mercado normal → selectAccumulatorGrowthRate decide: alta vol=1-2%, baixa vol=4-5%
+            // mercado em recuperação parcial → usa menor taxa PERMITIDA pelo usuário (nunca força taxa fora da config)
+            // mercado normal → selectAccumulatorGrowthRate decide conforme volatilidade, dentro das taxas do usuário
             let adaptiveGrowth: number;
             let growthModeLabel: string;
             if (this.badMarketReducedGrowthActive) {
-              adaptiveGrowth = this.BAD_MARKET_GROWTH_REDUCED; // 1% — recuperação forçada
-              growthModeLabel = 'REDUZIDO (mercado em recuperação)';
+              // Mercado em recuperação: usar a MENOR taxa permitida pelo usuário (conservador)
+              // — nunca forçar uma taxa fora da configuração do usuário
+              const minAllowedRate = Math.min(...allowedAccuGrowthRates);
+              adaptiveGrowth = minAllowedRate;
+              growthModeLabel = `REDUZIDO — menor taxa permitida (${(minAllowedRate*100).toFixed(0)}%) — mercado em recuperação`;
             } else {
               // Shannon Entropy como proxy de volatilidade (0=previsível=baixa vol, 1=caótico=alta vol)
               const mktVol = supremeAnalysis?.statistics?.shannonEntropy ?? 0.5;
