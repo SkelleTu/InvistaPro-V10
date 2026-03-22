@@ -847,29 +847,29 @@ const DERIV_SYNTHETIC_PROFILES: Record<string, DerivSyntheticProfile> = {
   },
   'JUMP50': {
     family: 'Jump Index',
-    description: 'Jump 50 Index — jumps de 50% de probabilidade a cada tick, índice de alta volatilidade',
+    description: 'Jump 50 Index — MODO SCALP: alvos baseados em tamanho de pivot M1 (150-500 pontos)',
     alwaysOpen: true,
     spikeIndex: false,
     volClass: 'ultra-high',
-    slAtrMultiplier: 2.5,
-    tpAtrMultiplier: 4.5,
-    minSlPips: 800, maxSlPips: 5000, minTpPips: 1000, maxTpPips: 8000,
+    slAtrMultiplier: 0.8,
+    tpAtrMultiplier: 1.2,
+    minSlPips: 150, maxSlPips: 500, minTpPips: 200, maxTpPips: 600,
     rsiOversold: 25, rsiOverbought: 75,
     trendType: 'hybrid',
     jumpProbability: 0.50,
-    indicatorNotes: 'Jump 50 tem jumps aleatórios a cada 2 ticks em média — SL mínimo de 800 pontos obrigatório. ATR-based SL é mandatório. Tendências entre jumps são muito curtas.',
+    indicatorNotes: 'Jump 50 SCALP M1 — TP e SL baseados no tamanho de 1 pivot M1. Operações rápidas de 1-5 minutos. TP = 1 pivot (200-400 pts). SL = 0.8 pivot (150-350 pts).',
     behaviorKnowledge: [
-      'Jumps de alta amplitude ocorrem a cada ~2 ticks — SL grande é essencial',
-      'Tendências entre jumps são muito curtas e instáveis',
-      'RSI e MACD têm efetividade reduzida pela alta frequência de jumps',
-      'SL deve ser no mínimo 800-1000 pontos do preço de entrada',
-      'TP deve ser no mínimo 1000-1500 pontos para compensar o risco',
-      'Girassol detecta direção entre jumps mas sinais são de curta duração',
-      'Priorizar entradas com Girassol muito bem definido e ATR grande',
+      'MODO SCALP: TP e SL baseados no tamanho de pivot M1 (200-400 pontos)',
+      'Operações de curta duração (1-5 minutos no M1)',
+      'TP = próximo nível de Fibonacci micro (20 candles) acima/abaixo da entrada',
+      'SL = 0.8x o tamanho do pivot abaixo/acima da entrada',
+      'Não aguardar alvos distantes — fechar no primeiro pivot atingido',
+      'Girassol detecta direção entre jumps — usar apenas sinais claros',
+      'Evitar manter posição por mais de 5 minutos — scalp rápido',
     ],
-    optimalTimeframe: 'M1, M5',
+    optimalTimeframe: 'M1',
     useFibonacci: true,
-    aiContextHint: 'Jump 50: jumps a cada ~2 ticks. SL mínimo 800 pontos obrigatório para evitar stop prematuro. Apenas entrar com sinal de Girassol muito claro. TP/SL largos.',
+    aiContextHint: 'Jump 50 SCALP M1: usar TP de 1 pivot (200-400 pts) e SL de 150-300 pts. Operações rápidas baseadas no tamanho de pivot local. NÃO usar alvos distantes.',
     tickSize: 0.01,
     avgDailyRange: 3000,
   },
@@ -1639,9 +1639,31 @@ class MetaTraderBridge extends EventEmitter {
     let tpPrice = 0;
     let source = 'atr_default';
 
+    // ── PRIORIDADE 0: Scalp pivot para Jump Indices (M1) ───────────────
+    // Para Jump indices em modo scalp, TP/SL baseado no tamanho de 1 pivot M1
+    const isJumpIndex = symbol.toUpperCase().includes('JUMP');
+    if (isJumpIndex && params.fibonacciLevels && params.fibonacciLevels.length >= 2) {
+      const sorted = [...params.fibonacciLevels].sort((a, b) => a.price - b.price);
+      const below  = sorted.filter(l => l.price < entryPrice);
+      const above  = sorted.filter(l => l.price > entryPrice);
+      if (below.length > 0 && above.length > 0) {
+        const nearBelow = below[below.length - 1].price;
+        const nearAbove = above[0].price;
+        const pivotSize = Math.abs(nearAbove - nearBelow);
+        if (action === 'BUY') {
+          slPrice = entryPrice - pivotSize * 0.8;
+          tpPrice = nearAbove;
+        } else {
+          slPrice = entryPrice + pivotSize * 0.8;
+          tpPrice = nearBelow;
+        }
+        source = 'jump_scalp_pivot';
+      }
+    }
+
     // ── PRIORIDADE 1: Níveis reais dos indicadores do MT5 ──────────────
     // Se o indicador Girassol enviou níveis de suporte/resistência reais
-    if (params.girassolSupportLevel && params.girassolResistanceLevel && action) {
+    if (!slPrice && !tpPrice && params.girassolSupportLevel && params.girassolResistanceLevel && action) {
       const support = params.girassolSupportLevel;
       const resistance = params.girassolResistanceLevel;
 
