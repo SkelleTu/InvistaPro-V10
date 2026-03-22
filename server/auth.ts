@@ -6,7 +6,7 @@ import { scrypt, randomBytes, timingSafeEqual } from "crypto";
 import { promisify } from "util";
 import { storage } from "./storage";
 import { User } from "@shared/schema";
-import { MemoryStore } from "express-session";
+import { SqliteSessionStore } from "./sqlite-session-store";
 import { isAuthorizedEmail, ACCESS_DENIED_MESSAGE } from "./config/access";
 
 declare global {
@@ -47,23 +47,27 @@ export function generateVerificationCode(): string {
 }
 
 export function setupAuth(app: Express) {
-  // Session configuration with MemoryStore (local storage)
-  const sessionStore = new MemoryStore();
+  // Session store persistente em SQLite — sobrevive a restarts do servidor
+  const sessionStore = new SqliteSessionStore();
 
   const isProduction = process.env.NODE_ENV === 'production';
-  
+
+  // 1 ano em ms — usuário só é deslogado se limpar cookies/cache ou clicar em "Sair"
+  const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
+
   const sessionSettings: session.SessionOptions = {
     secret: process.env.SESSION_SECRET || "change-this-in-production",
-    resave: true, // Força re-save da sessão
-    saveUninitialized: true, // Salva sessões não inicializadas
+    resave: false,
+    saveUninitialized: false, // Não cria sessão para visitantes não logados
+    rolling: true,            // Renova o cookie a cada requisição (mantém vivo enquanto usa)
     store: sessionStore,
-    name: 'investpro.sid', // Nome customizado para o cookie
+    name: 'investpro.sid',
     cookie: {
       httpOnly: true,
-      secure: isProduction, // Usar HTTPS apenas em produção
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-      sameSite: isProduction ? 'none' : 'lax', // 'none' para cross-origin em produção
-      path: '/', // Garantir que cookie é válido para todo o site
+      secure: isProduction,
+      maxAge: ONE_YEAR_MS,
+      sameSite: isProduction ? 'none' : 'lax',
+      path: '/',
     },
   };
 
