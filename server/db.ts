@@ -642,6 +642,56 @@ export function initializeDatabase() {
       // Coluna já existe - ignorar
     }
 
+    // MT5 Bridge persistence tables
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS mt5_positions (
+        ticket INTEGER PRIMARY KEY,
+        symbol TEXT NOT NULL,
+        type TEXT NOT NULL,
+        lots REAL NOT NULL,
+        open_price REAL NOT NULL,
+        current_price REAL NOT NULL,
+        stop_loss REAL DEFAULT 0,
+        take_profit REAL DEFAULT 0,
+        profit REAL DEFAULT 0,
+        open_time INTEGER NOT NULL,
+        signal_id TEXT DEFAULT '',
+        comment TEXT DEFAULT '',
+        magic INTEGER DEFAULT 0,
+        source TEXT DEFAULT 'ea',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS mt5_trades (
+        ticket INTEGER PRIMARY KEY,
+        signal_id TEXT DEFAULT '',
+        symbol TEXT NOT NULL,
+        type TEXT NOT NULL,
+        lots REAL NOT NULL,
+        open_price REAL NOT NULL,
+        close_price REAL NOT NULL,
+        profit REAL DEFAULT 0,
+        pips REAL DEFAULT 0,
+        open_time INTEGER DEFAULT 0,
+        close_time INTEGER DEFAULT 0,
+        close_reason TEXT DEFAULT 'MANUAL',
+        comment TEXT DEFAULT '',
+        source TEXT DEFAULT 'ea',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS mt5_config_state (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     console.log('✅ Banco de dados local inicializado com sucesso!');
     console.log('🛡️ Sistema de resiliência e auto-restart configurado!');
     console.log(`📍 Local do arquivo: ${dbPath}`);

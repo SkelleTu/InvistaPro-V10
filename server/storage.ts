@@ -986,6 +986,27 @@ export class DatabaseStorage implements IStorage {
     const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
     
     try {
+      // Ensure user exists before touching daily_pnl (prevents FOREIGN KEY constraint failure)
+      const userExists = await db.select({ id: users.id }).from(users).where(eq(users.id, userId)).limit(1);
+      if (userExists.length === 0) {
+        // User doesn't exist in local DB (e.g. Replit Auth user) — skip and return a virtual record
+        console.warn(`[storage] createOrUpdateDailyPnL: userId ${userId} não encontrado — operação ignorada`);
+        return {
+          id: 'virtual',
+          userId,
+          date: today,
+          openingBalance: dailyData.openingBalance?.toString() || '0',
+          currentBalance: dailyData.currentBalance?.toString() || '0',
+          dailyPnL: dailyData.dailyPnL?.toString() || '0',
+          totalOperations: dailyData.totalOperations || 0,
+          winOperations: dailyData.winOperations || 0,
+          lossOperations: dailyData.lossOperations || 0,
+          conservativeOperations: dailyData.conservativeOperations || 0,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        } as any;
+      }
+
       // Check if today's record exists
       const existing = await db
         .select()
@@ -1020,6 +1041,10 @@ export class DatabaseStorage implements IStorage {
         return created;
       }
     } catch (error: any) {
+      if (error.message?.includes('FOREIGN KEY')) {
+        console.warn(`[storage] createOrUpdateDailyPnL FOREIGN KEY ignorado para userId=${userId}`);
+        return { id: 'virtual', userId, date: today, dailyPnL: '0', openingBalance: '0', currentBalance: '0', totalOperations: 0, winOperations: 0, lossOperations: 0, conservativeOperations: 0, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() } as any;
+      }
       throw new Error(`Failed to create/update daily P&L: ${error.message}`);
     }
   }

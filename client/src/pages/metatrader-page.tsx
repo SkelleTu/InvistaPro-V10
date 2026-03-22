@@ -651,13 +651,13 @@ export default function MetaTraderPage() {
                           </p>
                         </div>
                       </div>
-                      {status.activeSignal.girassolDescription && (
+                      {activeSignal?.girassolDescription && (
                         <GirassolStatusBadge
-                          bias={status.activeSignal.girassolBias}
-                          description={status.activeSignal.girassolDescription}
+                          bias={activeSignal.girassolBias}
+                          description={activeSignal.girassolDescription}
                         />
                       )}
-                      <p className="text-xs text-muted-foreground border-t pt-2">{status.activeSignal.reason}</p>
+                      <p className="text-xs text-muted-foreground border-t pt-2">{activeSignal?.reason}</p>
                     </div>
                   ) : (
                     <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">

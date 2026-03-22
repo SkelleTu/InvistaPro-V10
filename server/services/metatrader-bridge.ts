@@ -12,6 +12,7 @@ import { huggingFaceAI } from './huggingface-ai';
 import { DerivTickData } from './deriv-api';
 import { storage } from '../storage';
 import { getSignal } from './signal-store';
+import { sqlite } from '../db';
 
 export interface MT5Signal {
   id: string;
@@ -142,6 +143,9 @@ export interface MT5Position {
   profit: number;
   openTime: number;
   signalId: string;
+  comment?: string;
+  magic?: number;
+  source?: 'ea' | 'api';
 }
 
 export interface MT5TradeResult {
@@ -157,6 +161,8 @@ export interface MT5TradeResult {
   openTime: number;
   closeTime: number;
   closeReason: 'TP' | 'SL' | 'MANUAL' | 'AI_SIGNAL' | 'TIMEOUT';
+  comment?: string;
+  source?: 'ea' | 'api';
 }
 
 export interface MT5Config {
@@ -1115,6 +1121,168 @@ class MetaTraderBridge extends EventEmitter {
   constructor() {
     super();
     this.status = this.initStatus();
+    this.loadFromDB();
+  }
+
+  private loadFromDB(): void {
+    try {
+      // Ensure tables exist (idempotent — safe to call on first run before initializeDatabase)
+      sqlite.exec(`CREATE TABLE IF NOT EXISTS mt5_positions (
+        ticket INTEGER PRIMARY KEY, symbol TEXT NOT NULL, type TEXT NOT NULL, lots REAL NOT NULL,
+        open_price REAL NOT NULL, current_price REAL NOT NULL, stop_loss REAL DEFAULT 0,
+        take_profit REAL DEFAULT 0, profit REAL DEFAULT 0, open_time INTEGER NOT NULL,
+        signal_id TEXT DEFAULT '', comment TEXT DEFAULT '', magic INTEGER DEFAULT 0,
+        source TEXT DEFAULT 'ea', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+      sqlite.exec(`CREATE TABLE IF NOT EXISTS mt5_trades (
+        ticket INTEGER PRIMARY KEY, signal_id TEXT DEFAULT '', symbol TEXT NOT NULL, type TEXT NOT NULL,
+        lots REAL NOT NULL, open_price REAL NOT NULL, close_price REAL NOT NULL, profit REAL DEFAULT 0,
+        pips REAL DEFAULT 0, open_time INTEGER DEFAULT 0, close_time INTEGER DEFAULT 0,
+        close_reason TEXT DEFAULT 'MANUAL', comment TEXT DEFAULT '', source TEXT DEFAULT 'ea',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+      sqlite.exec(`CREATE TABLE IF NOT EXISTS mt5_config_state (
+        key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+
+      // Restore open positions
+      const positions = sqlite.prepare('SELECT * FROM mt5_positions').all() as any[];
+      for (const row of positions) {
+        const pos: MT5Position = {
+          ticket: row.ticket,
+          symbol: row.symbol,
+          type: row.type as 'BUY' | 'SELL',
+          lots: row.lots,
+          openPrice: row.open_price,
+          currentPrice: row.current_price,
+          stopLoss: row.stop_loss,
+          takeProfit: row.take_profit,
+          profit: row.profit,
+          openTime: row.open_time,
+          signalId: row.signal_id,
+          comment: row.comment,
+          magic: row.magic,
+          source: row.source as 'ea' | 'api',
+        };
+        this.openPositions.set(pos.ticket, pos);
+      }
+      if (positions.length > 0) {
+        console.log(`[MT5Bridge] 📦 Restauradas ${positions.length} posições abertas do banco de dados`);
+        this.status.openPositions = positions.length;
+      }
+
+      // Restore recent trades (last 100)
+      const trades = sqlite.prepare('SELECT * FROM mt5_trades ORDER BY close_time DESC LIMIT 100').all() as any[];
+      for (const row of trades) {
+        const trade: MT5TradeResult = {
+          ticket: row.ticket,
+          signalId: row.signal_id,
+          symbol: row.symbol,
+          type: row.type as 'BUY' | 'SELL',
+          lots: row.lots,
+          openPrice: row.open_price,
+          closePrice: row.close_price,
+          profit: row.profit,
+          pips: row.pips,
+          openTime: row.open_time,
+          closeTime: row.close_time,
+          closeReason: row.close_reason as any,
+          comment: row.comment,
+          source: row.source as 'ea' | 'api',
+        };
+        this.recentTrades.push(trade);
+      }
+      if (trades.length > 0) {
+        console.log(`[MT5Bridge] 📊 Restaurados ${trades.length} trades recentes do banco de dados`);
+        // Recalculate stats from today's trades
+        const today = new Date().toDateString();
+        for (const t of this.recentTrades) {
+          const tradeDate = new Date(t.closeTime).toDateString();
+          if (tradeDate === today) {
+            if (t.profit > 0) {
+              this.status.dailyProfit += t.profit;
+              this.status.dailyWins++;
+            } else {
+              this.status.dailyLoss += Math.abs(t.profit);
+              this.status.dailyLosses++;
+            }
+          }
+        }
+        const total = this.status.dailyWins + this.status.dailyLosses;
+        this.status.winRate = total > 0 ? (this.status.dailyWins / total) * 100 : 0;
+      }
+
+      // Restore config state
+      const configRow = sqlite.prepare("SELECT value FROM mt5_config_state WHERE key = 'bridge_config'").get() as any;
+      if (configRow) {
+        try {
+          const savedConfig = JSON.parse(configRow.value);
+          this.config = { ...this.config, ...savedConfig };
+          console.log('[MT5Bridge] ⚙️ Configuração restaurada do banco de dados');
+        } catch {}
+      }
+    } catch (err) {
+      console.error('[MT5Bridge] ⚠️ Falha ao restaurar estado do banco de dados:', err);
+    }
+  }
+
+  private savePositionToDB(position: MT5Position): void {
+    try {
+      sqlite.prepare(`
+        INSERT INTO mt5_positions (ticket, symbol, type, lots, open_price, current_price, stop_loss, take_profit, profit, open_time, signal_id, comment, magic, source, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(ticket) DO UPDATE SET
+          current_price = excluded.current_price,
+          stop_loss = excluded.stop_loss,
+          take_profit = excluded.take_profit,
+          profit = excluded.profit,
+          updated_at = CURRENT_TIMESTAMP
+      `).run(
+        position.ticket, position.symbol, position.type, position.lots,
+        position.openPrice, position.currentPrice, position.stopLoss ?? 0,
+        position.takeProfit ?? 0, position.profit ?? 0, position.openTime,
+        position.signalId ?? '', position.comment ?? '', position.magic ?? 0,
+        position.source ?? 'ea'
+      );
+    } catch (err) {
+      console.error('[MT5Bridge] ⚠️ Falha ao salvar posição no banco:', err);
+    }
+  }
+
+  private removePositionFromDB(ticket: number): void {
+    try {
+      sqlite.prepare('DELETE FROM mt5_positions WHERE ticket = ?').run(ticket);
+    } catch (err) {
+      console.error('[MT5Bridge] ⚠️ Falha ao remover posição do banco:', err);
+    }
+  }
+
+  private saveTradeToDB(trade: MT5TradeResult): void {
+    try {
+      sqlite.prepare(`
+        INSERT OR IGNORE INTO mt5_trades (ticket, signal_id, symbol, type, lots, open_price, close_price, profit, pips, open_time, close_time, close_reason, comment, source)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        trade.ticket, trade.signalId ?? '', trade.symbol, trade.type, trade.lots,
+        trade.openPrice, trade.closePrice, trade.profit, trade.pips ?? 0,
+        trade.openTime ?? 0, trade.closeTime ?? 0, trade.closeReason ?? 'MANUAL',
+        trade.comment ?? '', trade.source ?? 'ea'
+      );
+    } catch (err) {
+      console.error('[MT5Bridge] ⚠️ Falha ao salvar trade no banco:', err);
+    }
+  }
+
+  saveConfigToDB(): void {
+    try {
+      sqlite.prepare(`
+        INSERT INTO mt5_config_state (key, value, updated_at)
+        VALUES ('bridge_config', ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+      `).run(JSON.stringify(this.config));
+    } catch (err) {
+      console.error('[MT5Bridge] ⚠️ Falha ao salvar configuração no banco:', err);
+    }
   }
 
   private initStatus(): MT5Status {
@@ -2698,6 +2866,7 @@ class MetaTraderBridge extends EventEmitter {
     if (this.pendingSignals.has(position.signalId)) {
       this.pendingSignals.delete(position.signalId);
     }
+    this.savePositionToDB(position);
     this.emit('trade_opened', position);
     console.log(`[MT5Bridge] 📈 Posição aberta: #${position.ticket} ${position.type} ${position.symbol} @ ${position.openPrice}`);
   }
@@ -2705,15 +2874,19 @@ class MetaTraderBridge extends EventEmitter {
   updatePosition(ticket: number, update: Partial<MT5Position>): void {
     const pos = this.openPositions.get(ticket);
     if (pos) {
-      this.openPositions.set(ticket, { ...pos, ...update });
+      const updated = { ...pos, ...update };
+      this.openPositions.set(ticket, updated);
+      this.savePositionToDB(updated);
     }
   }
 
   confirmTradeClose(result: MT5TradeResult): void {
     this.openPositions.delete(result.ticket);
+    this.removePositionFromDB(result.ticket);
     this.clearPositionContext(result.ticket); // Limpar memória desta posição
     this.recentTrades.unshift(result);
     if (this.recentTrades.length > 100) this.recentTrades.pop();
+    this.saveTradeToDB(result);
 
     if (result.profit > 0) {
       this.status.dailyProfit += result.profit;
