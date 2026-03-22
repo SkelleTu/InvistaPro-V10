@@ -59,6 +59,8 @@ interface MT5Config {
   requireGirassolConfirmation: boolean;
   maxPositionsPerSymbol: number;
   invertGirassolBuffers: boolean;
+  tradingTimeframe: 'day_trade' | 'swing_trade' | 'position_trade';
+  tradingStyle: 'scalp' | 'alvo_longo';
 }
 
 interface AIModelResult {
@@ -1546,6 +1548,95 @@ export default function MetaTraderPage() {
                 <CardDescription>Configure como o Expert Advisor vai operar</CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
+                {/* ── MODO DE OPERAÇÃO ─────────────────────────────── */}
+                <div className="space-y-4">
+                  <div>
+                    <Label className="font-semibold text-base">Modo de Operação</Label>
+                    <p className="text-sm text-muted-foreground">Define o horizonte temporal e estilo dos trades</p>
+                  </div>
+
+                  {/* Timeframe principal */}
+                  <div className="grid grid-cols-3 gap-2" data-testid="group-trading-timeframe">
+                    {([
+                      { value: 'day_trade',      label: 'Day Trade',      desc: 'Mesmo dia' },
+                      { value: 'swing_trade',    label: 'Swing Trade',    desc: '2–5 dias' },
+                      { value: 'position_trade', label: 'Position Trade', desc: 'Semanas+' },
+                    ] as const).map(opt => (
+                      <button
+                        key={opt.value}
+                        data-testid={`btn-timeframe-${opt.value}`}
+                        onClick={() => setConfigEdits(p => ({ ...p, tradingTimeframe: opt.value }))}
+                        className={`flex flex-col items-center justify-center p-3 rounded-lg border-2 text-center transition-all ${
+                          (cfg.tradingTimeframe ?? 'day_trade') === opt.value
+                            ? 'border-primary bg-primary/10 text-primary'
+                            : 'border-border hover:border-primary/50 text-muted-foreground'
+                        }`}
+                      >
+                        <span className="font-semibold text-sm">{opt.label}</span>
+                        <span className="text-xs opacity-70 mt-0.5">{opt.desc}</span>
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Sub-classificação por estilo */}
+                  <div className="grid grid-cols-2 gap-3" data-testid="group-trading-style">
+                    {([
+                      {
+                        value: 'scalp',
+                        label: '(a) Scalp',
+                        sublabel: 'Rápidas',
+                        desc: 'TP/SL no tamanho de 1 pivot. Operações de segundos a minutos.',
+                        icon: '⚡',
+                      },
+                      {
+                        value: 'alvo_longo',
+                        label: '(b) Alvo Longo',
+                        sublabel: 'Espera',
+                        desc: 'TP em estruturas maiores (Fibonacci, suporte/resistência). Maior R:R.',
+                        icon: '🎯',
+                      },
+                    ] as const).map(opt => {
+                      const selected = (cfg.tradingStyle ?? 'scalp') === opt.value;
+                      return (
+                        <button
+                          key={opt.value}
+                          data-testid={`btn-style-${opt.value}`}
+                          onClick={() => setConfigEdits(p => ({ ...p, tradingStyle: opt.value }))}
+                          className={`flex flex-col gap-1 p-4 rounded-lg border-2 text-left transition-all ${
+                            selected
+                              ? 'border-primary bg-primary/10'
+                              : 'border-border hover:border-primary/50'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="text-lg">{opt.icon}</span>
+                            <div>
+                              <span className={`font-bold text-sm ${selected ? 'text-primary' : ''}`}>{opt.label}</span>
+                              <span className="text-xs text-muted-foreground ml-1">— {opt.sublabel}</span>
+                            </div>
+                            {selected && (
+                              <div className="ml-auto w-2 h-2 rounded-full bg-primary" />
+                            )}
+                          </div>
+                          <p className="text-xs text-muted-foreground leading-snug">{opt.desc}</p>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Resumo do modo ativo */}
+                  <div className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground flex items-center gap-2">
+                    <span className="text-primary font-medium">Modo ativo:</span>
+                    <span>
+                      {cfg.tradingTimeframe === 'day_trade' ? 'Day Trade' : cfg.tradingTimeframe === 'swing_trade' ? 'Swing Trade' : 'Position Trade'}
+                      {' → '}
+                      {(cfg.tradingStyle ?? 'scalp') === 'scalp' ? '⚡ Scalp (alvos de 1 pivot, rápido)' : '🎯 Alvo Longo (estruturas maiores)'}
+                    </span>
+                  </div>
+                </div>
+
+                <Separator />
+
                 <div className="flex items-center justify-between">
                   <div>
                     <Label className="font-semibold text-base">Sistema Ativo</Label>

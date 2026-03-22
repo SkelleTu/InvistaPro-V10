@@ -195,6 +195,9 @@ export interface MT5Config {
   requireGirassolConfirmation: boolean; // Exige sinal claro do Girassol para operar (BUY ou SELL — NEUTRO bloqueia)
   maxPositionsPerSymbol: number;        // Máximo de posições abertas por símbolo (0 = sem limite por símbolo)
   invertGirassolBuffers: boolean;       // Inverte buffer 0 e 1 do Girassol (quando topo=buffer0=SELL mas sistema lê como BUY)
+  // Estilo de operação
+  tradingTimeframe: 'day_trade' | 'swing_trade' | 'position_trade'; // Horizonte temporal da operação
+  tradingStyle: 'scalp' | 'alvo_longo';                             // Sub-classificação: scalp rápido ou alvo longo
 }
 
 export interface MT5Status {
@@ -243,6 +246,8 @@ const DEFAULT_CONFIG: MT5Config = {
   requireGirassolConfirmation: false,
   maxPositionsPerSymbol: 1,
   invertGirassolBuffers: false,
+  tradingTimeframe: 'day_trade',
+  tradingStyle: 'scalp',
 };
 
 export interface ConnectionEvent {
@@ -1736,12 +1741,55 @@ class MetaTraderBridge extends EventEmitter {
       source = profile ? `asset_profile_${profile.volClass}` : 'atr_default';
     }
 
-    // Garantir que SL/TP respeitam o perfil do ativo
+    // ── ESTILO DE OPERAÇÃO: Ajuste global de TP/SL por timeframe e estilo ─
+    // Aplica multiplicadores de escala baseados no modo selecionado pelo usuário
+    const tradingTimeframe = this.config.tradingTimeframe ?? 'day_trade';
+    const tradingStyle     = this.config.tradingStyle ?? 'scalp';
+
+    // Fator de escala: comprime ou expande os alvos conforme o estilo
+    let tpScaleFactor = 1.0;
+    let slScaleFactor = 1.0;
+
+    if (tradingTimeframe === 'day_trade') {
+      if (tradingStyle === 'scalp') {
+        // Scalp: alvos pequenos, 1 pivot M1 (25-40% do perfil padrão)
+        tpScaleFactor = 0.30;
+        slScaleFactor = 0.35;
+      } else {
+        // Alvo Longo (day): cobre 1-2 pivots maiores (60-80% do perfil)
+        tpScaleFactor = 0.70;
+        slScaleFactor = 0.65;
+      }
+    } else if (tradingTimeframe === 'swing_trade') {
+      if (tradingStyle === 'scalp') {
+        // Scalp dentro de swing: 50-65% do perfil
+        tpScaleFactor = 0.55;
+        slScaleFactor = 0.50;
+      } else {
+        // Alvo Longo swing: perfil completo
+        tpScaleFactor = 1.0;
+        slScaleFactor = 1.0;
+      }
+    } else {
+      // Position trade: expande o perfil (1.5x)
+      tpScaleFactor = 1.5;
+      slScaleFactor = 1.5;
+    }
+
+    // Aplica escala nas distâncias calculadas (só se já calculados pelas prioridades anteriores)
+    if (slPrice && tpPrice && source !== 'jump_scalp_pivot') {
+      const rawSl = Math.abs(slPrice - entryPrice) * slScaleFactor;
+      const rawTp = Math.abs(tpPrice - entryPrice) * tpScaleFactor;
+      slPrice = action === 'BUY' ? entryPrice - rawSl : entryPrice + rawSl;
+      tpPrice = action === 'BUY' ? entryPrice + rawTp : entryPrice - rawTp;
+    }
+
+    // Garantir que SL/TP respeitam o perfil do ativo (com limites ajustados pelo estilo)
     if (profile) {
-      const minSl = profile.minSlPips * pipSize;
-      const maxSl = profile.maxSlPips * pipSize;
-      const minTp = profile.minTpPips * pipSize;
-      const maxTp = profile.maxTpPips * pipSize;
+      const minSl = profile.minSlPips * pipSize * slScaleFactor;
+      const maxSl = profile.maxSlPips * pipSize * slScaleFactor;
+      const minTp = profile.minTpPips * pipSize * tpScaleFactor;
+      const maxTp = profile.maxTpPips * pipSize * tpScaleFactor;
 
       const slDist = Math.abs(slPrice - entryPrice);
       const tpDist = Math.abs(tpPrice - entryPrice);
