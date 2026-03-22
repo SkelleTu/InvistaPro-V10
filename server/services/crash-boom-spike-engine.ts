@@ -115,6 +115,14 @@ export interface GirassolGroupResult {
   groupScore: number;
   /** Ambos os pivôs do padrão têm marcação Girassol confirmada (sinal de reversão de alta confiança) */
   bothPivotsMarked: boolean;
+  /**
+   * O pivô detectado está numa extremidade estrutural real do gráfico?
+   * Girassol visual (flor) só aparece em extremidades — topos/fundos significativos
+   * do range amplo (últimos ~100 candles). Pivôs no meio do range são bolinhas.
+   */
+  atStructuralExtreme: boolean;
+  /** Percentual de extremidade: 100% = exatamente no topo/fundo, 0% = centro do range */
+  extremityPct: number;
 }
 
 /** Resultado completo do sistema Girassol (3 grupos) */
@@ -330,6 +338,58 @@ function findLastSpike(candles: any[]): { idx: number; size: number } {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+// MÓDULO 0: EXTREMIDADE ESTRUTURAL
+//
+// O indicador Girassol (flor) no MT5 só aparece nas EXTREMIDADES do gráfico —
+// topos e fundos significativos da estrutura mais ampla.
+// As bolinhas aparecem em estruturas menores, mais ao centro do range.
+//
+// Esta função calcula se um pivô está numa extremidade real:
+//   extremityPct próximo de 100% = topo/fundo absoluto do range (girassol flor)
+//   extremityPct próximo de 0%   = meio do range (bolinha/microestrutura)
+//
+// Lookback por grupo (para refletir a escala visual do indicador):
+//   Macro (grupo 3): últimos 100 candles — estrutura ampla
+//   Meso  (grupo 2): últimos 40 candles  — estrutura média
+//   Micro (grupo 1): últimos 15 candles  — microestrutura local
+// ══════════════════════════════════════════════════════════════════════════════
+
+function calcStructuralExtremity(
+  pivotPrice: number,
+  pivotType: 'high' | 'low',
+  candles: any[],
+  groupNum: 1 | 2 | 3
+): { atExtreme: boolean; extremityPct: number } {
+  const lookbackByGroup = { 1: 15, 2: 40, 3: 100 };
+  const extremeThresholdByGroup = { 1: 0.15, 2: 0.20, 3: 0.25 }; // fração do range
+  const lookback = lookbackByGroup[groupNum];
+  const threshold = extremeThresholdByGroup[groupNum];
+
+  const recent = candles.slice(-lookback);
+  if (recent.length < 5) return { atExtreme: false, extremityPct: 0 };
+
+  const highs = recent.map((c: any) => c.high || c.close * 1.001);
+  const lows  = recent.map((c: any) => c.low  || c.close * 0.999);
+  const rangeHigh = Math.max(...highs);
+  const rangeLow  = Math.min(...lows);
+  const range = rangeHigh - rangeLow;
+  if (range <= 0) return { atExtreme: false, extremityPct: 0 };
+
+  let extremityPct: number;
+  if (pivotType === 'high') {
+    // Quanto o pivô está perto do topo absoluto do range
+    extremityPct = Math.max(0, 1 - (rangeHigh - pivotPrice) / range) * 100;
+    const atExtreme = pivotPrice >= rangeHigh - range * threshold;
+    return { atExtreme, extremityPct: Math.round(extremityPct) };
+  } else {
+    // Quanto o pivô está perto do fundo absoluto do range
+    extremityPct = Math.max(0, 1 - (pivotPrice - rangeLow) / range) * 100;
+    const atExtreme = pivotPrice <= rangeLow + range * threshold;
+    return { atExtreme, extremityPct: Math.round(extremityPct) };
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 // MÓDULO 1: DETECÇÃO DE PIVÔS — ALGORITMO GIRASSOL (ZigZag Fib)
 // Replica a lógica do indicador Girassol Sunflower MT5 v1.70
 // ══════════════════════════════════════════════════════════════════════════════
@@ -396,6 +456,7 @@ function analyzeGirassolGroup(
     pivotsFound: 0, doublePatternDetected: false, patternType: null,
     pivot1Price: 0, pivot2Price: 0, divergencePct: 0, candlesBetween: 0,
     fibAlignment: false, fibLevel: null, groupScore: 0, bothPivotsMarked: false,
+    atStructuralExtreme: false, extremityPct: 0,
   };
 
   const pivots = detectGirassolPivots(candles, params.period, params.deviation, params.backstep, pivotType);
@@ -430,12 +491,21 @@ function analyzeGirassolGroup(
     candlesBetween >= params.backstep &&
     candlesBetween <= params.period * 2;
 
+  // Extremidade estrutural: o Girassol (flor) visual só aparece em topos/fundos
+  // significativos — nas extremidades do gráfico. Calculamos isso para o pivô mais recente.
+  const { atExtreme: atStructuralExtreme, extremityPct } = calcStructuralExtremity(
+    p2.price, pivotType, candles, groupNum
+  );
+
   let groupScore = 60;
   if (divergencePct <= priceTolerance * 0.4) groupScore += 15;
   if (candlesBetween <= params.period)       groupScore += 10;
   if (fibAlignment)                           groupScore += 20;
-  // Boost significativo quando ambos os pivôs têm marcação Girassol confirmada
   if (bothPivotsMarked)                       groupScore += 25;
+  // Boost de extremidade: pivô em extremidade estrutural é mais confiável
+  // (é onde o Girassol visual realmente aparece no MT5)
+  if (atStructuralExtreme)                    groupScore += 15;
+  else if (extremityPct >= 60)               groupScore += 8;
   groupScore = Math.min(100, groupScore);
 
   return {
@@ -452,6 +522,8 @@ function analyzeGirassolGroup(
     fibLevel: nearestFib?.label || null,
     groupScore,
     bothPivotsMarked,
+    atStructuralExtreme,
+    extremityPct,
   };
 }
 
@@ -971,23 +1043,52 @@ export function analyzeCrashBoomSpike(
   const mesoGroupActive  = girassolSystem.groupResults.find(g => g.group === 2 && g.doublePatternDetected);
   const microGroupActive = girassolSystem.groupResults.find(g => g.group === 1 && g.doublePatternDetected);
 
-  // Determinar tipo de gatilho pela hierarquia visual do indicador
+  // Determinar tipo de gatilho pela hierarquia visual + posicao estrutural do pivo
+  //
+  // REGRA DERIVADA DA OBSERVACAO VISUAL DO MT5:
+  //   Girassol (flor) = aparece APENAS nas extremidades do grafico (macro)
+  //   Bolinha media   = aparece em estruturas intermediarias (meso, ou macro sem extremidade)
+  //   Bolinha menor   = aparece em microestruturas (micro)
+  //
+  // Portanto, o grupo macro ativo sozinho NAO e suficiente para classificar como girassol_flower
+  // se o pivo nao estiver numa extremidade estrutural real (atStructuralExtreme = false).
+  // Nesse caso, e tratado como bolinha_media.
   let girassolTriggerType: GirassolTriggerType;
   let confidenceThreshold: number;
   let imminenceThreshold: number;
 
-  if (macroGroupActive || girassolSystem.dualConfluence || girassolSystem.triConfluence) {
-    // Girassol (flor) apareceu — grupo macro ativo OU confluencia de grupos
+  const macroAtExtreme = macroGroupActive?.atStructuralExtreme ?? false;
+  const mesoAtExtreme  = mesoGroupActive?.atStructuralExtreme ?? false;
+
+  if (girassolSystem.triConfluence) {
+    // Tri-confluencia: 3 grupos ao mesmo tempo = certeza de extremidade macro
+    girassolTriggerType = 'girassol_flower';
+    confidenceThreshold = 50;
+    imminenceThreshold  = 25;
+  } else if (girassolSystem.dualConfluence && (macroAtExtreme || mesoAtExtreme)) {
+    // Confluencia dupla com pelo menos um grupo em extremidade = girassol forte
     girassolTriggerType = 'girassol_flower';
     confidenceThreshold = 55;
     imminenceThreshold  = 30;
-  } else if (mesoGroupActive) {
-    // Bolinha media apareceu — meso ativo sem macro
+  } else if (macroGroupActive && macroAtExtreme) {
+    // Macro ativo E na extremidade estrutural = Girassol (flor) visual
+    girassolTriggerType = 'girassol_flower';
+    confidenceThreshold = 55;
+    imminenceThreshold  = 30;
+  } else if (macroGroupActive && !macroAtExtreme) {
+    // Macro ativo mas NAO na extremidade = pivo no meio do range
+    // Visualmente no MT5 isso seria uma bolinha media, nao o girassol
     girassolTriggerType = 'bolinha_media';
-    confidenceThreshold = 65;
-    imminenceThreshold  = 40;
+    confidenceThreshold = 68;
+    imminenceThreshold  = 42;
+  } else if (mesoGroupActive) {
+    // Bolinha media: grupo meso ativo (sem macro)
+    // Se em extremidade do range meso, limiar um pouco menor
+    girassolTriggerType = 'bolinha_media';
+    confidenceThreshold = mesoAtExtreme ? 63 : 68;
+    imminenceThreshold  = mesoAtExtreme ? 38 : 42;
   } else if (microGroupActive) {
-    // Bolinha menor apareceu — APENAS micro ativo, rarissimo, alta exigencia
+    // Bolinha menor: APENAS micro ativo, rarissimo, alta exigencia
     girassolTriggerType = 'bolinha_menor';
     confidenceThreshold = 85;
     imminenceThreshold  = 55;
@@ -1044,19 +1145,29 @@ export function analyzeCrashBoomSpike(
     alerts.push(`🚫 SEM GATILHO GIRASSOL — Nenhum aparecimento do Girassol ou bolinha detectado. Operação bloqueada.`);
   } else if (girassolTriggerType === 'girassol_flower') {
     if (girassolSystem.triConfluence) {
-      alerts.push(`🌻 GIRASSOL APARECEU — TRI-CONFLUÊNCIA: 3/3 grupos confirmam ${girassolSystem.dominantPattern === 'double_top' ? 'Duplo Topo' : 'Duplo Fundo'} — GATILHO MÁXIMO`);
+      alerts.push(`🌻 GIRASSOL APARECEU NA EXTREMIDADE — TRI-CONFLUÊNCIA: 3/3 grupos confirmam ${girassolSystem.dominantPattern === 'double_top' ? 'Duplo Topo' : 'Duplo Fundo'} — GATILHO MÁXIMO`);
     } else if (girassolSystem.dualConfluence) {
-      alerts.push(`🌻 GIRASSOL APARECEU — Confluência dupla (macro + ${mesoGroupActive ? 'meso' : 'micro'}) — gatilho forte`);
+      const ext = macroGroupActive ? `extremidade ${macroGroupActive.extremityPct}%` : mesoGroupActive ? `extremidade ${mesoGroupActive.extremityPct}%` : 'extremidade';
+      alerts.push(`🌻 GIRASSOL APARECEU — Confluência dupla na ${ext} do gráfico — gatilho forte`);
     } else {
-      alerts.push(`🌻 GIRASSOL APARECEU — Grupo macro detectou ${girassolSystem.dominantPattern === 'double_top' ? 'Duplo Topo' : 'Duplo Fundo'} — gatilho de entrada`);
+      const ext = macroGroupActive?.extremityPct ?? 0;
+      alerts.push(`🌻 GIRASSOL APARECEU — Extremidade estrutural ${ext}% (macro) — ${girassolSystem.dominantPattern === 'double_top' ? 'Duplo Topo' : 'Duplo Fundo'} — gatilho de entrada`);
     }
   } else if (girassolTriggerType === 'bolinha_media') {
-    alerts.push(`🔵 BOLINHA MÉDIA APARECEU — Grupo meso ativo. Gatilho válido (confiança mínima ${confidenceThreshold}% exigida).`);
+    if (macroGroupActive && !macroAtExtreme) {
+      // Macro ativo mas pivô não está na extremidade estrutural → bolinha media
+      const ext = macroGroupActive.extremityPct;
+      alerts.push(`🔵 BOLINHA MÉDIA (macro fora da extremidade ${ext}%) — Pivô no meio do range, não nas bordas. Confiança mín. ${confidenceThreshold}% exigida.`);
+    } else {
+      const ext = mesoGroupActive?.extremityPct ?? 0;
+      alerts.push(`🔵 BOLINHA MÉDIA APARECEU — Estrutura intermediária (extremidade ${ext}%). Gatilho válido, confiança mín. ${confidenceThreshold}%.`);
+    }
   } else if (girassolTriggerType === 'bolinha_menor') {
     if (bolinhasMenorBloqueada) {
-      alerts.push(`🔴 BOLINHA MENOR APARECEU — MAS SEM validação AutoFib. Entrada BLOQUEADA (rarissimo sem Fib).`);
+      alerts.push(`🔴 BOLINHA MENOR APARECEU — MAS SEM validação AutoFib. Microestrutura sem confirmação Fib = BLOQUEADO.`);
     } else {
-      alerts.push(`🔴 BOLINHA MENOR APARECEU — AutoFib confirmado. Situação de altissima certeza (confiança ${overallConfidence}% >= ${confidenceThreshold}% exigido).`);
+      const ext = microGroupActive?.extremityPct ?? 0;
+      alerts.push(`🔴 BOLINHA MENOR — Microestrutura (extremidade ${ext}%) + AutoFib confirmado. Certeza altíssima exigida (${overallConfidence}% >= ${confidenceThreshold}%).`);
     }
   }
 
