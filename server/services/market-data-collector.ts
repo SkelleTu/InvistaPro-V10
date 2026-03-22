@@ -58,6 +58,20 @@ export class MarketDataCollector extends EventEmitter {
       this.processTick(tickData);
     });
 
+    // 🔄 AUTO-RESUBSCRIBE: quando a conexão pública reconectar, resubscrever todos os ativos
+    this.derivAPI.on('connected', async () => {
+      if (!this.isCollecting || this.DIGITDIFF_SUPPORTED_SYMBOLS.length === 0) return;
+      console.log(`🔄 [FNACIA] WebSocket reconectado — resubscrevendo ${this.DIGITDIFF_SUPPORTED_SYMBOLS.length} ativos...`);
+      try {
+        for (const symbol of this.DIGITDIFF_SUPPORTED_SYMBOLS) {
+          await this.derivAPI.subscribeToTicks(symbol);
+        }
+        console.log(`✅ [FNACIA] Resubscrição completa: ${this.DIGITDIFF_SUPPORTED_SYMBOLS.length} ativos ativos`);
+      } catch (err) {
+        console.error('❌ [FNACIA] Erro ao resubscrever após reconexão:', err);
+      }
+    });
+
     // Salvar dados periodicamente (análise microscópica contínua)
     this.saveInterval = setInterval(() => {
       this.saveBufferedData();

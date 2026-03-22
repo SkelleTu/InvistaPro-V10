@@ -437,29 +437,42 @@ export class DerivAPIService extends EventEmitter {
   }
 
   private startSupervisorHeartbeat(): void {
-    // Reportar saúde ao supervisor a cada 60 segundos
+    // Evitar múltiplos intervalos
+    if (this.supervisorHeartbeatInterval) return;
+    // Reportar saúde ao supervisor a cada 45 segundos (abaixo do timeout de 90s)
     this.supervisorHeartbeatInterval = setInterval(async () => {
       try {
+        // Reportar mesmo quando desconectado — status reflete estado real
+        const status = this.isConnected ? 'healthy' : 'reconnecting';
         await resilienceSupervisor.reportHeartbeat('websocket', {
           isConnected: this.isConnected,
           wsReadyState: this.ws?.readyState,
           activeSubscriptions: this.activeSubscriptions.size,
           reconnectAttempts: this.reconnectAttempts,
           operationId: this.operationId,
+          status,
         });
       } catch (error) {
         console.error('❌ Erro ao reportar heartbeat ao supervisor:', error);
       }
-    }, 60000);
+    }, 45000);
     console.log(`💓 Heartbeat do ResilienceSupervisor iniciado`);
   }
 
   private stopHeartbeat(): void {
+    // Para apenas o ping de WS — supervisor heartbeat continua rodando mesmo desconectado
     if (this.heartbeatInterval) {
       clearInterval(this.heartbeatInterval);
       this.heartbeatInterval = null;
     }
-    
+    // NÃO parar supervisorHeartbeatInterval aqui — ele deve continuar batendo (status reconnecting)
+  }
+
+  private stopAllHeartbeats(): void {
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
     if (this.supervisorHeartbeatInterval) {
       clearInterval(this.supervisorHeartbeatInterval);
       this.supervisorHeartbeatInterval = null;
@@ -467,7 +480,7 @@ export class DerivAPIService extends EventEmitter {
   }
 
   private cleanup(): void {
-    this.stopHeartbeat();
+    this.stopHeartbeat(); // mantém supervisor heartbeat ativo
     this.isConnected = false;
     
     if (this.connectionTimeout) {
@@ -1582,9 +1595,10 @@ export class DerivAPIService extends EventEmitter {
 
   async disconnect(): Promise<void> {
     this.isConnected = false;
+    this.isShuttingDown = true;
     this.activeSubscriptions.clear();
     this.stopKeepAlive();
-    this.stopHeartbeat();
+    this.stopAllHeartbeats();
     
     if (this.ws) {
       const ws = this.ws;

@@ -187,7 +187,16 @@ app.use((req, res, next) => {
   
   resilienceSupervisor.on('restart_websocket', async () => {
     console.log('🔄 Reiniciando WebSocket por solicitação do ResilienceSupervisor...');
-    console.log('ℹ️ WebSocket tem reconexão automática integrada');
+    try {
+      // Reiniciar o market data collector (que contém o WebSocket público de ticks)
+      const symbols = marketDataCollector.getSupportedSymbols();
+      await marketDataCollector.stopCollection();
+      await new Promise(r => setTimeout(r, 2000)); // aguardar limpeza
+      await marketDataCollector.startCollection(symbols.length > 0 ? symbols : undefined);
+      console.log('✅ WebSocket (market data collector) reiniciado com sucesso');
+    } catch (error) {
+      console.error('❌ Erro ao reiniciar WebSocket:', error);
+    }
   });
 
   resilienceSupervisor.on('restart_market_collector', async () => {
