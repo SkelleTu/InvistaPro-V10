@@ -12,6 +12,7 @@ import {
   getExternalGirassolPivots,
   ExternalGirassolPivot,
 } from '../services/crash-boom-spike-engine';
+import { sqlite } from '../db';
 
 const router = Router();
 
@@ -71,6 +72,38 @@ router.get('/signal', (req: Request, res: Response) => {
     }
 
     if (!signal || signal.action === 'HOLD') {
+      // Sem sinal ativo do EA — tentar retornar o último análise do Deriv Bot (DB)
+      try {
+        const latestLog: any = sqlite.prepare(`
+          SELECT model_name, analysis, decision, confidence, created_at
+          FROM ai_logs
+          ORDER BY created_at DESC
+          LIMIT 1
+        `).get();
+        if (latestLog) {
+          let parsed: any = {};
+          try { parsed = JSON.parse(latestLog.analysis || '{}'); } catch (_) {}
+          const consensus = parsed.consensusStrength || 0;
+          const symbol = parsed.symbol || 'Deriv Bot';
+          const finalDecision = parsed.finalDecision || 'neutral';
+          const action = consensus >= 70 && finalDecision !== 'neutral'
+            ? (finalDecision === 'up' ? 'BUY' : 'SELL') : 'HOLD';
+          return res.json({
+            action,
+            symbol,
+            confidence: consensus / 100,
+            reason: `Deriv Bot — Consenso: ${consensus}% | ${finalDecision.toUpperCase()} | ${latestLog.model_name}`,
+            aiSources: ['Quantum', 'Neural', 'HuggingFace', 'RL', 'Microscopic'],
+            timestamp: new Date(latestLog.created_at).getTime(),
+            lotSize: 0,
+            stopLoss: 0,
+            takeProfit: 0,
+            stopLossPips: 0,
+            takeProfitPips: 0,
+            source: 'deriv_bot',
+          });
+        }
+      } catch (_dbErr) {}
       return res.json({
         action: 'HOLD',
         reason: signal?.reason || 'Aguardando próximo sinal da IA',
@@ -634,7 +667,32 @@ router.post('/trade/close', (req: Request, res: Response) => {
 
 router.get('/positions', (_req: Request, res: Response) => {
   try {
-    res.json(metaTraderBridge.getOpenPositions());
+    const bridgePositions = metaTraderBridge.getOpenPositions();
+    try {
+      const activeContracts: any[] = sqlite.prepare(`
+        SELECT * FROM trade_operations
+        WHERE status='pending'
+        ORDER BY created_at DESC LIMIT 20
+      `).all();
+      const derivPositions = activeContracts.map((c: any, i: number) => ({
+        ticket: parseInt(String(c.deriv_contract_id || '').replace(/\D/g, '').slice(-9) || '0') || (900000000 + i),
+        symbol: c.symbol,
+        type: c.direction === 'up' ? 'BUY' : 'SELL',
+        lots: c.amount,
+        openPrice: c.entry_price || 0,
+        currentPrice: c.entry_price || 0,
+        profit: c.profit || 0,
+        openTime: Math.floor(new Date(c.created_at).getTime() / 1000),
+        stopLoss: 0,
+        takeProfit: 0,
+        comment: `Deriv ${c.trade_type} | IA: ${c.ai_consensus}`,
+        magic: 99999,
+        source: 'deriv',
+      }));
+      res.json([...bridgePositions, ...derivPositions]);
+    } catch (_dbErr) {
+      res.json(bridgePositions);
+    }
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -642,7 +700,32 @@ router.get('/positions', (_req: Request, res: Response) => {
 
 router.get('/trades', (_req: Request, res: Response) => {
   try {
-    res.json(metaTraderBridge.getRecentTrades());
+    const bridgeTrades = metaTraderBridge.getRecentTrades();
+    try {
+      const derivOps: any[] = sqlite.prepare(`
+        SELECT * FROM trade_operations
+        WHERE status IN ('won', 'lost')
+        ORDER BY COALESCE(completed_at, created_at) DESC LIMIT 100
+      `).all();
+      const derivTrades = derivOps.map((op: any, i: number) => ({
+        ticket: parseInt(String(op.deriv_contract_id || '').replace(/\D/g, '').slice(-9) || '0') || (800000000 + i),
+        symbol: op.symbol,
+        type: op.direction === 'up' ? 'BUY' : 'SELL',
+        lots: op.amount,
+        openPrice: op.entry_price || 0,
+        closePrice: op.exit_price || op.entry_price || 0,
+        profit: op.profit || 0,
+        closeReason: op.status === 'won' ? 'WIN' : 'LOSS',
+        openTime: Math.floor(new Date(op.created_at).getTime() / 1000),
+        closeTime: op.completed_at ? Math.floor(new Date(op.completed_at).getTime() / 1000) : 0,
+        comment: `Deriv ${op.trade_type} | ${op.operation_mode || 'Automático'}`,
+        magic: 99999,
+        source: 'deriv',
+      }));
+      res.json([...bridgeTrades, ...derivTrades]);
+    } catch (_dbErr) {
+      res.json(bridgeTrades);
+    }
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -650,7 +733,42 @@ router.get('/trades', (_req: Request, res: Response) => {
 
 router.get('/status', (_req: Request, res: Response) => {
   try {
-    res.json(metaTraderBridge.getStatus());
+    const bridgeStatus = metaTraderBridge.getStatus();
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const dayStats: any = sqlite.prepare(`
+        SELECT
+          COUNT(*) as total_trades,
+          SUM(CASE WHEN status='won' THEN 1 ELSE 0 END) as won,
+          SUM(CASE WHEN status='lost' THEN 1 ELSE 0 END) as lost,
+          SUM(CASE WHEN profit > 0 AND status='won' THEN profit ELSE 0 END) as daily_profit,
+          SUM(CASE WHEN profit < 0 AND status='lost' THEN ABS(profit) ELSE 0 END) as daily_loss
+        FROM trade_operations
+        WHERE date(created_at)=?
+      `).get(today);
+      const signalCount: any = sqlite.prepare(
+        `SELECT COUNT(*) as cnt FROM ai_logs WHERE date(created_at)=?`
+      ).get(today);
+      const won = dayStats?.won || 0;
+      const lost = dayStats?.lost || 0;
+      const total = won + lost;
+      const derivWinRate = total > 0 ? (won / total) * 100 : 0;
+      const derivSignals = Math.floor((signalCount?.cnt || 0) / 5);
+      res.json({
+        ...bridgeStatus,
+        dailyProfit: (bridgeStatus.dailyProfit || 0) + (dayStats?.daily_profit || 0),
+        dailyLoss: (bridgeStatus.dailyLoss || 0) + (dayStats?.daily_loss || 0),
+        dailyWins: (bridgeStatus.dailyWins || 0) + won,
+        dailyLosses: (bridgeStatus.dailyLosses || 0) + lost,
+        winRate: bridgeStatus.connected ? bridgeStatus.winRate : derivWinRate,
+        totalSignalsGenerated: (bridgeStatus.totalSignalsGenerated || 0) + derivSignals,
+        systemHealth: bridgeStatus.connected
+          ? bridgeStatus.systemHealth
+          : total > 0 ? 'excellent' : 'warning',
+      });
+    } catch (_dbErr) {
+      res.json(bridgeStatus);
+    }
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -1285,9 +1403,81 @@ router.post('/signal/generate', async (req: Request, res: Response) => {
 
 router.get('/ai-analysis', (_req: Request, res: Response) => {
   try {
-    const log = metaTraderBridge.getAnalysisLog();
-    const latest = metaTraderBridge.getLatestAnalysis();
-    res.json({ log, latest, total: log.length });
+    const bridgeLog = metaTraderBridge.getAnalysisLog();
+    const bridgeLatest = metaTraderBridge.getLatestAnalysis();
+
+    try {
+      // Buscar ai_logs das últimas 24h e sintetizar AIAnalysisEntry por janela de 10s
+      const recentLogs: any[] = sqlite.prepare(`
+        SELECT model_name, analysis, decision, confidence, market_data, created_at
+        FROM ai_logs
+        WHERE created_at >= datetime('now', '-24 hours')
+        ORDER BY created_at DESC
+        LIMIT 600
+      `).all();
+
+      // Agrupar por (symbol, janela de 10s)
+      const windowMap = new Map<string, any[]>();
+      for (const log of recentLogs) {
+        let parsed: any = {};
+        try { parsed = JSON.parse(log.analysis || '{}'); } catch (_) {}
+        const symbol = parsed.symbol || 'UNKNOWN';
+        const ts = new Date(log.created_at).getTime();
+        const windowKey = `${symbol}_${Math.floor(ts / 10000)}`;
+        if (!windowMap.has(windowKey)) windowMap.set(windowKey, []);
+        windowMap.get(windowKey)!.push({ ...log, parsed, ts });
+      }
+
+      // Converter cada janela em um AIAnalysisEntry
+      const dbEntries: any[] = [];
+      for (const [key, logs] of windowMap) {
+        const first = logs[0];
+        const symbol = first.parsed.symbol || 'UNKNOWN';
+        const ts = first.ts;
+        const consensus = first.parsed.consensusStrength || first.parsed.consenso || 0;
+        const finalDecision = first.parsed.finalDecision || 'neutral';
+
+        const modelResults = logs.map((l: any) => ({
+          model: l.model_name,
+          prediction: l.decision as 'up' | 'down' | 'neutral',
+          confidence: Math.round((l.confidence || 0) * 100),
+          reasoning: l.parsed.reasoning || '',
+        }));
+
+        const approved = consensus >= 70 && finalDecision !== 'neutral';
+        const aiDir = finalDecision === 'up' ? 'up' : finalDecision === 'down' ? 'down' : 'neutral';
+        const finalAct = approved ? (aiDir === 'up' ? 'BUY' : 'SELL') : 'HOLD';
+
+        dbEntries.push({
+          id: key,
+          timestamp: ts,
+          symbol,
+          phase: 'decision',
+          status: approved ? 'approved' : 'rejected',
+          aiConsensus: consensus,
+          aiDirection: aiDir,
+          aiReasoning: `Consenso: ${consensus}% | ${modelResults.length} modelos | Decisão: ${finalDecision.toUpperCase()}`,
+          modelResults,
+          participatingModels: modelResults.length,
+          finalDecision: finalAct,
+          decisionReason: `${symbol}: Consenso ${consensus}% — ${modelResults.length} IAs • Decisão: ${finalDecision.toUpperCase()}`,
+          fullNarrative: modelResults.map((m: any) => `• ${m.model} (${m.confidence}%): ${m.prediction.toUpperCase()}\n  ${m.reasoning}`).join('\n\n'),
+          consecutiveLosses: 0,
+          circuitBreakerActive: false,
+        });
+      }
+
+      // Ordenar do mais recente para o mais antigo
+      dbEntries.sort((a, b) => b.timestamp - a.timestamp);
+
+      // Mesclar: bridge first (se EA conectado), depois DB
+      const combined = [...bridgeLog, ...dbEntries.slice(0, 100)];
+      const latest = combined[0] || bridgeLatest;
+
+      res.json({ log: combined.slice(0, 150), latest, total: combined.length });
+    } catch (_dbErr) {
+      res.json({ log: bridgeLog, latest: bridgeLatest, total: bridgeLog.length });
+    }
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

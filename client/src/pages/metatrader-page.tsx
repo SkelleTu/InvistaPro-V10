@@ -245,8 +245,7 @@ export default function MetaTraderPage() {
 
   const { data: activeSignal, isLoading: signalLoading } = useQuery<any>({
     queryKey: ['/api/mt5/signal'],
-    refetchInterval: 2000,
-    enabled: !!status?.connected
+    refetchInterval: 3000,
   });
 
   const { data: aiAnalysis } = useQuery<AIAnalysisResponse>({
@@ -609,40 +608,45 @@ export default function MetaTraderPage() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  {status?.activeSignal ? (
+                  {activeSignal && activeSignal.action ? (
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
-                        <span className="text-xl font-bold">{status.activeSignal.symbol}</span>
-                        <Badge className={status.activeSignal.action === 'BUY' ? 'bg-green-500' : status.activeSignal.action === 'SELL' ? 'bg-red-500' : 'bg-gray-500'}>
-                          {status.activeSignal.action}
-                        </Badge>
+                        <span className="text-xl font-bold">{activeSignal.symbol || '—'}</span>
+                        <div className="flex items-center gap-2">
+                          {activeSignal.source === 'deriv_bot' && (
+                            <Badge variant="outline" className="text-xs border-primary/40 text-primary">Deriv Bot</Badge>
+                          )}
+                          <Badge className={activeSignal.action === 'BUY' ? 'bg-green-500' : activeSignal.action === 'SELL' ? 'bg-red-500' : 'bg-gray-500'}>
+                            {activeSignal.action}
+                          </Badge>
+                        </div>
                       </div>
                       <div className="grid grid-cols-2 gap-2 text-sm">
                         <div>
                           <span className="text-muted-foreground">Confiança</span>
-                          <p className="font-medium text-primary">{((status.activeSignal.confidence || 0) * 100).toFixed(1)}%</p>
+                          <p className="font-medium text-primary">{((activeSignal.confidence || 0) * 100).toFixed(1)}%</p>
                         </div>
                         <div>
-                          <span className="text-muted-foreground">Lote</span>
-                          <p className="font-medium">{status.activeSignal.lotSize}</p>
+                          <span className="text-muted-foreground">IAs Ativas</span>
+                          <p className="font-medium">{activeSignal.aiSources?.length || 5}</p>
                         </div>
                         <div>
                           <span className="text-muted-foreground">Stop Loss</span>
                           <p className="font-medium text-red-500">
-                            {status.activeSignal.stopLoss > 0
-                              ? status.activeSignal.stopLoss.toFixed(2)
-                              : status.activeSignal.stopLossPips > 0
-                                ? `${status.activeSignal.stopLossPips} pips`
+                            {activeSignal.stopLoss > 0
+                              ? activeSignal.stopLoss.toFixed(2)
+                              : activeSignal.stopLossPips > 0
+                                ? `${activeSignal.stopLossPips} pips`
                                 : 'IA monit.'}
                           </p>
                         </div>
                         <div>
                           <span className="text-muted-foreground">Take Profit</span>
                           <p className="font-medium text-green-500">
-                            {status.activeSignal.takeProfit > 0
-                              ? status.activeSignal.takeProfit.toFixed(2)
-                              : status.activeSignal.takeProfitPips > 0
-                                ? `${status.activeSignal.takeProfitPips} pips`
+                            {activeSignal.takeProfit > 0
+                              ? activeSignal.takeProfit.toFixed(2)
+                              : activeSignal.takeProfitPips > 0
+                                ? `${activeSignal.takeProfitPips} pips`
                                 : 'IA monit.'}
                           </p>
                         </div>
@@ -1486,15 +1490,20 @@ export default function MetaTraderPage() {
                       {trades.map((trade: any, i: number) => (
                         <div key={i} className={`p-3 rounded-lg border ${trade.profit >= 0 ? 'border-green-500/30 bg-green-500/5' : 'border-red-500/30 bg-red-500/5'}`} data-testid={`history-trade-${i}`}>
                           <div className="flex items-center justify-between mb-2">
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                               <Badge className={trade.type === 'BUY' ? 'bg-blue-500' : 'bg-purple-500'} variant="default">
                                 {trade.type}
                               </Badge>
                               <span className="font-bold">{trade.symbol}</span>
-                              <span className="text-xs text-muted-foreground">{trade.lots} lots • #{trade.ticket}</span>
+                              <span className="text-xs text-muted-foreground">stake ${Number(trade.lots).toFixed(2)}</span>
+                              {trade.source === 'deriv' && (
+                                <Badge variant="outline" className="text-xs border-primary/40 text-primary">Deriv Bot</Badge>
+                              )}
                             </div>
                             <div className="flex items-center gap-2">
-                              <Badge variant="outline" className="text-xs">{trade.closeReason || 'CLOSED'}</Badge>
+                              <Badge variant="outline" className={`text-xs ${trade.closeReason === 'WIN' ? 'border-green-500 text-green-500' : trade.closeReason === 'LOSS' ? 'border-red-500 text-red-500' : ''}`}>
+                                {trade.closeReason || 'CLOSED'}
+                              </Badge>
                               <span className={`font-bold text-lg ${trade.profit >= 0 ? 'text-green-500' : 'text-red-500'}`}>
                                 {trade.profit >= 0 ? '+' : ''}${trade.profit?.toFixed(2)}
                               </span>
@@ -1513,13 +1522,13 @@ export default function MetaTraderPage() {
                 ) : (
                   <div className="flex flex-col items-center py-16 text-muted-foreground gap-3">
                     <History className="h-14 w-14 opacity-20" />
-                    <p className="font-medium">Nenhuma operação fechada ainda nesta sessão</p>
+                    <p className="font-medium">Nenhuma operação encontrada</p>
                     <p className="text-xs max-w-sm text-center">
-                      O histórico é registrado automaticamente quando o EA fecha posições e reporta ao servidor via <code>/trade/close</code>
+                      Operações do Deriv Bot e do EA MetaTrader aparecem aqui automaticamente em tempo real
                     </p>
                     <div className="flex items-center gap-1.5 text-xs">
                       <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-                      Aguardando fechamento de posições...
+                      Aguardando operações...
                     </div>
                   </div>
                 )}
