@@ -80,6 +80,7 @@ interface ContractState {
   aiSignalBuffer: Array<{ ts: number; direction: 'up' | 'down' | 'neutral'; strength: number }>;
   peakProfit: number;         // maior lucro já visto
   peakBidPrice: number;
+  targetTicksReached: boolean; // ⚡ ACCU-AUTOSELL: flag ativado quando tickCount >= targetTicks (persiste até venda)
   status: 'monitoring' | 'closing' | 'closed';
   aiSnapshot?: AITickSnapshot;
   openReason?: string;
@@ -533,6 +534,7 @@ class UniversalContractMonitor extends EventEmitter {
   private keepAliveTimer: NodeJS.Timeout | null = null;
   private reqIdCounter = 1000000;
   private pendingSubAcks = new Map<number, number>(); // reqId → contractId
+  private pendingSellReqs = new Map<number, number>(); // reqId → contractId (rastreia vendas em andamento)
   private isShuttingDown = false;
   private readonly RECENTLY_CLOSED_TTL_MS = 20000; // 20 seconds
 
@@ -571,6 +573,7 @@ class UniversalContractMonitor extends EventEmitter {
       aiSignalBuffer: [],
       peakProfit: 0,
       peakBidPrice: input.buyPrice,
+      targetTicksReached: false,
       status: 'monitoring',
       spotHistory: [],
       barrierDistanceHistory: [],
@@ -705,6 +708,8 @@ class UniversalContractMonitor extends EventEmitter {
     if (msg.msg_type === 'sell') {
       if (msg.sell) {
         console.log(`💰 [MONITOR] Venda executada: contrato ${msg.sell.contract_id} | Vendido por: $${msg.sell.sold_for}`);
+        // Limpar reqId pendente (venda confirmada)
+        if (msg.req_id) this.pendingSellReqs.delete(msg.req_id);
         this.emit('contract_sold', {
           contractId: msg.sell.contract_id,
           soldFor: msg.sell.sold_for,
@@ -712,6 +717,18 @@ class UniversalContractMonitor extends EventEmitter {
         });
       } else if (msg.error) {
         console.warn(`⚠️ [MONITOR] Erro na venda: ${msg.error.message} (code: ${msg.error.code})`);
+        // Se havia um reqId pendente, reverter o estado do contrato para 'monitoring' se targetTicksReached
+        // → permite retry automático no próximo tick (especialmente quando is_valid_to_sell=0 na Deriv)
+        const reqId = msg.req_id;
+        if (reqId && this.pendingSellReqs.has(reqId)) {
+          const contractId = this.pendingSellReqs.get(reqId)!;
+          this.pendingSellReqs.delete(reqId);
+          const state = this.monitored.get(contractId);
+          if (state && state.targetTicksReached && state.status === 'closing') {
+            state.status = 'monitoring';
+            console.log(`🔄 [ACCU-AUTOSELL] ${contractId} | Venda rejeitada pela Deriv — vai tentar novamente no próximo tick`);
+          }
+        }
         this.emit('sell_error', msg.error);
       }
       return;
@@ -790,14 +807,20 @@ class UniversalContractMonitor extends EventEmitter {
     if (state.bidPrice > state.peakBidPrice) state.peakBidPrice = state.bidPrice;
 
     // ⚡ ACCU MODO-OPS: Venda automática após N ticks (1 ou 2) — sem delay de análise
+    // Quando atingido o tick alvo, ativar flag e tentar vender a cada tick subsequente
+    // NÃO bloquear em isValidToSell: é comum a Deriv retornar is_valid_to_sell=0 nos primeiros
+    // ticks de ACCU (especialmente a 2%+ growth), mas devemos tentar a cada tick até conseguir.
     if (
       state.input.targetTicks !== undefined &&
       state.tickCount >= state.input.targetTicks &&
-      state.isValidToSell &&
       state.status === 'monitoring'
     ) {
+      state.targetTicksReached = true;
+    }
+    if (state.targetTicksReached && state.status === 'monitoring') {
       const gain = state.profitPct.toFixed(2);
-      console.log(`⚡ [ACCU-AUTOSELL] ${contractId} | Tick #${state.tickCount}/${state.input.targetTicks} atingido | lucro=${gain}% | Vendendo agora...`);
+      const validLabel = state.isValidToSell ? '' : ' [aguardando is_valid_to_sell]';
+      console.log(`⚡ [ACCU-AUTOSELL] ${contractId} | Tick #${state.tickCount}/${state.input.targetTicks} atingido${validLabel} | lucro=${gain}% | Tentando vender...`);
       await this.executeSell(state, `ACCU-AUTOSELL: ${state.input.targetTicks} tick(s) alvo atingido | lucro=${gain}%`);
       return;
     }
@@ -1159,8 +1182,11 @@ class UniversalContractMonitor extends EventEmitter {
 
     if (this.connected && this.ws) {
       const reqId = ++this.reqIdCounter;
+      this.pendingSellReqs.set(reqId, contractId);
       this.ws.send(JSON.stringify({ sell: contractId, price: 0, req_id: reqId }));
-      state.status = 'closed';
+      // Não marcar como 'closed' aqui — aguardar resposta da Deriv.
+      // handleMessage processará a resposta 'sell' e marcará o estado corretamente.
+      // Status permanece 'closing' até confirmação ou erro da Deriv.
 
       this.emit('sell_initiated', {
         contractId,
