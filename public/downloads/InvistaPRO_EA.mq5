@@ -9,7 +9,7 @@
 //|   Detecta também Semáforo/Bolinha como indicador separado         |
 //+------------------------------------------------------------------+
 #property copyright "InvistaPRO"
-#property version   "7.0"
+#property version   "7.1"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -838,27 +838,28 @@ void FetchAndProcessSignal()
    }
    else if (stopLoss > 0 || takeProfit > 0)
    {
-      // Valida distância mínima de SL/TP
+      // Valida distância mínima de SL/TP com margem de segurança extra (1.5x)
       double point      = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
       long   stopsLevel = SymbolInfoInteger(g_symbol, SYMBOL_TRADE_STOPS_LEVEL);
-      double minDist    = MathMax((double)stopsLevel * point, (ask - bid) * 3.0);
+      // Usa 1.5x o nível mínimo do broker para evitar rejeição por slippage/spread
+      double minDist    = MathMax((double)stopsLevel * point * 1.5, (ask - bid) * 5.0);
 
-      // Para índices Jump (preço alto + jumps frequentes): usar mínimo proporcional ao preço
-      // Jump 50 = 5% do preço, Jump 75 = 7%, Jump 100 = 9% — evita "invalid stops" do broker
+      // Para índices Jump: usar percentual conservador do preço como piso garantido
+      // Valores aumentados (+3%) vs versão anterior para absorver variação de preço entre cálculo e envio
       string symUpper2 = g_symbol;
       StringToUpper(symUpper2);
       if (StringFind(symUpper2, "JUMP") >= 0 && ask > 1000)
       {
-         double jumpMinPct = 0.03; // 3% padrão para qualquer Jump
-         if (StringFind(symUpper2, "100") >= 0) jumpMinPct = 0.09;
-         else if (StringFind(symUpper2, "75")  >= 0) jumpMinPct = 0.07;
-         else if (StringFind(symUpper2, "50")  >= 0) jumpMinPct = 0.05;
-         else if (StringFind(symUpper2, "25")  >= 0) jumpMinPct = 0.04;
+         double jumpMinPct = 0.06; // 6% padrão para qualquer Jump (antes era 3%)
+         if (StringFind(symUpper2, "100") >= 0) jumpMinPct = 0.12;
+         else if (StringFind(symUpper2, "75")  >= 0) jumpMinPct = 0.10;
+         else if (StringFind(symUpper2, "50")  >= 0) jumpMinPct = 0.08;
+         else if (StringFind(symUpper2, "25")  >= 0) jumpMinPct = 0.07;
          minDist = MathMax(minDist, ask * jumpMinPct);
-         Print("⚡ Jump Index detectado — distância mínima SL/TP: ", NormalizeDouble(minDist, 2), " pontos (", jumpMinPct * 100, "% do preço)");
+         Print("⚡ Jump Index — distância mínima garantida: ", NormalizeDouble(minDist, 2), " pts (", jumpMinPct * 100, "% do preço | broker stopsLevel=", stopsLevel, ")");
       }
 
-      if (minDist <= 0) minDist = ask * 0.002;
+      if (minDist <= 0) minDist = ask * 0.01;
 
       if (action == "BUY")
       {
@@ -893,14 +894,83 @@ void FetchAndProcessSignal()
    else if (action == "SELL")
       success = trade.Sell(lotSize, g_symbol, 0, stopLoss, takeProfit, "InvistaPRO_" + signalId);
 
+   // ── Retry automático em caso de stops inválidos (erro 10016) ──────────
+   // Ocorre quando o broker rejeita SL/TP por estarem muito próximos do preço.
+   // Recalcula com distância garantida (dobro do broker + % proporcional ao preço) e reenvio.
+   if (!success && trade.ResultRetcode() == 10016)
+   {
+      Print("⚠️ Stops inválidos (10016) — recalculando com distância garantida...");
+      double askNow    = SymbolInfoDouble(g_symbol, SYMBOL_ASK);
+      double bidNow    = SymbolInfoDouble(g_symbol, SYMBOL_BID);
+      double pointNow  = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
+      long   stopsLvl  = SymbolInfoInteger(g_symbol, SYMBOL_TRADE_STOPS_LEVEL);
+
+      // Distância base: 3x o nível mínimo do broker ou 10x o spread, o que for maior
+      double safeDist  = MathMax((double)stopsLvl * pointNow * 3.0, (askNow - bidNow) * 10.0);
+
+      // Para Jump Index: garantir % conservadora do preço
+      string symUp = g_symbol;
+      StringToUpper(symUp);
+      if (StringFind(symUp, "JUMP") >= 0 && askNow > 1000)
+      {
+         double pct = 0.10; // 10% padrão conservador
+         if (StringFind(symUp, "100") >= 0) pct = 0.15;
+         else if (StringFind(symUp, "75")  >= 0) pct = 0.13;
+         else if (StringFind(symUp, "50")  >= 0) pct = 0.10;
+         else if (StringFind(symUp, "25")  >= 0) pct = 0.10;
+         safeDist = MathMax(safeDist, askNow * pct);
+      }
+
+      Print("   SafeDist calculado: ", NormalizeDouble(safeDist, 2), " | stopsLevel=", stopsLvl);
+
+      double slRetry = 0, tpRetry = 0;
+      if (action == "BUY")
+      {
+         slRetry = NormalizeDouble(askNow - safeDist, _Digits);
+         tpRetry = NormalizeDouble(askNow + safeDist, _Digits);
+         success = trade.Buy(lotSize, g_symbol, 0, slRetry, tpRetry, "InvistaPRO_" + signalId);
+      }
+      else if (action == "SELL")
+      {
+         slRetry = NormalizeDouble(bidNow + safeDist, _Digits);
+         tpRetry = NormalizeDouble(bidNow - safeDist, _Digits);
+         success = trade.Sell(lotSize, g_symbol, 0, slRetry, tpRetry, "InvistaPRO_" + signalId);
+      }
+
+      if (success)
+      {
+         Print("✅ Retry bem-sucedido! SL=", NormalizeDouble(slRetry, _Digits),
+               " | TP=", NormalizeDouble(tpRetry, _Digits),
+               " | Dist=", NormalizeDouble(safeDist, 2));
+         stopLoss   = slRetry;
+         takeProfit = tpRetry;
+      }
+      else
+      {
+         // Último recurso: abre sem SL/TP para não perder o sinal
+         // Posição ficará protegida apenas pelo MaxPositions e pelo monitor IA
+         Print("⚠️ Retry também falhou (", trade.ResultRetcode(), ") — abrindo SEM SL/TP como último recurso");
+         if (action == "BUY")
+            success = trade.Buy(lotSize, g_symbol, 0, 0, 0, "InvistaPRO_" + signalId);
+         else if (action == "SELL")
+            success = trade.Sell(lotSize, g_symbol, 0, 0, 0, "InvistaPRO_" + signalId);
+         if (success)
+            Print("⚠️ Ordem aberta SEM SL/TP — monitore e feche manualmente se necessário!");
+         stopLoss   = 0;
+         takeProfit = 0;
+      }
+   }
+
    if (success)
    {
       Print("✅ Ordem executada: ", action, " | Ticket: ", trade.ResultOrder(),
+            " | SL: ", NormalizeDouble(stopLoss, _Digits),
+            " | TP: ", NormalizeDouble(takeProfit, _Digits),
             " | SL/TP source: ", slTpSource != "" ? slTpSource : "server_default");
       ConfirmTradeOpen(signalId, (int)trade.ResultOrder(), action, lotSize, stopLoss, takeProfit);
    }
    else
-      Print("❌ Falha ao executar ordem: ", GetLastError());
+      Print("❌ Falha definitiva ao executar ordem: ", trade.ResultRetcode(), " / ", GetLastError());
 }
 
 //+------------------------------------------------------------------+
