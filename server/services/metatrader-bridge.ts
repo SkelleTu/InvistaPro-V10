@@ -1354,6 +1354,14 @@ class MetaTraderBridge extends EventEmitter {
     if (this.analysisLog.length > this.MAX_ANALYSIS_LOG) {
       this.analysisLog.pop();
     }
+    try {
+      sqlite.prepare(`
+        INSERT INTO mt5_analysis_log (id, timestamp, symbol, phase, status, data)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET data = excluded.data
+      `).run(entry.id, entry.timestamp, entry.symbol, entry.phase, entry.status, JSON.stringify(entry));
+      sqlite.exec(`DELETE FROM mt5_analysis_log WHERE id NOT IN (SELECT id FROM mt5_analysis_log ORDER BY timestamp DESC LIMIT 500)`);
+    } catch {}
     this.emit('analysis', entry);
   }
 
@@ -1376,6 +1384,26 @@ class MetaTraderBridge extends EventEmitter {
     } else if (!this.config.enabled && this.signalGenerationInterval) {
       this.stopSignalGeneration();
     }
+    this.saveConfigToDB();
+  }
+
+  private saveBridgeState(): void {
+    try {
+      const entries: Array<[string, any]> = [
+        ['totalSignalsGenerated', this.status.totalSignalsGenerated],
+        ['totalTradesExecuted', this.status.totalTradesExecuted],
+        ['consecutiveLosses', this.consecutiveLosses],
+        ['circuitBreakerUntil', this.circuitBreakerUntil],
+      ];
+      const stmt = sqlite.prepare(`
+        INSERT INTO mt5_bridge_state (key, value, updated_at)
+        VALUES (?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+      `);
+      for (const [key, val] of entries) {
+        stmt.run(key, JSON.stringify(val));
+      }
+    } catch {}
   }
 
   /**
@@ -2553,6 +2581,7 @@ class MetaTraderBridge extends EventEmitter {
       this.pendingSignals.set(signal.id, signal);
       this.status.totalSignalsGenerated++;
       this.status.activeSignal = signal;
+      if (this.status.totalSignalsGenerated % 5 === 0) this.saveBridgeState();
       this.emit('signal', signal);
       const spikeTag = isSpikeOpportunity ? ' [⚡ SPIKE]' : isContinuityOnSpikeIdx ? ' [CONTINUIDADE]' : '';
       const fibTag = fib && fib.nearestLevels.length > 0 ? ` | Fib: ${fibZoneLabel}` : '';
@@ -2911,6 +2940,7 @@ class MetaTraderBridge extends EventEmitter {
       this.pendingSignals.delete(position.signalId);
     }
     this.savePositionToDB(position);
+    this.saveBridgeState();
     this.emit('trade_opened', position);
     console.log(`[MT5Bridge] 📈 Posição aberta: #${position.ticket} ${position.type} ${position.symbol} @ ${position.openPrice}`);
   }
@@ -2951,6 +2981,7 @@ class MetaTraderBridge extends EventEmitter {
     const total = this.status.dailyWins + this.status.dailyLosses;
     this.status.winRate = total > 0 ? (this.status.dailyWins / total) * 100 : 0;
 
+    this.saveBridgeState();
     this.emit('trade_closed', result);
     console.log(`[MT5Bridge] 🔒 Posição fechada: #${result.ticket} | P&L: ${result.profit > 0 ? '+' : ''}${result.profit.toFixed(2)} | ${result.closeReason} | Perdas consecutivas: ${this.consecutiveLosses}`);
   }
