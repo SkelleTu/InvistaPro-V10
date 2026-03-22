@@ -102,8 +102,20 @@ int OnInit()
 
    trade.SetExpertMagicNumber(MagicNumber);
 
+   // Inicializa os timers com o tempo atual para evitar execução imediata
+   // na primeira atualização de preço (tick) após a conexão.
+   // Sem isso, a condição (now - g_lastSignal >= SignalSeconds) seria sempre
+   // verdadeira no primeiro tick e dispararia uma operação antes mesmo da
+   // análise inicial estar completa.
+   datetime now = TimeCurrent();
+   g_lastSignal   = now;  // aguarda SignalSeconds antes do 1º sinal
+   g_lastHeartbeat = now; // aguarda HeartbeatSeconds antes do 1º heartbeat
+   g_lastMonitor  = now;  // aguarda g_monitorSeconds antes do 1º monitor
+
    Print("🚀 InvistaPRO EA v6.0 iniciado | Símbolo: ", g_symbol);
    Print("   → Perfil de ativo Deriv | SL/TP por indicadores reais | ", CandleCount, " candles históricos");
+   Print("   → Aguardando ", SignalSeconds, "s antes do 1º sinal e ",
+         HeartbeatSeconds, "s antes do 1º heartbeat.");
 
    string modeLabel = "";
    if (AIControlMode == AI_MANUAL)
@@ -125,7 +137,11 @@ int OnInit()
    // Busca o perfil do ativo Deriv logo no início
    FetchAssetProfile();
 
+   // Envia heartbeat inicial imediatamente para registrar a conexão no servidor.
+   // Os próximos heartbeats seguirão o intervalo configurado (HeartbeatSeconds).
    SendHeartbeat();
+   g_lastHeartbeat = TimeCurrent(); // reseta após o heartbeat inicial
+
    return(INIT_SUCCEEDED);
 }
 
