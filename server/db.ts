@@ -641,6 +641,28 @@ export function initializeDatabase() {
     } catch (e: any) {
       // Coluna já existe - ignorar
     }
+    // Migração: campos de controle de risco
+    try {
+      sqlite.exec(`ALTER TABLE trade_configurations ADD COLUMN enable_martingale INTEGER DEFAULT 1`);
+    } catch {}
+    try {
+      sqlite.exec(`ALTER TABLE trade_configurations ADD COLUMN enable_leverage INTEGER DEFAULT 1`);
+    } catch {}
+    try {
+      sqlite.exec(`ALTER TABLE trade_configurations ADD COLUMN enable_circuit_breaker INTEGER DEFAULT 1`);
+    } catch {}
+    try {
+      sqlite.exec(`ALTER TABLE trade_configurations ADD COLUMN enable_recovery_mode INTEGER DEFAULT 1`);
+    } catch {}
+    try {
+      sqlite.exec(`ALTER TABLE trade_configurations ADD COLUMN martingale_multipliers TEXT DEFAULT '[1.3,1.6,2.0]'`);
+    } catch {}
+    try {
+      sqlite.exec(`ALTER TABLE trade_configurations ADD COLUMN circuit_breaker_losses INTEGER DEFAULT 1`);
+    } catch {}
+    try {
+      sqlite.exec(`ALTER TABLE trade_configurations ADD COLUMN circuit_breaker_pause_minutes INTEGER DEFAULT 2`);
+    } catch {}
 
     // MT5 Bridge persistence tables
     sqlite.exec(`

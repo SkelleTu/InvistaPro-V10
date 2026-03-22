@@ -250,6 +250,13 @@ export const tradeConfigurations = sqliteTable("trade_configurations", {
   modalityFrequency: text("modality_frequency").default('{}'), // JSON object: { modality_id: 'low'|'normal'|'high' }
   accuTicksPerRate: text("accu_ticks_per_rate").default('{"1":10,"2":7,"3":5,"4":4,"5":3}'), // JSON: { rate: ticks } for auto-sell
   modalityTicks: text("modality_ticks").default('{}'), // JSON: { modality_id: ticks } for digit/rise-fall duration
+  enableMartingale: integer("enable_martingale", { mode: 'boolean' }).default(true),
+  enableLeverage: integer("enable_leverage", { mode: 'boolean' }).default(true),
+  enableCircuitBreaker: integer("enable_circuit_breaker", { mode: 'boolean' }).default(true),
+  enableRecoveryMode: integer("enable_recovery_mode", { mode: 'boolean' }).default(true),
+  martingaleMultipliers: text("martingale_multipliers").default('[1.3,1.6,2.0]'), // JSON: [part1, part2, part3]
+  circuitBreakerLosses: integer("circuit_breaker_losses").default(1),
+  circuitBreakerPauseMinutes: integer("circuit_breaker_pause_minutes").default(2),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`),
 });

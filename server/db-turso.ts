@@ -425,6 +425,14 @@ export async function initializeTursoDatabase(): Promise<boolean> {
     } catch (e: any) {
       // Coluna já existe - ignorar
     }
+    // Migração: campos de controle de risco
+    try { await (tursoDb as any).run(`ALTER TABLE trade_configurations ADD COLUMN enable_martingale INTEGER DEFAULT 1`); } catch {}
+    try { await (tursoDb as any).run(`ALTER TABLE trade_configurations ADD COLUMN enable_leverage INTEGER DEFAULT 1`); } catch {}
+    try { await (tursoDb as any).run(`ALTER TABLE trade_configurations ADD COLUMN enable_circuit_breaker INTEGER DEFAULT 1`); } catch {}
+    try { await (tursoDb as any).run(`ALTER TABLE trade_configurations ADD COLUMN enable_recovery_mode INTEGER DEFAULT 1`); } catch {}
+    try { await (tursoDb as any).run(`ALTER TABLE trade_configurations ADD COLUMN martingale_multipliers TEXT DEFAULT '[1.3,1.6,2.0]'`); } catch {}
+    try { await (tursoDb as any).run(`ALTER TABLE trade_configurations ADD COLUMN circuit_breaker_losses INTEGER DEFAULT 1`); } catch {}
+    try { await (tursoDb as any).run(`ALTER TABLE trade_configurations ADD COLUMN circuit_breaker_pause_minutes INTEGER DEFAULT 2`); } catch {}
 
     // Migração: adicionar operation_mode em trade_operations se não existir
     try {

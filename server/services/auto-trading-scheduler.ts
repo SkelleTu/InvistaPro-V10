@@ -183,10 +183,11 @@ export class AutoTradingScheduler {
 
   /**
    * Aplica multiplicador de martingale ao stake base.
-   * Parte 1 → ×1.30 | Parte 2 → ×1.60 | Parte 3 → ×2.00
+   * Parte 1 → ×mult[0] | Parte 2 → ×mult[1] | Parte 3 → ×mult[2]
    * Retorna o stake ajustado e ativa/avança o estado de martingale.
    */
-  private applyMartingaleStake(userId: string, baseStake: number, consensus: number, operationId: string): number {
+  private applyMartingaleStake(userId: string, baseStake: number, consensus: number, operationId: string, enabled = true, userMultipliers?: number[]): number {
+    if (!enabled) return baseStake;
     const state = this.getMartingaleState(userId);
 
     if (!state.isActive) {
@@ -200,8 +201,8 @@ export class AutoTradingScheduler {
       console.log(`🎰 [${operationId}] MARTINGALE Parte ${state.currentPart}/3 em curso | Consenso: ${consensus}%`);
     }
 
-    const multipliers: Record<number, number> = { 1: 1.30, 2: 1.60, 3: 2.00 };
-    const mult = multipliers[state.currentPart] ?? 1.0;
+    const mults = userMultipliers && userMultipliers.length === 3 ? userMultipliers : [1.30, 1.60, 2.00];
+    const mult = mults[(state.currentPart - 1)] ?? 1.0;
     const adjustedStake = Math.round(baseStake * mult * 100) / 100;
 
     console.log(`🎰 [${operationId}] Stake martingale Parte ${state.currentPart}/3: $${baseStake.toFixed(2)} × ${mult} = $${adjustedStake.toFixed(2)}`);
@@ -648,9 +649,15 @@ export class AutoTradingScheduler {
 
       // 🚀 MODO ALAVANCAGEM: verificar se o mercado geral está excepcional para disparo cirúrgico
       // Roda em paralelo com o ciclo normal — não bloqueia, não adiciona latência às operações normais
-      this.checkAndExecuteLeverageTrade(operationId).catch(err =>
-        console.error(`⚠️ [LEVERAGE] Erro no ciclo de alavancagem:`, err)
-      );
+      const leverageConfig = activeConfigs[0] as any;
+      const userEnableLeverage = leverageConfig?.enableLeverage ?? true;
+      if (userEnableLeverage) {
+        this.checkAndExecuteLeverageTrade(operationId).catch(err =>
+          console.error(`⚠️ [LEVERAGE] Erro no ciclo de alavancagem:`, err)
+        );
+      } else {
+        console.log(`🚀 [LEVERAGE] Desabilitado pelo usuário — pulando ciclo de alavancagem`);
+      }
 
       // Executar TODAS as análises em paralelo total - sem limitações de burst
       // Sistema é inteligente para não abrir trades desnecessários
@@ -1137,7 +1144,8 @@ export class AutoTradingScheduler {
   private async executeAutomaticTrade(config: any, tokenData: any, operationId: string): Promise<{success: boolean, error?: string}> {
     try {
       // 🔴 CAMADA 3 - CIRCUIT BREAKER: Verificar pausa obrigatória por perdas consecutivas
-      if (realStatsTracker.isCircuitBreakerActive()) {
+      const userEnableCircuitBreaker = (config as any)?.enableCircuitBreaker ?? true;
+      if (userEnableCircuitBreaker && realStatsTracker.isCircuitBreakerActive()) {
         const reqs = realStatsTracker.getRecoveryRequirements();
         const remainingSec = Math.ceil(reqs.circuitBreakerRemainingMs / 1000);
         const remainingMin = Math.ceil(remainingSec / 60);
@@ -1146,6 +1154,8 @@ export class AutoTradingScheduler {
           success: false,
           error: `CIRCUIT BREAKER: ${reqs.consecutiveLosses} perdas consecutivas — aguardando ${remainingMin} min antes do próximo trade`
         };
+      } else if (!userEnableCircuitBreaker && realStatsTracker.isCircuitBreakerActive()) {
+        console.log(`🔴 [${operationId}] CIRCUIT BREAKER ignorado — desabilitado pelo usuário`);
       }
 
       // 🎯 PRÉ-LEITURA DAS MODALIDADES: Para filtrar símbolos compatíveis antes de selecionar o melhor ativo
@@ -1285,7 +1295,8 @@ export class AutoTradingScheduler {
           realStatsTracker.updateBalance(recoveryPnL.currentBalance);
         }
 
-        if (realStatsTracker.isPostLossMode()) {
+        const userEnableRecoveryMode = (config as any)?.enableRecoveryMode ?? true;
+        if (userEnableRecoveryMode && realStatsTracker.isPostLossMode()) {
           const reqs = realStatsTracker.getRecoveryRequirements();
 
           console.log(`🛡️ [${operationId}] RECOVERY MODE ATIVO — Streak: ${reqs.consecutiveLosses} perdas | Saldo alvo: $${reqs.balanceToRecover.toFixed(2)} | Consenso mínimo: ${reqs.minConsensus}%`);
@@ -1560,7 +1571,11 @@ export class AutoTradingScheduler {
         // Determinar parâmetros do trade baseado no modo e banca
         // 🔥 SISTEMA DE RECUPERAÇÃO INTELIGENTE DE PERDAS
       // 🚀 FLEXIBILIDADE DINÂMICA: Passar consenso + aplicar dynamic stake/ticks
-      let tradeParams = await this.getTradeParamsForMode(config.mode, selectedSymbol, aiConsensus.finalDecision, config.userId, aiConsensus.consensusStrength, aiConsensus.volatility || 0.5);
+      let tradeParams = await this.getTradeParamsForMode(config.mode, selectedSymbol, aiConsensus.finalDecision, config.userId, aiConsensus.consensusStrength, aiConsensus.volatility || 0.5, {
+        enableMartingale: (config as any)?.enableMartingale ?? true,
+        martingaleMultipliers: (() => { try { return JSON.parse((config as any)?.martingaleMultipliers || '[1.3,1.6,2.0]'); } catch { return [1.3,1.6,2.0]; } })(),
+        enableRecoveryMode: (config as any)?.enableRecoveryMode ?? true,
+      });
       
       // 📈 APLICAR TICKS DINÂMICOS baseado em win rate do ativo
       tradeParams.duration = this.calculateDynamicTicks(selectedSymbol, tradeParams.duration);
@@ -3507,7 +3522,7 @@ export class AutoTradingScheduler {
     return Math.min(pct, maxPct);
   }
 
-  private async getTradeParamsForMode(mode: string, symbol: string, direction: string, userId: string, consensoStrength?: number, volatility?: number): Promise<{amount: number, duration: number, barrier: string}> {
+  private async getTradeParamsForMode(mode: string, symbol: string, direction: string, userId: string, consensoStrength?: number, volatility?: number, riskConfig?: { enableMartingale?: boolean; martingaleMultipliers?: number[]; enableRecoveryMode?: boolean }): Promise<{amount: number, duration: number, barrier: string}> {
     let amount = 0.35; // Default para bancas pequenas (conservador)
     let duration = 10; // ⚡ OTIMIZAÇÃO: Aumentado de 5 para 10 ticks para distribuir fechamento
     
@@ -3538,7 +3553,7 @@ export class AutoTradingScheduler {
         // 🔺 RECOVERY STAKE — calcular stake baseado no déficit a recuperar
         // Objetivo: um único trade bem-sucedido cobre o déficit + 15% de lucro extra.
         // Não é sequencial: o sistema aguarda sinal com consenso ≥ minConsensus antes de operar.
-        if (realStatsTracker.isPostLossMode()) {
+        if ((riskConfig?.enableRecoveryMode ?? true) && realStatsTracker.isPostLossMode()) {
           const deficit = realStatsTracker.getLossDeficit();
           if (deficit > 0) {
             // ════════════════════════════════════════════════════════════════
@@ -3600,7 +3615,9 @@ export class AutoTradingScheduler {
     // 🎰 APLICAR MARTINGALE — SOMENTE se consenso excepcional e sem recovery/circuit breaker
     if (consensoStrength !== undefined && userId) {
       try {
-        amount = this.applyMartingaleStake(userId, amount, consensoStrength, 'STAKE');
+        const mgEnabled = riskConfig?.enableMartingale ?? true;
+        const mgMults = riskConfig?.martingaleMultipliers;
+        amount = this.applyMartingaleStake(userId, amount, consensoStrength, 'STAKE', mgEnabled, mgMults);
       } catch (mgErr) {
         console.error(`❌ [MARTINGALE] Erro ao aplicar stake: ${mgErr}`);
       }

@@ -2465,6 +2465,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     let modalityFrequency: Record<string, string> = {};
     let accuTicksPerRate: Record<string, number> = { '1': 10, '2': 7, '3': 5, '4': 4, '5': 3 };
     let modalityTicks: Record<string, number> = {};
+    let martingaleMultipliers: number[] = [1.3, 1.6, 2.0];
     try {
       if (config?.accuGrowthRates) accuGrowthRates = JSON.parse(config.accuGrowthRates);
     } catch {}
@@ -2477,7 +2478,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       if ((config as any)?.modalityTicks) modalityTicks = JSON.parse((config as any).modalityTicks);
     } catch {}
-    res.json({ accuGrowthRates, modalityFrequency, accuTicksPerRate, modalityTicks });
+    try {
+      if ((config as any)?.martingaleMultipliers) martingaleMultipliers = JSON.parse((config as any).martingaleMultipliers);
+    } catch {}
+    const c = config as any;
+    res.json({
+      accuGrowthRates,
+      modalityFrequency,
+      accuTicksPerRate,
+      modalityTicks,
+      enableMartingale: c?.enableMartingale ?? true,
+      enableLeverage: c?.enableLeverage ?? true,
+      enableCircuitBreaker: c?.enableCircuitBreaker ?? true,
+      enableRecoveryMode: c?.enableRecoveryMode ?? true,
+      martingaleMultipliers,
+      circuitBreakerLosses: c?.circuitBreakerLosses ?? 1,
+      circuitBreakerPauseMinutes: c?.circuitBreakerPauseMinutes ?? 2,
+    });
+  }));
+
+  app.put('/api/trading/risk-settings', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+    const {
+      enableMartingale, enableLeverage, enableCircuitBreaker, enableRecoveryMode,
+      martingaleMultipliers, circuitBreakerLosses, circuitBreakerPauseMinutes
+    } = req.body;
+    const patch: any = {};
+    if (typeof enableMartingale === 'boolean') patch.enableMartingale = enableMartingale;
+    if (typeof enableLeverage === 'boolean') patch.enableLeverage = enableLeverage;
+    if (typeof enableCircuitBreaker === 'boolean') patch.enableCircuitBreaker = enableCircuitBreaker;
+    if (typeof enableRecoveryMode === 'boolean') patch.enableRecoveryMode = enableRecoveryMode;
+    if (Array.isArray(martingaleMultipliers) && martingaleMultipliers.length === 3) {
+      const mults = martingaleMultipliers.map(Number);
+      if (mults.every(m => m >= 1.0 && m <= 10.0)) patch.martingaleMultipliers = mults;
+    }
+    if (typeof circuitBreakerLosses === 'number' && circuitBreakerLosses >= 1 && circuitBreakerLosses <= 10) {
+      patch.circuitBreakerLosses = Math.round(circuitBreakerLosses);
+    }
+    if (typeof circuitBreakerPauseMinutes === 'number' && circuitBreakerPauseMinutes >= 1 && circuitBreakerPauseMinutes <= 60) {
+      patch.circuitBreakerPauseMinutes = Math.round(circuitBreakerPauseMinutes);
+    }
+    await dbStorage.updateRiskSettings(req.user.id, patch);
+    console.log(`🛡️ [RISK SETTINGS] Usuário ${req.user.id} atualizou configurações de risco:`, JSON.stringify(patch));
+    res.json({ success: true });
   }));
 
   app.put('/api/trading/accu-growth-rates', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {

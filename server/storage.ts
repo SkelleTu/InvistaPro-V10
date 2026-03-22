@@ -172,6 +172,15 @@ export interface IStorage {
   updateModalityFrequency(userId: string, freq: Record<string, string>): Promise<void>;
   updateAccuTicksPerRate(userId: string, ticks: Record<string, number>): Promise<void>;
   updateModalityTicks(userId: string, ticks: Record<string, number>): Promise<void>;
+  updateRiskSettings(userId: string, settings: {
+    enableMartingale?: boolean;
+    enableLeverage?: boolean;
+    enableCircuitBreaker?: boolean;
+    enableRecoveryMode?: boolean;
+    martingaleMultipliers?: number[];
+    circuitBreakerLosses?: number;
+    circuitBreakerPauseMinutes?: number;
+  }): Promise<void>;
   deactivateAllTradeConfigs(userId: string): Promise<void>;
   reactivateTradeConfiguration(id: string): Promise<void>;
   deactivateTradeConfiguration(id: string): Promise<void>;
@@ -644,6 +653,29 @@ export class DatabaseStorage implements IStorage {
         modalityTicks: JSON.stringify(ticks),
         updatedAt: new Date().toISOString(),
       })
+      .where(and(eq(tradeConfigurations.userId, userId), eq(tradeConfigurations.isActive, true)));
+  }
+
+  async updateRiskSettings(userId: string, settings: {
+    enableMartingale?: boolean;
+    enableLeverage?: boolean;
+    enableCircuitBreaker?: boolean;
+    enableRecoveryMode?: boolean;
+    martingaleMultipliers?: number[];
+    circuitBreakerLosses?: number;
+    circuitBreakerPauseMinutes?: number;
+  }): Promise<void> {
+    const patch: Record<string, any> = { updatedAt: new Date().toISOString() };
+    if (settings.enableMartingale !== undefined) patch.enableMartingale = settings.enableMartingale;
+    if (settings.enableLeverage !== undefined) patch.enableLeverage = settings.enableLeverage;
+    if (settings.enableCircuitBreaker !== undefined) patch.enableCircuitBreaker = settings.enableCircuitBreaker;
+    if (settings.enableRecoveryMode !== undefined) patch.enableRecoveryMode = settings.enableRecoveryMode;
+    if (settings.martingaleMultipliers !== undefined) patch.martingaleMultipliers = JSON.stringify(settings.martingaleMultipliers);
+    if (settings.circuitBreakerLosses !== undefined) patch.circuitBreakerLosses = settings.circuitBreakerLosses;
+    if (settings.circuitBreakerPauseMinutes !== undefined) patch.circuitBreakerPauseMinutes = settings.circuitBreakerPauseMinutes;
+    await db
+      .update(tradeConfigurations)
+      .set(patch)
       .where(and(eq(tradeConfigurations.userId, userId), eq(tradeConfigurations.isActive, true)));
   }
 

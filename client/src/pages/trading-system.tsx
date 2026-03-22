@@ -669,6 +669,27 @@ export default function TradingSystemPage() {
     return {};
   });
   const [modalitySettingsLoaded, setModalitySettingsLoaded] = useState(false);
+  const [enableMartingale, setEnableMartingale] = useState<boolean>(() => {
+    try { const s = localStorage.getItem("enable_martingale"); if (s !== null) return s === "true"; } catch {} return true;
+  });
+  const [enableLeverage, setEnableLeverage] = useState<boolean>(() => {
+    try { const s = localStorage.getItem("enable_leverage"); if (s !== null) return s === "true"; } catch {} return true;
+  });
+  const [enableCircuitBreaker, setEnableCircuitBreaker] = useState<boolean>(() => {
+    try { const s = localStorage.getItem("enable_circuit_breaker"); if (s !== null) return s === "true"; } catch {} return true;
+  });
+  const [enableRecoveryMode, setEnableRecoveryMode] = useState<boolean>(() => {
+    try { const s = localStorage.getItem("enable_recovery_mode"); if (s !== null) return s === "true"; } catch {} return true;
+  });
+  const [martingaleMultipliers, setMartingaleMultipliers] = useState<[number, number, number]>(() => {
+    try { const s = localStorage.getItem("martingale_multipliers"); if (s) { const p = JSON.parse(s); if (Array.isArray(p) && p.length === 3) return p as [number, number, number]; } } catch {} return [1.3, 1.6, 2.0];
+  });
+  const [circuitBreakerLosses, setCircuitBreakerLosses] = useState<number>(() => {
+    try { const s = localStorage.getItem("circuit_breaker_losses"); if (s) return parseInt(s); } catch {} return 1;
+  });
+  const [circuitBreakerPauseMinutes, setCircuitBreakerPauseMinutes] = useState<number>(() => {
+    try { const s = localStorage.getItem("circuit_breaker_pause_minutes"); if (s) return parseInt(s); } catch {} return 2;
+  });
   const [autoMode, setAutoMode] = useState<boolean>(() => {
     try { return localStorage.getItem("trade_auto_mode") === "true"; } catch { return false; }
   });
@@ -724,6 +745,34 @@ export default function TradingSystemPage() {
         if (data?.modalityTicks && typeof data.modalityTicks === 'object') {
           setModalityTicks(data.modalityTicks);
           localStorage.setItem("modality_ticks", JSON.stringify(data.modalityTicks));
+        }
+        if (typeof data?.enableMartingale === 'boolean') {
+          setEnableMartingale(data.enableMartingale);
+          localStorage.setItem("enable_martingale", String(data.enableMartingale));
+        }
+        if (typeof data?.enableLeverage === 'boolean') {
+          setEnableLeverage(data.enableLeverage);
+          localStorage.setItem("enable_leverage", String(data.enableLeverage));
+        }
+        if (typeof data?.enableCircuitBreaker === 'boolean') {
+          setEnableCircuitBreaker(data.enableCircuitBreaker);
+          localStorage.setItem("enable_circuit_breaker", String(data.enableCircuitBreaker));
+        }
+        if (typeof data?.enableRecoveryMode === 'boolean') {
+          setEnableRecoveryMode(data.enableRecoveryMode);
+          localStorage.setItem("enable_recovery_mode", String(data.enableRecoveryMode));
+        }
+        if (Array.isArray(data?.martingaleMultipliers) && data.martingaleMultipliers.length === 3) {
+          setMartingaleMultipliers(data.martingaleMultipliers as [number, number, number]);
+          localStorage.setItem("martingale_multipliers", JSON.stringify(data.martingaleMultipliers));
+        }
+        if (typeof data?.circuitBreakerLosses === 'number') {
+          setCircuitBreakerLosses(data.circuitBreakerLosses);
+          localStorage.setItem("circuit_breaker_losses", String(data.circuitBreakerLosses));
+        }
+        if (typeof data?.circuitBreakerPauseMinutes === 'number') {
+          setCircuitBreakerPauseMinutes(data.circuitBreakerPauseMinutes);
+          localStorage.setItem("circuit_breaker_pause_minutes", String(data.circuitBreakerPauseMinutes));
         }
       } catch {}
       setModalitySettingsLoaded(true);
@@ -1919,6 +1968,20 @@ export default function TradingSystemPage() {
                       body: JSON.stringify({ ticks }),
                     }).catch(() => {});
                   };
+                  const saveRiskSettings = (patch: {
+                    enableMartingale?: boolean;
+                    enableLeverage?: boolean;
+                    enableCircuitBreaker?: boolean;
+                    enableRecoveryMode?: boolean;
+                    martingaleMultipliers?: number[];
+                    circuitBreakerLosses?: number;
+                    circuitBreakerPauseMinutes?: number;
+                  }) => {
+                    apiRequest("/api/trading/risk-settings", {
+                      method: "PUT",
+                      body: JSON.stringify(patch),
+                    }).catch(() => {});
+                  };
                   const TICK_MODALITIES = new Set(['digit_differs','digit_matches','digit_even','digit_odd','digit_over','digit_under','rise','fall','higher','lower']);
                   const toggleModality = (id: string, newVal: boolean, name: string) => {
                     const updated = { ...enabledModalities, [id]: newVal };
@@ -2491,6 +2554,225 @@ export default function TradingSystemPage() {
                     ))}
                   </div>
                 </div>
+              </CardContent>
+            </Card>
+
+            {/* Proteção & Risco */}
+            <Card className="border-orange-200 dark:border-orange-900">
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2 text-orange-800 dark:text-orange-200">
+                  <Shield className="h-5 w-5" />
+                  <span>Proteção &amp; Risco</span>
+                  <Badge className="bg-orange-500 text-white ml-2">
+                    {[enableMartingale, enableLeverage, enableCircuitBreaker, enableRecoveryMode].filter(Boolean).length} ativo{[enableMartingale, enableLeverage, enableCircuitBreaker, enableRecoveryMode].filter(Boolean).length !== 1 ? 's' : ''}
+                  </Badge>
+                </CardTitle>
+                <CardDescription>
+                  Controle total sobre os sistemas automáticos de proteção e gerenciamento de risco. Cada sistema pode ser ativado ou desativado individualmente.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+
+                {/* Martingale */}
+                <div className={`rounded-xl border-2 p-4 transition-all ${enableMartingale ? 'border-violet-300 dark:border-violet-700 bg-violet-50 dark:bg-violet-950/30' : 'border-border bg-muted/30'}`}>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg">🎰</span>
+                      <div>
+                        <p className="font-semibold text-sm text-foreground">Martingale Triplo</p>
+                        <p className="text-xs text-muted-foreground">Multiplica o stake em até 3 partes seguidas quando o consenso é alto</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      data-testid="toggle-martingale"
+                      onClick={() => {
+                        const next = !enableMartingale;
+                        setEnableMartingale(next);
+                        localStorage.setItem("enable_martingale", String(next));
+                        const patch: Record<string, unknown> = {
+                          enableMartingale: next, enableLeverage, enableCircuitBreaker, enableRecoveryMode,
+                          martingaleMultipliers, circuitBreakerLosses, circuitBreakerPauseMinutes
+                        };
+                        apiRequest("/api/trading/risk-settings", { method: "PUT", body: JSON.stringify(patch) }).catch(() => {});
+                        toast({ title: next ? "🎰 Martingale ativado" : "🎰 Martingale desativado", duration: 2000 });
+                      }}
+                      className={`relative w-12 h-6 rounded-full transition-colors ${enableMartingale ? 'bg-violet-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+                    >
+                      <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${enableMartingale ? 'left-6' : 'left-0.5'}`} />
+                    </button>
+                  </div>
+                  {enableMartingale && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-semibold text-violet-700 dark:text-violet-300 uppercase tracking-wider">Multiplicadores das 3 partes</p>
+                      <div className="grid grid-cols-3 gap-2">
+                        {(['Parte 1', 'Parte 2', 'Parte 3'] as const).map((label, i) => (
+                          <div key={i} className="flex flex-col items-center gap-1">
+                            <p className="text-[10px] text-muted-foreground">{label}</p>
+                            <div className="flex items-center gap-1">
+                              <button type="button" onClick={() => {
+                                const next = [...martingaleMultipliers] as [number, number, number];
+                                next[i] = Math.max(1.0, Math.round((next[i] - 0.1) * 10) / 10);
+                                setMartingaleMultipliers(next);
+                                localStorage.setItem("martingale_multipliers", JSON.stringify(next));
+                                const patch: Record<string, unknown> = { enableMartingale, enableLeverage, enableCircuitBreaker, enableRecoveryMode, martingaleMultipliers: next, circuitBreakerLosses, circuitBreakerPauseMinutes };
+                                apiRequest("/api/trading/risk-settings", { method: "PUT", body: JSON.stringify(patch) }).catch(() => {});
+                              }} className="w-5 h-5 rounded bg-violet-200 dark:bg-violet-800 text-violet-700 dark:text-violet-300 font-bold text-sm flex items-center justify-center hover:bg-violet-300">-</button>
+                              <span className="text-sm font-bold text-violet-800 dark:text-violet-200 w-8 text-center">×{martingaleMultipliers[i].toFixed(1)}</span>
+                              <button type="button" onClick={() => {
+                                const next = [...martingaleMultipliers] as [number, number, number];
+                                next[i] = Math.min(10.0, Math.round((next[i] + 0.1) * 10) / 10);
+                                setMartingaleMultipliers(next);
+                                localStorage.setItem("martingale_multipliers", JSON.stringify(next));
+                                const patch: Record<string, unknown> = { enableMartingale, enableLeverage, enableCircuitBreaker, enableRecoveryMode, martingaleMultipliers: next, circuitBreakerLosses, circuitBreakerPauseMinutes };
+                                apiRequest("/api/trading/risk-settings", { method: "PUT", body: JSON.stringify(patch) }).catch(() => {});
+                              }} className="w-5 h-5 rounded bg-violet-200 dark:bg-violet-800 text-violet-700 dark:text-violet-300 font-bold text-sm flex items-center justify-center hover:bg-violet-300">+</button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="text-[10px] text-muted-foreground">Ativa quando consenso ≥ 75%. Sequência: stake × {martingaleMultipliers[0].toFixed(1)} → × {martingaleMultipliers[1].toFixed(1)} → × {martingaleMultipliers[2].toFixed(1)}</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Alavancagem */}
+                <div className={`rounded-xl border-2 p-4 transition-all ${enableLeverage ? 'border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-950/30' : 'border-border bg-muted/30'}`}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg">🚀</span>
+                      <div>
+                        <p className="font-semibold text-sm text-foreground">Modo Alavancagem</p>
+                        <p className="text-xs text-muted-foreground">Dispara contratos extra quando 2+ ativos estão excepcionais ao mesmo tempo</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      data-testid="toggle-leverage"
+                      onClick={() => {
+                        const next = !enableLeverage;
+                        setEnableLeverage(next);
+                        localStorage.setItem("enable_leverage", String(next));
+                        const patch: Record<string, unknown> = { enableMartingale, enableLeverage: next, enableCircuitBreaker, enableRecoveryMode, martingaleMultipliers, circuitBreakerLosses, circuitBreakerPauseMinutes };
+                        apiRequest("/api/trading/risk-settings", { method: "PUT", body: JSON.stringify(patch) }).catch(() => {});
+                        toast({ title: next ? "🚀 Alavancagem ativada" : "🚀 Alavancagem desativada", duration: 2000 });
+                      }}
+                      className={`relative w-12 h-6 rounded-full transition-colors ${enableLeverage ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+                    >
+                      <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${enableLeverage ? 'left-6' : 'left-0.5'}`} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Circuit Breaker */}
+                <div className={`rounded-xl border-2 p-4 transition-all ${enableCircuitBreaker ? 'border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-950/30' : 'border-border bg-muted/30'}`}>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg">🔴</span>
+                      <div>
+                        <p className="font-semibold text-sm text-foreground">Circuit Breaker</p>
+                        <p className="text-xs text-muted-foreground">Para o sistema por N minutos após perdas consecutivas</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      data-testid="toggle-circuit-breaker"
+                      onClick={() => {
+                        const next = !enableCircuitBreaker;
+                        setEnableCircuitBreaker(next);
+                        localStorage.setItem("enable_circuit_breaker", String(next));
+                        const patch: Record<string, unknown> = { enableMartingale, enableLeverage, enableCircuitBreaker: next, enableRecoveryMode, martingaleMultipliers, circuitBreakerLosses, circuitBreakerPauseMinutes };
+                        apiRequest("/api/trading/risk-settings", { method: "PUT", body: JSON.stringify(patch) }).catch(() => {});
+                        toast({ title: next ? "🔴 Circuit Breaker ativado" : "🔴 Circuit Breaker desativado", duration: 2000 });
+                      }}
+                      className={`relative w-12 h-6 rounded-full transition-colors ${enableCircuitBreaker ? 'bg-red-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+                    >
+                      <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${enableCircuitBreaker ? 'left-6' : 'left-0.5'}`} />
+                    </button>
+                  </div>
+                  {enableCircuitBreaker && (
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <p className="text-xs font-semibold text-red-700 dark:text-red-300 mb-1">Perdas para ativar</p>
+                        <div className="flex items-center gap-1">
+                          <button type="button" onClick={() => {
+                            const next = Math.max(1, circuitBreakerLosses - 1);
+                            setCircuitBreakerLosses(next);
+                            localStorage.setItem("circuit_breaker_losses", String(next));
+                            const patch: Record<string, unknown> = { enableMartingale, enableLeverage, enableCircuitBreaker, enableRecoveryMode, martingaleMultipliers, circuitBreakerLosses: next, circuitBreakerPauseMinutes };
+                            apiRequest("/api/trading/risk-settings", { method: "PUT", body: JSON.stringify(patch) }).catch(() => {});
+                          }} className="w-6 h-6 rounded bg-red-200 dark:bg-red-800 text-red-700 dark:text-red-300 font-bold flex items-center justify-center hover:bg-red-300">-</button>
+                          <span className="text-sm font-bold text-red-800 dark:text-red-200 w-6 text-center">{circuitBreakerLosses}</span>
+                          <button type="button" onClick={() => {
+                            const next = Math.min(10, circuitBreakerLosses + 1);
+                            setCircuitBreakerLosses(next);
+                            localStorage.setItem("circuit_breaker_losses", String(next));
+                            const patch: Record<string, unknown> = { enableMartingale, enableLeverage, enableCircuitBreaker, enableRecoveryMode, martingaleMultipliers, circuitBreakerLosses: next, circuitBreakerPauseMinutes };
+                            apiRequest("/api/trading/risk-settings", { method: "PUT", body: JSON.stringify(patch) }).catch(() => {});
+                          }} className="w-6 h-6 rounded bg-red-200 dark:bg-red-800 text-red-700 dark:text-red-300 font-bold flex items-center justify-center hover:bg-red-300">+</button>
+                          <span className="text-xs text-muted-foreground ml-1">perda(s)</span>
+                        </div>
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold text-red-700 dark:text-red-300 mb-1">Duração da pausa</p>
+                        <div className="flex items-center gap-1">
+                          <button type="button" onClick={() => {
+                            const next = Math.max(1, circuitBreakerPauseMinutes - 1);
+                            setCircuitBreakerPauseMinutes(next);
+                            localStorage.setItem("circuit_breaker_pause_minutes", String(next));
+                            const patch: Record<string, unknown> = { enableMartingale, enableLeverage, enableCircuitBreaker, enableRecoveryMode, martingaleMultipliers, circuitBreakerLosses, circuitBreakerPauseMinutes: next };
+                            apiRequest("/api/trading/risk-settings", { method: "PUT", body: JSON.stringify(patch) }).catch(() => {});
+                          }} className="w-6 h-6 rounded bg-red-200 dark:bg-red-800 text-red-700 dark:text-red-300 font-bold flex items-center justify-center hover:bg-red-300">-</button>
+                          <span className="text-sm font-bold text-red-800 dark:text-red-200 w-6 text-center">{circuitBreakerPauseMinutes}</span>
+                          <button type="button" onClick={() => {
+                            const next = Math.min(60, circuitBreakerPauseMinutes + 1);
+                            setCircuitBreakerPauseMinutes(next);
+                            localStorage.setItem("circuit_breaker_pause_minutes", String(next));
+                            const patch: Record<string, unknown> = { enableMartingale, enableLeverage, enableCircuitBreaker, enableRecoveryMode, martingaleMultipliers, circuitBreakerLosses, circuitBreakerPauseMinutes: next };
+                            apiRequest("/api/trading/risk-settings", { method: "PUT", body: JSON.stringify(patch) }).catch(() => {});
+                          }} className="w-6 h-6 rounded bg-red-200 dark:bg-red-800 text-red-700 dark:text-red-300 font-bold flex items-center justify-center hover:bg-red-300">+</button>
+                          <span className="text-xs text-muted-foreground ml-1">minutos</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Recovery Mode */}
+                <div className={`rounded-xl border-2 p-4 transition-all ${enableRecoveryMode ? 'border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-950/30' : 'border-border bg-muted/30'}`}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg">🛡️</span>
+                      <div>
+                        <p className="font-semibold text-sm text-foreground">Modo Recuperação</p>
+                        <p className="text-xs text-muted-foreground">Após perda, exige consenso maior e calcula stake para recuperar o déficit</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      data-testid="toggle-recovery-mode"
+                      onClick={() => {
+                        const next = !enableRecoveryMode;
+                        setEnableRecoveryMode(next);
+                        localStorage.setItem("enable_recovery_mode", String(next));
+                        const patch: Record<string, unknown> = { enableMartingale, enableLeverage, enableCircuitBreaker, enableRecoveryMode: next, martingaleMultipliers, circuitBreakerLosses, circuitBreakerPauseMinutes };
+                        apiRequest("/api/trading/risk-settings", { method: "PUT", body: JSON.stringify(patch) }).catch(() => {});
+                        toast({ title: next ? "🛡️ Modo Recuperação ativado" : "🛡️ Modo Recuperação desativado", duration: 2000 });
+                      }}
+                      className={`relative w-12 h-6 rounded-full transition-colors ${enableRecoveryMode ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+                    >
+                      <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${enableRecoveryMode ? 'left-6' : 'left-0.5'}`} />
+                    </button>
+                  </div>
+                </div>
+
+                {(!enableMartingale || !enableLeverage || !enableCircuitBreaker || !enableRecoveryMode) && (
+                  <div className="rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700 p-3">
+                    <p className="text-xs text-amber-800 dark:text-amber-200 font-medium">
+                      ⚠️ Sistemas desabilitados ficam completamente inativos até serem reativados. Certifique-se de que entende os riscos de operar sem proteção.
+                    </p>
+                  </div>
+                )}
               </CardContent>
             </Card>
 
