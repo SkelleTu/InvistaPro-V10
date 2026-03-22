@@ -1144,6 +1144,15 @@ class MetaTraderBridge extends EventEmitter {
       sqlite.exec(`CREATE TABLE IF NOT EXISTS mt5_config_state (
         key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )`);
+      sqlite.exec(`CREATE TABLE IF NOT EXISTS mt5_analysis_log (
+        id TEXT PRIMARY KEY, timestamp INTEGER NOT NULL, symbol TEXT NOT NULL,
+        phase TEXT NOT NULL, status TEXT NOT NULL, data TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+      sqlite.exec(`CREATE TABLE IF NOT EXISTS mt5_bridge_state (
+        key TEXT PRIMARY KEY, value TEXT NOT NULL,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
 
       // Restore open positions
       const positions = sqlite.prepare('SELECT * FROM mt5_positions').all() as any[];
@@ -1221,6 +1230,41 @@ class MetaTraderBridge extends EventEmitter {
           console.log('[MT5Bridge] ⚙️ Configuração restaurada do banco de dados');
         } catch {}
       }
+
+      // Restore analysis log (last 100 entries, oldest first)
+      try {
+        const analysisRows = sqlite.prepare('SELECT data FROM mt5_analysis_log ORDER BY timestamp DESC LIMIT 100').all() as any[];
+        for (const row of analysisRows.reverse()) {
+          try {
+            const entry = JSON.parse(row.data);
+            this.analysisLog.push(entry);
+          } catch {}
+        }
+        if (analysisRows.length > 0) {
+          console.log(`[MT5Bridge] 🧠 Restauradas ${analysisRows.length} entradas de análise do banco de dados`);
+        }
+      } catch {}
+
+      // Restore bridge state counters
+      try {
+        const stateRows = sqlite.prepare('SELECT key, value FROM mt5_bridge_state').all() as any[];
+        for (const row of stateRows) {
+          try {
+            const val = JSON.parse(row.value);
+            if (row.key === 'totalSignalsGenerated') this.status.totalSignalsGenerated = val;
+            if (row.key === 'totalTradesExecuted') this.status.totalTradesExecuted = val;
+            if (row.key === 'consecutiveLosses') this.consecutiveLosses = val;
+            if (row.key === 'circuitBreakerUntil') this.circuitBreakerUntil = val;
+          } catch {}
+        }
+        if (stateRows.length > 0) {
+          console.log(`[MT5Bridge] ♻️ Contadores do bridge restaurados (signals=${this.status.totalSignalsGenerated}, trades=${this.status.totalTradesExecuted}, perdas-consec=${this.consecutiveLosses})`);
+          if (this.circuitBreakerUntil > Date.now()) {
+            const remaining = Math.round((this.circuitBreakerUntil - Date.now()) / 60000);
+            console.log(`[MT5Bridge] 🛑 Circuit Breaker ainda ativo — ${remaining} min restantes`);
+          }
+        }
+      } catch {}
     } catch (err) {
       console.error('[MT5Bridge] ⚠️ Falha ao restaurar estado do banco de dados:', err);
     }
