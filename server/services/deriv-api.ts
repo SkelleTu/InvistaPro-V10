@@ -883,8 +883,8 @@ export class DerivAPIService extends EventEmitter {
 
     console.log(`[DERIV_API] 🚀 Tentando abrir contrato: ${params.symbol}, Valor: ${params.amount}, Barreira: ${params.barrier}`);
 
-    // 🚫 VALIDAÇÃO DEFENSIVA: BLOQUEIO TOTAL DE ATIVOS 1s (formato "(1s)" e "1HZ*")
-    const BLOCKED_SYMBOLS_PATTERN = /\(1s\)|^1HZ/i;
+    // 🚫 VALIDAÇÃO DEFENSIVA: BLOQUEIO TOTAL DE ATIVOS 1s (formatos: "(1s)", "1HZ*", "_1S")
+    const BLOCKED_SYMBOLS_PATTERN = /\(1s\)|^1HZ|_1S/i;
     if (BLOCKED_SYMBOLS_PATTERN.test(params.symbol)) {
       console.error(`❌ [DERIV API] BLOQUEIO ATIVADO: Símbolo "${params.symbol}" é ativo 1s (CAUSADOR DE LOSS) - TRADE NÃO EXECUTADO`);
       return null;
@@ -1095,7 +1095,7 @@ export class DerivAPIService extends EventEmitter {
   }): Promise<DerivContractInfo | null> {
     if (!this.isConnected) return null;
 
-    const BLOCKED = /\(1s\)|^1HZ/i;
+    const BLOCKED = /\(1s\)|^1HZ|_1S/i;
     if (BLOCKED.test(params.symbol)) {
       console.error(`❌ Símbolo bloqueado (ativo 1s): ${params.symbol}`);
       return null;
@@ -1255,7 +1255,7 @@ export class DerivAPIService extends EventEmitter {
   }): Promise<DerivContractInfo | null> {
     if (!this.isConnected) return null;
 
-    const BLOCKED = /\(1s\)|^1HZ/i;
+    const BLOCKED = /\(1s\)|^1HZ|_1S/i;
     if (BLOCKED.test(params.symbol)) {
       console.error(`❌ Símbolo bloqueado (ativo 1s): ${params.symbol}`);
       return null;

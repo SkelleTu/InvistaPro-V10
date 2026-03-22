@@ -57,8 +57,8 @@ export class AutoTradingScheduler {
   private isInitialized: boolean = false;
   
   // 🚫 BLOQUEADO 100%: Ativos causadores de loss - NUNCA serão operados
-  // Cobre tanto o formato "(1s)" quanto o formato de API "1HZ*" (são os mesmos ativos)
-  private static readonly BLOCKED_SYMBOLS_PATTERN = /\(1s\)|^1HZ/i;
+  // Cobre: formato "(1s)", formato de API "1HZ*" e formato interno "_1S" (ex: R_100_1S)
+  private static readonly BLOCKED_SYMBOLS_PATTERN = /\(1s\)|^1HZ|_1S/i;
   
   /**
    * Validar se símbolo está bloqueado (causador de loss)

@@ -30,7 +30,7 @@ export class MarketDataCollector extends EventEmitter {
   
   // 🚫 BLOQUEADO 100%: Ativos causadores de loss - NUNCA serão operados
   // Cobre tanto o formato "(1s)" quanto o formato de API "1HZ*" (são os mesmos ativos)
-  private static readonly BLOCKED_SYMBOLS_PATTERN = /\(1s\)|^1HZ/i;
+  private static readonly BLOCKED_SYMBOLS_PATTERN = /\(1s\)|^1HZ|_1S/i;
   
   // 🎯 DINÂMICO: CARREGADO DA DERIV EM TEMPO REAL
   // Sistema agora descobri automaticamente TODOS os ativos que suportam DIGITDIFF
