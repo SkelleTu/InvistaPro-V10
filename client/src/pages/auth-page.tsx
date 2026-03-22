@@ -91,10 +91,11 @@ export default function AuthPage() {
         title: "Login realizado!",
         description: "Bem-vindo de volta!",
       });
-      // Full page reload to ensure session cookie is properly recognized
-      // This forces the browser to send the new session cookie on the next request
+      // Redirect to the page the user was trying to access, or fallback to home
       setTimeout(() => {
-        window.location.href = "/";
+        const savedPath = sessionStorage.getItem("redirect_after_login");
+        sessionStorage.removeItem("redirect_after_login");
+        window.location.href = savedPath || "/";
       }, 300);
     },
     onError: (error) => {

@@ -1,9 +1,10 @@
-import { Switch, Route } from "wouter";
+import { Switch, Route, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Loader2 } from "lucide-react";
+import { useEffect } from "react";
 import NotFound from "@/pages/not-found";
 import AuthPage from "@/pages/auth-page";
 import ResetPasswordPage from "@/pages/reset-password-page";
@@ -28,10 +29,35 @@ import KeepAliveSetup from "@/pages/KeepAliveSetup";
 import { useAuth } from "@/hooks/useAuth";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 
+const PUBLIC_PATHS = [
+  "/", "/auth", "/reset-password",
+  "/termos-uso", "/politica-privacidade", "/politica-cookies",
+  "/lgpd", "/quem-somos", "/como-funciona", "/seguranca",
+  "/transparencia", "/resultados", "/tecnologia-financeira",
+  "/setup/keepalive",
+];
+
+function SaveAndRedirectToAuth({ currentPath }: { currentPath: string }) {
+  const [, setLocation] = useLocation();
+
+  useEffect(() => {
+    if (!PUBLIC_PATHS.includes(currentPath)) {
+      sessionStorage.setItem("redirect_after_login", currentPath);
+    }
+    setLocation("/auth");
+  }, []);
+
+  return (
+    <div className="min-h-screen flex items-center justify-center">
+      <Loader2 className="h-8 w-8 animate-spin text-primary" />
+    </div>
+  );
+}
+
 function Router() {
   const { isAuthenticated, isLoading, isApproved, isPhoneVerified } = useAuth();
+  const [location] = useLocation();
 
-  // Rotas públicas que não dependem de autenticação
   return (
     <Switch>
       {/* Páginas institucionais - acessíveis a todos */}
@@ -64,6 +90,10 @@ function Router() {
               <Route path="/auth" component={AuthPage} />
               <Route path="/reset-password" component={ResetPasswordPage} />
               <Route path="/" component={Landing} />
+              {/* Se tentou acessar rota protegida sem autenticação, salva o destino e redireciona para login */}
+              <Route>
+                <SaveAndRedirectToAuth currentPath={location} />
+              </Route>
             </>
           );
         }

@@ -1,6 +1,5 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
-import { useToast } from "@/hooks/use-toast";
 import Header from "@/components/dashboard/header.tsx";
 import PortfolioOverview from "@/components/dashboard/portfolio-overview";
 import ActionButtons from "@/components/dashboard/action-buttons";
@@ -15,28 +14,13 @@ import investmentBgImage from "@assets/generated_images/Dark_investment_chart_ba
 
 
 export default function Home() {
-  const { toast } = useToast();
-  const { isAuthenticated, isLoading, user } = useAuth();
+  const { isLoading, user } = useAuth();
   const [profileModalOpen, setProfileModalOpen] = useState(false);
 
   
 
 
 
-  // Redirect to home if not authenticated
-  useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
-      toast({
-        title: "Unauthorized",
-        description: "You are logged out. Logging in again...",
-        variant: "destructive",
-      });
-      setTimeout(() => {
-        window.location.href = "/api/login";
-      }, 500);
-      return;
-    }
-  }, [isAuthenticated, isLoading, toast]);
 
   if (isLoading) {
     return (
