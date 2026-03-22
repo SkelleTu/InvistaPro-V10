@@ -171,6 +171,20 @@ export interface AIBrainAnalysis {
   signals: string[];
 }
 
+/**
+ * Tipo de gatilho de entrada/saída do Girassol.
+ *
+ * HIERARQUIA OBRIGATÓRIA:
+ *  girassol_flower → aparecimento do girassol (grupo macro ou confluência) — gatilho padrão
+ *  bolinha_media   → aparecimento da bolinha média (grupo meso ativo)      — gatilho válido
+ *  bolinha_menor   → aparecimento da bolinha menor (só grupo micro)        — RARISSIMO, altíssima certeza
+ *  none            → sem gatilho Girassol — OPERAÇÃO BLOQUEADA
+ *
+ * A IA e os outros indicadores ajudam a CONFIRMAR a direção,
+ * mas NUNCA disparam entrada/saída por si só. Só o Girassol abre o gate.
+ */
+export type GirassolTriggerType = 'girassol_flower' | 'bolinha_media' | 'bolinha_menor' | 'none';
+
 /** Resultado final da detecção de spike */
 export interface SpikeDetectionResult {
   symbol: string;
@@ -184,6 +198,24 @@ export interface SpikeDetectionResult {
 
   // Sistema Girassol
   girassolSystem: GirassolSystemResult;
+
+  /**
+   * Tipo de gatilho Girassol que disparou (ou não) esta análise.
+   * REGRA CENTRAL: sem gatilho Girassol confirmado = sem operação.
+   */
+  girassolTriggerType: GirassolTriggerType;
+
+  /**
+   * Limiar de confiança mínima exigido para o gatilho atual.
+   * Varia conforme o tipo: flower=55, media=65, menor=85, none=999.
+   */
+  entryConfidenceThreshold: number;
+
+  /**
+   * AutoFib validou o nível do pivô Girassol? Quando true, amplia a confiança.
+   * Quando false na presença de bolinha_menor, pode bloquear a entrada.
+   */
+  autoFibValidatesGirassol: boolean;
 
   // Auto Fibonacci
   autoFib: AutoFibResult;
@@ -780,7 +812,9 @@ export function analyzeCrashBoomSpike(
   const empty: SpikeDetectionResult = {
     symbol, isSpikeIndex: false, spikeType: null, averageInterval: 0,
     candlesSinceLastSpike: 0, imminencePercent: 0, imminenceLabel: 'baixa',
-    girassolSystem: emptyGirassol, autoFib: emptyAutoFib,
+    girassolSystem: emptyGirassol,
+    girassolTriggerType: 'none', entryConfidenceThreshold: 999, autoFibValidatesGirassol: false,
+    autoFib: emptyAutoFib,
     fibZoneScore: null, nearestFibLevels: [], fibConfluence: 0, fibSpikeMultiplier: 1.0,
     aiBrain: emptyAI, momentumConfirms: false, momentumValue: 0,
     volatilityCompressed: false, compressionScore: 0,
@@ -910,20 +944,75 @@ export function analyzeCrashBoomSpike(
 
   const overallConfidence = Math.min(98, Math.round(cooperativeScore));
 
-  // ══════════════════════════════════════════════════════════════════════
-  // REGRA CRÍTICA: O GIRASSOL É OBRIGATÓRIO PARA ABRIR OPERAÇÃO
+  // ════════════════════════════════════════════════════════════════════════════
+  // REGRA CENTRAL: HIERARQUIA DE GATILHOS DO GIRASSOL
   //
-  // O bot SÓ pode operar quando o indicador Girassol detectar de verdade
-  // um Duplo Topo (Crash) ou Duplo Fundo (Boom) — activeGroups >= 1.
-  // Sem padrão Girassol confirmado = SEM OPERAÇÃO, não importa o score.
+  // O ÚNICO gatilho de entrada (e fechamento) é o APARECIMENTO do Girassol
+  // ou das bolinhas no gráfico. A IA, o AutoFib e todos os outros
+  // indicadores apenas CONFIRMAM a direção — nunca disparam por si sós.
   //
-  // Thresholds de iminência e confiança são elevados para exigir
-  // confirmação real do padrão antes de qualquer entrada.
-  // ══════════════════════════════════════════════════════════════════════
-  const girassolObrigatorio = girassolSystem.activeGroups >= 1;
-  const imminenceThreshold  = girassolSystem.activeGroups >= 2 ? 30 : girassolSystem.activeGroups === 1 ? 45 : 999;
-  const confidenceThreshold = girassolSystem.activeGroups >= 2 ? 50 : girassolSystem.activeGroups === 1 ? 60 : 999;
-  const spikeExpected = girassolObrigatorio &&
+  // Mapeamento visual MT5 → grupos do engine:
+  //   Girassol (flor)  = grupo 3 (macro) ativo OU confluência dupla/tri
+  //   Bolinha média    = grupo 2 (meso) ativo SEM grupo 3
+  //   Bolinha menor    = APENAS grupo 1 (micro) ativo — RARISSIMO
+  //
+  // Thresholds de confiança mínima por gatilho:
+  //   girassol_flower = 55%  (padrão, entrada normal)
+  //   bolinha_media   = 65%  (precisa mais confirmação)
+  //   bolinha_menor   = 85%  (exige altíssima certeza + AutoFib obrigatório)
+  //   none            = bloqueado — SEM OPERAÇÃO
+  //
+  // AutoFibonacci como validador complementar:
+  //   Pivô Girassol coincide com nível Fib (<=0.6%) = confirmado
+  //   Para bolinha_menor: AutoFib não confirmado = BLOQUEADO
+  // ════════════════════════════════════════════════════════════════════════════
+
+  const macroGroupActive = girassolSystem.groupResults.find(g => g.group === 3 && g.doublePatternDetected);
+  const mesoGroupActive  = girassolSystem.groupResults.find(g => g.group === 2 && g.doublePatternDetected);
+  const microGroupActive = girassolSystem.groupResults.find(g => g.group === 1 && g.doublePatternDetected);
+
+  // Determinar tipo de gatilho pela hierarquia visual do indicador
+  let girassolTriggerType: GirassolTriggerType;
+  let confidenceThreshold: number;
+  let imminenceThreshold: number;
+
+  if (macroGroupActive || girassolSystem.dualConfluence || girassolSystem.triConfluence) {
+    // Girassol (flor) apareceu — grupo macro ativo OU confluencia de grupos
+    girassolTriggerType = 'girassol_flower';
+    confidenceThreshold = 55;
+    imminenceThreshold  = 30;
+  } else if (mesoGroupActive) {
+    // Bolinha media apareceu — meso ativo sem macro
+    girassolTriggerType = 'bolinha_media';
+    confidenceThreshold = 65;
+    imminenceThreshold  = 40;
+  } else if (microGroupActive) {
+    // Bolinha menor apareceu — APENAS micro ativo, rarissimo, alta exigencia
+    girassolTriggerType = 'bolinha_menor';
+    confidenceThreshold = 85;
+    imminenceThreshold  = 55;
+  } else {
+    // Nenhum gatilho Girassol visual — operacao bloqueada
+    girassolTriggerType = 'none';
+    confidenceThreshold = 999;
+    imminenceThreshold  = 999;
+  }
+
+  // AutoFib valida o pivo do Girassol?
+  // Verifica se o nivel Fib foi calculado a partir dos pivos do Girassol
+  // e esta proximo do preco atual (zona de confluencia real)
+  const autoFibValidatesGirassol = !!(
+    autoFib.nearestLevel &&
+    autoFib.nearestLevel.distancePct < 0.6 &&
+    (autoFib.nearestLevel.significance === 'critical' || autoFib.nearestLevel.significance === 'major') &&
+    autoFib.source === 'girassol_pivots'
+  );
+
+  // Para bolinha_menor: AutoFib e OBRIGATORIO para validar a entrada
+  const bolinhasMenorBloqueada = girassolTriggerType === 'bolinha_menor' && !autoFibValidatesGirassol;
+
+  const spikeExpected = girassolTriggerType !== 'none' &&
+                        !bolinhasMenorBloqueada &&
                         imminencePercent >= imminenceThreshold &&
                         overallConfidence >= confidenceThreshold;
 
@@ -950,6 +1039,34 @@ export function analyzeCrashBoomSpike(
     alerts.push(structuralOverrideAlert);
   }
 
+  // Alerta principal do gatilho Girassol — PRIMEIRO e mais importante
+  if (girassolTriggerType === 'none') {
+    alerts.push(`🚫 SEM GATILHO GIRASSOL — Nenhum aparecimento do Girassol ou bolinha detectado. Operação bloqueada.`);
+  } else if (girassolTriggerType === 'girassol_flower') {
+    if (girassolSystem.triConfluence) {
+      alerts.push(`🌻 GIRASSOL APARECEU — TRI-CONFLUÊNCIA: 3/3 grupos confirmam ${girassolSystem.dominantPattern === 'double_top' ? 'Duplo Topo' : 'Duplo Fundo'} — GATILHO MÁXIMO`);
+    } else if (girassolSystem.dualConfluence) {
+      alerts.push(`🌻 GIRASSOL APARECEU — Confluência dupla (macro + ${mesoGroupActive ? 'meso' : 'micro'}) — gatilho forte`);
+    } else {
+      alerts.push(`🌻 GIRASSOL APARECEU — Grupo macro detectou ${girassolSystem.dominantPattern === 'double_top' ? 'Duplo Topo' : 'Duplo Fundo'} — gatilho de entrada`);
+    }
+  } else if (girassolTriggerType === 'bolinha_media') {
+    alerts.push(`🔵 BOLINHA MÉDIA APARECEU — Grupo meso ativo. Gatilho válido (confiança mínima ${confidenceThreshold}% exigida).`);
+  } else if (girassolTriggerType === 'bolinha_menor') {
+    if (bolinhasMenorBloqueada) {
+      alerts.push(`🔴 BOLINHA MENOR APARECEU — MAS SEM validação AutoFib. Entrada BLOQUEADA (rarissimo sem Fib).`);
+    } else {
+      alerts.push(`🔴 BOLINHA MENOR APARECEU — AutoFib confirmado. Situação de altissima certeza (confiança ${overallConfidence}% >= ${confidenceThreshold}% exigido).`);
+    }
+  }
+
+  // AutoFib como validador do Girassol
+  if (autoFibValidatesGirassol) {
+    alerts.push(`✅ AutoFib VALIDA o pivô Girassol — ${autoFib.nearestLevel!.label} a ${autoFib.nearestLevel!.distancePct.toFixed(2)}% (traçado dos pivôs) — confluência confirmada`);
+  } else if (autoFib.nearestLevel && autoFib.significance !== 'none') {
+    alerts.push(`📐 AutoFib ${autoFib.nearestLevel.label} a ${autoFib.nearestLevel.distancePct.toFixed(2)}% — ${autoFib.source === 'girassol_pivots' ? 'pivôs Girassol' : 'range de mercado'} — ×${autoFib.spikeMultiplier.toFixed(1)}`);
+  }
+
   if (girassolSystem.tripleBothMarked) {
     alerts.push(`🌟 DUPLA MARCAÇÃO GIRASSOL TRIPLA — 3/3 grupos com marcadores nos 2 pivôs — REVERSÃO QUASE CERTA`);
   } else if (girassolSystem.bothMarkedGroups >= 2) {
@@ -959,19 +1076,8 @@ export function analyzeCrashBoomSpike(
     alerts.push(`🌻 Marcação dupla Girassol no grupo ${markedGroup?.groupLabel || ''} — reversão com suporte`);
   }
 
-  if (girassolSystem.triConfluence) {
-    alerts.push(`🚨 GIRASSOL TRI-CONFLUÊNCIA — 3/3 grupos Fibonacci confirmam ${girassolSystem.dominantPattern === 'double_top' ? 'Duplo Topo' : 'Duplo Fundo'} — SINAL CRÍTICO`);
-  } else if (girassolSystem.dualConfluence) {
-    alerts.push(`🌻 GIRASSOL DUPLA CONFLUÊNCIA — 2/3 grupos confirmam padrão — sinal forte`);
-  } else if (girassolSystem.singleSignal) {
-    alerts.push(`🌻 Girassol Grupo ${girassolSystem.groupResults.find(g => g.doublePatternDetected)?.groupLabel} detectou padrão`);
-  }
-
   if (girassolSystem.fibAlignedGroups > 0) {
     alerts.push(`✨ ${girassolSystem.fibAlignedGroups} grupo(s) Girassol alinhado(s) com AutoFib — força máxima`);
-  }
-  if (autoFib.nearestLevel && autoFib.significance !== 'none') {
-    alerts.push(`📐 AutoFib ${autoFib.nearestLevel.label} a ${autoFib.nearestLevel.distancePct.toFixed(2)}% — ${autoFib.source === 'girassol_pivots' ? 'traçado dos pivôs Girassol' : 'range de mercado'} — ×${autoFib.spikeMultiplier.toFixed(1)}`);
   }
   if (imminencePercent >= 85) {
     alerts.push(`⚡ Iminência CRÍTICA — ${candlesSinceLastSpike}/${avgInterval} candles desde último spike`);
@@ -985,23 +1091,26 @@ export function analyzeCrashBoomSpike(
   }
 
   // ── Recomendação de transição ──
+  // Fechamento de operação também exige gatilho Girassol/bolinha — mesma hierarquia
   let switchRecommendation: SwitchRecommendation | null = null;
-  if (openPosition && preEntryWindow && overallConfidence >= 50) {
+  if (openPosition && preEntryWindow && overallConfidence >= 50 && girassolTriggerType !== 'none') {
     const exitDir: 'CLOSE_BUY' | 'CLOSE_SELL' = openPosition.type === 'BUY' ? 'CLOSE_BUY' : 'CLOSE_SELL';
     const spikeEntryDir: 'BUY' | 'SELL' = spikeDirection === 'down' ? 'SELL' : 'BUY';
     const isBadPosition = (openPosition.type === 'BUY' && spikeDirection === 'down') ||
                           (openPosition.type === 'SELL' && spikeDirection === 'up');
     const urgency = overallConfidence >= 80 ? 'critical' : overallConfidence >= 65 ? 'high' : 'warning';
     const secondsToAct = urgency === 'critical' ? 3 : urgency === 'high' ? 8 : 15;
+    const triggerLabel =
+      girassolTriggerType === 'girassol_flower' ? `Girassol apareceu (${girassolSystem.confluenceLabel}, ${girassolSystem.activeGroups}/3 grupos)` :
+      girassolTriggerType === 'bolinha_media'   ? `Bolinha média apareceu (meso ativo)` :
+      `Bolinha menor apareceu (micro + AutoFib confirmado)`;
     if (isBadPosition || urgency === 'critical') {
       switchRecommendation = {
         action: 'EXIT_CONTINUITY_ENTER_SPIKE', urgency, exitDirection: exitDir, spikeDirection: spikeEntryDir,
         confidence: overallConfidence,
         reasoning:
-          (girassolSystem.activeGroups > 0
-            ? `Gatilho Girassol ${girassolSystem.confluenceLabel} (${girassolSystem.activeGroups}/3 grupos). `
-            : '') +
-          (autoFib.nearestLevel ? `AutoFib ${autoFib.nearestLevel.label} (${autoFib.significance}). ` : '') +
+          `GATILHO: ${triggerLabel}. ` +
+          (autoFibValidatesGirassol ? `AutoFib valida pivô Girassol (${autoFib.nearestLevel?.label}). ` : '') +
           `IA Score: ${aiBrain.overallAIScore}%. Iminência: ${imminencePercent}%. Confiança: ${overallConfidence}%.`,
         secondsToAct,
       };
@@ -1009,19 +1118,30 @@ export function analyzeCrashBoomSpike(
   }
 
   // ── Narrativa completa ──
+  const triggerNarrative =
+    girassolTriggerType === 'girassol_flower' ? `GATILHO: Girassol apareceu (${girassolSystem.confluenceLabel})` :
+    girassolTriggerType === 'bolinha_media'   ? `GATILHO: Bolinha média (meso, confiança mín. ${confidenceThreshold}%)` :
+    girassolTriggerType === 'bolinha_menor'   ? `GATILHO RARO: Bolinha menor (micro, ${bolinhasMenorBloqueada ? 'BLOQUEADO sem AutoFib' : 'AutoFib confirmado'})` :
+    `SEM GATILHO — operação bloqueada`;
+
   const narrative =
-    `${isCrash ? '🔴 CRASH' : '🟢 BOOM'} ${symbol} — ` +
+    `${isCrash ? 'CRASH' : 'BOOM'} ${symbol} — ` +
+    `${triggerNarrative} | ` +
     `${girassolSystem.description} | ` +
-    (autoFib.nearestLevel ? `AutoFib ${autoFib.nearestLevel.label} a ${autoFib.nearestLevel.distancePct.toFixed(2)}% | ` : '') +
+    (autoFibValidatesGirassol
+      ? `AutoFib VALIDA pivô: ${autoFib.nearestLevel!.label} | `
+      : autoFib.nearestLevel ? `AutoFib ${autoFib.nearestLevel.label} a ${autoFib.nearestLevel.distancePct.toFixed(2)}% | ` : '') +
     `IA: ${aiBrain.overallAIScore}% | ` +
     `Iminência: ${imminencePercent}% (${imminenceLabel}) | ` +
-    `Confiança cooperativa: ${overallConfidence}%. ` +
-    (spikeExpected ? `⚡ SPIKE ${spikeDirection.toUpperCase()} ESPERADO.` : 'Aguardando confluência.');
+    `Confiança: ${overallConfidence}% (mín. ${confidenceThreshold}%). ` +
+    (spikeExpected ? `SPIKE ${spikeDirection!.toUpperCase()} ESPERADO.` : 'Aguardando gatilho Girassol.');
 
   return {
     symbol, isSpikeIndex: true, spikeType, averageInterval: avgInterval,
     candlesSinceLastSpike, imminencePercent, imminenceLabel,
-    girassolSystem, autoFib,
+    girassolSystem,
+    girassolTriggerType, entryConfidenceThreshold: confidenceThreshold, autoFibValidatesGirassol,
+    autoFib,
     fibZoneScore: bestFibZone, nearestFibLevels: allFibLevels.slice(0, 5),
     fibConfluence, fibSpikeMultiplier,
     aiBrain, momentumConfirms, momentumValue: Math.round(momentumValue * 10000) / 10000,
@@ -1041,16 +1161,52 @@ export function analyzeContinuitySafety(
   if (!spike.isSpikeIndex) {
     return { symbol, canContinue: true, direction: positionType, confidence: 70, spikeRiskLevel: 'safe', exitNow: false, reasoning: 'Símbolo não é Crash/Boom — continuidade normal.' };
   }
-  const riskLevel =
-    spike.overallConfidence >= 80 ? 'abort' :
-    spike.overallConfidence >= 60 ? 'danger' :
-    spike.overallConfidence >= 40 ? 'caution' : 'safe';
+
+  // ── REGRA: Fechamento também exige gatilho Girassol/bolinha ──
+  // Sem aparecimento do Girassol ou bolinha no gráfico, a operação
+  // não deve ser encerrada apenas por score de confiança da IA.
+  // O mesmo gatilho visual que abre a operação deve sinalizá-la.
+  //
+  // Exceção: se o spike estiver na direção CONTRÁRIA à posição aberta
+  // E o Girassol confirmou isso → sair imediatamente (abort).
+  // Sem Girassol/bolinha → continuar (canContinue = true, apenas caution).
+  const hasGirassolTrigger = spike.girassolTriggerType !== 'none';
+  const spikeAgainstPosition =
+    (positionType === 'BUY'  && spike.spikeDirection === 'down') ||
+    (positionType === 'SELL' && spike.spikeDirection === 'up');
+
+  let riskLevel: 'safe' | 'caution' | 'danger' | 'abort';
+  if (!hasGirassolTrigger) {
+    // Sem gatilho Girassol visual — IA sozinha não fecha operação
+    riskLevel = spike.overallConfidence >= 70 ? 'caution' : 'safe';
+  } else if (spike.girassolTriggerType === 'bolinha_menor') {
+    // Bolinha menor: só abort em confiança muito alta E contra a posição
+    riskLevel = (spike.overallConfidence >= 85 && spikeAgainstPosition) ? 'abort' :
+                spike.overallConfidence >= 65 ? 'danger' : 'caution';
+  } else if (spike.girassolTriggerType === 'bolinha_media') {
+    // Bolinha média: hierarquia normal mas limiar mais alto
+    riskLevel = (spike.overallConfidence >= 75 && spikeAgainstPosition) ? 'abort' :
+                spike.overallConfidence >= 65 ? 'danger' :
+                spike.overallConfidence >= 45 ? 'caution' : 'safe';
+  } else {
+    // Girassol (flor) apareceu: usar hierarquia completa de risco
+    riskLevel = spike.overallConfidence >= 80 ? 'abort' :
+                spike.overallConfidence >= 60 ? 'danger' :
+                spike.overallConfidence >= 40 ? 'caution' : 'safe';
+  }
+
   const exitNow = riskLevel === 'abort' || spike.switchRecommendation?.urgency === 'critical';
   const canContinue = riskLevel === 'safe' || riskLevel === 'caution';
+
+  const triggerInfo = hasGirassolTrigger
+    ? `Gatilho: ${spike.girassolTriggerType === 'girassol_flower' ? 'Girassol apareceu' : spike.girassolTriggerType === 'bolinha_media' ? 'Bolinha média' : 'Bolinha menor'}. `
+    : `Sem gatilho Girassol visual (IA sozinha não fecha). `;
+
   const reasoning =
-    riskLevel === 'abort'   ? `🚨 Sair imediatamente — ${spike.narrative}` :
-    riskLevel === 'danger'  ? `⚠️ Alto risco — ${spike.narrative}` :
-    riskLevel === 'caution' ? `⚡ Atenção — ${spike.narrative}` :
-                              `✅ Continuar — ${spike.narrative}`;
+    riskLevel === 'abort'   ? `🚨 Sair imediatamente — ${triggerInfo}${spike.narrative}` :
+    riskLevel === 'danger'  ? `⚠️ Alto risco — ${triggerInfo}${spike.narrative}` :
+    riskLevel === 'caution' ? `⚡ Atenção — ${triggerInfo}${spike.narrative}` :
+                              `✅ Continuar — ${triggerInfo}${spike.narrative}`;
+
   return { symbol, canContinue, direction: positionType, confidence: 100 - spike.overallConfidence, spikeRiskLevel: riskLevel, exitNow, reasoning };
 }
