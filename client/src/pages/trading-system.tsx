@@ -70,6 +70,7 @@ import {
   Microscope,
   LineChart,
   Info,
+  Shield,
 } from "lucide-react";
 import { Link } from "wouter";
 import { Input } from "@/components/ui/input";
