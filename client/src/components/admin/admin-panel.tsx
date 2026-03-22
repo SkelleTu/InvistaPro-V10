@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
@@ -40,7 +40,9 @@ import {
   Eye,
   Settings,
   BarChart3,
-  PieChart
+  PieChart,
+  Activity,
+  Wifi
 } from "lucide-react";
 
 interface AdminPanelProps {
@@ -103,6 +105,28 @@ export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
     enabled: isAdmin && isOpen,
     refetchInterval: 5000, // Atualizar a cada 5 segundos
   });
+
+  // Estado para o botão de keep-alive (animação de clique quando ping chega)
+  const [pingButtonClicking, setPingButtonClicking] = useState(false);
+  const [lastKnownExternalPing, setLastKnownExternalPing] = useState<string | null>(null);
+
+  // Buscar status do keep-alive com polling rápido
+  const { data: keepAliveStatus } = useQuery<any>({
+    queryKey: ["/api/status"],
+    enabled: isAdmin && isOpen,
+    refetchInterval: 3000, // Polling a cada 3 segundos para detectar pings externos
+    select: (data: any) => data,
+  });
+
+  // Detectar novos pings externos e animar o botão
+  useEffect(() => {
+    if (!keepAliveStatus?.lastExternalPingAt) return;
+    if (lastKnownExternalPing === keepAliveStatus.lastExternalPingAt) return;
+    // Novo ping detectado!
+    setLastKnownExternalPing(keepAliveStatus.lastExternalPingAt);
+    setPingButtonClicking(true);
+    setTimeout(() => setPingButtonClicking(false), 600);
+  }, [keepAliveStatus?.lastExternalPingAt]);
 
   // Buscar token Deriv salvo
   const { data: savedTokenData, refetch: refetchTokenData } = useQuery<any>({
@@ -1248,6 +1272,46 @@ export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
                     </div>
                   </div>
                 )}
+              </CardContent>
+            </Card>
+
+            {/* Card Keep-Alive: Botão clicado pelos pings externos */}
+            <Card className="border border-green-200 dark:border-green-800 bg-green-50/50 dark:bg-green-950/30">
+              <CardContent className="py-3 px-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <div className={`w-2 h-2 rounded-full flex-shrink-0 ${keepAliveStatus?.isActive ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`} />
+                    <Wifi className="h-4 w-4 text-green-600 dark:text-green-400 flex-shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-green-700 dark:text-green-300 leading-none">Keep-Alive Ativo</p>
+                      <p className="text-xs text-green-600 dark:text-green-500 mt-0.5 truncate">
+                        {keepAliveStatus?.lastExternalPingAt
+                          ? `Último ping: ${new Date(keepAliveStatus.lastExternalPingAt).toLocaleTimeString('pt-BR')} · ${keepAliveStatus.lastExternalPingSource || 'externo'}`
+                          : keepAliveStatus?.totalExternalPings === 0
+                          ? 'Aguardando pings externos...'
+                          : `${keepAliveStatus?.totalExternalPings ?? 0} pings recebidos`}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    data-testid="button-keepalive-ping"
+                    className={`
+                      flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold
+                      border border-green-300 dark:border-green-700
+                      text-green-700 dark:text-green-300
+                      bg-white dark:bg-green-900/40
+                      transition-all duration-150 select-none cursor-default
+                      ${pingButtonClicking
+                        ? 'scale-95 bg-green-100 dark:bg-green-800/60 border-green-500 shadow-inner ring-2 ring-green-400/40'
+                        : 'hover:bg-green-50 dark:hover:bg-green-900/60'
+                      }
+                    `}
+                    title="Pings externos clicam aqui automaticamente para manter o sistema acordado"
+                  >
+                    <Activity className={`h-3.5 w-3.5 ${pingButtonClicking ? 'text-green-600' : 'text-green-500'}`} />
+                    💓 Manter Ativo
+                  </button>
+                </div>
               </CardContent>
             </Card>
 

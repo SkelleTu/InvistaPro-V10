@@ -4,7 +4,10 @@ import fetch from 'node-fetch';
 interface KeepAliveStatus {
   isActive: boolean;
   lastPingAt: Date | null;
+  lastExternalPingAt: Date | null;
+  lastExternalPingSource: string | null;
   totalPings: number;
+  totalExternalPings: number;
   totalFailures: number;
   uptimeSeconds: number;
   startTime: Date;
@@ -22,7 +25,10 @@ class KeepAliveSystem {
     this.status = {
       isActive: false,
       lastPingAt: null,
+      lastExternalPingAt: null,
+      lastExternalPingSource: null,
       totalPings: 0,
+      totalExternalPings: 0,
       totalFailures: 0,
       uptimeSeconds: 0,
       startTime: new Date(),
@@ -130,8 +136,12 @@ class KeepAliveSystem {
     console.log('🛑 Sistema Keep-Alive parado');
   }
 
-  /** Compatibilidade com código legado que chamava receivePing */
+  /** Registra um ping externo recebido (de Vercel, UptimeRobot, cron-job.org, etc.) */
   receivePing(source: string): { success: boolean; message: string; status: any } {
+    this.status.lastExternalPingAt = new Date();
+    this.status.lastExternalPingSource = source;
+    this.status.totalExternalPings++;
+    console.log(`📡 [Keep-Alive] Ping externo recebido de: ${source} | Total externos: ${this.status.totalExternalPings}`);
     return { success: true, message: `Ping recebido de ${source}`, status: this.getStatus() };
   }
 
@@ -149,7 +159,10 @@ class KeepAliveSystem {
       uptimeSeconds: s,
       startTime: this.status.startTime.toISOString(),
       lastPingAt: this.status.lastPingAt?.toISOString() || null,
+      lastExternalPingAt: this.status.lastExternalPingAt?.toISOString() || null,
+      lastExternalPingSource: this.status.lastExternalPingSource,
       totalPings: this.status.totalPings,
+      totalExternalPings: this.status.totalExternalPings,
       totalFailures: this.status.totalFailures,
       targetUrl: this.status.targetUrl,
       serverTime: new Date().toISOString()
