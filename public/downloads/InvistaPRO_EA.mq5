@@ -14,6 +14,7 @@
 
 #include <Trade\Trade.mqh>
 #include <Trade\PositionInfo.mqh>
+#include <Trade\DealInfo.mqh>
 
 //--- Modo de Controle da IA
 enum ENUM_AI_CONTROL_MODE
@@ -1153,6 +1154,94 @@ double ExtractJsonDoubleInObject(string json, string parentKey, string key)
 }
 
 //+------------------------------------------------------------------+
+//| Reporta fechamento de posição ao servidor                         |
+//| Chamado pelo OnTradeTransaction quando o broker fecha via SL/TP  |
+//+------------------------------------------------------------------+
+void ConfirmTradeClose(long ticket, string symbol, string type, double lots,
+                       double openPrice, double closePrice, double profit, string closeReason)
+{
+   double pips = MathAbs(closePrice - openPrice) / SymbolInfoDouble(symbol, SYMBOL_POINT) / 10;
+   string body = "{";
+   body += "\"ticket\":"       + IntegerToString(ticket)                    + ",";
+   body += "\"symbol\":\""     + symbol                                     + "\",";
+   body += "\"type\":\""       + type                                       + "\",";
+   body += "\"lots\":"         + DoubleToString(lots, 2)                    + ",";
+   body += "\"openPrice\":"    + DoubleToString(openPrice,  _Digits)        + ",";
+   body += "\"closePrice\":"   + DoubleToString(closePrice, _Digits)        + ",";
+   body += "\"profit\":"       + DoubleToString(profit,     2)              + ",";
+   body += "\"pips\":"         + DoubleToString(pips,       1)              + ",";
+   body += "\"closeTime\":"    + IntegerToString((long)TimeCurrent())       + ",";
+   body += "\"closeReason\":\"" + closeReason                               + "\"";
+   body += "}";
+
+   string headers = "Content-Type: application/json\r\n";
+   char   postData[], result[];
+   StringToCharArray(body, postData, 0, StringLen(body));
+   string responseHeaders;
+   int res = WebRequest("POST", g_serverUrl + "/api/metatrader/trade/close", headers, 5000, postData, result, responseHeaders);
+   if (res == 200)
+      Print("✅ Fechamento reportado ao servidor: #", ticket, " | P&L: $", DoubleToString(profit, 2), " | Motivo: ", closeReason);
+   else
+      Print("⚠️ Falha ao reportar fechamento ao servidor: HTTP ", res);
+}
+
+//+------------------------------------------------------------------+
+//| Detecta fechamentos automáticos de posição (SL/TP/broker)        |
+//| Essencial para liberar novos sinais após fechamento automático    |
+//+------------------------------------------------------------------+
+void OnTradeTransaction(const MqlTradeTransaction &trans,
+                        const MqlTradeRequest    &request,
+                        const MqlTradeResult     &result)
+{
+   // Só nos interessa deals de saída (fechamento de posição)
+   if (trans.type != TRADE_TRANSACTION_DEAL_ADD) return;
+
+   CDealInfo deal;
+   if (!deal.Ticket(trans.deal)) return;
+   if (deal.Magic() != MagicNumber) return;
+   if (deal.Symbol() != g_symbol)  return;
+
+   ENUM_DEAL_ENTRY entry = deal.Entry();
+   if (entry != DEAL_ENTRY_OUT && entry != DEAL_ENTRY_INOUT) return;
+
+   // Determina o motivo do fechamento
+   string closeReason = "MANUAL";
+   ENUM_DEAL_REASON reason = deal.Reason();
+   if (reason == DEAL_REASON_SL)     closeReason = "SL";
+   else if (reason == DEAL_REASON_TP) closeReason = "TP";
+   else if (reason == DEAL_REASON_SO) closeReason = "STOP_OUT";
+
+   long   ticket     = (long)deal.PositionId();
+   string type       = (deal.DealType() == DEAL_TYPE_SELL) ? "BUY" : "SELL"; // deal de saída é inverso
+   double lots       = deal.Volume();
+   double closePrice = deal.Price();
+   double profit     = deal.Profit() + deal.Swap() + deal.Commission();
+
+   // Busca openPrice na posição fechada pelo histórico
+   double openPrice  = closePrice; // fallback
+   if (HistorySelectByPosition(ticket))
+   {
+      for (int i = HistoryDealsTotal() - 1; i >= 0; i--)
+      {
+         ulong dTicket = HistoryDealGetTicket(i);
+         if (HistoryDealGetInteger(dTicket, DEAL_POSITION_ID) != ticket) continue;
+         if ((ENUM_DEAL_ENTRY)HistoryDealGetInteger(dTicket, DEAL_ENTRY) == DEAL_ENTRY_IN)
+         {
+            openPrice = HistoryDealGetDouble(dTicket, DEAL_PRICE);
+            break;
+         }
+      }
+   }
+
+   Print("📋 OnTradeTransaction: posição #", ticket, " fechada (", closeReason, ") | P&L: $", DoubleToString(profit, 2));
+
+   // Limpa o sinalId pendente para liberar nova entrada
+   if (g_pendingSignalId != "") g_pendingSignalId = "";
+
+   ConfirmTradeClose(ticket, g_symbol, type, lots, openPrice, closePrice, profit, closeReason);
+}
+
+//+------------------------------------------------------------------+
 //| Desinicialização                                                  |
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
@@ -1162,6 +1251,6 @@ void OnDeinit(const int reason)
       if (g_indicators[i].handle != INVALID_HANDLE)
          IndicatorRelease(g_indicators[i].handle);
    }
-   Print("🛑 InvistaPRO EA v6.0 encerrado. Razão: ", reason);
+   Print("🛑 InvistaPRO EA v7.0 encerrado. Razão: ", reason);
 }
 //+------------------------------------------------------------------+

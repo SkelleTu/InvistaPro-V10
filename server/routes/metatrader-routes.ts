@@ -24,9 +24,9 @@ router.post('/heartbeat', (req: Request, res: Response) => {
     if (config.apiToken && token && token !== config.apiToken) {
       return res.status(401).json({ error: 'Token inválido' });
     }
-    metaTraderBridge.recordHeartbeat({ accountId, broker: broker || 'Unknown', balance, equity, freeMargin });
+    metaTraderBridge.recordHeartbeat({ accountId, broker: broker || 'Unknown', balance, equity, freeMargin, openPositionsCount: typeof openPositions === 'number' ? openPositions : undefined });
     const updatedConfig = metaTraderBridge.getConfig();
-    console.log(`[MT5Bridge] 💚 Heartbeat: ${broker || 'Unknown'} | Conta: ${accountId} | Saldo: $${balance} | Habilitado: ${updatedConfig.enabled}`);
+    console.log(`[MT5Bridge] 💚 Heartbeat: ${broker || 'Unknown'} | Conta: ${accountId} | Saldo: $${balance} | Posições abertas EA: ${openPositions ?? '?'} | Habilitado: ${updatedConfig.enabled}`);
     res.json({
       ok: true,
       serverTime: Date.now(),

@@ -1911,7 +1911,7 @@ class MetaTraderBridge extends EventEmitter {
     return { action, confidence, source: profile ? `technical_${profile.trendType}` : 'technical', fibScore, fibZone: fibZoneDesc, spikeInfo, profileNotes };
   }
 
-  recordHeartbeat(accountData: { accountId: string; broker: string; balance: number; equity: number; freeMargin: number }): void {
+  recordHeartbeat(accountData: { accountId: string; broker: string; balance: number; equity: number; freeMargin: number; openPositionsCount?: number }): void {
     this.status.lastHeartbeat = Date.now();
     // Só sobrescrever accountId/broker se trouxer valor real (não o placeholder automático)
     const isRealId = accountData.accountId && accountData.accountId !== 'EA_AUTO';
@@ -1926,6 +1926,16 @@ class MetaTraderBridge extends EventEmitter {
       this.config.enabled = true;
       this.startSignalGeneration();
       console.log(`[MT5Bridge] ✅ Sistema auto-habilitado via heartbeat do EA (${accountData.broker})`);
+    }
+    // Reconciliar posições: se o EA reporta 0 posições abertas mas o servidor tem registros,
+    // limpar posições fantasma que bloqueiam novos sinais (fechadas via SL/TP sem notificação)
+    if (typeof accountData.openPositionsCount === 'number' && accountData.openPositionsCount === 0 && this.openPositions.size > 0) {
+      console.log(`[MT5Bridge] 🧹 Heartbeat: EA reportou 0 posições, mas servidor tem ${this.openPositions.size} — limpando posições fantasma`);
+      for (const [ticket] of this.openPositions) {
+        this.removePositionFromDB(ticket);
+      }
+      this.openPositions.clear();
+      this.status.openPositions = 0;
     }
   }
 
@@ -2013,6 +2023,17 @@ class MetaTraderBridge extends EventEmitter {
     if (!this.config.enabled) return null;
 
     // Bloquear novo sinal se já atingiu o limite de posições por símbolo
+    // Auto-limpar posições fantasma (fechadas via SL/TP sem notificação) com mais de 2 horas
+    const MAX_POSITION_AGE_MS = 2 * 60 * 60 * 1000; // 2 horas
+    const nowMs = Date.now();
+    for (const [ticket, pos] of this.openPositions) {
+      const ageMs = nowMs - (pos.openTime * 1000);
+      if (ageMs > MAX_POSITION_AGE_MS) {
+        console.log(`[MT5Bridge] 🧹 Auto-limpeza: posição #${ticket} ${pos.symbol} removida (${(ageMs / 3600000).toFixed(1)}h sem fechar — provável SL/TP silencioso)`);
+        this.removePositionFromDB(ticket);
+        this.openPositions.delete(ticket);
+      }
+    }
     const positionsForSymbol = Array.from(this.openPositions.values()).filter(p => p.symbol === symbol).length;
     const maxPerSymbol = this.config.maxPositionsPerSymbol ?? 1;
     if (maxPerSymbol > 0 && positionsForSymbol >= maxPerSymbol) {
