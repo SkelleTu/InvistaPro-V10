@@ -998,6 +998,23 @@ export default function TradingSystemPage() {
     refetchInterval: 2000, // Atualização a cada 2 segundos
   });
 
+  // Keep-Alive: polling do status de pings externos
+  const [pingButtonClicking, setPingButtonClicking] = useState(false);
+  const [lastKnownExternalPing, setLastKnownExternalPing] = useState<string | null>(null);
+
+  const { data: keepAliveStatus } = useQuery<any>({
+    queryKey: ["/api/status"],
+    refetchInterval: 3000,
+  });
+
+  useEffect(() => {
+    if (!keepAliveStatus?.lastExternalPingAt) return;
+    if (lastKnownExternalPing === keepAliveStatus.lastExternalPingAt) return;
+    setLastKnownExternalPing(keepAliveStatus.lastExternalPingAt);
+    setPingButtonClicking(true);
+    setTimeout(() => setPingButtonClicking(false), 600);
+  }, [keepAliveStatus?.lastExternalPingAt]);
+
   // ⏱️ Countdown até próximo ciclo de análise
   const [nextCycleCountdown, setNextCycleCountdown] = useState<number>(0);
   useEffect(() => {
@@ -1236,6 +1253,44 @@ export default function TradingSystemPage() {
                 </AlertDescription>
               </Alert>
             )}
+
+            {/* Keep-Alive: botão clicado pelos pings externos */}
+            <Card className="border border-green-200 dark:border-green-800 bg-green-50/50 dark:bg-green-950/30">
+              <CardContent className="py-3 px-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <div className={`w-2 h-2 rounded-full flex-shrink-0 ${keepAliveStatus?.isActive ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`} />
+                    <Wifi className="h-4 w-4 text-green-600 dark:text-green-400 flex-shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-green-700 dark:text-green-300 leading-none">Servidor Acordado 24/7</p>
+                      <p className="text-xs text-green-600 dark:text-green-500 mt-0.5 truncate">
+                        {keepAliveStatus?.lastExternalPingAt
+                          ? `Último ping: ${new Date(keepAliveStatus.lastExternalPingAt).toLocaleTimeString('pt-BR')} · ${keepAliveStatus.lastExternalPingSource || 'externo'}`
+                          : 'Aguardando pings externos...'}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    data-testid="button-keepalive-ping"
+                    className={`
+                      flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold
+                      border border-green-300 dark:border-green-700
+                      text-green-700 dark:text-green-300
+                      bg-white dark:bg-green-900/40
+                      transition-all duration-150 select-none cursor-default
+                      ${pingButtonClicking
+                        ? 'scale-95 bg-green-100 dark:bg-green-800/60 border-green-500 shadow-inner ring-2 ring-green-400/40'
+                        : 'hover:bg-green-50 dark:hover:bg-green-900/60'
+                      }
+                    `}
+                    title="Pings externos clicam aqui automaticamente para manter o servidor acordado"
+                  >
+                    <Activity className={`h-3.5 w-3.5 ${pingButtonClicking ? 'text-green-600 scale-110' : 'text-green-500'} transition-transform duration-150`} />
+                    💓 Manter Ativo
+                  </button>
+                </div>
+              </CardContent>
+            </Card>
 
             {/* Card de Controle do Sistema */}
             <Card className={`border-2 ${(schedulerStatus as any)?.canExecuteTrades ? 'border-green-500/30 bg-green-500/5' : 'border-orange-400/30 bg-orange-400/5'}`}>
