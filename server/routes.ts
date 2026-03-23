@@ -2439,6 +2439,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(400).json({ message: 'modalities deve ser um array' });
     }
     const VALID = new Set([
+      '__auto__', // Modo Automático — 5 IAs selecionam modalidades autonomamente
       'digit_differs','digit_matches','digit_even','digit_odd','digit_over','digit_under',
       'rise','fall','higher','lower',
       'ends_between','ends_outside','stays_between','goes_outside',
@@ -2446,11 +2447,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       'accumulator','turbo_up','turbo_down','vanilla_call','vanilla_put',
       'lookback_high_close','lookback_close_low','lookback_high_low'
     ]);
-    const filtered = modalities.filter((m: string) => VALID.has(m));
+    // Se "__auto__" está presente, armazena apenas ele (modo exclusivo)
+    const isAutoMode = modalities.includes('__auto__');
+    const finalModalities = isAutoMode ? ['__auto__'] : modalities.filter((m: string) => VALID.has(m));
     // Permite array vazio — significa "sem modalidade selecionada → sistema pausado"
-    const finalModalities = filtered;
     await dbStorage.updateSelectedModalities(userId, finalModalities);
-    console.log(`📋 [MODALITIES] Usuário ${userId} atualizou modalidades: ${finalModalities.join(', ')}`);
+    console.log(`📋 [MODALITIES] Usuário ${userId} atualizou modalidades: ${isAutoMode ? '🤖 AUTOMÁTICO' : finalModalities.join(', ')}`);
     res.json({ success: true, modalities: finalModalities });
   });
 

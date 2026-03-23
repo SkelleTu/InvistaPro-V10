@@ -1184,6 +1184,7 @@ export class AutoTradingScheduler {
 
       // 🎯 PRÉ-LEITURA DAS MODALIDADES: Para filtrar símbolos compatíveis antes de selecionar o melhor ativo
       let earlyActiveModalities: string[] = [];
+      let earlyAutoModalityMode = false;
       try {
         if (config.selectedModalities) {
           try {
@@ -1195,10 +1196,16 @@ export class AutoTradingScheduler {
           }
         }
       } catch {}
+      // 🤖 MODO AUTOMÁTICO: "__auto__" = IA escolhe modalidades; não filtrar símbolos por modalidade
+      earlyAutoModalityMode = earlyActiveModalities.includes('__auto__');
+      if (earlyAutoModalityMode) {
+        earlyActiveModalities = []; // sem restrição de símbolo por modalidade no modo automático
+        console.log(`🤖 [${operationId}] MODO AUTOMÁTICO detectado — seleção de símbolo irrestrita`);
+      }
 
       // 🔥 NOVA LÓGICA: Analisar TODOS os símbolos disponíveis e escolher o melhor
       // Filtra SOMENTE ativos compatíveis com as modalidades do usuário antes de rankear
-      console.log(`🔍 [${operationId}] Iniciando análise de TODOS os símbolos disponíveis (modalidades: [${earlyActiveModalities.join(', ') || 'todas'}])...`);
+      console.log(`🔍 [${operationId}] Iniciando análise de TODOS os símbolos disponíveis (modalidades: [${earlyAutoModalityMode ? 'AUTOMÁTICO' : earlyActiveModalities.join(', ') || 'todas'}])...`);
       
       const bestSymbolResult = await this.analyzeBestSymbolFromAll(config.userId, operationId, earlyActiveModalities.length > 0 ? earlyActiveModalities : undefined);
       
@@ -1527,7 +1534,8 @@ export class AutoTradingScheduler {
           console.log(`✅ [${operationId}] 🎯 EXECUTANDO: dígito frio=${digitQuality.barrier} | edge=+${digitQuality.edge.toFixed(1)}% | winRate=${digitQuality.winRate.toFixed(1)}%`);
         }
       } else {
-        console.log(`🚀 [${operationId}] MODO ${config.mode} - Modalidades: [${preActiveModalities.join(', ')}]`);
+        const preAutoMode = preActiveModalities.includes('__auto__');
+        console.log(`🚀 [${operationId}] MODO ${config.mode} - Modalidades: [${preAutoMode ? '🤖 AUTOMÁTICO — IA seleciona' : preActiveModalities.join(', ')}]`);
         if (hasDigitModalities) {
           console.log(`✅ [${operationId}] 🎯 Análise de dígitos: barreira=${digitQuality.barrier} | edge=+${digitQuality.edge.toFixed(1)}% | winRate=${digitQuality.winRate.toFixed(1)}%`);
         }
@@ -1688,9 +1696,18 @@ export class AutoTradingScheduler {
           }
         }
 
-        if (activeModalities.length === 0) {
+        // 🤖 MODO AUTOMÁTICO — 5 IAs em Tempo Real:
+        // Quando "__auto__" é a modalidade selecionada, a IA seleciona autonomamente a
+        // melhor modalidade para cada ciclo baseando-se nas condições de mercado em tempo real.
+        const isAutoModalityMode = activeModalities.includes('__auto__');
+
+        if (!isAutoModalityMode && activeModalities.length === 0) {
           console.log(`⛔ [${operationId}] Nenhuma modalidade selecionada pelo usuário — operação cancelada.`);
           return { success: false, reason: 'no_modalities' };
+        }
+
+        if (isAutoModalityMode) {
+          console.log(`🤖 [${operationId}] MODO AUTOMÁTICO ativado — IA vai selecionar a melhor modalidade para ${selectedSymbol}`);
         }
 
         // Ler taxas de crescimento permitidas para ACCU (padrão: todas)
@@ -1751,7 +1768,7 @@ export class AutoTradingScheduler {
           }
         } catch {}
 
-        console.log(`🎯 [${operationId}] Modalidades ativas do usuário: ${activeModalities.join(', ')}`);
+        console.log(`🎯 [${operationId}] Modalidades ativas do usuário: ${isAutoModalityMode ? '🤖 AUTOMÁTICO — IA seleciona por ciclo' : activeModalities.join(', ')}`);
         if (allowedAccuGrowthRates.length < 5 && activeModalities.includes('accumulator')) {
           console.log(`📈 [${operationId}] ACCU growth rates permitidas: ${allowedAccuGrowthRates.map(r => (r*100).toFixed(0)+'%').join(', ')}`);
         }
@@ -1840,21 +1857,32 @@ export class AutoTradingScheduler {
         // Determinar modalidades compatíveis com o símbolo selecionado
         const symbolCompatible = new Set<string>(SYMBOL_COMPAT[selectedSymbol] ?? [...DIGIT_KEYS, ...RISFALL_KEYS]);
 
-        // Filtrar apenas modalidades compatíveis com o símbolo — SEM fallback automático.
-        // Se nenhuma das modalidades selecionadas pelo usuário for compatível com o símbolo,
-        // a operação é cancelada. Nunca substituir a escolha do usuário por digit_differs.
-        const compatibleModalities = activeModalities.filter(m => ALL_SUPPORTED.has(m) && symbolCompatible.has(m));
+        // 🤖 MODO AUTOMÁTICO: usar todas as modalidades compatíveis com o símbolo
+        // A IA (selectModalityByMarketFit) escolhe a melhor para cada ciclo.
+        // MODO MANUAL: filtrar apenas as modalidades que o usuário selecionou.
+        let compatibleModalities: string[];
+        if (isAutoModalityMode) {
+          // Pool completo: todas as modalidades que o símbolo suporta
+          compatibleModalities = [...symbolCompatible].filter(m => ALL_SUPPORTED.has(m));
+          console.log(`🤖 [${operationId}] MODO AUTOMÁTICO — pool de modalidades para ${selectedSymbol}: [${compatibleModalities.join(', ')}]`);
+        } else {
+          compatibleModalities = activeModalities.filter(m => ALL_SUPPORTED.has(m) && symbolCompatible.has(m));
+        }
 
         if (compatibleModalities.length === 0) {
-          const knownUnsupported = activeModalities.filter(m => ALL_SUPPORTED.has(m) && !symbolCompatible.has(m));
-          const unknown = activeModalities.filter(m => !ALL_SUPPORTED.has(m));
-          console.log(`⛔ [${operationId}] Modalidades selecionadas (${activeModalities.join(', ')}) incompatíveis com ${selectedSymbol}${knownUnsupported.length ? ` [incompatíveis: ${knownUnsupported.join(', ')}]` : ''}${unknown.length ? ` [desconhecidas: ${unknown.join(', ')}]` : ''} — operação cancelada.`);
+          if (!isAutoModalityMode) {
+            const knownUnsupported = activeModalities.filter(m => ALL_SUPPORTED.has(m) && !symbolCompatible.has(m));
+            const unknown = activeModalities.filter(m => !ALL_SUPPORTED.has(m));
+            console.log(`⛔ [${operationId}] Modalidades selecionadas (${activeModalities.join(', ')}) incompatíveis com ${selectedSymbol}${knownUnsupported.length ? ` [incompatíveis: ${knownUnsupported.join(', ')}]` : ''}${unknown.length ? ` [desconhecidas: ${unknown.join(', ')}]` : ''} — operação cancelada.`);
+          }
           return { success: false, reason: 'no_compatible_modalities' };
         }
 
-        const dropped = activeModalities.filter(m => ALL_SUPPORTED.has(m) && !symbolCompatible.has(m));
-        if (dropped.length > 0) {
-          console.log(`🔄 [${operationId}] Compatibilidade: ${dropped.join(', ')} não disponível em ${selectedSymbol} → usando: ${compatibleModalities.join(', ')}`);
+        if (!isAutoModalityMode) {
+          const dropped = activeModalities.filter(m => ALL_SUPPORTED.has(m) && !symbolCompatible.has(m));
+          if (dropped.length > 0) {
+            console.log(`🔄 [${operationId}] Compatibilidade: ${dropped.join(', ')} não disponível em ${selectedSymbol} → usando: ${compatibleModalities.join(', ')}`);
+          }
         }
 
         // 🎯 FILTRO DE QUALIDADE — DIGIT DIFFERS: só opera com consenso ≥90%

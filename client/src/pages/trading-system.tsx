@@ -733,10 +733,16 @@ export default function TradingSystemPage() {
       try {
         const data = await res.json();
         if (data?.modalities && Array.isArray(data.modalities)) {
-          const map: Record<string, boolean> = {};
-          data.modalities.forEach((id: string) => { map[id] = true; });
-          setEnabledModalities(map);
-          localStorage.setItem("trade_modalities", JSON.stringify(map));
+          // Detectar modo automático persistido no servidor
+          if (data.modalities.includes('__auto__')) {
+            setAutoMode(true);
+            try { localStorage.setItem("trade_auto_mode", "true"); } catch {}
+          } else {
+            const map: Record<string, boolean> = {};
+            data.modalities.forEach((id: string) => { map[id] = true; });
+            setEnabledModalities(map);
+            localStorage.setItem("trade_modalities", JSON.stringify(map));
+          }
         }
       } catch {}
       setModalitiesLoaded(true);
@@ -1910,9 +1916,20 @@ export default function TradingSystemPage() {
                       setAutoMode(next);
                       try { localStorage.setItem("trade_auto_mode", String(next)); } catch {}
                       if (!next) {
+                        // Ao desativar: limpar modalidades no servidor (usuário seleciona manualmente)
+                        apiRequest("/api/trading/modalities", {
+                          method: "PUT",
+                          body: JSON.stringify({ modalities: [] }),
+                        }).catch(() => {});
                         toast({ title: "Modo Automático desativado", description: "Selecione as modalidades manualmente abaixo." });
                       } else {
-                        toast({ title: "⚡ Modo Automático ativado!", description: "5 IAs agora controlam as modalidades em tempo real — decidindo a cada segundo." });
+                        // Ao ativar: persistir sentinela __auto__ no servidor
+                        // O scheduler backend passará a selecionar modalidades autonomamente
+                        apiRequest("/api/trading/modalities", {
+                          method: "PUT",
+                          body: JSON.stringify({ modalities: ["__auto__"] }),
+                        }).catch(() => {});
+                        toast({ title: "⚡ Modo Automático ativado!", description: "5 IAs agora controlam as modalidades em tempo real — nenhuma seleção manual necessária." });
                       }
                     }}
                     className={`w-full justify-start font-bold text-base py-6 transition-all ${
@@ -2047,6 +2064,8 @@ export default function TradingSystemPage() {
                     'touch','no_touch',
                   ]);
                   const saveModalities = (updated: Record<string, boolean>) => {
+                    // Em modo automático, não sobrescrever o sentinela __auto__ do servidor
+                    if (autoMode) return;
                     localStorage.setItem("trade_modalities", JSON.stringify(updated));
                     const active = Object.entries(updated).filter(([, v]) => v).map(([k]) => k);
                     apiRequest("/api/trading/modalities", {
@@ -2127,18 +2146,32 @@ export default function TradingSystemPage() {
                       duration: 2000,
                     });
                   };
-                  return TRADE_CATEGORIES.map((cat) => {
+                  return (
+                    <>
+                    {autoMode && (
+                      <div className="rounded-xl border-2 border-violet-400 dark:border-violet-600 bg-violet-50 dark:bg-violet-950/60 p-4 flex items-start gap-3">
+                        <Sparkles className="h-5 w-5 text-violet-600 dark:text-violet-400 mt-0.5 flex-shrink-0 animate-pulse" />
+                        <div>
+                          <p className="text-sm font-bold text-violet-800 dark:text-violet-200">Modo Automático ativo — controle total da IA</p>
+                          <p className="text-xs text-violet-600 dark:text-violet-400 mt-0.5">
+                            O backend seleciona a melhor modalidade a cada ciclo com base em análise em tempo real de mercado, regime de tendência, volatilidade e dados de dígitos. As checkboxes abaixo estão bloqueadas.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                    {TRADE_CATEGORIES.map((cat) => {
                     const allEnabled = cat.modalities.every(m => enabledModalities[m.id]);
                     const someEnabled = cat.modalities.some(m => enabledModalities[m.id]);
                     return (
-                      <div key={cat.id} className="space-y-2">
+                      <div key={cat.id} className={`space-y-2 ${autoMode ? 'opacity-40 pointer-events-none select-none' : ''}`}>
                         <div className={`flex items-center justify-between p-3 rounded-lg border ${catHeaderColors[cat.color]}`}>
                           <div className="flex items-center gap-3">
                             <Checkbox
                               checked={allEnabled}
                               data-testid={`checkbox-category-${cat.id}`}
-                              onCheckedChange={(checked) => toggleCategory(cat, !!checked)}
+                              onCheckedChange={(checked) => { if (!autoMode) toggleCategory(cat, !!checked); }}
                               className={someEnabled && !allEnabled ? "opacity-60" : ""}
+                              disabled={autoMode}
                             />
                             <div>
                               <p className="font-semibold text-sm">{cat.name}</p>
@@ -2506,7 +2539,9 @@ export default function TradingSystemPage() {
                         </div>
                       </div>
                     );
-                  });
+                  })}
+                    </>
+                  );
                 })()}
                 </div>
 
