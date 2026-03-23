@@ -2060,24 +2060,36 @@ export class AutoTradingScheduler {
           let barrier: string;
 
           if (currentPrice && currentPrice > 0) {
-            // 🧠 SUPREMO: barreira adaptativa por volatilidade real do mercado
-            const adaptivePct = supremeAnalysis?.adaptiveParams?.touch?.barrierOffsetPct;
-            // no_touch precisa de offset maior (≥5%) para garantir retorno na Deriv
-            const offsetPct = adaptivePct ?? (selectedModality === 'no_touch' ? 0.05 : 0.004);
-            const effectiveOffsetPct = selectedModality === 'no_touch' ? Math.max(offsetPct, 0.05) : offsetPct;
+            // ─── Barreira TOUCH / NOTOUCH ───────────────────────────────────────────
+            // REGRA: barreira precisa ser PEQUENA (0.2-0.5% do preço) para ambos os tipos.
+            //   NOTOUCH: price must NOT touch → barreira perto = risco real = payout viável
+            //   ONETOUCH: price must touch → barreira perto = chance real de tocar = payout viável
+            // Barreira LONGE (1%+) em 5 min = movimento impossível → payout 0% → "no return"
+            // O adaptivePct do Motor Supremo calibra para horizonte maior, não para 5min.
+            // Para 5 min em índices sintéticos (25% annual vol): vol_5min ≈ 0.09%
+            //   → barreira viável: 0.15–0.40% de offset
+            // Cap: nunca exceder 0.5% em 5 min para evitar "no return"
+            const rawAdaptivePct = supremeAnalysis?.adaptiveParams?.touch?.barrierOffsetPct;
+            // Usar no máximo 0.4% mesmo que o Motor Supremo sugira mais — acima disso dá "no return"
+            const cappedAdaptivePct = rawAdaptivePct ? Math.min(rawAdaptivePct, 0.004) : null;
+            const offsetPct = cappedAdaptivePct ?? (selectedModality === 'no_touch' ? 0.003 : 0.002);
             // Deriv só aceita até 2 casas decimais na barreira
-            const offset = parseFloat((currentPrice * effectiveOffsetPct).toFixed(2));
+            const offset = parseFloat((currentPrice * offsetPct).toFixed(2));
             barrier = (safeDirection === 'up' ? '+' : '-') + offset;
-            console.log(`📊 [${operationId}] ${contractType}: barrier=${barrier} (offset=${(offsetPct*100).toFixed(2)}%${adaptivePct ? ' ADAPTATIVO' : ' padrão'}) | Symbol: ${selectedSymbol}`);
+            console.log(`📊 [${operationId}] ${contractType}: barrier=${barrier} (offset=${(offsetPct*100).toFixed(2)}%${rawAdaptivePct ? ' → cap 0.4%' : ' padrão'}) | Symbol: ${selectedSymbol}`);
           } else {
             barrier = safeDirection === 'up' ? '+0.5' : '-0.5';
             console.log(`📊 [${operationId}] ${contractType}: barrier=${barrier} | Symbol: ${selectedSymbol}`);
           }
+          // Duração: 30 min dá vol_30min ≈ 0.22% para R_25, tornando barreira de 0.3% viável
+          // Com 5 min (vol ≈ 0.09%), qualquer barreira > 0.1% = probabilidade de toque ≈ 0 → "no return"
+          const touchDuration = supremeAnalysis?.adaptiveParams?.vanilla?.durationMin ?? 30;
+          const clampedTouchDuration = Math.min(Math.max(touchDuration, 15), 60); // entre 15 e 60 min
           contract = await derivAPI.buyFlexibleContract({
             contract_type: contractType,
             symbol: selectedSymbol,
             amount: tradeParams.amount,
-            duration: 5,
+            duration: clampedTouchDuration,
             duration_unit: 'm',
             barrier,
           });
