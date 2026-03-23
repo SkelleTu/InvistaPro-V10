@@ -549,8 +549,10 @@ function OperationCard({ operation, compact = false }: { operation: any; compact
   const isWon = operation.status === 'won';
   const isLost = operation.status === 'lost';
   const isPending = operation.status === 'pending' || operation.status === 'open';
-  const profit = typeof operation.profit === 'number' ? operation.profit : null;
-  const amount = typeof operation.amount === 'number' ? operation.amount : parseFloat(operation.amount || '0');
+  const rawProfit = operation.derivProfit ?? operation.profit;
+  const profit = typeof rawProfit === 'number' ? rawProfit : null;
+  const rawAmount = operation.buyPrice ?? operation.amount;
+  const amount = typeof rawAmount === 'number' ? rawAmount : parseFloat(rawAmount || '0');
 
   const statusBadge = () => {
     if (isWon) return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300">✓ Ganhou</span>;
@@ -3017,7 +3019,8 @@ export default function TradingSystemPage() {
                             const ai = op.aiConsensus;
                             const isWon = op.status === 'won';
                             const isLost = op.status === 'lost';
-                            const profit = typeof op.profit === 'number' ? op.profit : null;
+                            const rawProfit = op.derivProfit ?? op.profit;
+                            const profit = typeof rawProfit === 'number' ? rawProfit : null;
                             const time = op.createdAt ? new Date(op.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '--';
                             const date = op.createdAt ? new Date(op.createdAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) : '--';
                             return (
