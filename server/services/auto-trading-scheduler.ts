@@ -3886,14 +3886,17 @@ export class AutoTradingScheduler {
     // Cada ciclo pode abrir 1 trade (com stagger de 10s entre múltiplas configs)
     // = Máximo ~1 trade por minuto por config (controlado e previsível)
     
-    // 🔥 CRITICAL FIX: Executar imediatamente na primeira vez após start
-    // Para evitar atraso de 60 segundos na retomada após pausa
+    // ⏳ STARTUP DELAY: Aguardar 30s para o coletor de dados acumular ticks reais
+    // antes do primeiro ciclo de análise/trade. Evita decisões com dados insuficientes.
     (async () => {
       try {
-        console.log('▶️ [SCHEDULER] Executando ciclo IMEDIATO para recuperar operações após pausa...');
+        const STARTUP_DELAY_MS = 30000; // 30 segundos
+        console.log(`▶️ [SCHEDULER] Aguardando ${STARTUP_DELAY_MS / 1000}s para acúmulo de dados de mercado antes do primeiro ciclo...`);
+        await new Promise(resolve => setTimeout(resolve, STARTUP_DELAY_MS));
+        console.log('▶️ [SCHEDULER] Dados acumulados — executando primeiro ciclo de análise...');
         await this.executeAnaliseNaturalAnalysis();
       } catch (error) {
-        console.error('❌ [SCHEDULER] Erro no ciclo imediato de retomada:', error);
+        console.error('❌ [SCHEDULER] Erro no ciclo inicial:', error);
       }
     })();
     
