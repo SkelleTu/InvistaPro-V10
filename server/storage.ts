@@ -171,6 +171,7 @@ export interface IStorage {
   updateAccuGrowthRates(userId: string, rates: string[]): Promise<void>;
   updateModalityFrequency(userId: string, freq: Record<string, string>): Promise<void>;
   updateAccuTicksPerRate(userId: string, ticks: Record<string, number>): Promise<void>;
+  updateAccuFrequencyPerRate(userId: string, freq: Record<string, string>): Promise<void>;
   updateModalityTicks(userId: string, ticks: Record<string, number>): Promise<void>;
   updateRiskSettings(userId: string, settings: {
     enableMartingale?: boolean;
@@ -641,6 +642,16 @@ export class DatabaseStorage implements IStorage {
       .update(tradeConfigurations)
       .set({
         accuTicksPerRate: JSON.stringify(ticks),
+        updatedAt: new Date().toISOString(),
+      })
+      .where(and(eq(tradeConfigurations.userId, userId), eq(tradeConfigurations.isActive, true)));
+  }
+
+  async updateAccuFrequencyPerRate(userId: string, freq: Record<string, string>): Promise<void> {
+    await db
+      .update(tradeConfigurations)
+      .set({
+        accuFrequencyPerRate: JSON.stringify(freq),
         updatedAt: new Date().toISOString(),
       })
       .where(and(eq(tradeConfigurations.userId, userId), eq(tradeConfigurations.isActive, true)));

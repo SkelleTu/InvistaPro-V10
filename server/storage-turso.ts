@@ -363,6 +363,13 @@ export class TursoStorage implements IStorage {
       .where(and(eq(tradeConfigurations.userId, userId), eq(tradeConfigurations.isActive, true)));
   }
 
+  async updateAccuFrequencyPerRate(userId: string, freq: Record<string, string>): Promise<void> {
+    await getDb()
+      .update(tradeConfigurations)
+      .set({ accuFrequencyPerRate: JSON.stringify(freq), updatedAt: new Date().toISOString() })
+      .where(and(eq(tradeConfigurations.userId, userId), eq(tradeConfigurations.isActive, true)));
+  }
+
   async updateModalityTicks(userId: string, ticks: Record<string, number>): Promise<void> {
     await getDb()
       .update(tradeConfigurations)

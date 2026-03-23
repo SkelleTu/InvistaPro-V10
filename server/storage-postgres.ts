@@ -438,6 +438,7 @@ export class PostgresStorage implements IStorage {
   async updateAccuGrowthRates(_userId: string, _rates: string[]): Promise<void> {}
   async updateModalityFrequency(_userId: string, _freq: Record<string, string>): Promise<void> {}
   async updateAccuTicksPerRate(_userId: string, _ticks: Record<string, number>): Promise<void> {}
+  async updateAccuFrequencyPerRate(_userId: string, _freq: Record<string, string>): Promise<void> {}
   async updateModalityTicks(_userId: string, _ticks: Record<string, number>): Promise<void> {}
 
   async getActiveTradeConfigurations(): Promise<TradeConfiguration[]> {

@@ -663,6 +663,9 @@ export function initializeDatabase() {
     try {
       sqlite.exec(`ALTER TABLE trade_configurations ADD COLUMN circuit_breaker_pause_minutes INTEGER DEFAULT 2`);
     } catch {}
+    try {
+      sqlite.exec(`ALTER TABLE trade_configurations ADD COLUMN accu_frequency_per_rate TEXT DEFAULT '{}'`);
+    } catch {}
 
     // MT5 Bridge persistence tables
     sqlite.exec(`

@@ -1732,6 +1732,15 @@ export class AutoTradingScheduler {
           }
         } catch {}
 
+        // Ler frequência por taxa do ACCU configurada pelo usuário
+        let accuFrequencyPerRate: Record<string, string> = {}; // '1'-'5' → 'ai'|'low'|'normal'|'high'|'ai:low'|'ai:normal'|'ai:high'
+        try {
+          if ((config as any).accuFrequencyPerRate) {
+            const parsed = JSON.parse((config as any).accuFrequencyPerRate);
+            if (parsed && typeof parsed === 'object') accuFrequencyPerRate = parsed;
+          }
+        } catch {}
+
         // Ler ticks por modalidade configurados pelo usuário (dígitos, rise/fall)
         let userModalityTicks: Record<string, number> = {};
         try {
@@ -2128,6 +2137,35 @@ export class AutoTradingScheduler {
               adaptiveGrowth = rate;
               growthModeLabel = `IA (${reason})`;
             }
+
+            // ─── FREQUÊNCIA POR TAXA (ACCU) ────────────────────────────────────────────
+            {
+              const rateKey = (adaptiveGrowth * 100).toFixed(0); // '1','2','3','4','5'
+              const freqVal = accuFrequencyPerRate[rateKey] ?? 'ai';
+              const isAiFreq = freqVal === 'ai' || freqVal.startsWith('ai:');
+              const hintLevel = freqVal.startsWith('ai:') ? freqVal.slice(3) : (freqVal === 'ai' ? 'normal' : freqVal);
+
+              if (freqVal !== 'ai') { // 'ai' puro = nenhum filtro (comportamento atual)
+                let effectiveLevel = hintLevel;
+                if (isAiFreq) {
+                  // IA+hint: qualidade de mercado modula o nível preferido
+                  const mktVol = supremeAnalysis?.statistics?.shannonEntropy ?? 0.5;
+                  if (mktVol < 0.35)       effectiveLevel = hintLevel === 'low' ? 'normal' : 'high';
+                  else if (mktVol > 0.65)  effectiveLevel = hintLevel === 'high' ? 'normal' : 'low';
+                  // else: mercado neutro → usa o nível do usuário sem ajuste
+                }
+                const freqW: Record<string, number> = { low: 1, normal: 3, high: 6 };
+                const maxW = 6;
+                const slot = Math.floor(Date.now() / 30000) % maxW;
+                if (slot >= (freqW[effectiveLevel] ?? 3)) {
+                  const modeLabel = isAiFreq ? `IA+${hintLevel}→${effectiveLevel}` : effectiveLevel;
+                  console.log(`⏭️ [${operationId}] Frequência ACCU ${rateKey}% [${modeLabel}] → ciclo pulado (slot ${slot}/${maxW})`);
+                  this.setPhase('AGUARDANDO', `⏭️ Frequência ${effectiveLevel} — ACCU ${rateKey}% aguardando próximo ciclo`, 'info');
+                  return { success: false, reason: `accu_frequency_skip_${rateKey}pct` };
+                }
+              }
+            }
+            // ───────────────────────────────────────────────────────────────────────────
 
             // ⚡ Ticks alvo: inversamente proporcional ao growth — taxa menor = mais ticks necessários
             // para manter lucro alvo similar e compensar a barreira mais apertada com acumulação gradual

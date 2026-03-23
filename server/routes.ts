@@ -2464,6 +2464,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     let accuGrowthRates: string[] = ['1','2','3','4','5'];
     let modalityFrequency: Record<string, string> = {};
     let accuTicksPerRate: Record<string, number> = { '1': 10, '2': 7, '3': 5, '4': 4, '5': 3 };
+    let accuFrequencyPerRate: Record<string, string> = {};
     let modalityTicks: Record<string, number> = {};
     let martingaleMultipliers: number[] = [1.3, 1.6, 2.0];
     try {
@@ -2476,6 +2477,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if ((config as any)?.accuTicksPerRate) accuTicksPerRate = JSON.parse((config as any).accuTicksPerRate);
     } catch {}
     try {
+      if ((config as any)?.accuFrequencyPerRate) accuFrequencyPerRate = JSON.parse((config as any).accuFrequencyPerRate);
+    } catch {}
+    try {
       if ((config as any)?.modalityTicks) modalityTicks = JSON.parse((config as any).modalityTicks);
     } catch {}
     try {
@@ -2486,6 +2490,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       accuGrowthRates,
       modalityFrequency,
       accuTicksPerRate,
+      accuFrequencyPerRate,
       modalityTicks,
       enableMartingale: c?.enableMartingale ?? true,
       enableLeverage: c?.enableLeverage ?? true,
@@ -2565,6 +2570,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     await dbStorage.updateAccuTicksPerRate(req.user.id, cleaned);
     console.log(`⏱️ [ACCU-TICKS] Usuário ${req.user.id} atualizou ticks por taxa: ${JSON.stringify(cleaned)}`);
     res.json({ success: true, ticks: cleaned });
+  }));
+
+  app.put('/api/trading/accu-frequency-per-rate', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+    const { frequency } = req.body;
+    if (typeof frequency !== 'object' || Array.isArray(frequency)) {
+      return res.status(400).json({ message: 'frequency deve ser um objeto { rate: level }' });
+    }
+    const VALID_RATES = new Set(['1','2','3','4','5']);
+    const VALID_LEVELS = new Set(['ai','low','normal','high','ai:low','ai:normal','ai:high']);
+    const cleaned: Record<string, string> = {};
+    for (const [k, v] of Object.entries(frequency)) {
+      if (VALID_RATES.has(k) && VALID_LEVELS.has(String(v))) cleaned[k] = String(v);
+    }
+    await dbStorage.updateAccuFrequencyPerRate(req.user.id, cleaned);
+    console.log(`⚡ [ACCU-FREQ] Usuário ${req.user.id} atualizou frequência por taxa: ${JSON.stringify(cleaned)}`);
+    res.json({ success: true, frequency: cleaned });
   }));
 
   app.put('/api/trading/modality-ticks', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {

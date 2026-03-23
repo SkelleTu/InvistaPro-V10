@@ -249,6 +249,7 @@ export const tradeConfigurations = sqliteTable("trade_configurations", {
   accuGrowthRates: text("accu_growth_rates").default('["1","2","3","4","5"]'), // JSON array of allowed growth rates
   modalityFrequency: text("modality_frequency").default('{}'), // JSON object: { modality_id: 'low'|'normal'|'high' }
   accuTicksPerRate: text("accu_ticks_per_rate").default('{"1":10,"2":7,"3":5,"4":4,"5":3}'), // JSON: { rate: ticks } for auto-sell
+  accuFrequencyPerRate: text("accu_frequency_per_rate").default('{}'), // JSON: { rate: 'ai'|'low'|'normal'|'high'|'ai:low'|'ai:normal'|'ai:high' }
   modalityTicks: text("modality_ticks").default('{}'), // JSON: { modality_id: ticks } for digit/rise-fall duration
   enableMartingale: integer("enable_martingale", { mode: 'boolean' }).default(true),
   enableLeverage: integer("enable_leverage", { mode: 'boolean' }).default(true),
