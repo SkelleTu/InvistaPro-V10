@@ -1998,12 +1998,16 @@ export class AutoTradingScheduler {
           const currentPrice = await derivAPI.getCurrentPrice(selectedSymbol);
 
           const isExpiry = (selectedModality === 'ends_between' || selectedModality === 'ends_outside');
+          // Offsets específicos por modalidade — NÃO usar touch.barrierOffsetPct (é para ONETOUCH/NOTOUCH)
+          // stays_between/ends_between: range estreito (~0.5%) → preço pode sair da faixa
+          // goes_outside/ends_outside: range maior (~0.8%) → preço precisa escapar
           const offsetPct = (selectedModality === 'ends_outside' || selectedModality === 'goes_outside') ? 0.008 : 0.005;
 
           if (isExpiry && currentPrice && currentPrice > 0) {
             // EXPIRYRANGE / EXPIRYMISS: barriers absolutas + date_expiry dinâmico via IA
             const adaptiveExpiryMin = supremeAnalysis?.adaptiveParams?.vanilla?.durationMin ?? 15;
-            const adaptiveOffsetPct = supremeAnalysis?.adaptiveParams?.touch?.barrierOffsetPct ?? offsetPct;
+            // Usar offsetPct dedicado — touch.barrierOffsetPct é para ONETOUCH/NOTOUCH, não EXPIRY
+            const adaptiveOffsetPct = offsetPct;
             const offset = currentPrice * adaptiveOffsetPct;
             const upperBarrier = (currentPrice + offset).toFixed(2);
             const lowerBarrier  = (currentPrice - offset).toFixed(2);
@@ -2021,9 +2025,9 @@ export class AutoTradingScheduler {
           } else {
             // RANGE / UPORDOWN: barriers relativas + duration dinâmica via IA
             const adaptiveRangeDurMin = supremeAnalysis?.adaptiveParams?.turbo?.durationMin ?? 5;
-            const adaptiveRangeOffsetPct = supremeAnalysis?.adaptiveParams?.touch?.barrierOffsetPct ?? offsetPct;
+            // Usar offsetPct dedicado — touch.barrierOffsetPct é para ONETOUCH/NOTOUCH, não RANGE
             const offset = currentPrice && currentPrice > 0
-              ? parseFloat((currentPrice * adaptiveRangeOffsetPct).toFixed(2))
+              ? parseFloat((currentPrice * offsetPct).toFixed(2))
               : 0.5;
             const upperBarrier = '+' + offset;
             const lowerBarrier  = '-' + offset;
