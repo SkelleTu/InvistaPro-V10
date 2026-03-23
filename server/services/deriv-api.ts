@@ -100,6 +100,8 @@ export class DerivAPIService extends EventEmitter {
   private ws: WebSocket | null = null;
   private connectionId: number = 0;
   private isConnected: boolean = false;
+  private isConnecting: boolean = false;
+  private pendingConnectPromise: Promise<boolean> | null = null;
   private apiToken: string | null = null;
   private accountType: 'demo' | 'real' = 'demo';
   private reconnectAttempts = 0;
@@ -228,6 +230,13 @@ export class DerivAPIService extends EventEmitter {
       return true;
     }
 
+    // ⚡ LOCK: se já houver uma conexão em andamento, aguardar ela terminar
+    if (this.isConnecting && this.pendingConnectPromise) {
+      console.log(`⏳ [CONN WAIT] Conexão em andamento — aguardando resultado (Operation: ${operationId || 'N/A'})`);
+      return this.pendingConnectPromise;
+    }
+
+    this.isConnecting = true;
     this.operationId = operationId || `CONNECT_${Date.now()}`;
     this.apiToken = apiToken;
     this.accountType = accountType;
@@ -240,7 +249,20 @@ export class DerivAPIService extends EventEmitter {
 
     console.log(`🔌 Iniciando conexão Deriv - Operation ID: ${this.operationId}`);
 
-    return new Promise((resolve, reject) => {
+    this.pendingConnectPromise = new Promise((resolve, reject) => {
+      let settled = false;
+      const done = (result: boolean | Error) => {
+        if (settled) return;
+        settled = true;
+        this.isConnecting = false;
+        this.pendingConnectPromise = null;
+        if (result instanceof Error) {
+          reject(result);
+        } else {
+          resolve(result);
+        }
+      };
+
       const connectionTimer = setTimeout(() => {
         const timeoutError = new Error('Connection timeout after 10 seconds');
         
@@ -261,7 +283,7 @@ export class DerivAPIService extends EventEmitter {
         );
         
         this.cleanup();
-        reject(timeoutError);
+        done(timeoutError);
       }, 10000);
 
       try {
@@ -290,7 +312,7 @@ export class DerivAPIService extends EventEmitter {
               // TEMPORARIAMENTE DESABILITADO: await this.resubscribeAll();
               // Motivo: 11,396 subscrições estão bloqueando a inicialização do servidor
               
-              resolve(true);
+              done(true);
             } else {
               const authError = new Error('Authentication failed');
               
@@ -309,7 +331,7 @@ export class DerivAPIService extends EventEmitter {
               );
               
               this.cleanup();
-              reject(authError);
+              done(authError);
             }
           } catch (authError) {
             clearTimeout(connectionTimer);
@@ -329,11 +351,11 @@ export class DerivAPIService extends EventEmitter {
             );
             
             this.cleanup();
-            reject(authError);
+            done(authError as Error);
           }
         });
 
-        this.setupWebSocketListeners(reject, connectionTimer, endpoint, accountType);
+        this.setupWebSocketListeners((err: Error) => done(err), connectionTimer, endpoint, accountType);
 
       } catch (error) {
         clearTimeout(connectionTimer);
@@ -354,9 +376,11 @@ export class DerivAPIService extends EventEmitter {
         );
         
         console.error(`❌ Erro ao configurar conexão Deriv - Operation ID: ${this.operationId}:`, error);
-        reject(error);
+        done(error as Error);
       }
     });
+
+    return this.pendingConnectPromise;
   }
 
   private setupWebSocketListeners(reject: any, connectionTimer: NodeJS.Timeout, endpoint: string, accountType: string): void {
@@ -482,6 +506,7 @@ export class DerivAPIService extends EventEmitter {
   private cleanup(): void {
     this.stopHeartbeat(); // mantém supervisor heartbeat ativo
     this.isConnected = false;
+    this.isConnecting = false;
     
     if (this.connectionTimeout) {
       clearTimeout(this.connectionTimeout);
@@ -1595,6 +1620,8 @@ export class DerivAPIService extends EventEmitter {
 
   async disconnect(): Promise<void> {
     this.isConnected = false;
+    this.isConnecting = false;
+    this.pendingConnectPromise = null;
     this.isShuttingDown = true;
     this.activeSubscriptions.clear();
     this.stopKeepAlive();

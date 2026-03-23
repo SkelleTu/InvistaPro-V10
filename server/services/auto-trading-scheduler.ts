@@ -846,7 +846,6 @@ export class AutoTradingScheduler {
     this.setPhase('EXECUTANDO', `🚀 ALAVANCAGEM: ${best.symbol} $${leverageStake} (${exceptional.length} ativos alinhados)`, 'trade');
 
     try {
-      const derivAPI = new (await import('./deriv-api')).DerivAPIService();
       await derivAPI.connect(tokenData.token, (tokenData.accountType as 'demo' | 'real') || 'demo', levOpId);
       const contract = await derivAPI.buyFlexibleContract({
         contract_type: 'ACCU',

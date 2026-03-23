@@ -1998,6 +1998,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     console.log(`📦 Request Body: ${JSON.stringify(req.body, null, 2)}`);
     console.log('🔧'.repeat(60));
 
+    let tempDerivAPI = new DerivAPIService();
     try {
       // PASSO 1: Validação dos dados
       console.log(`📝 PASSO 1: Validando dados de entrada...`);
@@ -2058,14 +2059,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       let connected = false;
       try {
-        // Garantir que não há conexão pendente antes de tentar uma nova
-        await derivAPI.disconnect();
-        
-        // Tentar conectar com timeout curto para feedback rápido
-        connected = await derivAPI.connect(token, accountType, operationId);
+        // Usar instância temporária para validar o token sem afetar a conexão persistente
+        connected = await tempDerivAPI.connect(token, accountType, operationId);
         console.log(`   Resultado da conexão: ${connected}`);
       } catch (connectionError: any) {
         console.log(`❌ PASSO 3 FALHOU: Erro na conexão - ${connectionError.message}`);
+        await tempDerivAPI.disconnect().catch(() => {});
         return res.status(400).json({ 
           message: `Erro de conexão: ${connectionError.message}`,
           operationId
@@ -2101,7 +2100,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log(`💰 PASSO 4: Verificando saldo da conta...`);
       let balance;
       try {
-        balance = await derivAPI.getBalance();
+        balance = await tempDerivAPI.getBalance();
         console.log(`   Saldo obtido: ${JSON.stringify(balance, null, 2)}`);
       } catch (balanceError) {
         const errorId = errorTracker.captureError(
@@ -2121,8 +2120,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log(`❌ PASSO 4 FALHOU: Erro ao obter saldo - Error ID: ${errorId}`);
         console.log(`   Detalhes do erro: ${balanceError instanceof Error ? balanceError.message : String(balanceError)}`);
         
-        await derivAPI.disconnect();
-        console.log(`🔌 Desconectado da Deriv API após erro`);
+        await tempDerivAPI.disconnect().catch(() => {});
+        console.log(`🔌 Desconectado da instância temporária após erro`);
         
         return res.status(400).json({ 
           message: 'Não foi possível verificar a conta Deriv',
@@ -2147,8 +2146,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
         
         console.log(`❌ PASSO 4 FALHOU: Saldo é null - Error ID: ${errorId}`);
-        await derivAPI.disconnect();
-        console.log(`🔌 Desconectado da Deriv API após saldo null`);
+        await tempDerivAPI.disconnect().catch(() => {});
+        console.log(`🔌 Desconectado da instância temporária após saldo null`);
         
         return res.status(400).json({ 
           message: 'Não foi possível verificar a conta Deriv',
@@ -2183,8 +2182,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log(`❌ PASSO 5 FALHOU: Erro ao salvar no banco - Error ID: ${errorId}`);
         console.log(`   Detalhes do erro: ${saveError instanceof Error ? saveError.message : String(saveError)}`);
         
-        await derivAPI.disconnect();
-        console.log(`🔌 Desconectado da Deriv API após erro de BD`);
+        await tempDerivAPI.disconnect().catch(() => {});
+        console.log(`🔌 Desconectado da instância temporária após erro de BD`);
         
         // Check if it's an encryption configuration error
         if (saveError instanceof Error && saveError.message.includes('ENCRYPTION_KEY')) {
@@ -2200,11 +2199,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       console.log(`✅ PASSO 5 SUCESSO: Token salvo no banco de dados`);
 
-      // PASSO 6: Desconexão limpa
-      console.log(`🔌 PASSO 6: Desconectando da Deriv API...`);
+      // PASSO 6: Desconexão da instância temporária
+      console.log(`🔌 PASSO 6: Desconectando instância temporária de validação...`);
       try {
-        await derivAPI.disconnect();
-        console.log(`✅ PASSO 6 SUCESSO: Desconectado da Deriv API`);
+        await tempDerivAPI.disconnect();
+        console.log(`✅ PASSO 6 SUCESSO: Instância temporária desconectada`);
       } catch (disconnectError) {
         console.log(`⚠️ PASSO 6 AVISO: Erro na desconexão: ${disconnectError instanceof Error ? disconnectError.message : String(disconnectError)}`);
         // Não é crítico, continuamos
@@ -2254,10 +2253,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log(`📍 Stack: ${error instanceof Error ? error.stack : 'N/A'}`);
       console.log('💥'.repeat(60) + '\n');
       
-      // Garantir desconexão em caso de erro
+      // Garantir desconexão da instância temporária em caso de erro
       try {
-        await derivAPI.disconnect();
-        console.log(`🔌 Desconectado da Deriv API após erro crítico`);
+        await tempDerivAPI.disconnect();
+        console.log(`🔌 Instância temporária desconectada após erro crítico`);
       } catch (disconnectError) {
         console.log(`⚠️ Erro adicional na desconexão: ${disconnectError instanceof Error ? disconnectError.message : String(disconnectError)}`);
       }
@@ -2834,8 +2833,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           status: 'active'
         });
 
-      } finally {
-        await derivAPI.disconnect();
+      } catch (tradeError) {
+        throw tradeError;
       }
 
     } catch (error) {
@@ -3592,20 +3591,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      try {
-        const balance = await derivAPI.getBalance();
-        
-        res.json({
-          balance: balance?.balance || 0,
-          currency: balance?.currency || 'USD',
-          loginid: balance?.loginid || 'N/A',
-          accountType: tokenData.accountType,
-          connected: true
-        });
-
-      } finally {
-        await derivAPI.disconnect();
-      }
+      const balance = await derivAPI.getBalance();
+      
+      res.json({
+        balance: balance?.balance || 0,
+        currency: balance?.currency || 'USD',
+        loginid: balance?.loginid || 'N/A',
+        accountType: tokenData.accountType,
+        connected: true
+      });
 
     } catch (error) {
       console.error('❌ Erro ao buscar info da conta:', error);
