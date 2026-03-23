@@ -3005,10 +3005,79 @@ export default function TradingSystemPage() {
               </CardHeader>
               <CardContent>
                 {liveContracts.length === 0 ? (
-                  <div className="text-center py-10 space-y-3">
-                    <Activity className="h-10 w-10 text-muted-foreground mx-auto animate-pulse" />
-                    <p className="text-muted-foreground text-sm">Nenhuma operação aberta sendo monitorada no momento.</p>
-                    <p className="text-xs text-muted-foreground">Quando o sistema abrir operações, você verá aqui o raciocínio das IAs em tempo real tick a tick.</p>
+                  <div className="space-y-3">
+                    {recentOperations.length > 0 ? (
+                      <div>
+                        <p className="text-xs text-muted-foreground mb-3 flex items-center gap-1">
+                          <Clock className="h-3 w-3" />
+                          Exibindo operações recentes — aguardando próxima operação ao vivo
+                        </p>
+                        <div className="space-y-2">
+                          {recentOperations.slice(0, 5).map((op: any) => {
+                            const ai = op.aiConsensus;
+                            const isWon = op.status === 'won';
+                            const isLost = op.status === 'lost';
+                            const profit = typeof op.profit === 'number' ? op.profit : null;
+                            const time = op.createdAt ? new Date(op.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '--';
+                            const date = op.createdAt ? new Date(op.createdAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) : '--';
+                            return (
+                              <div key={op.id} className={`border rounded-lg p-3 space-y-2 ${
+                                isWon ? 'border-emerald-200 dark:border-emerald-800 bg-emerald-50/30 dark:bg-emerald-900/10' :
+                                isLost ? 'border-red-200 dark:border-red-800 bg-red-50/30 dark:bg-red-900/10' :
+                                'border-muted bg-muted/20'
+                              }`}>
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-semibold text-sm">{op.symbol}</span>
+                                    <span className="text-xs text-muted-foreground">{op.contractType || op.tradeType || 'Trade'}</span>
+                                    {isWon && <span className="text-xs px-1.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 font-medium">✓ Ganhou</span>}
+                                    {isLost && <span className="text-xs px-1.5 py-0.5 rounded-full bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 font-medium">✗ Perdeu</span>}
+                                  </div>
+                                  <div className="text-right">
+                                    {profit !== null && (
+                                      <span className={`text-sm font-bold ${profit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                                        {profit >= 0 ? '+' : ''}${profit.toFixed(2)}
+                                      </span>
+                                    )}
+                                    <div className="text-[10px] text-muted-foreground">{date} {time}</div>
+                                  </div>
+                                </div>
+                                {ai && (
+                                  <div className="grid grid-cols-3 gap-2 text-xs">
+                                    {ai.consensusStrength != null && (
+                                      <div className="bg-muted/50 rounded p-1.5 text-center">
+                                        <div className="font-bold text-blue-600 dark:text-blue-400">{typeof ai.consensusStrength === 'number' ? ai.consensusStrength.toFixed(1) : ai.consensusStrength}%</div>
+                                        <div className="text-muted-foreground text-[10px]">Consenso IA</div>
+                                      </div>
+                                    )}
+                                    {ai.finalDecision && (
+                                      <div className="bg-muted/50 rounded p-1.5 text-center">
+                                        <div className={`font-bold capitalize ${ai.finalDecision === 'up' ? 'text-emerald-600 dark:text-emerald-400' : ai.finalDecision === 'down' ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}>
+                                          {ai.finalDecision === 'up' ? '↑ Alta' : ai.finalDecision === 'down' ? '↓ Baixa' : ai.finalDecision}
+                                        </div>
+                                        <div className="text-muted-foreground text-[10px]">Decisão IA</div>
+                                      </div>
+                                    )}
+                                    {op.operationMode && (
+                                      <div className="bg-muted/50 rounded p-1.5 text-center">
+                                        <div className="font-bold text-purple-600 dark:text-purple-400 text-[10px] leading-tight">{op.operationMode}</div>
+                                        <div className="text-muted-foreground text-[10px]">Modo</div>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-center py-10 space-y-3">
+                        <Activity className="h-10 w-10 text-muted-foreground mx-auto animate-pulse" />
+                        <p className="text-muted-foreground text-sm">Nenhuma operação monitorada no momento.</p>
+                        <p className="text-xs text-muted-foreground">Quando o sistema abrir operações, você verá aqui o raciocínio das IAs em tempo real tick a tick.</p>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="space-y-4">

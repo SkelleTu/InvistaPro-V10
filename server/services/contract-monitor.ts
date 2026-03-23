@@ -536,7 +536,7 @@ class UniversalContractMonitor extends EventEmitter {
   private pendingSubAcks = new Map<number, number>(); // reqId → contractId
   private pendingSellReqs = new Map<number, number>(); // reqId → contractId (rastreia vendas em andamento)
   private isShuttingDown = false;
-  private readonly RECENTLY_CLOSED_TTL_MS = 20000; // 20 seconds
+  private readonly RECENTLY_CLOSED_TTL_MS = 120000; // 2 minutes
 
   constructor() {
     super();

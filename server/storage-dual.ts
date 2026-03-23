@@ -300,11 +300,23 @@ export class DualStorage implements IStorage {
   }
 
   async getUserTradeOperations(uid: string, limit?: number) {
-    return this.localRead(
-      () => this.turso!.getUserTradeOperations(uid, limit),
-      () => this.sqlite.getUserTradeOperations(uid, limit),
-      'getUserTradeOperations'
-    );
+    // SQLite first (fast, local). If empty, try Turso as fallback (data may only be there).
+    try {
+      const sqliteResult = await this.sqlite.getUserTradeOperations(uid, limit);
+      if (sqliteResult && sqliteResult.length > 0) return sqliteResult;
+    } catch {}
+    // SQLite empty or failed — try Turso
+    if (this.turso && this.tursoReadOk) {
+      try {
+        const r = await this.turso.getUserTradeOperations(uid, limit);
+        this.tursoReadFailCount = 0;
+        return r;
+      } catch (e: any) {
+        this.onTursoReadError(e, 'getUserTradeOperations');
+      }
+    }
+    // Final fallback to SQLite (may return empty array)
+    return this.sqlite.getUserTradeOperations(uid, limit).catch(() => []);
   }
   async updateTradeOperation(id: string, updates: Partial<TradeOperation>) { return this.write(() => this.turso!.updateTradeOperation(id, updates), () => this.sqlite.updateTradeOperation(id, updates), 'updateTradeOperation'); }
   async getActiveTradeOperations(uid: string) {

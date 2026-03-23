@@ -2850,23 +2850,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const operations = await dbStorage.getUserTradeOperations(userId, limit);
       
-      const formattedOperations = operations.map((op: any) => ({
-        id: op.id,
-        symbol: op.symbol,
-        direction: op.direction,
-        amount: op.amount,
-        duration: op.duration,
-        status: op.status,
-        entryPrice: op.entryPrice,
-        exitPrice: op.exitPrice,
-        profit: op.profit,
-        createdAt: op.createdAt,
-        completedAt: op.completedAt,
-        tradeType: op.tradeType || op.trade_type || null,
-        contractType: op.contractType || op.contract_type || null,
-        barrier: op.barrier || null,
-        aiConsensus: op.aiConsensus ? JSON.parse(op.aiConsensus) : null
-      }));
+      const formattedOperations = operations.map((op: any) => {
+        let aiConsensus = null;
+        if (op.aiConsensus) {
+          try { aiConsensus = typeof op.aiConsensus === 'string' ? JSON.parse(op.aiConsensus) : op.aiConsensus; } catch {}
+        }
+        return {
+          id: op.id,
+          symbol: op.symbol,
+          direction: op.direction,
+          amount: op.amount,
+          duration: op.duration,
+          status: op.status,
+          entryPrice: op.entryPrice,
+          exitPrice: op.exitPrice,
+          profit: op.profit,
+          createdAt: op.createdAt,
+          completedAt: op.completedAt,
+          tradeType: op.tradeType || op.trade_type || null,
+          contractType: op.contractType || op.contract_type || null,
+          barrier: op.barrier != null ? op.barrier : null,
+          operationMode: op.operationMode || op.operation_mode || null,
+          isRecoveryMode: op.isRecoveryMode ?? op.is_recovery_mode ?? false,
+          recoveryMultiplier: op.recoveryMultiplier || op.recovery_multiplier || 1,
+          aiConsensus,
+        };
+      });
 
       res.json({ operations: formattedOperations });
 
