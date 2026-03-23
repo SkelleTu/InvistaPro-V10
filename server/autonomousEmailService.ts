@@ -212,6 +212,15 @@ class ReplitAutonomousEmailService implements AutonomousEmailService {
       this.handleEmailServerRequest(req, res);
     });
 
+    this.emailServer.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRINUSE') {
+        console.warn(`⚠️ [EMAIL SERVER] Porta ${this.serverPort} já em uso — servidor de email não iniciado (modo simulação)`);
+        this.emailServer = null;
+      } else {
+        console.error(`❌ [EMAIL SERVER] Erro no servidor de email:`, err.message);
+      }
+    });
+
     this.emailServer.listen(this.serverPort, () => {
       console.log(`📧 Servidor de email autônomo iniciado na porta ${this.serverPort}`);
       console.log(`🌐 Domínio de email: ${this.emailDomain}`);
