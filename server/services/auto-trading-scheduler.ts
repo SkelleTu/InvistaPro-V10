@@ -128,6 +128,7 @@ export class AutoTradingScheduler {
   private readonly LEVERAGE_MIN_ASSETS        = 2;               // Reduzido de 3→2: mais fácil atingir com índices sintéticos
   private readonly LEVERAGE_CONSENSUS_MIN     = 65;              // Reduzido de 78→65: opportunityScore real dos sintéticos fica 55-70
   private readonly LEVERAGE_STAKE_PCT         = 0.05;            // 5% da banca
+  private readonly LEVERAGE_MIN_STAKE         = 2.50;            // mínimo $2.50 → gera ≥$0.05 lucro em ACCU 2%
   private readonly LEVERAGE_MAX_STAKE         = 50.00;           // teto absoluto de segurança
 
   private setPhase(phase: string, detail: string, type: 'info' | 'success' | 'warning' | 'trade' = 'info'): void {
@@ -793,7 +794,7 @@ export class AutoTradingScheduler {
     }
     const leverageStake = Math.min(
       this.LEVERAGE_MAX_STAKE,
-      Math.max(1.00, Math.round(bankBalance * this.LEVERAGE_STAKE_PCT * 100) / 100)
+      Math.max(this.LEVERAGE_MIN_STAKE, Math.round(bankBalance * this.LEVERAGE_STAKE_PCT * 100) / 100)
     );
 
     // 9. Growth rate dinâmico por volatilidade — respeita taxas e ticks configurados pelo usuário
