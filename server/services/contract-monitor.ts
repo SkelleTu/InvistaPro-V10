@@ -106,7 +106,7 @@ const CONTRACT_CATEGORIES = {
     'TURBOSLONG', 'TURBOSSHORT',
     'VANILLACALL', 'VANILLAPUT',
     'ONETOUCH', 'NOTOUCH',
-    'RANGE', 'EXPIRYRANGE', 'UPORDOWN',
+    'RANGE', 'EXPIRYRANGE', 'EXPIRYMISS', 'UPORDOWN',
     'CALLE', 'PUTE',
   ],
 
@@ -202,6 +202,7 @@ function getThresholds(contractType: string): ExitThresholds {
     case 'NOTOUCH':
     case 'RANGE':
     case 'EXPIRYRANGE':
+    case 'EXPIRYMISS':
     case 'UPORDOWN':
       return {
         profitTargetPct: 65,
@@ -1167,8 +1168,8 @@ class UniversalContractMonitor extends EventEmitter {
       }
     }
 
-    // ── ONETOUCH/NOTOUCH/RANGE ────────────────────────────────────
-    if (['ONETOUCH', 'NOTOUCH', 'RANGE', 'EXPIRYRANGE', 'UPORDOWN'].includes(ct)) {
+    // ── ONETOUCH/NOTOUCH/RANGE/EXPIRYMISS ────────────────────────────────────
+    if (['ONETOUCH', 'NOTOUCH', 'RANGE', 'EXPIRYRANGE', 'EXPIRYMISS', 'UPORDOWN'].includes(ct)) {
       if (state.profitPct >= thresholds.profitTargetPct) {
         return { shouldSell: true, reason: `BARRIER: lucro ${state.profitPct.toFixed(1)}% realizado (regime=${supreme.regime})`, urgency: 'high' };
       }
