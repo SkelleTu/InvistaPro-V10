@@ -2499,13 +2499,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       martingaleMultipliers,
       circuitBreakerLosses: c?.circuitBreakerLosses ?? 1,
       circuitBreakerPauseMinutes: c?.circuitBreakerPauseMinutes ?? 2,
+      stakeMode: c?.stakeMode ?? 'ai',
+      fixedStake: c?.fixedStake ?? 0.35,
     });
   }));
 
   app.put('/api/trading/risk-settings', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
     const {
       enableMartingale, enableLeverage, enableCircuitBreaker, enableRecoveryMode,
-      martingaleMultipliers, circuitBreakerLosses, circuitBreakerPauseMinutes
+      martingaleMultipliers, circuitBreakerLosses, circuitBreakerPauseMinutes,
+      stakeMode, fixedStake
     } = req.body;
     const patch: any = {};
     if (typeof enableMartingale === 'boolean') patch.enableMartingale = enableMartingale;
@@ -2521,6 +2524,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
     if (typeof circuitBreakerPauseMinutes === 'number' && circuitBreakerPauseMinutes >= 1 && circuitBreakerPauseMinutes <= 60) {
       patch.circuitBreakerPauseMinutes = Math.round(circuitBreakerPauseMinutes);
+    }
+    if (stakeMode === 'ai' || stakeMode === 'fixed') patch.stakeMode = stakeMode;
+    if (typeof fixedStake === 'number' && fixedStake >= 0.35 && fixedStake <= 1000) {
+      patch.fixedStake = Math.round(fixedStake * 100) / 100;
     }
     await dbStorage.updateRiskSettings(req.user.id, patch);
     console.log(`🛡️ [RISK SETTINGS] Usuário ${req.user.id} atualizou configurações de risco:`, JSON.stringify(patch));

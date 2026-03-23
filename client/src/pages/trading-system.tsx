@@ -700,6 +700,15 @@ export default function TradingSystemPage() {
   const [circuitBreakerPauseMinutes, setCircuitBreakerPauseMinutes] = useState<number>(() => {
     try { const s = localStorage.getItem("circuit_breaker_pause_minutes"); if (s) return parseInt(s); } catch {} return 2;
   });
+  const [stakeMode, setStakeMode] = useState<'ai' | 'fixed'>(() => {
+    try { const s = localStorage.getItem("stake_mode"); if (s === 'fixed') return 'fixed'; } catch {} return 'ai';
+  });
+  const [fixedStake, setFixedStake] = useState<number>(() => {
+    try { const s = localStorage.getItem("fixed_stake"); if (s) { const n = parseFloat(s); if (n >= 0.35) return n; } } catch {} return 0.35;
+  });
+  const [fixedStakeInput, setFixedStakeInput] = useState<string>(() => {
+    try { const s = localStorage.getItem("fixed_stake"); if (s) return s; } catch {} return "0.35";
+  });
   const [autoMode, setAutoMode] = useState<boolean>(() => {
     try { return localStorage.getItem("trade_auto_mode") === "true"; } catch { return false; }
   });
@@ -787,6 +796,15 @@ export default function TradingSystemPage() {
         if (typeof data?.circuitBreakerPauseMinutes === 'number') {
           setCircuitBreakerPauseMinutes(data.circuitBreakerPauseMinutes);
           localStorage.setItem("circuit_breaker_pause_minutes", String(data.circuitBreakerPauseMinutes));
+        }
+        if (data?.stakeMode === 'ai' || data?.stakeMode === 'fixed') {
+          setStakeMode(data.stakeMode);
+          localStorage.setItem("stake_mode", data.stakeMode);
+        }
+        if (typeof data?.fixedStake === 'number' && data.fixedStake >= 0.35) {
+          setFixedStake(data.fixedStake);
+          setFixedStakeInput(String(data.fixedStake));
+          localStorage.setItem("fixed_stake", String(data.fixedStake));
         }
       } catch {}
       setModalitySettingsLoaded(true);
@@ -1800,6 +1818,88 @@ export default function TradingSystemPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-5">
+
+                {/* 💰 MODO DE STAKE */}
+                <div className="rounded-xl border-2 border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/30 p-4 space-y-3">
+                  <p className="text-sm font-bold text-blue-800 dark:text-blue-200 flex items-center gap-2">
+                    <span>💰</span> Valor do Stake por Operação
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => {
+                        setStakeMode('ai');
+                        localStorage.setItem("stake_mode", 'ai');
+                        const patch = { stakeMode: 'ai', fixedStake };
+                        apiRequest("/api/trading/risk-settings", { method: "PUT", body: JSON.stringify(patch) }).catch(() => {});
+                        toast({ title: "IA decide o stake", description: "A IA calculará o valor ideal a cada operação com base na banca e sinal." });
+                      }}
+                      data-testid="button-stake-mode-ai"
+                      className={`flex flex-col items-center gap-1 rounded-lg border-2 p-3 transition-all text-left ${
+                        stakeMode === 'ai'
+                          ? 'border-blue-500 bg-blue-500 text-white shadow-lg'
+                          : 'border-blue-200 dark:border-blue-700 bg-white dark:bg-gray-900 text-blue-700 dark:text-blue-300 hover:border-blue-400'
+                      }`}
+                    >
+                      <span className="text-base font-bold">🧠 IA Decide</span>
+                      <span className={`text-xs ${stakeMode === 'ai' ? 'text-blue-100' : 'text-muted-foreground'}`}>Dinâmico por banca</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setStakeMode('fixed');
+                        localStorage.setItem("stake_mode", 'fixed');
+                        const patch = { stakeMode: 'fixed', fixedStake };
+                        apiRequest("/api/trading/risk-settings", { method: "PUT", body: JSON.stringify(patch) }).catch(() => {});
+                        toast({ title: "Stake fixo ativado", description: `Todas as operações usarão $${fixedStake.toFixed(2)} como stake.` });
+                      }}
+                      data-testid="button-stake-mode-fixed"
+                      className={`flex flex-col items-center gap-1 rounded-lg border-2 p-3 transition-all text-left ${
+                        stakeMode === 'fixed'
+                          ? 'border-green-500 bg-green-500 text-white shadow-lg'
+                          : 'border-green-200 dark:border-green-700 bg-white dark:bg-gray-900 text-green-700 dark:text-green-300 hover:border-green-400'
+                      }`}
+                    >
+                      <span className="text-base font-bold">📌 Stake Fixo</span>
+                      <span className={`text-xs ${stakeMode === 'fixed' ? 'text-green-100' : 'text-muted-foreground'}`}>Valor definido por você</span>
+                    </button>
+                  </div>
+                  {stakeMode === 'fixed' && (
+                    <div className="flex items-center gap-3 mt-1">
+                      <label className="text-sm font-medium text-green-800 dark:text-green-200 whitespace-nowrap">Valor ($):</label>
+                      <div className="flex-1 flex items-center gap-2">
+                        <input
+                          type="number"
+                          min="0.35"
+                          step="0.01"
+                          value={fixedStakeInput}
+                          onChange={(e) => setFixedStakeInput(e.target.value)}
+                          onBlur={() => {
+                            const val = parseFloat(fixedStakeInput);
+                            if (!isNaN(val) && val >= 0.35) {
+                              const rounded = Math.round(val * 100) / 100;
+                              setFixedStake(rounded);
+                              setFixedStakeInput(String(rounded));
+                              localStorage.setItem("fixed_stake", String(rounded));
+                              const patch = { stakeMode: 'fixed', fixedStake: rounded };
+                              apiRequest("/api/trading/risk-settings", { method: "PUT", body: JSON.stringify(patch) }).catch(() => {});
+                              toast({ title: "Stake fixo salvo", description: `Operações usarão $${rounded.toFixed(2)} por trade.` });
+                            } else {
+                              setFixedStakeInput(String(fixedStake));
+                              toast({ title: "Valor inválido", description: "O stake mínimo é $0.35.", variant: "destructive" });
+                            }
+                          }}
+                          data-testid="input-fixed-stake"
+                          className="w-28 rounded-lg border-2 border-green-300 dark:border-green-600 bg-white dark:bg-gray-900 px-3 py-2 text-sm font-bold text-green-900 dark:text-green-100 focus:outline-none focus:border-green-500"
+                        />
+                        <span className="text-xs text-muted-foreground">mín. $0.35</span>
+                      </div>
+                    </div>
+                  )}
+                  {stakeMode === 'ai' && (
+                    <p className="text-xs text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/50 rounded-lg px-3 py-2">
+                      A IA calcula o stake ideal por operação com base no saldo, consenso dos modelos, volatilidade e regime de mercado.
+                    </p>
+                  )}
+                </div>
 
                 {/* ⚡ MODO AUTOMÁTICO */}
                 <div className="space-y-3">

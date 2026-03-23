@@ -666,6 +666,12 @@ export function initializeDatabase() {
     try {
       sqlite.exec(`ALTER TABLE trade_configurations ADD COLUMN accu_frequency_per_rate TEXT DEFAULT '{}'`);
     } catch {}
+    try {
+      sqlite.exec(`ALTER TABLE trade_configurations ADD COLUMN stake_mode TEXT DEFAULT 'ai'`);
+    } catch {}
+    try {
+      sqlite.exec(`ALTER TABLE trade_configurations ADD COLUMN fixed_stake REAL DEFAULT 0.35`);
+    } catch {}
 
     // MT5 Bridge persistence tables
     sqlite.exec(`

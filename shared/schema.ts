@@ -258,6 +258,8 @@ export const tradeConfigurations = sqliteTable("trade_configurations", {
   martingaleMultipliers: text("martingale_multipliers").default('[1.3,1.6,2.0]'), // JSON: [part1, part2, part3]
   circuitBreakerLosses: integer("circuit_breaker_losses").default(1),
   circuitBreakerPauseMinutes: integer("circuit_breaker_pause_minutes").default(2),
+  stakeMode: text("stake_mode").default('ai'), // 'ai' | 'fixed'
+  fixedStake: real("fixed_stake").default(0.35), // used when stakeMode === 'fixed'
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`),
 });

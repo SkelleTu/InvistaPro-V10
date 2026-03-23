@@ -1600,6 +1600,8 @@ export class AutoTradingScheduler {
         enableMartingale: (config as any)?.enableMartingale ?? true,
         martingaleMultipliers: (() => { try { return JSON.parse((config as any)?.martingaleMultipliers || '[1.3,1.6,2.0]'); } catch { return [1.3,1.6,2.0]; } })(),
         enableRecoveryMode: (config as any)?.enableRecoveryMode ?? true,
+        stakeMode: (config as any)?.stakeMode ?? 'ai',
+        fixedStake: (config as any)?.fixedStake ?? 0.35,
       });
       
       // 📈 APLICAR TICKS DINÂMICOS baseado em win rate do ativo
@@ -3588,16 +3590,24 @@ export class AutoTradingScheduler {
     return Math.min(pct, maxPct);
   }
 
-  private async getTradeParamsForMode(mode: string, symbol: string, direction: string, userId: string, consensoStrength?: number, volatility?: number, riskConfig?: { enableMartingale?: boolean; martingaleMultipliers?: number[]; enableRecoveryMode?: boolean }): Promise<{amount: number, duration: number, barrier: string}> {
+  private async getTradeParamsForMode(mode: string, symbol: string, direction: string, userId: string, consensoStrength?: number, volatility?: number, riskConfig?: { enableMartingale?: boolean; martingaleMultipliers?: number[]; enableRecoveryMode?: boolean; stakeMode?: string; fixedStake?: number }): Promise<{amount: number, duration: number, barrier: string}> {
     let amount = 0.35; // Default para bancas pequenas (conservador)
     let duration = 10; // ⚡ OTIMIZAÇÃO: Aumentado de 5 para 10 ticks para distribuir fechamento
+
+    // 📌 STAKE FIXO — bypassa cálculo da IA completamente
+    if (riskConfig?.stakeMode === 'fixed' && typeof riskConfig?.fixedStake === 'number' && riskConfig.fixedStake >= 0.35) {
+      amount = riskConfig.fixedStake;
+      console.log(`📌 [STAKE FIXO] Usando stake definido pelo usuário: $${amount.toFixed(2)} (bypassing IA)`);
+      // ainda precisa de duration/barrier — vai setar abaixo via modo
+    }
     
     // 🎯 CALCULAR STAKE VIA IA — por ativo, por sinal, por regime
+    const useAIStake = !riskConfig?.stakeMode || riskConfig.stakeMode === 'ai';
     try {
       // Buscar saldo do usuário
       const balanceAnalysis = await storage.getBalanceAnalysis(userId);
       
-      if (balanceAnalysis && balanceAnalysis.currentBalance > 0) {
+      if (useAIStake && balanceAnalysis && balanceAnalysis.currentBalance > 0) {
         const bankSize = balanceAnalysis.currentBalance;
 
         // Dados de IA disponíveis para decisão de stake
@@ -3671,23 +3681,28 @@ export class AutoTradingScheduler {
 
         // Arredondar para 2 casas decimais
         amount = Math.round(amount * 100) / 100;
-      } else {
+      } else if (useAIStake) {
         console.log(`⚠️ [STAKE] Saldo não encontrado, usando stake padrão: $${amount}`);
       }
     } catch (error) {
       console.error(`❌ [STAKE] Erro ao calcular stake: ${error}, usando padrão $${amount}`);
     }
 
-    // 🎰 APLICAR MARTINGALE — SOMENTE se consenso excepcional e sem recovery/circuit breaker
-    if (consensoStrength !== undefined && userId) {
-      try {
-        const mgEnabled = riskConfig?.enableMartingale ?? true;
-        const mgMults = riskConfig?.martingaleMultipliers;
-        amount = this.applyMartingaleStake(userId, amount, consensoStrength, 'STAKE', mgEnabled, mgMults);
-      } catch (mgErr) {
-        console.error(`❌ [MARTINGALE] Erro ao aplicar stake: ${mgErr}`);
+    // Se stake fixo, garantir que o martingale/safety cap não sobrescreva
+    if (!useAIStake) {
+      // Stake fixo definido pelo usuário — não aplicar martingale nem safety cap
+    } else {
+      // 🎰 APLICAR MARTINGALE — SOMENTE se consenso excepcional e sem recovery/circuit breaker
+      if (consensoStrength !== undefined && userId) {
+        try {
+          const mgEnabled = riskConfig?.enableMartingale ?? true;
+          const mgMults = riskConfig?.martingaleMultipliers;
+          amount = this.applyMartingaleStake(userId, amount, consensoStrength, 'STAKE', mgEnabled, mgMults);
+        } catch (mgErr) {
+          console.error(`❌ [MARTINGALE] Erro ao aplicar stake: ${mgErr}`);
+        }
       }
-    }
+    } // end else (useAIStake)
 
     // Extrair parâmetros do modo (ex: "production_3-4_24h", "test_4_1min")
     // Agora o amount vem do cálculo de banca, não do modo

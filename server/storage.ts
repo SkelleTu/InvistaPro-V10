@@ -181,6 +181,8 @@ export interface IStorage {
     martingaleMultipliers?: number[];
     circuitBreakerLosses?: number;
     circuitBreakerPauseMinutes?: number;
+    stakeMode?: string;
+    fixedStake?: number;
   }): Promise<void>;
   deactivateAllTradeConfigs(userId: string): Promise<void>;
   reactivateTradeConfiguration(id: string): Promise<void>;
@@ -675,6 +677,8 @@ export class DatabaseStorage implements IStorage {
     martingaleMultipliers?: number[];
     circuitBreakerLosses?: number;
     circuitBreakerPauseMinutes?: number;
+    stakeMode?: string;
+    fixedStake?: number;
   }): Promise<void> {
     const patch: Record<string, any> = { updatedAt: new Date().toISOString() };
     if (settings.enableMartingale !== undefined) patch.enableMartingale = settings.enableMartingale;
@@ -684,6 +688,8 @@ export class DatabaseStorage implements IStorage {
     if (settings.martingaleMultipliers !== undefined) patch.martingaleMultipliers = JSON.stringify(settings.martingaleMultipliers);
     if (settings.circuitBreakerLosses !== undefined) patch.circuitBreakerLosses = settings.circuitBreakerLosses;
     if (settings.circuitBreakerPauseMinutes !== undefined) patch.circuitBreakerPauseMinutes = settings.circuitBreakerPauseMinutes;
+    if (settings.stakeMode !== undefined) patch.stakeMode = settings.stakeMode;
+    if (settings.fixedStake !== undefined) patch.fixedStake = settings.fixedStake;
     await db
       .update(tradeConfigurations)
       .set(patch)
