@@ -2058,8 +2058,11 @@ export class AutoTradingScheduler {
           if (currentPrice && currentPrice > 0) {
             // 🧠 SUPREMO: barreira adaptativa por volatilidade real do mercado
             const adaptivePct = supremeAnalysis?.adaptiveParams?.touch?.barrierOffsetPct;
-            const offsetPct = adaptivePct ?? (selectedModality === 'no_touch' ? 0.015 : 0.004);
-            const offset = parseFloat((currentPrice * offsetPct).toFixed(4));
+            // no_touch precisa de offset maior (≥5%) para garantir retorno na Deriv
+            const offsetPct = adaptivePct ?? (selectedModality === 'no_touch' ? 0.05 : 0.004);
+            const effectiveOffsetPct = selectedModality === 'no_touch' ? Math.max(offsetPct, 0.05) : offsetPct;
+            // Deriv só aceita até 2 casas decimais na barreira
+            const offset = parseFloat((currentPrice * effectiveOffsetPct).toFixed(2));
             barrier = (safeDirection === 'up' ? '+' : '-') + offset;
             console.log(`📊 [${operationId}] ${contractType}: barrier=${barrier} (offset=${(offsetPct*100).toFixed(2)}%${adaptivePct ? ' ADAPTATIVO' : ' padrão'}) | Symbol: ${selectedSymbol}`);
           } else {
@@ -2080,7 +2083,20 @@ export class AutoTradingScheduler {
           // ── Contratos Multiplicadores (MULTUP, MULTDOWN) ──
           const contractType = MULTIPLIER_TYPES[selectedModality];
           // 🧠 SUPREMO: multiplicador adaptativo por força de tendência e volatilidade
-          const adaptiveMult = supremeAnalysis?.adaptiveParams?.multiplier?.factor ?? 10;
+          // Índices de volatilidade (R_*, JD*) aceitam apenas: 80, 200, 400, 600, 800
+          // Demais ativos (forex, etc.) aceitam multiplicadores menores (1, 2, 3, 5, 10...)
+          const isVolatilityIndex = /^(R_|JD|1HZ|RDBULL|RDBEAR)/.test(selectedSymbol);
+          const VALID_VOL_MULTIPLIERS = [80, 200, 400, 600, 800];
+          const rawAdaptiveMult = supremeAnalysis?.adaptiveParams?.multiplier?.factor ?? (isVolatilityIndex ? 80 : 10);
+          let adaptiveMult: number;
+          if (isVolatilityIndex) {
+            // Encontrar o multiplicador válido mais próximo ao sugerido pela IA
+            adaptiveMult = VALID_VOL_MULTIPLIERS.reduce((prev, curr) =>
+              Math.abs(curr - rawAdaptiveMult) < Math.abs(prev - rawAdaptiveMult) ? curr : prev
+            );
+          } else {
+            adaptiveMult = rawAdaptiveMult;
+          }
           console.log(`📊 [${operationId}] ${contractType}: multiplier=${adaptiveMult}x${supremeAnalysis ? ` ADAPTATIVO (regime=${supremeAnalysis.regime})` : ' padrão'} | Symbol: ${selectedSymbol}`);
           contract = await derivAPI.buyFlexibleContract({
             contract_type: contractType,
