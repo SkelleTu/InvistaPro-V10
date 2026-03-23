@@ -1025,8 +1025,9 @@ export class AutoTradingScheduler {
         // Salvar resultado para tracking (será processado async)
         this.trackTradeOutcome(userId, result, config);
       } else {
-        this.setPhase('AGUARDANDO', `⚠️ Operação rejeitada: ${result.error?.substring(0, 60) ?? 'erro desconhecido'}`, 'warning');
-        console.log(`⚠️ [${operationId}] Trade Análise natural continua de IA falhou: ${result.error} - Sessão mantida ativa`);
+        const rejectReason = (result.error ?? result.reason ?? 'sem detalhes').toString().substring(0, 80);
+        this.setPhase('AGUARDANDO', `⚠️ Operação adiada: ${rejectReason}`, 'warning');
+        console.log(`⚠️ [${operationId}] Trade adiado: ${result.error ?? result.reason} - Sessão mantida ativa`);
       }
       
       return result;
@@ -1161,8 +1162,13 @@ export class AutoTradingScheduler {
 
   private async executeAutomaticTrade(config: any, tokenData: any, operationId: string): Promise<{success: boolean, error?: string}> {
     try {
-      // 🔴 CAMADA 3 - CIRCUIT BREAKER: Verificar pausa obrigatória por perdas consecutivas
+      // 🔴 CAMADA 3 - CIRCUIT BREAKER: Sincronizar config do usuário no tracker
       const userEnableCircuitBreaker = (config as any)?.enableCircuitBreaker ?? true;
+      const userCbLosses = Number((config as any)?.circuitBreakerLosses ?? 0);
+      const userCbPauseMin = Number((config as any)?.circuitBreakerPauseMinutes ?? 0);
+      if (userCbLosses > 0 && userCbPauseMin > 0) {
+        realStatsTracker.configureCircuitBreaker(userCbLosses, userCbPauseMin);
+      }
       if (userEnableCircuitBreaker && realStatsTracker.isCircuitBreakerActive()) {
         const reqs = realStatsTracker.getRecoveryRequirements();
         const remainingSec = Math.ceil(reqs.circuitBreakerRemainingMs / 1000);

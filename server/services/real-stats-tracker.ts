@@ -72,6 +72,10 @@ class RealStatsTracker {
   private blockedAsset: string = '';          // ativo que causou a perda
   private assetBlockedUntil: number = 0;      // timestamp até quando o ativo está bloqueado
 
+  // 🔧 Configuração de Circuit Breaker customizável pelo usuário
+  private cbUserLossThreshold: number | null = null;  // nº de perdas para ativar
+  private cbUserPauseMs: number | null = null;        // duração da pausa em ms
+
   // 🔄 Callback de persistência — chamado após cada win/loss para salvar estado no BD
   private persistCallback?: (state: PersistedRecoveryState) => void;
 
@@ -101,6 +105,17 @@ class RealStatsTracker {
    */
   registerPersistCallback(cb: (state: PersistedRecoveryState) => void): void {
     this.persistCallback = cb;
+  }
+
+  /**
+   * Configura o Circuit Breaker com os valores definidos pelo usuário no dashboard.
+   * Quando configurado, substitui os valores padrão escalonados.
+   * @param lossThreshold - número de perdas consecutivas para ativar o breaker
+   * @param pauseMinutes - duração da pausa em minutos
+   */
+  configureCircuitBreaker(lossThreshold: number, pauseMinutes: number): void {
+    this.cbUserLossThreshold = Math.max(1, Math.round(lossThreshold));
+    this.cbUserPauseMs = Math.max(30_000, pauseMinutes * 60_000); // mínimo 30s
   }
 
   /**
@@ -355,13 +370,23 @@ class RealStatsTracker {
     // 🛡️ CAMADA 2 - Incrementar streak de perdas consecutivas
     this.consecutiveLosses++;
 
-    // 🛡️ CAMADA 3 - Ativar Circuit Breaker (nível 1=90s, 2=5min, 3+=15min)
-    const streakLevel = Math.min(this.consecutiveLosses, 3);
-    const breakerPauseMs = CIRCUIT_BREAKER_PAUSE_MS[streakLevel] ?? 0;
+    // 🛡️ CAMADA 3 - Ativar Circuit Breaker
+    // Se usuário configurou threshold+pausa, usa config customizada; senão usa padrão escalonado
+    let breakerPauseMs: number;
+    if (this.cbUserLossThreshold !== null && this.cbUserPauseMs !== null) {
+      // Config do usuário: ativa quando atingir o threshold configurado
+      breakerPauseMs = this.consecutiveLosses >= this.cbUserLossThreshold ? this.cbUserPauseMs : 0;
+    } else {
+      // Padrão escalonado: 1 perda=90s, 2=5min, 3+=15min
+      const streakLevel = Math.min(this.consecutiveLosses, 3);
+      breakerPauseMs = CIRCUIT_BREAKER_PAUSE_MS[streakLevel] ?? 0;
+    }
     if (breakerPauseMs > 0) {
       this.circuitBreakerUntil = Date.now() + breakerPauseMs;
       const pauseMin = Math.round(breakerPauseMs / 60000);
-      console.log(`🔴 [CIRCUIT BREAKER] ${this.consecutiveLosses} perdas consecutivas → PAUSA OBRIGATÓRIA de ${pauseMin} minutos`);
+      const pauseSec = Math.round(breakerPauseMs / 1000);
+      const display = pauseMin >= 1 ? `${pauseMin} minuto(s)` : `${pauseSec} segundos`;
+      console.log(`🔴 [CIRCUIT BREAKER] ${this.consecutiveLosses} perdas consecutivas → PAUSA OBRIGATÓRIA de ${display}`);
       console.log(`   → Próximo trade permitido após: ${new Date(this.circuitBreakerUntil).toLocaleTimeString()}`);
     }
 

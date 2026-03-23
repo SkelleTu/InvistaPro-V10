@@ -260,6 +260,26 @@ export class DualStorage implements IStorage {
   async reactivateTradeConfiguration(id: string)                    { return this.write(() => this.turso!.reactivateTradeConfiguration(id), () => this.sqlite.reactivateTradeConfiguration(id), 'reactivateTradeConfiguration'); }
   async deactivateTradeConfiguration(id: string)                    { return this.write(() => this.turso!.deactivateTradeConfiguration(id), () => this.sqlite.deactivateTradeConfiguration(id), 'deactivateTradeConfiguration'); }
 
+  // ─── Sincronização de usuário para satisfazer FK do Turso ─────────────────
+
+  private tursoSyncedUsers = new Set<string>();
+
+  private async ensureUserInTurso(userId: string): Promise<void> {
+    if (!this.turso || this.tursoSyncedUsers.has(userId)) return;
+    try {
+      const tursoUser = await this.turso.getUser(userId).catch(() => null);
+      if (!tursoUser) {
+        const sqliteUser = await this.sqlite.getUser(userId);
+        if (sqliteUser) {
+          await this.turso.createUser(sqliteUser).catch(() => {});
+        }
+      }
+      this.tursoSyncedUsers.add(userId);
+    } catch {
+      // não-fatal — FK error será tratado pelo fallback SQLite se necessário
+    }
+  }
+
   // ─── Operações de Trade ───────────────────────────────────────────────────
 
   async createTradeOperation(op: InsertTradeOperation): Promise<TradeOperation> {
@@ -267,6 +287,7 @@ export class DualStorage implements IStorage {
     const withId = { ...op, id } as any;
     if (this.turso) {
       try {
+        await this.ensureUserInTurso(op.userId);
         const r = await this.turso.createTradeOperation(withId);
         this.sqlite.createTradeOperation(withId).catch((e: any) => console.warn('⚠️ [SQLITE SYNC] createTradeOperation:', e.message));
         return r;
@@ -319,7 +340,19 @@ export class DualStorage implements IStorage {
 
   // ─── PnL Diário ───────────────────────────────────────────────────────────
 
-  async createOrUpdateDailyPnL(uid: string, data: Partial<InsertDailyPnL>) { return this.write(() => this.turso!.createOrUpdateDailyPnL(uid, data), () => this.sqlite.createOrUpdateDailyPnL(uid, data), 'createOrUpdateDailyPnL'); }
+  async createOrUpdateDailyPnL(uid: string, data: Partial<InsertDailyPnL>) {
+    if (this.turso) {
+      try {
+        await this.ensureUserInTurso(uid);
+        const r = await this.turso.createOrUpdateDailyPnL(uid, data);
+        this.sqlite.createOrUpdateDailyPnL(uid, data).catch(() => {});
+        return r;
+      } catch (e: any) {
+        console.warn(`⚠️ [TURSO] createOrUpdateDailyPnL falhou, fallback SQLite:`, e.message);
+      }
+    }
+    return this.sqlite.createOrUpdateDailyPnL(uid, data);
+  }
   async getDailyPnL(uid: string, date?: string) {
     return this.localRead(() => this.turso!.getDailyPnL(uid, date), () => this.sqlite.getDailyPnL(uid, date), 'getDailyPnL');
   }
