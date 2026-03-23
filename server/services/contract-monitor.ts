@@ -82,6 +82,7 @@ interface ContractState {
   peakBidPrice: number;
   targetTicksReached: boolean; // ⚡ ACCU-AUTOSELL: flag ativado quando tickCount >= targetTicks (persiste até venda)
   status: 'monitoring' | 'closing' | 'closed';
+  closingSince?: number;      // timestamp ms quando status mudou para 'closing' (para timeout de retry)
   aiSnapshot?: AITickSnapshot;
   openReason?: string;
   spotHistory: number[];      // histórico de spots do próprio contrato desde a entrada
@@ -675,6 +676,8 @@ class UniversalContractMonitor extends EventEmitter {
         clearTimeout(timeout);
         this.connected = false;
         this.stopKeepAlive();
+        this.pendingSellReqs.clear(); // Limpar requests pendentes — respostas não chegarão mais
+        this.pendingSubAcks.clear();  // Limpar acks de subscription pendentes
         console.log('🔌 [MONITOR] WebSocket fechado — reconectando em 3s...');
         if (!this.isShuttingDown) {
           setTimeout(() => this.reconnectAndResubscribe(), 3000);
@@ -762,6 +765,14 @@ class UniversalContractMonitor extends EventEmitter {
 
   private async reconnectAndResubscribe(): Promise<void> {
     if (this.isShuttingDown || this.reconnecting) return;
+    // Resetar contratos travados em 'closing' — a resposta da venda foi perdida na reconexão
+    for (const [id, state] of Array.from(this.monitored.entries())) {
+      if (state.status === 'closing' && state.targetTicksReached) {
+        state.status = 'monitoring';
+        state.closingSince = undefined;
+        console.log(`🔄 [MONITOR] ${id} — reconectando: status 'closing' resetado para 'monitoring' (retry automático)`);
+      }
+    }
     await this.connect();
   }
 
@@ -805,6 +816,18 @@ class UniversalContractMonitor extends EventEmitter {
     // Atualizar pico
     if (state.profit > state.peakProfit) state.peakProfit = state.profit;
     if (state.bidPrice > state.peakBidPrice) state.peakBidPrice = state.bidPrice;
+
+    // ⚡ TIMEOUT DE VENDA: se o comando de venda foi enviado há >3s sem confirmação
+    // (WebSocket desconectou antes da resposta), resetar para 'monitoring' e tentar novamente
+    if (
+      state.status === 'closing' &&
+      state.closingSince !== undefined &&
+      Date.now() - state.closingSince > 3000
+    ) {
+      console.log(`🔄 [MONITOR] ${contractId} — venda em 'closing' há ${((Date.now() - state.closingSince)/1000).toFixed(1)}s sem confirmação — resetando para retry`);
+      state.status = 'monitoring';
+      state.closingSince = undefined;
+    }
 
     // ⚡ ACCU MODO-OPS: Venda automática após N ticks (1 ou 2) — sem delay de análise
     // Quando atingido o tick alvo, ativar flag e tentar vender a cada tick subsequente
@@ -1162,6 +1185,7 @@ class UniversalContractMonitor extends EventEmitter {
   private async executeSell(state: ContractState, reason: string): Promise<void> {
     if (state.status !== 'monitoring') return;
     state.status = 'closing';
+    state.closingSince = Date.now();
 
     const contractId = state.input.contractId;
     console.log(`\n🔴 [MONITOR] ═══ EXECUTANDO VENDA ═══`);
