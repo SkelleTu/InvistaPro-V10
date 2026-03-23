@@ -662,6 +662,13 @@ export default function TradingSystemPage() {
     } catch {}
     return { '1': 10, '2': 7, '3': 5, '4': 4, '5': 3 };
   });
+  const [accuFrequencyPerRate, setAccuFrequencyPerRate] = useState<Record<string, string>>(() => {
+    try {
+      const s = localStorage.getItem("accu_frequency_per_rate");
+      if (s) { const p = JSON.parse(s); if (p && typeof p === 'object') return p; }
+    } catch {}
+    return {};
+  });
   const [modalityTicks, setModalityTicks] = useState<Record<string, number>>(() => {
     try {
       const s = localStorage.getItem("modality_ticks");
@@ -742,6 +749,10 @@ export default function TradingSystemPage() {
         if (data?.accuTicksPerRate && typeof data.accuTicksPerRate === 'object') {
           setAccuTicksPerRate(data.accuTicksPerRate);
           localStorage.setItem("accu_ticks_per_rate", JSON.stringify(data.accuTicksPerRate));
+        }
+        if (data?.accuFrequencyPerRate && typeof data.accuFrequencyPerRate === 'object') {
+          setAccuFrequencyPerRate(data.accuFrequencyPerRate);
+          localStorage.setItem("accu_frequency_per_rate", JSON.stringify(data.accuFrequencyPerRate));
         }
         if (data?.modalityTicks && typeof data.modalityTicks === 'object') {
           setModalityTicks(data.modalityTicks);
@@ -1962,6 +1973,13 @@ export default function TradingSystemPage() {
                       body: JSON.stringify({ ticks }),
                     }).catch(() => {});
                   };
+                  const saveAccuFrequencyPerRate = (freq: Record<string, string>) => {
+                    localStorage.setItem("accu_frequency_per_rate", JSON.stringify(freq));
+                    apiRequest("/api/trading/accu-frequency-per-rate", {
+                      method: "PUT",
+                      body: JSON.stringify({ frequency: freq }),
+                    }).catch(() => {});
+                  };
                   const saveModalityTicks = (ticks: Record<string, number>) => {
                     localStorage.setItem("modality_ticks", JSON.stringify(ticks));
                     apiRequest("/api/trading/modality-ticks", {
@@ -2205,10 +2223,64 @@ export default function TradingSystemPage() {
                                       </div>
                                     )}
 
-                                    {/* ── Frequência de Operações (ACCU) ── */}
+                                    {/* ── Frequência por Taxa de Crescimento (ACCU) ── */}
+                                    {accuGrowthRates.length > 0 && (
+                                      <div className="rounded-md bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800 p-2">
+                                        <p className="text-[11px] font-semibold text-indigo-700 dark:text-indigo-300 mb-1.5 flex items-center gap-1">
+                                          <span>⚡</span> Frequência por taxa de crescimento
+                                        </p>
+                                        <div className="space-y-1.5">
+                                          {['1','2','3','4','5'].filter(r => accuGrowthRates.includes(r)).map((rate) => {
+                                            const curFreq = accuFrequencyPerRate[rate] ?? 'ai';
+                                            const FREQ_OPTIONS = [
+                                              { value: 'ai', label: 'IA', desc: 'automático', color: 'text-violet-600 dark:text-violet-300 border-violet-400 bg-violet-50 dark:bg-violet-900/30' },
+                                              { value: 'low', label: 'Baixa', desc: '~1/3', color: 'text-amber-600 dark:text-amber-400 border-amber-400 bg-amber-50 dark:bg-amber-900/30' },
+                                              { value: 'normal', label: 'Normal', desc: 'padrão', color: 'text-green-600 dark:text-green-400 border-green-400 bg-green-50 dark:bg-green-900/30' },
+                                              { value: 'high', label: 'Alta', desc: '2×', color: 'text-blue-600 dark:text-blue-400 border-blue-400 bg-blue-50 dark:bg-blue-900/30' },
+                                            ];
+                                            return (
+                                              <div key={rate} className="flex items-center gap-1.5">
+                                                <span className="text-[11px] font-bold text-indigo-700 dark:text-indigo-300 w-6 shrink-0">{rate}%</span>
+                                                <div className="flex gap-1 flex-1">
+                                                  {FREQ_OPTIONS.map(({ value, label, desc, color }) => {
+                                                    const isSel = curFreq === value;
+                                                    return (
+                                                      <button
+                                                        key={value}
+                                                        type="button"
+                                                        data-testid={`accu-freq-rate${rate}-${value}`}
+                                                        title={`Taxa ${rate}%: frequência ${label} (${desc})`}
+                                                        onClick={(e) => {
+                                                          e.stopPropagation();
+                                                          const next = { ...accuFrequencyPerRate, [rate]: value };
+                                                          setAccuFrequencyPerRate(next);
+                                                          saveAccuFrequencyPerRate(next);
+                                                          toast({ title: `Taxa ${rate}%: frequência ${label}`, duration: 1200 });
+                                                        }}
+                                                        className={`flex-1 px-1.5 py-1 rounded text-[10px] font-bold border transition-all text-center ${
+                                                          isSel ? color + ' border-2' : 'bg-white dark:bg-gray-800 text-muted-foreground border-border hover:border-indigo-400'
+                                                        }`}
+                                                      >
+                                                        <div>{label}</div>
+                                                        <div className="font-normal opacity-70">{desc}</div>
+                                                      </button>
+                                                    );
+                                                  })}
+                                                </div>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                        <p className="text-[10px] text-indigo-600 dark:text-indigo-400 mt-1.5">
+                                          <span className="font-semibold text-violet-600 dark:text-violet-400">IA</span> = IA decide a frequência automaticamente. As outras opções fixam a frequência por taxa de crescimento.
+                                        </p>
+                                      </div>
+                                    )}
+
+                                    {/* ── Frequência Geral (ACCU) ── */}
                                     <div className="rounded-md bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 p-2">
                                       <p className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1.5 flex items-center gap-1">
-                                        <span>⚡</span> Frequência de operações
+                                        <span>⚡</span> Frequência geral de operações
                                       </p>
                                       <div className="flex gap-1.5">
                                         {[
@@ -2240,6 +2312,9 @@ export default function TradingSystemPage() {
                                           );
                                         })}
                                       </div>
+                                      <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
+                                        Frequência global para o AccuBot (se a frequência por taxa estiver em IA, esta configuração é usada como base).
+                                      </p>
                                     </div>
                                   </div>
                                 )}
