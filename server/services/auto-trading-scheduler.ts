@@ -2293,13 +2293,16 @@ export class AutoTradingScheduler {
           }
           // 🧠 SUPREMO: knockout adaptativo por volatilidade real
           const adaptiveTurboPct = supremeAnalysis?.adaptiveParams?.turbo?.knockoutOffsetPct ?? 0.015;
-          const adaptiveTurboDur = supremeAnalysis?.adaptiveParams?.turbo?.durationMin ?? 15;
+          const aiTurboDur = supremeAnalysis?.adaptiveParams?.turbo?.durationMin ?? 15;
+          const rawTurboMin = userModalityTicks[selectedModality];
+          const adaptiveTurboDur = rawTurboMin === 0 ? aiTurboDur : (rawTurboMin && rawTurboMin > 0 ? rawTurboMin : aiTurboDur);
+          const turboModeLabel = rawTurboMin === 0 ? '🤖 IA' : rawTurboMin && rawTurboMin > 0 ? '⚙️ FIXO' : 'ADAPTATIVO';
           const knockoutOffset = currentPrice * adaptiveTurboPct;
           const barrier = selectedModality === 'turbo_up'
             ? (currentPrice - knockoutOffset).toFixed(4)
             : (currentPrice + knockoutOffset).toFixed(4);
           const dateExpiry = Math.floor(Date.now() / 1000) + (adaptiveTurboDur * 60);
-          console.log(`📊 [${operationId}] ${contractType}: barrier=${barrier} (${(adaptiveTurboPct*100).toFixed(2)}%${supremeAnalysis ? ' ADAPTATIVO' : ' padrão'}), expiry=${adaptiveTurboDur}min | Symbol: ${selectedSymbol}`);
+          console.log(`📊 [${operationId}] ${contractType}: barrier=${barrier} (${(adaptiveTurboPct*100).toFixed(2)}%${supremeAnalysis ? ' ADAPTATIVO' : ' padrão'}), expiry=${adaptiveTurboDur}min ${turboModeLabel} | Symbol: ${selectedSymbol}`);
           contract = await derivAPI.buyFlexibleContract({
             contract_type: contractType,
             symbol: selectedSymbol,
@@ -2324,13 +2327,16 @@ export class AutoTradingScheduler {
           }
           // 🧠 SUPREMO: strike adaptativo por momentum real do mercado
           const adaptiveVanillaPct = supremeAnalysis?.adaptiveParams?.vanilla?.strikeOffsetPct ?? 0.005;
-          const adaptiveVanillaDur = supremeAnalysis?.adaptiveParams?.vanilla?.durationMin ?? 15;
+          const aiVanillaDur = supremeAnalysis?.adaptiveParams?.vanilla?.durationMin ?? 15;
+          const rawVanillaMin = userModalityTicks[selectedModality];
+          const adaptiveVanillaDur = rawVanillaMin === 0 ? aiVanillaDur : (rawVanillaMin && rawVanillaMin > 0 ? rawVanillaMin : aiVanillaDur);
+          const vanillaModeLabel = rawVanillaMin === 0 ? '🤖 IA' : rawVanillaMin && rawVanillaMin > 0 ? '⚙️ FIXO' : 'ADAPTATIVO';
           const strikeOffset = currentPrice * adaptiveVanillaPct;
           const strike = selectedModality === 'vanilla_call'
             ? (currentPrice + strikeOffset).toFixed(4)
             : (currentPrice - strikeOffset).toFixed(4);
           const dateExpiry = Math.floor(Date.now() / 1000) + (adaptiveVanillaDur * 60);
-          console.log(`📊 [${operationId}] ${contractType}: strike=${strike} (${(adaptiveVanillaPct*100).toFixed(2)}%${supremeAnalysis ? ' ADAPTATIVO' : ' padrão'}), expiry=${adaptiveVanillaDur}min | Symbol: ${selectedSymbol}`);
+          console.log(`📊 [${operationId}] ${contractType}: strike=${strike} (${(adaptiveVanillaPct*100).toFixed(2)}%${supremeAnalysis ? ' ADAPTATIVO' : ' padrão'}), expiry=${adaptiveVanillaDur}min ${vanillaModeLabel} | Symbol: ${selectedSymbol}`);
           contract = await derivAPI.buyFlexibleContract({
             contract_type: contractType,
             symbol: selectedSymbol,
@@ -2348,12 +2354,18 @@ export class AutoTradingScheduler {
           // ── Contratos Lookback (LBFLOATPUT, LBFLOATCALL, LBHIGHLOW) ──
           // Lookback usa "amount" como multiplicador e NÃO aceita o campo "basis"
           const contractType = LOOKBACK_TYPES[selectedModality];
-          // Duração adaptativa: tendências fortes → mais tempo para capturar amplitude máxima
-          const lbDurMin = supremeAnalysis?.regime === 'strong_trend' ? 10
-                         : supremeAnalysis?.regime === 'weak_trend'   ? 7
-                         : supremeAnalysis?.regime === 'calm'         ? 8
-                         : 5; // ranging/chaotic: mais curto
-          console.log(`📊 [${operationId}] ${contractType}: multiplier=${Math.max(1, Math.round(tradeParams.amount))} | duration=${lbDurMin}min ADAPTATIVO (regime=${supremeAnalysis?.regime ?? 'padrão'}) | Symbol: ${selectedSymbol}`);
+          // Duração: respeita config do usuário (0=IA controla, >0=fixo em minutos)
+          const rawLbMin = userModalityTicks[selectedModality];
+          const aiLbDur = supremeAnalysis?.regime === 'strong_trend' ? 10
+                        : supremeAnalysis?.regime === 'weak_trend'   ? 7
+                        : supremeAnalysis?.regime === 'calm'         ? 8
+                        : 5; // ranging/chaotic: mais curto
+          const lbDurMin = rawLbMin === 0
+            ? aiLbDur // 🤖 IA controla
+            : rawLbMin && rawLbMin > 0 ? rawLbMin
+            : aiLbDur;
+          const lbModeLabel = rawLbMin === 0 ? '🤖 IA' : rawLbMin && rawLbMin > 0 ? '⚙️ FIXO' : 'ADAPTATIVO';
+          console.log(`📊 [${operationId}] ${contractType}: multiplier=${Math.max(1, Math.round(tradeParams.amount))} | duration=${lbDurMin}min ${lbModeLabel} (regime=${supremeAnalysis?.regime ?? 'padrão'}) | Symbol: ${selectedSymbol}`);
           contract = await derivAPI.buyFlexibleContract({
             contract_type: contractType,
             symbol: selectedSymbol,
@@ -2700,9 +2712,9 @@ export class AutoTradingScheduler {
 
       // ── Mapa de compatibilidade símbolo × modalidade (espelhado da lógica de execução) ──
       // Permite que a seleção de símbolo SOMENTE considere ativos onde as modalidades do usuário funcionam.
-      const _DIGIT_K   = ['digit_differs','digit_match','digit_over','digit_under','digit_odd','digit_even'];
+      const _DIGIT_K   = ['digit_differs','digit_matches','digit_over','digit_under','digit_odd','digit_even'];
       const _RF_K      = ['rise','fall','higher','lower'];
-      const _INOUT_K   = ['ends_between','ends_outside','goes_between','goes_outside'];
+      const _INOUT_K   = ['ends_between','ends_outside','stays_between','goes_outside'];
       const _TOUCH_K   = ['touch','no_touch'];
       const _MULT_K    = ['multiplier_up','multiplier_down'];
       const _ACCU_K    = ['accumulator'];

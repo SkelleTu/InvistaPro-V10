@@ -737,6 +737,9 @@ export default function TradingSystemPage() {
           if (data.modalities.includes('__auto__')) {
             setAutoMode(true);
             try { localStorage.setItem("trade_auto_mode", "true"); } catch {}
+            // Limpar seleções manuais antigas do localStorage para evitar estado inconsistente
+            try { localStorage.removeItem("trade_modalities"); } catch {}
+            setEnabledModalities({});
           } else {
             const map: Record<string, boolean> = {};
             data.modalities.forEach((id: string) => { map[id] = true; });
@@ -1344,8 +1347,8 @@ export default function TradingSystemPage() {
               </Alert>
             )}
 
-            {/* Aviso: Nenhuma Modalidade Selecionada */}
-            {Object.values(enabledModalities).filter(Boolean).length === 0 && (
+            {/* Aviso: Nenhuma Modalidade Selecionada (só aparece quando modo manual está ativo) */}
+            {!autoMode && Object.values(enabledModalities).filter(Boolean).length === 0 && (
               <Alert className="border-yellow-500/50 bg-yellow-500/10" data-testid="alert-no-modalities">
                 <AlertTriangle className="h-4 w-4 text-yellow-600" />
                 <AlertDescription className="text-yellow-700 dark:text-yellow-400">
@@ -1916,7 +1919,9 @@ export default function TradingSystemPage() {
                       setAutoMode(next);
                       try { localStorage.setItem("trade_auto_mode", String(next)); } catch {}
                       if (!next) {
-                        // Ao desativar: limpar modalidades no servidor (usuário seleciona manualmente)
+                        // Ao desativar: limpar modalidades no servidor E resetar estado local (usuário seleciona manualmente)
+                        setEnabledModalities({});
+                        try { localStorage.removeItem("trade_modalities"); } catch {}
                         apiRequest("/api/trading/modalities", {
                           method: "PUT",
                           body: JSON.stringify({ modalities: [] }),
@@ -2123,7 +2128,7 @@ export default function TradingSystemPage() {
                     }).catch(() => {});
                   };
                   const TICK_MODALITIES = new Set(['digit_differs','digit_matches','digit_even','digit_odd','digit_over','digit_under','rise','fall','higher','lower']);
-                  const MINUTE_MODALITIES = new Set(['touch','no_touch','ends_between','ends_outside','stays_between','goes_outside','turbo_up','turbo_down','vanilla_call','vanilla_put']);
+                  const MINUTE_MODALITIES = new Set(['touch','no_touch','ends_between','ends_outside','stays_between','goes_outside','turbo_up','turbo_down','vanilla_call','vanilla_put','lookback_high_close','lookback_close_low','lookback_high_low']);
                   const toggleModality = (id: string, newVal: boolean, name: string) => {
                     const updated = { ...enabledModalities, [id]: newVal };
                     setEnabledModalities(updated);
