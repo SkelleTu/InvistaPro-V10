@@ -207,7 +207,7 @@ function getThresholds(contractType: string): ExitThresholds {
     case 'UPORDOWN':
       return {
         profitTargetPct: 65,
-        trailingStopPct: 25,
+        trailingStopPct: 12,       // reduzido de 25% → 12% para proteger lucros antes que o preço reverta
         barrierDangerPct: 0.5,
         maxDurationMin: 30,
         earlyLossExitPct: 70,
@@ -1233,9 +1233,13 @@ class UniversalContractMonitor extends EventEmitter {
       if (bidDecline >= thresholds.earlyLossExitPct) {
         return { shouldSell: true, reason: `CALL/PUT: bid caiu ${bidDecline.toFixed(1)}% — saída preventiva`, urgency: 'medium' };
       }
-      // Trailing stop por bid — arma quando bid sobe ≥5% (era ≥30%, nunca armava)
-      if (!supremeHold && state.peakBidPrice > state.input.buyPrice * 1.05 && state.bidPrice < state.peakBidPrice * (1 - thresholds.trailingStopPct / 100)) {
-        return { shouldSell: true, reason: `CALL/PUT: trailing bid (pico $${state.peakBidPrice.toFixed(4)} → $${state.bidPrice.toFixed(4)}, queda ${thresholds.trailingStopPct.toFixed(0)}%) regime=${supreme.regime}`, urgency: 'high' };
+      // Trailing stop por bid — arma quando bid sobe ≥20% acima do buy price
+      // GUARDA: só vende se bid ainda estiver ACIMA do preço de compra (nunca sai com perda pelo trailing)
+      if (!supremeHold && state.peakBidPrice > state.input.buyPrice * 1.20) {
+        const trailingThreshold = state.peakBidPrice * (1 - thresholds.trailingStopPct / 100);
+        if (state.bidPrice < trailingThreshold && state.bidPrice > state.input.buyPrice) {
+          return { shouldSell: true, reason: `CALL/PUT: trailing bid (pico $${state.peakBidPrice.toFixed(4)} → $${state.bidPrice.toFixed(4)}, queda ${thresholds.trailingStopPct.toFixed(0)}%) regime=${supreme.regime}`, urgency: 'high' };
+        }
       }
       // Trailing stop por lucro % — protege qualquer pico de lucro positivo
       if (!supremeHold && state.peakProfit > 0 && state.profitPct > 3) {
@@ -1259,17 +1263,24 @@ class UniversalContractMonitor extends EventEmitter {
       }
 
       // 2. TRAILING STOP — protege pico de lucro (BID)
-      // Arma quando bid subiu ≥5% acima do buy price (muito mais agressivo que antes)
-      const peakBidRiseBarrier = state.input.buyPrice * 1.05;
+      // Arma apenas quando bid subiu ≥20% acima do buy price (zona de lucro real)
+      // GUARDA CRÍTICA: só vende pelo trailing se o bid ainda estiver ACIMA do preço de compra
+      // (evita sair com perda quando o preço salta um tick inteiro abaixo do limiar de trailing)
+      const peakBidRiseBarrier = state.input.buyPrice * 1.20;
       if (state.peakBidPrice > peakBidRiseBarrier) {
         const trailingThreshold = state.peakBidPrice * (1 - thresholds.trailingStopPct / 100);
-        if (state.bidPrice < trailingThreshold) {
+        const minProfitFloor = state.input.buyPrice * 1.01; // mínimo: vender com pelo menos 1% de lucro
+        const effectiveThreshold = Math.max(trailingThreshold, minProfitFloor);
+        if (state.bidPrice < effectiveThreshold && state.bidPrice > state.input.buyPrice) {
+          // bid ainda está acima do preço de compra — saída com lucro garantido
           return {
             shouldSell: true,
             reason: `BARRIER trailing: bid caiu de $${state.peakBidPrice.toFixed(4)} → $${state.bidPrice.toFixed(4)} (queda de ${thresholds.trailingStopPct.toFixed(0)}% do pico) | lucro atual=${state.profitPct.toFixed(1)}%`,
             urgency: 'high',
           };
         }
+        // bid caiu ABAIXO do preço de compra — trailing não dispara aqui (evita saída com perda)
+        // o earlyLossExitPct abaixo tratará saídas com perda excessiva
       }
 
       // 3. Trailing baseado em lucro % (proteção extra quando em % de lucro alto)
