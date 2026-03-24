@@ -1782,7 +1782,11 @@ export class AutoTradingScheduler {
           'digit_over': 'DIGITOVER',
           'digit_under': 'DIGITUNDER',
         };
-        const RISFALL_TYPES: Set<string> = new Set(['rise', 'fall', 'higher', 'lower']);
+        // 'rise'/'fall' → CALL/PUT (contrato de ticks simples, sem barreira)
+        // 'higher'/'lower' → CALLE/PUTE (contrato com barreira — preço termina acima/abaixo do barrier)
+        // São modalidades DISTINTAS — 'higher'/'lower' NÃO devem gerar Rise/Fall
+        const RISFALL_TYPES: Set<string> = new Set(['rise', 'fall']);
+        const HIGHER_LOWER_TYPES: Record<string, string> = { 'higher': 'CALLE', 'lower': 'PUTE' };
         const IN_OUT_TYPES: Record<string, string> = {
           'ends_between': 'EXPIRYRANGE',
           'ends_outside': 'EXPIRYMISS',
@@ -1814,6 +1818,7 @@ export class AutoTradingScheduler {
         const ALL_SUPPORTED = new Set([
           ...Object.keys(DIGIT_TYPES),
           ...RISFALL_TYPES,
+          ...Object.keys(HIGHER_LOWER_TYPES),  // higher, lower → CALLE/PUTE
           ...Object.keys(IN_OUT_TYPES),
           ...Object.keys(TOUCH_TYPES),
           ...Object.keys(MULTIPLIER_TYPES),
@@ -1826,22 +1831,22 @@ export class AutoTradingScheduler {
         // ─── MATRIZ DE COMPATIBILIDADE SÍMBOLO × MODALIDADE ──────────────
         // Define quais modalidades são suportadas por cada grupo de símbolo.
         // Baseado na documentação oficial da Deriv para índices sintéticos.
-        const DIGIT_KEYS   = Object.keys(DIGIT_TYPES);
-        const RISFALL_KEYS = ['rise', 'fall', 'higher', 'lower'];
-        const INOUT_KEYS   = Object.keys(IN_OUT_TYPES);
-        const TOUCH_KEYS   = Object.keys(TOUCH_TYPES);
-        const MULT_KEYS    = Object.keys(MULTIPLIER_TYPES);
-        const ACCU_KEYS    = ['accumulator'];
-        const TURBO_KEYS   = Object.keys(TURBO_TYPES);
-        const VANILLA_KEYS = Object.keys(VANILLA_TYPES);
-        const LB_KEYS      = Object.keys(LOOKBACK_TYPES);
+        const DIGIT_KEYS        = Object.keys(DIGIT_TYPES);
+        const RISFALL_KEYS      = ['rise', 'fall'];           // CALL/PUT — ticks simples
+        const HIGHER_LOWER_KEYS = ['higher', 'lower'];        // CALLE/PUTE — com barreira
+        const INOUT_KEYS        = Object.keys(IN_OUT_TYPES);
+        const TOUCH_KEYS        = Object.keys(TOUCH_TYPES);
+        const MULT_KEYS         = Object.keys(MULTIPLIER_TYPES);
+        const ACCU_KEYS         = ['accumulator'];
+        const TURBO_KEYS        = Object.keys(TURBO_TYPES);
+        const VANILLA_KEYS      = Object.keys(VANILLA_TYPES);
+        const LB_KEYS           = Object.keys(LOOKBACK_TYPES);
 
-        // Volatility Indices (R_10, R_25, R_50, R_75, R_100):
-        //   suportam tudo exceto Turbos e Vanillas (disponíveis apenas em conta real/forex)
-        const VOL_BASE   = [...DIGIT_KEYS, ...RISFALL_KEYS, ...INOUT_KEYS, ...TOUCH_KEYS, ...MULT_KEYS, ...ACCU_KEYS, ...LB_KEYS];
-        // Jump Indices (JD10..JD100): apenas dígitos e rise/fall (Deriv não suporta INOUT/TOUCH nesses)
+        // Volatility Indices (R_10..R_100): suportam tudo, incluindo CALLE/PUTE (higher/lower)
+        const VOL_BASE   = [...DIGIT_KEYS, ...RISFALL_KEYS, ...HIGHER_LOWER_KEYS, ...INOUT_KEYS, ...TOUCH_KEYS, ...MULT_KEYS, ...ACCU_KEYS, ...LB_KEYS];
+        // Jump Indices (JD10..JD100): apenas dígitos e CALL/PUT (rise/fall) — NÃO suportam CALLE/PUTE
         const JUMP_OK    = [...DIGIT_KEYS, ...RISFALL_KEYS];
-        // Range Break (RDBULL, RDBEAR): apenas dígitos e rise/fall
+        // Range Break (RDBULL, RDBEAR): apenas dígitos e CALL/PUT (rise/fall) — NÃO suportam CALLE/PUTE
         const RDB_OK     = [...DIGIT_KEYS, ...RISFALL_KEYS];
         // R_100 também suporta Turbos e Vanillas (maior liquidez)
         const VOL_100    = [...VOL_BASE, ...TURBO_KEYS, ...VANILLA_KEYS];
@@ -1985,10 +1990,8 @@ export class AutoTradingScheduler {
           resolvedTradeType = selectedModality.replace('_', '');
 
         } else if (RISFALL_TYPES.has(selectedModality)) {
-          // ── Contratos Rise/Fall (CALL/PUT) ──
-          const callPutDirection: 'up' | 'down' = (selectedModality === 'rise' || selectedModality === 'higher') ? 'up' : 
-                                                    (selectedModality === 'fall' || selectedModality === 'lower') ? 'down' : 
-                                                    safeDirection;
+          // ── Contratos Rise/Fall (CALL/PUT) — ticks simples, sem barreira ──
+          const callPutDirection: 'up' | 'down' = selectedModality === 'rise' ? 'up' : selectedModality === 'fall' ? 'down' : safeDirection;
           const rawRFTicks = userModalityTicks[selectedModality];
           const callPutDuration = rawRFTicks === 0
             ? this.calculateDynamicTicks(selectedSymbol, 5) // 🤖 IA controla
@@ -1997,6 +2000,31 @@ export class AutoTradingScheduler {
               : Math.max(1, Math.floor(tradeParams.duration / 2));
           contract = await derivAPI.buyCallPutContract(selectedSymbol, callPutDirection, callPutDuration, tradeParams.amount);
           resolvedTradeType = selectedModality;
+
+        } else if (HIGHER_LOWER_TYPES[selectedModality]) {
+          // ── Contratos Higher/Lower (CALLE/PUTE) — preço deve terminar acima/abaixo da barreira ──
+          const contractType = HIGHER_LOWER_TYPES[selectedModality]; // 'CALLE' ou 'PUTE'
+          const isHigher = selectedModality === 'higher';
+          const currentPrice = await derivAPI.getCurrentPrice(selectedSymbol);
+          // Barreira: 0.3% acima (CALLE) ou abaixo (PUTE) do preço atual — relativa
+          const offsetPct = barrierConfig?.offsetPct ?? 0.003;
+          const offset = currentPrice && currentPrice > 0 ? parseFloat((currentPrice * offsetPct).toFixed(2)) : 0.5;
+          const barrier = isHigher ? '+' + offset : '-' + offset;
+          // Duração em minutos (IA ou config do usuário)
+          const rawHLMin = userModalityTicks[selectedModality];
+          const aiHLDurMin = supremeAnalysis?.adaptiveParams?.vanilla?.durationMin ?? 5;
+          const durationMin = rawHLMin === 0 ? aiHLDurMin : (rawHLMin && rawHLMin > 0 ? rawHLMin : aiHLDurMin);
+          const dateExpiry = Math.floor(Date.now() / 1000) + (durationMin * 60);
+          console.log(`📊 [${operationId}] ${contractType}: barrier=${barrier}, expiry=${durationMin}min | Symbol: ${selectedSymbol}`);
+          contract = await derivAPI.buyFlexibleContract({
+            contract_type: contractType,
+            symbol: selectedSymbol,
+            amount: tradeParams.amount,
+            barrier,
+            date_expiry: dateExpiry,
+            currency: 'USD',
+          });
+          resolvedTradeType = contractType.toLowerCase();
 
         } else if (IN_OUT_TYPES[selectedModality]) {
           // ── Contratos Dentro & Fora (EXPIRYRANGE, EXPIRYMISS, RANGE, UPORDOWN) ──
@@ -2416,7 +2444,8 @@ export class AutoTradingScheduler {
         // 🔭 MONITOR UNIVERSAL IA — acompanhar contrato tick a tick
         const contractTypeForMonitor = (
           DIGIT_TYPES[selectedModality] ||
-          (RISFALL_TYPES.has(selectedModality) ? (selectedModality === 'rise' || selectedModality === 'higher' ? 'CALL' : 'PUT') : undefined) ||
+          (RISFALL_TYPES.has(selectedModality) ? (selectedModality === 'rise' ? 'CALL' : 'PUT') : undefined) ||
+          HIGHER_LOWER_TYPES[selectedModality] ||   // 'higher'→CALLE, 'lower'→PUTE
           IN_OUT_TYPES[selectedModality] ||
           TOUCH_TYPES[selectedModality] ||
           MULTIPLIER_TYPES[selectedModality] ||
@@ -2715,7 +2744,8 @@ export class AutoTradingScheduler {
       // ── Mapa de compatibilidade símbolo × modalidade (espelhado da lógica de execução) ──
       // Permite que a seleção de símbolo SOMENTE considere ativos onde as modalidades do usuário funcionam.
       const _DIGIT_K   = ['digit_differs','digit_matches','digit_over','digit_under','digit_odd','digit_even'];
-      const _RF_K      = ['rise','fall','higher','lower'];
+      const _RF_K      = ['rise','fall'];                   // CALL/PUT (ticks simples)
+      const _HL_K      = ['higher','lower'];                 // CALLE/PUTE (com barreira) — JD/RDB não suportam
       const _INOUT_K   = ['ends_between','ends_outside','stays_between','goes_outside'];
       const _TOUCH_K   = ['touch','no_touch'];
       const _MULT_K    = ['multiplier_up','multiplier_down'];
@@ -2723,9 +2753,9 @@ export class AutoTradingScheduler {
       const _TURBO_K   = ['turbo_up','turbo_down'];
       const _VANILLA_K = ['vanilla_call','vanilla_put'];
       const _LB_K      = ['lookback_high_close','lookback_close_low','lookback_high_low'];
-      const _VOL_BASE  = [..._DIGIT_K, ..._RF_K, ..._INOUT_K, ..._TOUCH_K, ..._MULT_K, ..._ACCU_K, ..._LB_K];
-      const _JUMP_OK   = [..._DIGIT_K, ..._RF_K];
-      const _RDB_OK    = [..._DIGIT_K, ..._RF_K];
+      const _VOL_BASE  = [..._DIGIT_K, ..._RF_K, ..._HL_K, ..._INOUT_K, ..._TOUCH_K, ..._MULT_K, ..._ACCU_K, ..._LB_K];
+      const _JUMP_OK   = [..._DIGIT_K, ..._RF_K];           // JD: apenas ticks — sem CALLE/PUTE
+      const _RDB_OK    = [..._DIGIT_K, ..._RF_K];           // RDB: apenas ticks — sem CALLE/PUTE
       const _VOL_100   = [..._VOL_BASE, ..._TURBO_K, ..._VANILLA_K];
       const _COMPAT: Record<string, string[]> = {
         'R_10': _VOL_BASE,  'R_25': _VOL_BASE,   'R_50': _VOL_BASE,
@@ -3527,11 +3557,22 @@ export class AutoTradingScheduler {
         reason = `volatilidade ${(marketAnalysis.volatility * 100).toFixed(0)}% → ${marketAnalysis.volatility < 0.4 ? 'IDEAL para ACCU' : 'volatilidade alta penaliza ACCU'}`;
 
       } else if (m === 'rise' || m === 'fall') {
-        // Rise/Fall são melhores com tendência clara
+        // Rise/Fall (CALL/PUT ticks): melhores com tendência clara
         const favored = (m === 'rise' && (marketAnalysis.trend === 'strong_up' || marketAnalysis.trend === 'weak_up'))
                      || (m === 'fall' && (marketAnalysis.trend === 'strong_down' || marketAnalysis.trend === 'weak_down'));
         score = favored ? 70 + marketAnalysis.trendStrength * 20 : 35;
         reason = favored ? `tendência ${marketAnalysis.trend} favorece ${m}` : `tendência oposta penaliza ${m}`;
+
+      } else if (m === 'higher' || m === 'lower') {
+        // Higher/Lower (CALLE/PUTE): preço termina acima/abaixo da barreira — bom com tendência + baixa volatilidade
+        const favored = (m === 'higher' && (marketAnalysis.trend === 'strong_up' || marketAnalysis.trend === 'weak_up'))
+                     || (m === 'lower' && (marketAnalysis.trend === 'strong_down' || marketAnalysis.trend === 'weak_down'));
+        score = favored
+          ? 65 + marketAnalysis.trendStrength * 20 + (1 - marketAnalysis.volatility) * 10
+          : 38;
+        reason = favored
+          ? `tendência ${marketAnalysis.trend} + vol ${(marketAnalysis.volatility*100).toFixed(0)}% favorece ${m}`
+          : `tendência contrária penaliza ${m}`;
 
       } else if (m.startsWith('multiplier_')) {
         // Multipliers são bons com tendência forte + baixa volatilidade
