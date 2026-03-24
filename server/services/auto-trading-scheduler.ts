@@ -1242,6 +1242,29 @@ export class AutoTradingScheduler {
         }
       }
       
+      // 🚨 VERIFICAÇÃO CRÍTICA: Bloquear abertura de novo contrato se já existe um ATIVO no mesmo símbolo
+      // Isso evita abrir NOTOUCH/CALL/etc em cima de um ENDS_OUTSIDE ainda em andamento no mesmo ativo
+      const top5ForCheck = bestSymbolResult.top5Symbols || [];
+      const isSymbolOccupied = (sym: string): boolean => contractMonitor.hasActiveContractOnSymbol(sym);
+      if (isSymbolOccupied(selectedSymbol)) {
+        const occupiedId = contractMonitor.getActiveContractIdOnSymbol(selectedSymbol);
+        console.log(`🚫 [${operationId}] CONTRATO ATIVO DETECTADO: ${selectedSymbol} já tem contrato #${occupiedId} em andamento — buscando ativo alternativo...`);
+        let foundAlternative = false;
+        for (let i = 1; i < Math.min(top5ForCheck.length, 5); i++) {
+          const altSym = top5ForCheck[i].split('(')[0].trim();
+          if (!isSymbolOccupied(altSym) && !this.isSymbolBlocked(altSym)) {
+            selectedSymbol = altSym;
+            console.log(`✅ [${operationId}] Alternativa livre selecionada (sem contrato ativo): ${selectedSymbol}`);
+            foundAlternative = true;
+            break;
+          }
+        }
+        if (!foundAlternative) {
+          console.log(`⏸️ [${operationId}] Todos os top-5 ativos têm contratos ativos — aguardando próximo ciclo`);
+          return { success: false, error: 'Todos os ativos candidatos já possuem contratos ativos em andamento' };
+        }
+      }
+
       // 🎯 DIVERSIFICAÇÃO INTELIGENTE: Verificar se ativo pode ser aberto + jogo de cintura
       const diversityCheck = await this.canOpenTradeForAsset(
         config.userId, 

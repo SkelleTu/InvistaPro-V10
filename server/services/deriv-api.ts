@@ -64,6 +64,9 @@ export interface DerivContractInfo {
   exit_tick_time?: number;
   contract_type?: string;
   barrier?: string;
+  barrier2?: string;       // Segunda barreira (ENDS_OUTSIDE/EXPIRYRANGE — limite inferior)
+  high_barrier?: string;   // Barreira alta (formato alternativo Deriv)
+  low_barrier?: string;    // Barreira baixa (formato alternativo Deriv)
   payout?: number;
   is_valid_to_sell?: boolean;
   is_sold?: boolean;
@@ -1497,7 +1500,11 @@ export class DerivAPIService extends EventEmitter {
               entry_tick_time: contract.entry_tick_time,
               exit_tick_time: contract.exit_tick_time,
               contract_type: contract.contract_type,
-              barrier: contract.barrier,
+              // ENDS_OUTSIDE/EXPIRYRANGE usam barrier2 (low) ou high_barrier/low_barrier
+              barrier: contract.barrier ?? contract.high_barrier,
+              barrier2: contract.barrier2 ?? contract.low_barrier,
+              high_barrier: contract.high_barrier,
+              low_barrier: contract.low_barrier,
               payout: contract.payout,
               is_valid_to_sell: contract.is_valid_to_sell,
               is_sold: contract.is_sold,

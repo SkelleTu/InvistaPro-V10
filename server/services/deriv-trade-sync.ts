@@ -302,7 +302,11 @@ export class DerivTradeSync {
             updates.entryPrice = contractInfo.entry_tick;
             updates.entryEpoch = contractInfo.entry_tick_time;
             updates.payout = contractInfo.payout;
-            console.log(`📈 [DERIV SYNC] ${operation.symbol} ativo | Entry=$${contractInfo.entry_tick} | Barrier=${contractInfo.barrier}`);
+            // Para ENDS_OUTSIDE/EXPIRYRANGE: ler high_barrier e low_barrier
+            const barrierHigh = contractInfo.barrier ?? contractInfo.high_barrier ?? '—';
+            const barrierLow  = contractInfo.barrier2 ?? contractInfo.low_barrier;
+            const barrierStr  = barrierLow ? `H=${barrierHigh} L=${barrierLow}` : barrierHigh;
+            console.log(`📈 [DERIV SYNC] ${operation.symbol} ativo | Entry=$${contractInfo.entry_tick} | Barrier=${barrierStr} | Type=${contractInfo.contract_type}`);
           }
 
           // SEMPRE salvar - garante sync 100%

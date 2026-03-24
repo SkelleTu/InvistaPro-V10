@@ -717,6 +717,31 @@ class UniversalContractMonitor extends EventEmitter {
     return this.monitored.get(contractId);
   }
 
+  /**
+   * Retorna true se já existe um contrato ativo sendo monitorado no símbolo informado.
+   * Usado pelo scheduler para BLOQUEAR a abertura de um segundo contrato no mesmo ativo.
+   */
+  hasActiveContractOnSymbol(symbol: string): boolean {
+    for (const [, state] of this.monitored) {
+      if (state.input.symbol === symbol && !state.isSold && !state.isExpired) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Retorna o ID do contrato ativo no símbolo informado (para log).
+   */
+  getActiveContractIdOnSymbol(symbol: string): number | undefined {
+    for (const [contractId, state] of this.monitored) {
+      if (state.input.symbol === symbol && !state.isSold && !state.isExpired) {
+        return contractId;
+      }
+    }
+    return undefined;
+  }
+
   // ── WebSocket interno ────────────────────────────────────
 
   private async ensureConnected(): Promise<void> {
