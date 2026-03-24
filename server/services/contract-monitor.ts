@@ -1062,6 +1062,28 @@ class UniversalContractMonitor extends EventEmitter {
     if (ct === 'ACCU') {
       const contractId = state.input.contractId;
 
+      // ── ALVO DE LUCRO: fechar quando atingir meta de rentabilidade ──
+      if (state.profitPct >= thresholds.profitTargetPct) {
+        return {
+          shouldSell: true,
+          reason: `ACCU: alvo de lucro atingido ${state.profitPct.toFixed(2)}% ≥ ${thresholds.profitTargetPct.toFixed(0)}% | pico=$${state.peakProfit.toFixed(4)}`,
+          urgency: 'high',
+        };
+      }
+
+      // ── TRAILING STOP: protege ganhos acumulados ──
+      if (state.peakProfit > state.input.buyPrice * 0.03 && state.profitPct > 0) {
+        const peakPct = (state.peakProfit / state.input.buyPrice) * 100;
+        const dropFromPeak = peakPct - state.profitPct;
+        if (dropFromPeak >= thresholds.trailingStopPct) {
+          return {
+            shouldSell: true,
+            reason: `ACCU trailing: lucro caiu de pico ${peakPct.toFixed(2)}% → ${state.profitPct.toFixed(2)}% (queda ${dropFromPeak.toFixed(2)}% > limiar ${thresholds.trailingStopPct.toFixed(0)}%)`,
+            urgency: 'high',
+          };
+        }
+      }
+
       // ── EMERGÊNCIA: barreira muito próxima — fecha imediatamente ──
       if (state.barrierDistance !== undefined && state.barrierDistance < 0.5) {
         return { shouldSell: true, reason: `ACCU: BARREIRA CRÍTICA a ${state.barrierDistance.toFixed(3)}% — saída de emergência`, urgency: 'emergency' };
@@ -1211,20 +1233,70 @@ class UniversalContractMonitor extends EventEmitter {
       if (bidDecline >= thresholds.earlyLossExitPct) {
         return { shouldSell: true, reason: `CALL/PUT: bid caiu ${bidDecline.toFixed(1)}% — saída preventiva`, urgency: 'medium' };
       }
-      if (!supremeHold && state.profitPct > 15 && (confirmedReversal || supreme.urgency !== 'low')) {
-        return { shouldSell: true, reason: `CALL/PUT: ${supreme.exitReason || 'reversão suprema'} | lucro=${state.profitPct.toFixed(1)}%`, urgency: supreme.urgency };
+      // Trailing stop por bid — arma quando bid sobe ≥5% (era ≥30%, nunca armava)
+      if (!supremeHold && state.peakBidPrice > state.input.buyPrice * 1.05 && state.bidPrice < state.peakBidPrice * (1 - thresholds.trailingStopPct / 100)) {
+        return { shouldSell: true, reason: `CALL/PUT: trailing bid (pico $${state.peakBidPrice.toFixed(4)} → $${state.bidPrice.toFixed(4)}, queda ${thresholds.trailingStopPct.toFixed(0)}%) regime=${supreme.regime}`, urgency: 'high' };
       }
-      if (!supremeHold && state.peakBidPrice > state.input.buyPrice * 1.3 && state.bidPrice < state.peakBidPrice * (1 - thresholds.trailingStopPct / 100)) {
-        return { shouldSell: true, reason: `CALL/PUT: trailing bid (pico $${state.peakBidPrice.toFixed(2)} → $${state.bidPrice.toFixed(2)}) regime=${supreme.regime}`, urgency: 'high' };
+      // Trailing stop por lucro % — protege qualquer pico de lucro positivo
+      if (!supremeHold && state.peakProfit > 0 && state.profitPct > 3) {
+        const peakPct = (state.peakProfit / state.input.buyPrice) * 100;
+        const dropFromPeak = peakPct - state.profitPct;
+        if (dropFromPeak >= thresholds.trailingStopPct) {
+          return { shouldSell: true, reason: `CALL/PUT trailing %: pico ${peakPct.toFixed(1)}% → ${state.profitPct.toFixed(1)}% (queda ${dropFromPeak.toFixed(1)}%) regime=${supreme.regime}`, urgency: 'high' };
+        }
+      }
+      // Reversão de IA (reduziu limiar de 15% para 5% de lucro)
+      if (!supremeHold && state.profitPct > 5 && (confirmedReversal || supreme.urgency !== 'low')) {
+        return { shouldSell: true, reason: `CALL/PUT: ${supreme.exitReason || 'reversão suprema'} | lucro=${state.profitPct.toFixed(1)}%`, urgency: supreme.urgency };
       }
     }
 
     // ── ONETOUCH/NOTOUCH/RANGE/EXPIRYMISS ────────────────────────────────────
     if (['ONETOUCH', 'NOTOUCH', 'RANGE', 'EXPIRYRANGE', 'EXPIRYMISS', 'UPORDOWN'].includes(ct)) {
+      // 1. Alvo de lucro atingido → realizar
       if (state.profitPct >= thresholds.profitTargetPct) {
-        return { shouldSell: true, reason: `BARRIER: lucro ${state.profitPct.toFixed(1)}% realizado (regime=${supreme.regime})`, urgency: 'high' };
+        return { shouldSell: true, reason: `BARRIER: lucro ${state.profitPct.toFixed(1)}% atingiu alvo de ${thresholds.profitTargetPct.toFixed(0)}% (regime=${supreme.regime})`, urgency: 'high' };
       }
-      if (!supremeHold && (confirmedReversal || supreme.urgency !== 'low') && state.profitPct > 20) {
+
+      // 2. TRAILING STOP — protege pico de lucro (BID)
+      // Arma quando bid subiu ≥5% acima do buy price (muito mais agressivo que antes)
+      const peakBidRiseBarrier = state.input.buyPrice * 1.05;
+      if (state.peakBidPrice > peakBidRiseBarrier) {
+        const trailingThreshold = state.peakBidPrice * (1 - thresholds.trailingStopPct / 100);
+        if (state.bidPrice < trailingThreshold) {
+          return {
+            shouldSell: true,
+            reason: `BARRIER trailing: bid caiu de $${state.peakBidPrice.toFixed(4)} → $${state.bidPrice.toFixed(4)} (queda de ${thresholds.trailingStopPct.toFixed(0)}% do pico) | lucro atual=${state.profitPct.toFixed(1)}%`,
+            urgency: 'high',
+          };
+        }
+      }
+
+      // 3. Trailing baseado em lucro % (proteção extra quando em % de lucro alto)
+      if (state.peakProfit > 0 && state.profitPct > 5) {
+        const peakProfitPct = (state.peakProfit / state.input.buyPrice) * 100;
+        const dropFromPeak = peakProfitPct - state.profitPct;
+        if (dropFromPeak >= thresholds.trailingStopPct) {
+          return {
+            shouldSell: true,
+            reason: `BARRIER trailing %: lucro caiu de pico ${peakProfitPct.toFixed(1)}% → ${state.profitPct.toFixed(1)}% (queda ${dropFromPeak.toFixed(1)}% > limiar ${thresholds.trailingStopPct.toFixed(0)}%)`,
+            urgency: 'high',
+          };
+        }
+      }
+
+      // 4. Saída antecipada com corte de perda
+      if (state.profitPct <= -thresholds.earlyLossExitPct) {
+        return { shouldSell: true, reason: `BARRIER: corte de perda ${state.profitPct.toFixed(1)}% (limiar -${thresholds.earlyLossExitPct.toFixed(0)}%)`, urgency: 'high' };
+      }
+
+      // 5. Barreira perigosa (especialmente No Touch: se preço se aproxima da barreira proibida)
+      if (state.barrierDistance !== undefined && thresholds.barrierDangerPct > 0 && state.barrierDistance < thresholds.barrierDangerPct) {
+        return { shouldSell: true, reason: `BARRIER: barreira perigosa a ${state.barrierDistance.toFixed(3)}% | lucro=${state.profitPct.toFixed(1)}%`, urgency: 'emergency' };
+      }
+
+      // 6. Reversão de IA — agora sensível a partir de qualquer lucro positivo (antes exigia >20%)
+      if (!supremeHold && (confirmedReversal || supreme.urgency !== 'low') && state.profitPct > 3) {
         return { shouldSell: true, reason: `BARRIER: ${supreme.exitReason || 'reversão suprema'} | lucro=${state.profitPct.toFixed(1)}%`, urgency: supreme.urgency };
       }
     }
