@@ -2006,9 +2006,10 @@ export class AutoTradingScheduler {
           const contractType = HIGHER_LOWER_TYPES[selectedModality]; // 'CALLE' ou 'PUTE'
           const isHigher = selectedModality === 'higher';
           const currentPrice = await derivAPI.getCurrentPrice(selectedSymbol);
-          // Barreira: 0.3% acima (CALLE) ou abaixo (PUTE) do preço atual — relativa
-          const offsetPct = barrierConfig?.offsetPct ?? 0.003;
-          const offset = currentPrice && currentPrice > 0 ? parseFloat((currentPrice * offsetPct).toFixed(2)) : 0.5;
+          // Barreira: 0.3% do preço (adaptada pelo Motor Supremo se disponível)
+          const rawHLBarrierPct = supremeAnalysis?.adaptiveParams?.touch?.barrierOffsetPct;
+          const hlOffsetPct = rawHLBarrierPct ? Math.min(rawHLBarrierPct, 0.005) : 0.003;
+          const offset = currentPrice && currentPrice > 0 ? parseFloat((currentPrice * hlOffsetPct).toFixed(2)) : 0.5;
           const barrier = isHigher ? '+' + offset : '-' + offset;
           // Duração em minutos (IA ou config do usuário)
           const rawHLMin = userModalityTicks[selectedModality];
