@@ -1968,10 +1968,12 @@ export class AutoTradingScheduler {
 
           const rawDigitTicks = userModalityTicks[selectedModality];
           const digitDuration = rawDigitTicks === 0
-            ? this.calculateDynamicTicks(selectedSymbol, 5) // 🤖 IA controla
-            : rawDigitTicks
-              ? Math.max(1, Math.min(rawDigitTicks, 10))
-              : tradeParams.duration;
+            ? this.calculateDynamicTicks(selectedSymbol, 5) // 🤖 IA livre
+            : rawDigitTicks && rawDigitTicks < 0
+              ? Math.min(Math.abs(rawDigitTicks), Math.max(1, this.calculateDynamicTicks(selectedSymbol, Math.abs(rawDigitTicks)))) // 🤖 IA+Máx
+              : rawDigitTicks
+                ? Math.max(1, Math.min(rawDigitTicks, 10)) // ⚙️ Fixo
+                : tradeParams.duration;
           contract = await derivAPI.buyGenericDigitContract({
             contract_type: contractType,
             symbol: selectedSymbol,
