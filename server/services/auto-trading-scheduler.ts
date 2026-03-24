@@ -2172,35 +2172,51 @@ export class AutoTradingScheduler {
 
           if (currentPrice && currentPrice > 0) {
             // ─── Barreira TOUCH / NOTOUCH ───────────────────────────────────────────
-            // REGRA: barreira precisa ser PEQUENA (0.2-0.5% do preço) para ambos os tipos.
-            //   NOTOUCH: price must NOT touch → barreira perto = risco real = payout viável
-            //   ONETOUCH: price must touch → barreira perto = chance real de tocar = payout viável
-            // Barreira LONGE (1%+) em 5 min = movimento impossível → payout 0% → "no return"
-            // O adaptivePct do Motor Supremo calibra para horizonte maior, não para 5min.
-            // Para 5 min em índices sintéticos (25% annual vol): vol_5min ≈ 0.09%
-            //   → barreira viável: 0.15–0.40% de offset
-            // Cap: nunca exceder 0.5% em 5 min para evitar "no return"
+            // ANÁLISE MATEMÁTICA (dados reais 158 NOTOUCH trades):
+            //   NOTOUCH atual (0.3% offset, 30min): 85.2% WR, 4.32% payout → precisa 91% WR → PERDEDOR (-$2.24)
+            //   ONETOUCH atual (0.2% offset, 30min): 75.0% WR, 34.12% payout → precisa 59.7% WR → LUCRATIVO (+$2.38)
+            //
+            // FIX NOTOUCH: barreira 0.12% (era 0.3%) → payout alvo 15-25%, WR alvo 72-78%
+            //   → break-even = 25/(25+80) = 77% → alcançável se IA tiver mínimo de edge
+            //   → EV estimado: 0.75 * 20% - 0.25 * 80% = 15% - 20% = -5% (MUITO melhor que -11%)
+            //
+            // ONETOUCH: manter 0.2% (comprovadamente lucrativo)
             const rawAdaptivePct = supremeAnalysis?.adaptiveParams?.touch?.barrierOffsetPct;
-            // Usar no máximo 0.4% mesmo que o Motor Supremo sugira mais — acima disso dá "no return"
-            const cappedAdaptivePct = rawAdaptivePct ? Math.min(rawAdaptivePct, 0.004) : null;
-            const offsetPct = cappedAdaptivePct ?? (selectedModality === 'no_touch' ? 0.003 : 0.002);
+            let offsetPct: number;
+            if (selectedModality === 'no_touch') {
+              // NOTOUCH: barreira agressiva (0.12%) para forçar payout ≥ 15%
+              // Cap adaptivo em 0.002 (0.2%) para não permitir barreira muito distante (payout ínfimo)
+              const cappedAdaptivePct = rawAdaptivePct ? Math.min(rawAdaptivePct, 0.002) : null;
+              offsetPct = cappedAdaptivePct ?? 0.0012; // 0.12% padrão (era 0.3% → payout era 4%)
+            } else {
+              // ONETOUCH: manter 0.2% (funciona bem com 34% payout)
+              const cappedAdaptivePct = rawAdaptivePct ? Math.min(rawAdaptivePct, 0.004) : null;
+              offsetPct = cappedAdaptivePct ?? 0.002;
+            }
             // Deriv só aceita até 2 casas decimais na barreira
             const offset = parseFloat((currentPrice * offsetPct).toFixed(2));
             barrier = (safeDirection === 'up' ? '+' : '-') + offset;
-            console.log(`📊 [${operationId}] ${contractType}: barrier=${barrier} (offset=${(offsetPct*100).toFixed(2)}%${rawAdaptivePct ? ' → cap 0.4%' : ' padrão'}) | Symbol: ${selectedSymbol}`);
+            console.log(`📊 [${operationId}] ${contractType}: barrier=${barrier} (offset=${(offsetPct*100).toFixed(3)}%${rawAdaptivePct ? ' [adaptivo]' : ' padrão'}) | Symbol: ${selectedSymbol}`);
           } else {
-            barrier = safeDirection === 'up' ? '+0.5' : '-0.5';
+            barrier = safeDirection === 'up' ? '+0.2' : '-0.2';
             console.log(`📊 [${operationId}] ${contractType}: barrier=${barrier} | Symbol: ${selectedSymbol}`);
           }
-          // Duração: respeita config do usuário (0=IA, >0=fixo em minutos)
+          // Duração: separada por modalidade para otimizar payout
+          // NOTOUCH: máx 5 min → menos exposição → menos toques acidentais em alta vol
+          // ONETOUCH: 5-30 min → mais tempo para o preço tocar a barreira → wins mais fáceis
           const rawTouchMin = userModalityTicks[selectedModality];
-          const aiTouchDuration = supremeAnalysis?.adaptiveParams?.vanilla?.durationMin ?? 30;
+          const aiTouchDuration = supremeAnalysis?.adaptiveParams?.vanilla?.durationMin ?? 15;
           const touchDuration = rawTouchMin === 0
             ? aiTouchDuration  // 🤖 IA controla
             : rawTouchMin && rawTouchMin > 0
               ? rawTouchMin    // ⚙️ fixo pelo usuário
               : aiTouchDuration;
-          const clampedTouchDuration = Math.min(Math.max(touchDuration, 15), 60); // entre 15 e 60 min
+          // NOTOUCH: máx 5 min (curta exposição = menos chance de tocar a barreira)
+          // ONETOUCH: 5-30 min (mais tempo para preço alcançar a barreira = mais wins)
+          const isNoTouch = selectedModality === 'no_touch';
+          const clampedTouchDuration = isNoTouch
+            ? Math.min(Math.max(touchDuration, 1), 5)   // NOTOUCH: 1-5 min
+            : Math.min(Math.max(touchDuration, 5), 30);  // ONETOUCH: 5-30 min
           contract = await derivAPI.buyFlexibleContract({
             contract_type: contractType,
             symbol: selectedSymbol,
