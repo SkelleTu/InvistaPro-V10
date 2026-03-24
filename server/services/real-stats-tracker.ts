@@ -2,43 +2,40 @@
  * REAL STATS TRACKER
  * Rastreia resultados reais de trades (won/lost) baseado em dados do banco.
  *
- * 🛡️ MODO RECUPERAÇÃO HIPER-SELETIVO (Multi-Camada)
+ * 🤖 MODO IA LIVRE — SEM RESTRIÇÕES DE TIMING
  *
- * CAMADA 1 - ANTI-REPETIÇÃO TOTAL:
- *   O mesmo ativo NUNCA pode ser operado duas vezes seguidas.
- *   Independente de consenso ou qualquer outro critério.
+ * CAMADA 1 - ANTI-REPETIÇÃO MÍNIMA:
+ *   O mesmo ativo é evitado apenas uma vez após perda (rotação natural de ativos).
+ *   Bloqueio de apenas 90 segundos para permitir rotação e retornar ao ativo.
  *
- * CAMADA 2 - CONSENSO ESCALONADO POR PERDAS CONSECUTIVAS:
- *   0 perdas consecutivas → consenso mínimo normal (~65%)
- *   1 perda consecutiva  → consenso mínimo 85%
- *   2 perdas consecutivas → consenso mínimo 90%
- *   3+ perdas consecutivas → consenso mínimo 95%
+ * CAMADA 2 - CONSENSO LEVEMENTE ESCALADO:
+ *   A IA opera livremente. Qualquer sinal gerado pela IA é considerado válido.
+ *   Sem escalada agressiva de consenso — a IA já analisa milimetricamente.
  *
- * CAMADA 3 - CIRCUIT BREAKER:
- *   1 perda consecutiva  → pausa obrigatória de 90 segundos (recuperação rápida)
- *   2 perdas consecutivas → pausa obrigatória de 5 minutos
- *   3+ perdas consecutivas → pausa obrigatória de 15 minutos
- *   Assim que saldo superar o pré-perda, volta ao modo normal
+ * CAMADA 3 - CIRCUIT BREAKER MÍNIMO:
+ *   Pausa mínima (5s) apenas para dar tempo de processar dados do trade anterior.
+ *   A IA não fica bloqueada — retoma imediatamente.
  *
- * CAMADA 4 - BLOQUEIO DE ATIVO PERDEDOR:
- *   Ativo que causou a perda bloqueado por 30 minutos.
+ * CAMADA 4 - BLOQUEIO DE ATIVO PERDEDOR REDUZIDO:
+ *   Ativo bloqueado por apenas 90 segundos (rotação, não penalidade).
  */
 
-const RECOVERY_ASSET_BLOCK_MS = 30 * 60 * 1000; // 30 min de bloqueio para o ativo perdedor
+const RECOVERY_ASSET_BLOCK_MS = 90 * 1000; // 90 segundos — rotação de ativo, não penalidade longa
 
 // Consenso mínimo por nível de perdas consecutivas
+// Mantido próximo do nível base: a IA já analisa profundamente — não precisamos dobrar exigência
 const RECOVERY_CONSENSUS_BY_STREAK: Record<number, number> = {
-  1: 75,  // 1 perda consecutiva → 75% (leve proteção, não trava o bot)
-  2: 82,  // 2 perdas consecutivas → 82%
-  3: 88,  // 3+ perdas consecutivas → 88%
+  1: 52,  // 1 perda consecutiva → 52% (praticamente livre — a IA decide)
+  2: 55,  // 2 perdas consecutivas → 55%
+  3: 58,  // 3+ perdas consecutivas → 58% (ainda muito permissivo para não travar)
 };
 
-// Pausa obrigatória entre trades por perdas consecutivas (em ms)
-// 🔧 FIX: 1 perda → 90s (recuperação rápida); 2+ perdas → pausas maiores para cautela
+// Pausa mínima entre trades por perdas consecutivas (em ms)
+// Apenas tempo suficiente para processar o resultado anterior — IA não fica parada
 const CIRCUIT_BREAKER_PAUSE_MS: Record<number, number> = {
-  1:  90 * 1000,      // 1 perda  → 90 segundos (recuperar rápido com Martingale)
-  2:  5 * 60 * 1000,  // 2 perdas → 5 minutos
-  3: 15 * 60 * 1000,  // 3+ perdas → 15 minutos
+  1:  3 * 1000,   // 1 perda  → 3 segundos (tempo de processamento)
+  2:  5 * 1000,   // 2 perdas → 5 segundos
+  3: 10 * 1000,   // 3+ perdas → 10 segundos (máximo — IA retoma em seguida)
 };
 
 export interface PersistedRecoveryState {
@@ -148,12 +145,17 @@ class RealStatsTracker {
     }
 
     this.consecutiveLosses = state.consecutiveLosses || 0;
-    this.circuitBreakerUntil = state.circuitBreakerUntil || 0;
     this.postLossMode = state.postLossMode || false;
     this.lastKnownBalance = state.lastKnownBalance || 0;
     this.balanceToRecover = state.balanceToRecover || 0;
     this.blockedAsset = state.blockedAsset || '';
-    this.assetBlockedUntil = state.assetBlockedUntil || 0;
+
+    // Limitar timestamps restaurados aos novos valores máximos (evita que bloqueios antigos longos persistam)
+    // Circuit breaker máx: 10s; Asset block máx: 90s — valores das novas constantes
+    const maxCircuitBreakerUntil = now + Math.max(...Object.values(CIRCUIT_BREAKER_PAUSE_MS));
+    const maxAssetBlockUntil = now + RECOVERY_ASSET_BLOCK_MS;
+    this.circuitBreakerUntil = Math.min(state.circuitBreakerUntil || 0, maxCircuitBreakerUntil);
+    this.assetBlockedUntil = Math.min(state.assetBlockedUntil || 0, maxAssetBlockUntil);
 
     if (this.postLossMode) {
       const remainingBlock = Math.max(0, this.assetBlockedUntil - now);

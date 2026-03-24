@@ -102,10 +102,10 @@ export class AutoTradingScheduler {
   // 🚫 PAUSA POR MERCADO RUIM — Bloqueia operações quando o mercado global está desfavorável
   private badMarketPausedUntil: number = 0;             // Timestamp até quando operações estão pausadas
   private badMarketReducedGrowthActive: boolean = false; // true = opera com growth 1% (recuperação parcial)
-  private readonly BAD_MARKET_PAUSE_MS = 15 * 60 * 1000; // 15 min de pausa quando mercado cai abaixo do threshold
-  private readonly BAD_MARKET_QUALITY_THRESHOLD = 40;    // Qualidade ≤ 40% → pausa total
+  private readonly BAD_MARKET_PAUSE_MS = 30 * 1000;      // 30 segundos (antes: 15 min) — IA retoma quase imediatamente
+  private readonly BAD_MARKET_QUALITY_THRESHOLD = 20;    // Qualidade ≤ 20% → pausa (antes: 40%) — só pausa em mercado muito ruim
   private readonly BAD_MARKET_RECOVERED_THRESHOLD = 60;  // Qualidade > 60% → recuperação plena (5%)
-  private readonly BAD_MARKET_PARTIAL_THRESHOLD = 40;    // Qualidade 41-60% → recuperação parcial (1%)
+  private readonly BAD_MARKET_PARTIAL_THRESHOLD = 30;    // Qualidade 31-60% → recuperação parcial (antes: 40%)
   private readonly BAD_MARKET_GROWTH_REDUCED = 0.01;     // Taxa de crescimento reduzida (1%)
   private activityLog: Array<{ time: number; message: string; type: 'info' | 'success' | 'warning' | 'trade' }> = [];
 
@@ -120,11 +120,11 @@ export class AutoTradingScheduler {
   }> = new Map();
   private pendingMartingaleContracts: Map<string, { userId: string; part: number }> = new Map();
   private readonly MARTINGALE_CONSENSUS_THRESHOLD = 75; // Reduzido de 92→75: sistema máx atinge ~75-80%
-  private readonly MARTINGALE_COOLDOWN_MS = 15 * 60 * 1000; // 15 min entre sequências
+  private readonly MARTINGALE_COOLDOWN_MS = 30 * 1000; // 30 segundos entre sequências (antes: 15 min — IA não fica travada)
 
   // 🚀 MODO ALAVANCAGEM — disparo raro e cirúrgico quando o mercado geral está excepcional
   private leverageLastFiredAt: number = 0;
-  private readonly LEVERAGE_COOLDOWN_MS       = 25 * 60 * 1000; // 25 min entre disparos (raro por design)
+  private readonly LEVERAGE_COOLDOWN_MS       = 60 * 1000; // 60 segundos entre disparos (antes: 25 min — IA opera livre)
   private readonly LEVERAGE_MIN_ASSETS        = 2;               // Reduzido de 3→2: mais fácil atingir com índices sintéticos
   private readonly LEVERAGE_CONSENSUS_MIN     = 65;              // Reduzido de 78→65: opportunityScore real dos sintéticos fica 55-70
   private readonly LEVERAGE_STAKE_PCT         = 0.05;            // 5% da banca
