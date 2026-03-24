@@ -572,8 +572,11 @@ class UniversalContractMonitor extends EventEmitter {
 
   private startOrphanScan(): void {
     if (this.orphanScanTimer) return;
-    this.orphanScanTimer = setInterval(() => this.recoverOrphanedContracts(), 5 * 60 * 1000);
-    console.log('🔍 [MONITOR] Scanner de contratos órfãos iniciado (varredura a cada 5 min)');
+    // Varredura a cada 60s para recuperar rapidamente qualquer contrato perdido
+    this.orphanScanTimer = setInterval(() => this.recoverOrphanedContracts(), 60 * 1000);
+    // Execução imediata ao iniciar (após 5s para dar tempo ao WS conectar)
+    setTimeout(() => this.recoverOrphanedContracts(), 5000);
+    console.log('🔍 [MONITOR] Scanner de contratos órfãos iniciado (varredura a cada 60s + imediata ao iniciar)');
   }
 
   private async recoverOrphanedContracts(): Promise<void> {
@@ -581,14 +584,34 @@ class UniversalContractMonitor extends EventEmitter {
       const allUsers = await storage.getAllUsers();
       let recovered = 0;
       for (const user of allUsers) {
-        const openOps = await storage.getActiveTradeOperations(user.id);
+        // Buscar tanto 'active' quanto 'pending' — contratos novos começam como pending
+        const activeOps = await storage.getActiveTradeOperations(user.id);
+        const recentOps = await storage.getUserTradeOperations(user.id, 20);
+        const pendingOps = recentOps.filter(op => op.status === 'pending');
+
+        // Unificar sem duplicatas
+        const seenIds = new Set<string>();
+        const openOps = [...activeOps, ...pendingOps].filter(op => {
+          if (!op.id || seenIds.has(op.id)) return false;
+          seenIds.add(op.id);
+          return true;
+        });
+
         for (const op of openOps) {
           if (!op.derivContractId) continue;
           const contractId = Number(op.derivContractId);
           if (!contractId || this.monitored.has(contractId) || this.recentlyClosed.has(contractId)) continue;
 
+          // Ignorar contratos muito antigos (mais de 2h sem fechar = provavelmente já expirou)
+          const openedAt = op.entryEpoch ? op.entryEpoch * 1000 : (op.createdAt ? new Date(op.createdAt).getTime() : Date.now());
+          const ageMs = Date.now() - openedAt;
+          if (ageMs > 2 * 60 * 60 * 1000) {
+            console.log(`⏭️ [MONITOR] Ignorando contrato antigo ${contractId} (${Math.round(ageMs / 60000)}min) — provavelmente já expirou`);
+            continue;
+          }
+
           const contractTypeRaw = (op.contractType || op.tradeType || 'CALL').toUpperCase();
-          console.log(`♻️ [MONITOR] Recuperando contrato órfão: ${contractId} | ${contractTypeRaw} | ${op.symbol}`);
+          console.log(`♻️ [MONITOR] Recuperando contrato órfão: ${contractId} | ${contractTypeRaw} | ${op.symbol} | status=${op.status}`);
           try {
             await this.startMonitoring({
               contractId,
@@ -598,7 +621,7 @@ class UniversalContractMonitor extends EventEmitter {
               amount: op.amount ?? 1,
               direction: (op.direction as 'up' | 'down' | 'neutral') ?? 'neutral',
               userId: user.id,
-              openedAt: op.entryEpoch ? op.entryEpoch * 1000 : Date.now(),
+              openedAt,
             });
             recovered++;
           } catch (err: any) {
@@ -608,6 +631,8 @@ class UniversalContractMonitor extends EventEmitter {
       }
       if (recovered > 0) {
         console.log(`✅ [MONITOR] ${recovered} contrato(s) órfão(s) recuperado(s) e remonitorado(s)`);
+      } else {
+        console.log('🔍 [MONITOR] Nenhum contrato órfão encontrado nesta varredura');
       }
     } catch (err: any) {
       console.warn(`⚠️ [MONITOR] Erro na varredura de órfãos: ${err?.message}`);
@@ -768,8 +793,13 @@ class UniversalContractMonitor extends EventEmitter {
       this.startKeepAlive();
       console.log(`✅ [MONITOR] Autenticado como ${msg.authorize.loginid}`);
       authResolve?.();
-      // Resubscrever contratos pendentes
+      // Resubscrever contratos em memória
       this.resubscribeAll();
+      // Se a memória está vazia (restart do servidor), recuperar contratos órfãos do banco imediatamente
+      if (this.monitored.size === 0) {
+        console.log('♻️ [MONITOR] Memória vazia após autenticação — recuperando contratos ativos do banco...');
+        setTimeout(() => this.recoverOrphanedContracts(), 1500);
+      }
       return;
     }
 
