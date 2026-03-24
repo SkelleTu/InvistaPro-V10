@@ -3083,7 +3083,7 @@ export default function TradingSystemPage() {
               <CardHeader>
                 <CardTitle>Frequência de Operações</CardTitle>
                 <CardDescription>
-                  Configure a frequência das operações de digit differs
+                  Configure quantas operações por ciclo e o intervalo entre elas — aplica-se às modalidades selecionadas acima
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -3099,7 +3099,7 @@ export default function TradingSystemPage() {
                       data-testid="button-mode-prod-3-4"
                     >
                       <Clock className="h-4 w-4 mr-2" />
-                      3-4 digit differs a cada 24 horas
+                      3-4 operações a cada 24 horas
                     </Button>
                     <Button
                       variant={tradeConfig?.mode === 'production_2_24h' ? "default" : "outline"}
@@ -3109,7 +3109,7 @@ export default function TradingSystemPage() {
                       data-testid="button-mode-prod-2"
                     >
                       <Clock className="h-4 w-4 mr-2" />
-                      2 digit differs a cada 24 horas
+                      2 operações a cada 24 horas
                     </Button>
                   </div>
                 </div>
@@ -3127,7 +3127,7 @@ export default function TradingSystemPage() {
                       data-testid="button-mode-test-4-1min"
                     >
                       <Zap className="h-4 w-4 mr-2" />
-                      4 digit differs a cada 1 minuto
+                      4 operações a cada 1 minuto
                     </Button>
                     <Button
                       variant={tradeConfig?.mode === 'test_3_2min' ? "default" : "outline"}
@@ -3137,7 +3137,7 @@ export default function TradingSystemPage() {
                       data-testid="button-mode-test-3-2min"
                     >
                       <Zap className="h-4 w-4 mr-2" />
-                      3 digit differs a cada 2 minutos
+                      3 operações a cada 2 minutos
                     </Button>
                     <Button
                       variant={tradeConfig?.mode === 'test_4_1hour' ? "default" : "outline"}
@@ -3147,7 +3147,7 @@ export default function TradingSystemPage() {
                       data-testid="button-mode-test-4-1h"
                     >
                       <Clock className="h-4 w-4 mr-2" />
-                      4 digit differs a cada 1 hora
+                      4 operações a cada 1 hora
                     </Button>
                     <Button
                       variant={tradeConfig?.mode === 'test_3_2hour' ? "default" : "outline"}
@@ -3157,7 +3157,7 @@ export default function TradingSystemPage() {
                       data-testid="button-mode-test-3-2h"
                     >
                       <Clock className="h-4 w-4 mr-2" />
-                      3 digit differs a cada 2 horas
+                      3 operações a cada 2 horas
                     </Button>
                     <Button
                       variant={tradeConfig?.mode === 'test_sem_limites' ? "default" : "outline"}
@@ -3167,7 +3167,7 @@ export default function TradingSystemPage() {
                       data-testid="button-mode-test-sem-limites"
                     >
                       <Infinity className="h-4 w-4 mr-2" />
-                      Sem Limites - Operação Contínua
+                      Sem Limites — Operação Contínua
                     </Button>
                   </div>
                 </div>
@@ -3177,6 +3177,22 @@ export default function TradingSystemPage() {
 
           {/* Operações Tab */}
           <TabsContent value="operations" className="space-y-6">
+            {/* Banner de modalidades ativas */}
+            <div className="rounded-lg border border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-950/30 p-3 flex flex-wrap items-center gap-2" data-testid="banner-active-modalities">
+              <Shield className="h-4 w-4 text-blue-600 dark:text-blue-400 shrink-0" />
+              <span className="text-xs font-semibold text-blue-800 dark:text-blue-200">
+                {autoMode ? "Modalidades ativas: Modo Automático — IA seleciona a melhor por ciclo" : (() => {
+                  const activeIds = Object.entries(enabledModalities).filter(([, v]) => v).map(([k]) => k);
+                  if (activeIds.length === 0) return "Nenhuma modalidade selecionada — operações pausadas";
+                  const allMods = TRADE_CATEGORIES.flatMap(c => c.modalities);
+                  const labels = activeIds.map(id => allMods.find(m => m.id === id)?.name ?? id);
+                  return `Operando somente: ${labels.join(", ")}`;
+                })()}
+              </span>
+              <span className="text-xs text-blue-600 dark:text-blue-400 ml-auto">
+                Novas operações respeitam esta seleção
+              </span>
+            </div>
             <Card data-testid="card-operations-history">
               <CardHeader>
                 <CardTitle className="flex items-center space-x-2">
@@ -3188,7 +3204,7 @@ export default function TradingSystemPage() {
                   </Badge>
                 </CardTitle>
                 <CardDescription>
-                  Atualização automática a cada 1 segundo — Ativo · Modalidade · Tipo · Resultado
+                  Atualização automática a cada 1 segundo — inclui trades anteriores de todas as modalidades já executadas
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -3213,6 +3229,13 @@ export default function TradingSystemPage() {
 
           {/* IA e Análises Tab */}
           <TabsContent value="ai-analysis" className="space-y-4">
+            {/* Banner explicativo: análise ≠ trade */}
+            <div className="rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/30 p-3 flex flex-wrap items-center gap-2" data-testid="banner-ai-analysis-info">
+              <Info className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
+              <span className="text-xs text-amber-800 dark:text-amber-200">
+                <strong>Análise ≠ Trade:</strong> as IAs analisam todos os ativos e modalidades disponíveis para encontrar a melhor oportunidade — mas os trades são executados somente nas modalidades que você selecionou.
+              </span>
+            </div>
 
             {/* MICROSCÓPIO DE OPERAÇÕES AO VIVO */}
             <Card data-testid="card-live-analysis">
@@ -3595,6 +3618,22 @@ export default function TradingSystemPage() {
 
           {/* Monitor IA Universal — Acompanhamento tick a tick de cada contrato */}
           <TabsContent value="monitor" className="space-y-6">
+            {/* Banner de modalidades ativas */}
+            <div className="rounded-lg border border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-950/30 p-3 flex flex-wrap items-center gap-2" data-testid="banner-monitor-modalities">
+              <Shield className="h-4 w-4 text-blue-600 dark:text-blue-400 shrink-0" />
+              <span className="text-xs font-semibold text-blue-800 dark:text-blue-200">
+                {autoMode ? "Modalidades ativas: Modo Automático — IA seleciona a melhor por ciclo" : (() => {
+                  const activeIds = Object.entries(enabledModalities).filter(([, v]) => v).map(([k]) => k);
+                  if (activeIds.length === 0) return "Nenhuma modalidade selecionada — operações pausadas";
+                  const allMods = TRADE_CATEGORIES.flatMap(c => c.modalities);
+                  const labels = activeIds.map(id => allMods.find(m => m.id === id)?.name ?? id);
+                  return `Novas operações usam somente: ${labels.join(", ")}`;
+                })()}
+              </span>
+              <span className="text-xs text-blue-600 dark:text-blue-400 ml-auto">
+                O monitor exibe todos os contratos Deriv abertos, incluindo de sessões anteriores
+              </span>
+            </div>
             <Card className="border-2 border-blue-500/30 bg-blue-500/5">
               <CardHeader>
                 <CardTitle className="flex items-center justify-between">
