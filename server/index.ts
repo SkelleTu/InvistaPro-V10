@@ -228,21 +228,27 @@ app.use((req, res, next) => {
   // NOTA: Keep-alive interno NÃO impede hibernação no Replit!
   // Apenas tráfego HTTP EXTERNO mantém o servidor ativo.
   
+  const publicDomain = process.env.REPLIT_DEV_DOMAIN;
   const keepWorkspaceAlive = async () => {
+    const now = new Date().toLocaleTimeString('pt-BR');
     try {
-      const response = await fetch('http://localhost:5000/api/status', {
-        method: 'GET',
-        headers: { 'X-Internal-Debug': 'true' }
-      });
-      
-      if (response.ok) {
-        const data = await response.json() as any;
-        const uptimeHours = Math.floor((data.uptime || process.uptime()) / 3600);
-        const uptimeMinutes = Math.floor(((data.uptime || process.uptime()) % 3600) / 60);
-        console.log(`💚 [DEBUG] Sistema ativo | ⏱️  ${uptimeHours}h ${uptimeMinutes}m | ${new Date().toLocaleTimeString('pt-BR')}`);
+      // Ping externo via URL pública (impede hibernação do Replit)
+      if (publicDomain) {
+        await fetch(`https://${publicDomain}/api/status`, {
+          method: 'GET',
+          headers: { 'X-Keep-Alive': 'true' },
+          signal: AbortSignal.timeout(8000),
+        });
+        const upH = Math.floor(process.uptime() / 3600);
+        const upM = Math.floor((process.uptime() % 3600) / 60);
+        console.log(`💚 [KEEP-ALIVE] Ping externo OK | ⏱️  ${upH}h ${upM}m | ${now}`);
+      } else {
+        // Fallback: localhost (funciona apenas para log)
+        await fetch('http://localhost:5000/api/status', { headers: { 'X-Internal-Debug': 'true' } });
+        console.log(`💛 [KEEP-ALIVE] Ping interno | ${now}`);
       }
-    } catch (error) {
-      console.log(`💛 [DEBUG] Sistema operando... | ${new Date().toLocaleTimeString('pt-BR')}`);
+    } catch (_) {
+      console.log(`💛 [KEEP-ALIVE] Sistema operando... | ${now}`);
     }
   };
   
@@ -359,13 +365,9 @@ app.use((req, res, next) => {
       );
     }
     
-    // 🔍 SISTEMA DE DEBUG INTERNO (Apenas para logs e monitoramento)
-    // ⚠️  IMPORTANTE: Keep-alive interno NÃO impede hibernação no Replit!
-    
-    // Ping de debug básico a cada 60 segundos (apenas para logs)
-    setInterval(keepWorkspaceAlive, 60000);
-    
-    // Ping inicial após 5 segundos
+    // 🔍 KEEP-ALIVE: Ping externo via URL pública a cada 4 minutos
+    // Replit hiberna após ~5 min sem tráfego externo — 4 min mantém sempre ativo
+    setInterval(keepWorkspaceAlive, 4 * 60 * 1000);
     setTimeout(keepWorkspaceAlive, 5000);
     
     log('\n' + '='.repeat(80));

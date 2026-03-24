@@ -19,6 +19,7 @@ import { EventEmitter } from 'events';
 import WebSocket from 'ws';
 import { marketDataCollector } from './market-data-collector';
 import { supremeAnalyzer, SupremeAnalysis, MarketRegime } from './supreme-market-analyzer';
+import { dualStorage as storage } from '../storage-dual';
 
 // ─────────────────────────── Tipos ───────────────────────────
 
@@ -538,11 +539,59 @@ class UniversalContractMonitor extends EventEmitter {
   private pendingSubAcks = new Map<number, number>(); // reqId → contractId
   private pendingSellReqs = new Map<number, number>(); // reqId → contractId (rastreia vendas em andamento)
   private isShuttingDown = false;
+  private orphanScanTimer: NodeJS.Timeout | null = null;
   private readonly RECENTLY_CLOSED_TTL_MS = 120000; // 2 minutes
 
   constructor() {
     super();
     this.setMaxListeners(50);
+    this.startOrphanScan();
+  }
+
+  // ── Recuperação de contratos órfãos (hibernação/reconexão) ──
+
+  private startOrphanScan(): void {
+    if (this.orphanScanTimer) return;
+    this.orphanScanTimer = setInterval(() => this.recoverOrphanedContracts(), 5 * 60 * 1000);
+    console.log('🔍 [MONITOR] Scanner de contratos órfãos iniciado (varredura a cada 5 min)');
+  }
+
+  private async recoverOrphanedContracts(): Promise<void> {
+    try {
+      const allUsers = await storage.getAllUsers();
+      let recovered = 0;
+      for (const user of allUsers) {
+        const openOps = await storage.getActiveTradeOperations(user.id);
+        for (const op of openOps) {
+          if (!op.derivContractId) continue;
+          const contractId = Number(op.derivContractId);
+          if (!contractId || this.monitored.has(contractId) || this.recentlyClosed.has(contractId)) continue;
+
+          const contractTypeRaw = (op.contractType || op.tradeType || 'CALL').toUpperCase();
+          console.log(`♻️ [MONITOR] Recuperando contrato órfão: ${contractId} | ${contractTypeRaw} | ${op.symbol}`);
+          try {
+            await this.startMonitoring({
+              contractId,
+              contractType: contractTypeRaw,
+              symbol: op.symbol,
+              buyPrice: op.buyPrice ?? op.amount ?? 1,
+              amount: op.amount ?? 1,
+              direction: (op.direction as 'up' | 'down' | 'neutral') ?? 'neutral',
+              userId: user.id,
+              openedAt: op.entryEpoch ? op.entryEpoch * 1000 : Date.now(),
+            });
+            recovered++;
+          } catch (err: any) {
+            console.warn(`⚠️ [MONITOR] Falha ao recuperar ${contractId}: ${err?.message}`);
+          }
+        }
+      }
+      if (recovered > 0) {
+        console.log(`✅ [MONITOR] ${recovered} contrato(s) órfão(s) recuperado(s) e remonitorado(s)`);
+      }
+    } catch (err: any) {
+      console.warn(`⚠️ [MONITOR] Erro na varredura de órfãos: ${err?.message}`);
+    }
   }
 
   // ── API Pública ──────────────────────────────────────────
@@ -775,6 +824,8 @@ class UniversalContractMonitor extends EventEmitter {
       }
     }
     await this.connect();
+    // Após reconectar: recuperar contratos que ficaram órfãos durante a hibernação
+    setTimeout(() => this.recoverOrphanedContracts(), 2000);
   }
 
   // ── Processamento de updates do contrato ─────────────────
