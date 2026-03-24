@@ -876,8 +876,8 @@ export class AutoTradingScheduler {
           console.log(`🎯 [LEVERAGE] Monitor de auto-sell ativo: contrato ${contract.contract_id} | alvo=${levTargetTicks} ticks`);
         }
 
-        // Registrar operação no banco (async, não bloqueia)
-        storage.createTradeOperation({
+        // Registrar operação no banco (await para garantir persistência em ambos os bancos)
+        await storage.createTradeOperation({
           userId: config.userId,
           symbol: best.symbol,
           direction: 'accumulator',
@@ -886,7 +886,7 @@ export class AutoTradingScheduler {
           amount: leverageStake,
           duration: 1,
           status: 'pending',
-          contractId: contract.contract_id?.toString(),
+          derivContractId: contract.contract_id?.toString(),
           aiConsensus: JSON.stringify({ leverageMode: true, assetsAligned: exceptional.length, score: best.consensus, growthRate: levGrowth }),
         }).catch(err => console.error('⚠️ [LEVERAGE] Erro ao salvar operação:', err));
       } else {

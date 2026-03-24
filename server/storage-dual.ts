@@ -289,9 +289,19 @@ export class DualStorage implements IStorage {
     if (this.turso) {
       try {
         await this.ensureUserInTurso(op.userId);
-        const r = await this.turso.createTradeOperation(withId);
-        this.sqlite.createTradeOperation(withId).catch((e: any) => console.warn('⚠️ [SQLITE SYNC] createTradeOperation:', e.message));
-        return r;
+        // Aguardar AMBOS (Turso + SQLite) para garantir consistência.
+        // Sem isso, SQLite fica desatualizado e o sync não encontra operações pendentes.
+        const [tursoResult] = await Promise.allSettled([
+          this.turso.createTradeOperation(withId),
+          this.sqlite.createTradeOperation(withId),
+        ]);
+        if (tursoResult.status === 'fulfilled') return tursoResult.value;
+        // Turso falhou mas SQLite pode ter dado certo
+        const sqliteResult = await this.sqlite.createTradeOperation(withId).catch((e: any) => {
+          console.warn('⚠️ [SQLITE] createTradeOperation (após falha Turso):', e.message);
+          throw e;
+        });
+        return sqliteResult;
       } catch (e: any) {
         console.warn('⚠️ [TURSO] createTradeOperation falhou, fallback SQLite:', e.message);
       }
@@ -300,23 +310,40 @@ export class DualStorage implements IStorage {
   }
 
   async getUserTradeOperations(uid: string, limit?: number) {
-    // SQLite first (fast, local). If empty, try Turso as fallback (data may only be there).
+    // Busca SQLite e Turso em paralelo e mescla os resultados para não perder pendentes.
+    // Isso resolve o bug onde novos trades ficavam só no Turso e o sync nunca os encontrava.
+    let sqliteOps: any[] = [];
+    let tursoOps: any[] = [];
+
     try {
-      const sqliteResult = await this.sqlite.getUserTradeOperations(uid, limit);
-      if (sqliteResult && sqliteResult.length > 0) return sqliteResult;
+      sqliteOps = await this.sqlite.getUserTradeOperations(uid, limit) ?? [];
     } catch {}
-    // SQLite empty or failed — try Turso
+
     if (this.turso && this.tursoReadOk) {
       try {
-        const r = await this.turso.getUserTradeOperations(uid, limit);
+        tursoOps = await this.turso.getUserTradeOperations(uid, limit) ?? [];
         this.tursoReadFailCount = 0;
-        return r;
       } catch (e: any) {
         this.onTursoReadError(e, 'getUserTradeOperations');
       }
     }
-    // Final fallback to SQLite (may return empty array)
-    return this.sqlite.getUserTradeOperations(uid, limit).catch(() => []);
+
+    if (tursoOps.length === 0) return sqliteOps;
+    if (sqliteOps.length === 0) return tursoOps;
+
+    // Mesclar: usar mapa por ID, preferindo Turso (fonte primária de escrita)
+    const merged = new Map<string, any>();
+    for (const op of sqliteOps) if (op?.id) merged.set(op.id, op);
+    for (const op of tursoOps)  if (op?.id) merged.set(op.id, op); // sobrescreve com dado mais recente
+    const result = Array.from(merged.values());
+
+    // Ordenar por createdAt decrescente (mais recente primeiro), respeitando o limit
+    result.sort((a: any, b: any) => {
+      const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return tb - ta;
+    });
+    return limit ? result.slice(0, limit) : result;
   }
   async updateTradeOperation(id: string, updates: Partial<TradeOperation>) { return this.write(() => this.turso!.updateTradeOperation(id, updates), () => this.sqlite.updateTradeOperation(id, updates), 'updateTradeOperation'); }
   async getActiveTradeOperations(uid: string) {
@@ -338,7 +365,15 @@ export class DualStorage implements IStorage {
 
   // ─── Estatísticas de Trading ──────────────────────────────────────────────
 
-  async getTradingStats(uid: string) { return this.sqlite.getTradingStats(uid); }
+  async getTradingStats(uid: string) {
+    // Turso é a fonte primária de escrita — buscar dele para ter estatísticas atualizadas.
+    // SQLite fica como fallback caso Turso esteja indisponível.
+    return this.localRead(
+      () => this.turso!.getTradingStats(uid),
+      () => this.sqlite.getTradingStats(uid),
+      'getTradingStats'
+    );
+  }
 
   async getActiveTradesCount(uid: string) {
     // Alta frequência → SQLite first
