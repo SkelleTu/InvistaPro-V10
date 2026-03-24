@@ -1966,9 +1966,12 @@ export class AutoTradingScheduler {
           }
           if (!needsBarrier) barrier = undefined;
 
-          const digitDuration = userModalityTicks[selectedModality]
-            ? Math.max(1, Math.min(userModalityTicks[selectedModality], 10))
-            : tradeParams.duration;
+          const rawDigitTicks = userModalityTicks[selectedModality];
+          const digitDuration = rawDigitTicks === 0
+            ? this.calculateDynamicTicks(selectedSymbol, 5) // 🤖 IA controla
+            : rawDigitTicks
+              ? Math.max(1, Math.min(rawDigitTicks, 10))
+              : tradeParams.duration;
           contract = await derivAPI.buyGenericDigitContract({
             contract_type: contractType,
             symbol: selectedSymbol,
@@ -1984,9 +1987,12 @@ export class AutoTradingScheduler {
           const callPutDirection: 'up' | 'down' = (selectedModality === 'rise' || selectedModality === 'higher') ? 'up' : 
                                                     (selectedModality === 'fall' || selectedModality === 'lower') ? 'down' : 
                                                     safeDirection;
-          const callPutDuration = userModalityTicks[selectedModality]
-            ? Math.max(1, Math.min(userModalityTicks[selectedModality], 10))
-            : Math.max(1, Math.floor(tradeParams.duration / 2));
+          const rawRFTicks = userModalityTicks[selectedModality];
+          const callPutDuration = rawRFTicks === 0
+            ? this.calculateDynamicTicks(selectedSymbol, 5) // 🤖 IA controla
+            : rawRFTicks
+              ? Math.max(1, Math.min(rawRFTicks, 10))
+              : Math.max(1, Math.floor(tradeParams.duration / 2));
           contract = await derivAPI.buyCallPutContract(selectedSymbol, callPutDirection, callPutDuration, tradeParams.amount);
           resolvedTradeType = selectedModality;
 
@@ -2003,9 +2009,15 @@ export class AutoTradingScheduler {
           // goes_outside/ends_outside: range maior (~0.8%) → preço precisa escapar
           const offsetPct = (selectedModality === 'ends_outside' || selectedModality === 'goes_outside') ? 0.008 : 0.005;
 
+          // Duração: respeita config do usuário (0=IA controla, >0=fixo em minutos)
+          const rawInOutMin = userModalityTicks[selectedModality];
+          const aiInOutExpiryMin = supremeAnalysis?.adaptiveParams?.vanilla?.durationMin ?? 15;
+          const aiInOutRangeMin = supremeAnalysis?.adaptiveParams?.turbo?.durationMin ?? 5;
+          const userInOutMin = rawInOutMin === 0 ? null : (rawInOutMin && rawInOutMin > 0 ? rawInOutMin : null);
+
           if (isExpiry && currentPrice && currentPrice > 0) {
             // EXPIRYRANGE / EXPIRYMISS: barriers absolutas + date_expiry dinâmico via IA
-            const adaptiveExpiryMin = supremeAnalysis?.adaptiveParams?.vanilla?.durationMin ?? 15;
+            const adaptiveExpiryMin = userInOutMin ?? aiInOutExpiryMin;
             // Usar offsetPct dedicado — touch.barrierOffsetPct é para ONETOUCH/NOTOUCH, não EXPIRY
             const adaptiveOffsetPct = offsetPct;
             const offset = currentPrice * adaptiveOffsetPct;
@@ -2013,7 +2025,7 @@ export class AutoTradingScheduler {
             const lowerBarrier  = (currentPrice - offset).toFixed(2);
             const dateExpiry  = Math.floor(Date.now() / 1000) + (adaptiveExpiryMin * 60);
 
-            console.log(`📊 [${operationId}] ${contractType}: barrier=${upperBarrier}, barrier2=${lowerBarrier}, expiry=${adaptiveExpiryMin}min ADAPTATIVO (regime=${supremeAnalysis?.regime ?? 'padrão'}) | Symbol: ${selectedSymbol}`);
+            console.log(`📊 [${operationId}] ${contractType}: barrier=${upperBarrier}, barrier2=${lowerBarrier}, expiry=${adaptiveExpiryMin}min ${rawInOutMin === 0 ? '🤖 IA' : userInOutMin ? '⚙️ FIXO' : 'ADAPTATIVO'} (regime=${supremeAnalysis?.regime ?? 'padrão'}) | Symbol: ${selectedSymbol}`);
             contract = await derivAPI.buyFlexibleContract({
               contract_type: contractType,
               symbol: selectedSymbol,
@@ -2024,7 +2036,7 @@ export class AutoTradingScheduler {
             });
           } else {
             // RANGE / UPORDOWN: barriers relativas + duration dinâmica via IA
-            const adaptiveRangeDurMin = supremeAnalysis?.adaptiveParams?.turbo?.durationMin ?? 5;
+            const adaptiveRangeDurMin = userInOutMin ?? aiInOutRangeMin;
             // Usar offsetPct dedicado — touch.barrierOffsetPct é para ONETOUCH/NOTOUCH, não RANGE
             const offset = currentPrice && currentPrice > 0
               ? parseFloat((currentPrice * offsetPct).toFixed(2))
@@ -2032,7 +2044,7 @@ export class AutoTradingScheduler {
             const upperBarrier = '+' + offset;
             const lowerBarrier  = '-' + offset;
 
-            console.log(`📊 [${operationId}] ${contractType}: barrier=${upperBarrier}, barrier2=${lowerBarrier}, ${adaptiveRangeDurMin}m ADAPTATIVO (regime=${supremeAnalysis?.regime ?? 'padrão'}) | Symbol: ${selectedSymbol}`);
+            console.log(`📊 [${operationId}] ${contractType}: barrier=${upperBarrier}, barrier2=${lowerBarrier}, ${adaptiveRangeDurMin}m ${rawInOutMin === 0 ? '🤖 IA' : userInOutMin ? '⚙️ FIXO' : 'ADAPTATIVO'} (regime=${supremeAnalysis?.regime ?? 'padrão'}) | Symbol: ${selectedSymbol}`);
             contract = await derivAPI.buyFlexibleContract({
               contract_type: contractType,
               symbol: selectedSymbol,
@@ -2081,9 +2093,14 @@ export class AutoTradingScheduler {
             barrier = safeDirection === 'up' ? '+0.5' : '-0.5';
             console.log(`📊 [${operationId}] ${contractType}: barrier=${barrier} | Symbol: ${selectedSymbol}`);
           }
-          // Duração: 30 min dá vol_30min ≈ 0.22% para R_25, tornando barreira de 0.3% viável
-          // Com 5 min (vol ≈ 0.09%), qualquer barreira > 0.1% = probabilidade de toque ≈ 0 → "no return"
-          const touchDuration = supremeAnalysis?.adaptiveParams?.vanilla?.durationMin ?? 30;
+          // Duração: respeita config do usuário (0=IA, >0=fixo em minutos)
+          const rawTouchMin = userModalityTicks[selectedModality];
+          const aiTouchDuration = supremeAnalysis?.adaptiveParams?.vanilla?.durationMin ?? 30;
+          const touchDuration = rawTouchMin === 0
+            ? aiTouchDuration  // 🤖 IA controla
+            : rawTouchMin && rawTouchMin > 0
+              ? rawTouchMin    // ⚙️ fixo pelo usuário
+              : aiTouchDuration;
           const clampedTouchDuration = Math.min(Math.max(touchDuration, 15), 60); // entre 15 e 60 min
           contract = await derivAPI.buyFlexibleContract({
             contract_type: contractType,

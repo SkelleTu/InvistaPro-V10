@@ -2123,6 +2123,7 @@ export default function TradingSystemPage() {
                     }).catch(() => {});
                   };
                   const TICK_MODALITIES = new Set(['digit_differs','digit_matches','digit_even','digit_odd','digit_over','digit_under','rise','fall','higher','lower']);
+                  const MINUTE_MODALITIES = new Set(['touch','no_touch','ends_between','ends_outside','stays_between','goes_outside','turbo_up','turbo_down','vanilla_call','vanilla_put']);
                   const toggleModality = (id: string, newVal: boolean, name: string) => {
                     const updated = { ...enabledModalities, [id]: newVal };
                     setEnabledModalities(updated);
@@ -2493,44 +2494,76 @@ export default function TradingSystemPage() {
                                       </div>
                                     </div>
 
-                                    {/* ── Ticks por Operação (somente modalidades compatíveis) ── */}
-                                    {TICK_MODALITIES.has(modality.id) && (
-                                      <div className="rounded-md bg-violet-50 dark:bg-violet-900/20 border border-violet-200 dark:border-violet-800 p-2">
-                                        <p className="text-[11px] font-semibold text-violet-700 dark:text-violet-300 mb-1.5 flex items-center gap-1">
-                                          <span>⏱️</span> Ticks por operação
-                                        </p>
-                                        <div className="flex flex-wrap gap-1">
-                                          {[1,2,3,4,5,6,7,8,9,10].map((t) => {
-                                            const curTicks = modalityTicks[modality.id] ?? 5;
-                                            const isSel = curTicks === t;
-                                            return (
-                                              <button
-                                                key={t}
-                                                type="button"
-                                                data-testid={`modality-ticks-${modality.id}-${t}`}
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                  const next = { ...modalityTicks, [modality.id]: t };
-                                                  setModalityTicks(next);
-                                                  saveModalityTicks(next);
-                                                  toast({ title: `${modality.name}: ${t} ticks`, duration: 1200 });
-                                                }}
-                                                className={`px-2 py-1 rounded text-[11px] font-bold border transition-all ${
-                                                  isSel
-                                                    ? 'bg-violet-500 text-white border-violet-500'
-                                                    : 'bg-white dark:bg-gray-800 text-muted-foreground border-border hover:border-violet-400'
-                                                }`}
-                                              >
-                                                {t}
-                                              </button>
-                                            );
-                                          })}
+                                    {/* ── Duração controlada por IA ou manual (todas as modalidades compatíveis) ── */}
+                                    {(TICK_MODALITIES.has(modality.id) || MINUTE_MODALITIES.has(modality.id)) && (() => {
+                                      const isTick = TICK_MODALITIES.has(modality.id);
+                                      const rawVal = modalityTicks[modality.id];
+                                      const curVal = (rawVal === undefined || rawVal === 0) ? (isTick ? 5 : 15) : rawVal;
+                                      const tickOptions = [1,2,3,4,5,6,7,8,9,10];
+                                      const minOptions = [5,10,15,30,60];
+                                      const options = isTick ? tickOptions : minOptions;
+                                      const unit = isTick ? 'ticks' : 'min';
+                                      return (
+                                        <div className="rounded-md bg-violet-50 dark:bg-violet-900/20 border border-violet-200 dark:border-violet-800 p-2">
+                                          <p className="text-[11px] font-semibold text-violet-700 dark:text-violet-300 mb-1.5 flex items-center gap-1">
+                                            <span>⏱️</span> {isTick ? 'Ticks por operação' : 'Duração (minutos)'}
+                                          </p>
+                                          <div className="flex flex-wrap gap-1">
+                                            {/* Botão IA */}
+                                            <button
+                                              type="button"
+                                              data-testid={`modality-ticks-${modality.id}-ai`}
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                const next = { ...modalityTicks, [modality.id]: 0 };
+                                                setModalityTicks(next);
+                                                saveModalityTicks(next);
+                                                toast({ title: `${modality.name}: IA controla ${unit}`, description: 'A IA decide a duração ideal a cada operação.', duration: 1800 });
+                                              }}
+                                              className={`px-2 py-1 rounded text-[11px] font-bold border transition-all flex items-center gap-0.5 ${
+                                                rawVal === 0
+                                                  ? 'bg-purple-600 text-white border-purple-600'
+                                                  : 'bg-white dark:bg-gray-800 text-muted-foreground border-border hover:border-purple-400'
+                                              }`}
+                                            >
+                                              🤖 IA
+                                            </button>
+                                            {/* Botões de valor fixo */}
+                                            {options.map((t) => {
+                                              const isSel = rawVal === t;
+                                              return (
+                                                <button
+                                                  key={t}
+                                                  type="button"
+                                                  data-testid={`modality-ticks-${modality.id}-${t}`}
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    const next = { ...modalityTicks, [modality.id]: t };
+                                                    setModalityTicks(next);
+                                                    saveModalityTicks(next);
+                                                    toast({ title: `${modality.name}: ${t} ${unit}`, duration: 1200 });
+                                                  }}
+                                                  className={`px-2 py-1 rounded text-[11px] font-bold border transition-all ${
+                                                    isSel
+                                                      ? 'bg-violet-500 text-white border-violet-500'
+                                                      : 'bg-white dark:bg-gray-800 text-muted-foreground border-border hover:border-violet-400'
+                                                  }`}
+                                                >
+                                                  {t}
+                                                </button>
+                                              );
+                                            })}
+                                          </div>
+                                          <p className="text-[10px] text-violet-600 dark:text-violet-400 mt-1">
+                                            {rawVal === 0
+                                              ? '🤖 IA controla a duração — decide o ideal a cada operação com base no regime de mercado.'
+                                              : isTick
+                                                ? `Fixo em ${curVal} ${unit}. Clique em 🤖 IA para deixar a IA decidir.`
+                                                : `Fixo em ${curVal} ${unit}. Clique em 🤖 IA para deixar a IA decidir.`}
+                                          </p>
                                         </div>
-                                        <p className="text-[10px] text-violet-600 dark:text-violet-400 mt-1">
-                                          Duração do contrato em ticks (1–10). Padrão: 5.
-                                        </p>
-                                      </div>
-                                    )}
+                                      );
+                                    })()}
                                   </div>
                                 )}
                               </div>
