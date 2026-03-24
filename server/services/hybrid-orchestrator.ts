@@ -8,6 +8,7 @@ import { AdvancedLearningSystem, AdvancedLearningConfig } from './advanced-learn
 import { QuantumNeuralSystem, QuantumNeuralConfig } from './quantum-neural-system';
 import { MicroscopicTechnicalAnalyzer, microscopicAnalyzer, MicroscopicAnalysis } from './microscopic-technical-analysis';
 import { DerivTickData } from './deriv-api';
+import { persistentLearningEngine } from './persistent-learning-engine';
 
 interface IAdvancedAnalyzer {
   analyzeMarket(symbol: string, marketData: any[], models: string[]): Promise<any>;
@@ -215,14 +216,15 @@ export class HybridOrchestrator {
     // 4. Obter análise microscópica recente (se disponível)
     const microscopicResult = this.latestMicroscopicAnalysis.get(symbol);
 
-    // 5. Fusão Inteligente de TODOS os Resultados
-    return await this.fuseResults(advancedResult, quantumResult, microscopicResult);
+    // 5. Fusão Inteligente de TODOS os Resultados (com pesos aprendidos)
+    return await this.fuseResults(symbol, advancedResult, quantumResult, microscopicResult);
   }
 
   /**
    * FUSÃO INTELIGENTE DOS SISTEMAS
+   * Agora consulta os pesos persistidos pelo motor de aprendizado para ponderar cada sistema.
    */
-  private async fuseResults(advancedResult: any, quantumResult: any, microscopicResult?: MicroscopicAnalysis): Promise<any> {
+  private async fuseResults(symbol: string, advancedResult: any, quantumResult: any, microscopicResult?: MicroscopicAnalysis): Promise<any> {
     const hasMicroscopic = microscopicResult && microscopicResult.cooperativeSignal.confidence > 50;
     
     if (!quantumResult && !hasMicroscopic) {
@@ -247,26 +249,47 @@ export class HybridOrchestrator {
     
     console.log(`🌌 [HYBRID FUSION] Fusionando Sistema Avançado + ${availableSystems.join(' + ')}`);
     
-    // Pesos adaptativos baseados na performance real de cada sistema
-    const adaptiveWeights = this.getAdaptiveWeights();
-    let advancedWeight = adaptiveWeights.advanced;
-    let quantumWeight = quantumResult ? adaptiveWeights.quantum : 0;
-    let microscopicWeight = hasMicroscopic ? adaptiveWeights.microscopic : 0;
-
-    // Se algum sistema não está disponível, redistribuir pesos proporcionalmente
-    if (!quantumResult && !hasMicroscopic) {
-      advancedWeight = 1.0;
-    } else if (!quantumResult && hasMicroscopic) {
-      const total = adaptiveWeights.advanced + adaptiveWeights.microscopic;
-      advancedWeight = adaptiveWeights.advanced / total;
-      microscopicWeight = adaptiveWeights.microscopic / total;
-    } else if (quantumResult && !hasMicroscopic) {
-      const total = adaptiveWeights.advanced + adaptiveWeights.quantum;
-      advancedWeight = adaptiveWeights.advanced / total;
-      quantumWeight = adaptiveWeights.quantum / total;
+    // ── PESOS APRENDIDOS (motor persistente) ─────────────────────────────────
+    // Lê os pesos que foram acumulados trade a trade desde o início da conta.
+    // Cada modelo tem um peso entre 0.05 e 3.0 (inicia em 1.0).
+    // Modelos que acertam crescem; os que erram encolhem.
+    let learnedAdvanced = 1.0;
+    let learnedQuantum = 1.0;
+    let learnedMicroscopic = 1.0;
+    try {
+      const learnedWeights = await persistentLearningEngine.getModelWeights(symbol);
+      learnedAdvanced = learnedWeights['advanced_learning'] ?? 1.0;
+      learnedQuantum = learnedWeights['quantum_neural'] ?? 1.0;
+      learnedMicroscopic = learnedWeights['microscopic_technical'] ?? 1.0;
+      const totalTrades = Object.values(learnedWeights).reduce((sum, w) => sum + (w !== 1.0 ? 1 : 0), 0);
+      if (totalTrades > 0) {
+        console.log(`🧠 [LEARNING WEIGHTS] ${symbol} | advanced=${learnedAdvanced.toFixed(3)} quantum=${learnedQuantum.toFixed(3)} microscopic=${learnedMicroscopic.toFixed(3)}`);
+      }
+    } catch {
+      // Falha silenciosa — continua com peso neutro 1.0
     }
 
-    console.log(`⚖️ [HYBRID WEIGHTS] Avançado=${(advancedWeight*100).toFixed(0)}% | Quântico=${(quantumWeight*100).toFixed(0)}% | Microscópico=${(microscopicWeight*100).toFixed(0)}% (baseado em ${this.systemAccuracy.advanced.total + this.systemAccuracy.quantum.total + this.systemAccuracy.microscopic.total} amostras)`);
+    // ── PESOS ADAPTATIVOS (memória de sessão) ────────────────────────────────
+    // Pesos adaptativos baseados na performance real de cada sistema
+    const adaptiveWeights = this.getAdaptiveWeights();
+    // Blendagem: peso_final = adaptativo * aprendido_persistente (depois normalizado)
+    let advancedWeight = adaptiveWeights.advanced * learnedAdvanced;
+    let quantumWeight = quantumResult ? adaptiveWeights.quantum * learnedQuantum : 0;
+    let microscopicWeight = hasMicroscopic ? adaptiveWeights.microscopic * learnedMicroscopic : 0;
+
+    // Normalizar pesos blendados para que somem 1.0
+    if (!quantumResult && !hasMicroscopic) {
+      advancedWeight = 1.0;
+    } else {
+      const totalBlended = advancedWeight + quantumWeight + microscopicWeight;
+      if (totalBlended > 0) {
+        advancedWeight = advancedWeight / totalBlended;
+        quantumWeight = quantumWeight / totalBlended;
+        microscopicWeight = microscopicWeight / totalBlended;
+      }
+    }
+
+    console.log(`⚖️ [HYBRID WEIGHTS] Avançado=${(advancedWeight*100).toFixed(0)}% | Quântico=${(quantumWeight*100).toFixed(0)}% | Microscópico=${(microscopicWeight*100).toFixed(0)}% (sessão: ${this.systemAccuracy.advanced.total + this.systemAccuracy.quantum.total + this.systemAccuracy.microscopic.total} amostras | aprendizado: adv=${learnedAdvanced.toFixed(2)} qnt=${learnedQuantum.toFixed(2)} mic=${learnedMicroscopic.toFixed(2)})`);
     
     // Sanitizar confidence inputs para prevenir NaN propagation
     const safeAdvancedConfidence = isFinite(advancedResult.confidence) && advancedResult.confidence >= 0 ? 
