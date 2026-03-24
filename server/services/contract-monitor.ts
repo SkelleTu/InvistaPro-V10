@@ -200,14 +200,34 @@ function getThresholds(contractType: string): ExitThresholds {
         minTicksBeforeSell: 5,
       };
     case 'ONETOUCH':
+      // Preço chegando perto da barreira = ÓTIMO (vai ganhar!) → barrierDangerPct=0 (não vender por proximidade)
+      return {
+        profitTargetPct: 65,
+        trailingStopPct: 12,
+        barrierDangerPct: 0,       // barreira próxima = vitória iminente — NUNCA vender por esse motivo
+        maxDurationMin: 30,
+        earlyLossExitPct: 70,
+        aiReversalStrength: 70,
+        minTicksBeforeSell: 4,
+      };
     case 'NOTOUCH':
+      // Barreira começa a ~0.3% — só vender se estiver a <0.08% (quase tocando)
+      return {
+        profitTargetPct: 65,
+        trailingStopPct: 12,
+        barrierDangerPct: 0.08,    // 0.3% inicial: só dispara quando spot está literalmente prestes a tocar
+        maxDurationMin: 30,
+        earlyLossExitPct: 70,
+        aiReversalStrength: 70,
+        minTicksBeforeSell: 4,
+      };
     case 'RANGE':
     case 'EXPIRYRANGE':
     case 'EXPIRYMISS':
     case 'UPORDOWN':
       return {
         profitTargetPct: 65,
-        trailingStopPct: 12,       // reduzido de 25% → 12% para proteger lucros antes que o preço reverta
+        trailingStopPct: 12,
         barrierDangerPct: 0.5,
         maxDurationMin: 30,
         earlyLossExitPct: 70,
@@ -1301,9 +1321,22 @@ class UniversalContractMonitor extends EventEmitter {
         return { shouldSell: true, reason: `BARRIER: corte de perda ${state.profitPct.toFixed(1)}% (limiar -${thresholds.earlyLossExitPct.toFixed(0)}%)`, urgency: 'high' };
       }
 
-      // 5. Barreira perigosa (especialmente No Touch: se preço se aproxima da barreira proibida)
+      // 5a. NOTOUCH: aproximação rápida da barreira — vender para proteger lucro antes de tocar
+      if (ct === 'NOTOUCH' && state.barrierDistanceHistory.length >= 5) {
+        const hist = state.barrierDistanceHistory;
+        const oldest = hist[0];
+        const newest = hist[hist.length - 1];
+        const approachingFast = (oldest - newest) > 0.05 && newest < 0.3; // se aproximando rápido
+        if (approachingFast && state.profitPct >= 0) {
+          return { shouldSell: true, reason: `NOTOUCH: barreira se aproximando rápido (${oldest.toFixed(3)}%→${newest.toFixed(3)}%) | lucro=${state.profitPct.toFixed(1)}%`, urgency: 'high' };
+        }
+      }
+
+      // 5b. Barreira física MUITO próxima (quase tocando) — salvamento de emergência
+      // Para ONETOUCH: barrierDangerPct=0 → check nunca dispara (barreira próxima = vitória)
+      // Para NOTOUCH: barrierDangerPct=0.08% → só dispara se spot estiver literalmente prestes a tocar
       if (state.barrierDistance !== undefined && thresholds.barrierDangerPct > 0 && state.barrierDistance < thresholds.barrierDangerPct) {
-        return { shouldSell: true, reason: `BARRIER: barreira perigosa a ${state.barrierDistance.toFixed(3)}% | lucro=${state.profitPct.toFixed(1)}%`, urgency: 'emergency' };
+        return { shouldSell: true, reason: `BARRIER: barreira crítica a ${state.barrierDistance.toFixed(3)}% | lucro=${state.profitPct.toFixed(1)}%`, urgency: 'emergency' };
       }
 
       // 6. Reversão de IA — agora sensível a partir de qualquer lucro positivo (antes exigia >20%)
