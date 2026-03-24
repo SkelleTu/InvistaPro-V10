@@ -461,9 +461,9 @@ function getAdaptiveThresholds(base: ExitThresholds, symbol: string, currentProf
 
   // ── Regime de mercado ────────────────────────────────────────
   if (regime === 'strong_trend') {
-    // Tendência forte → aguardar mais lucro, trailing mais solto
+    // Tendência forte → aguardar mais lucro, mas trailing permanece firme para preservar ganhos
     profitTargetPct   *= 1.4;    // +40% alvo
-    trailingStopPct   *= 1.25;   // trailing mais solto (deixar respirar)
+    trailingStopPct   *= 1.0;    // trailing mantido: não abrir mão do lucro acumulado
     maxDurationMin    *= 1.3;    // mais tempo
     aiReversalStrength *= 1.1;   // exigir sinal mais forte para fechar
   } else if (regime === 'weak_trend') {
@@ -1076,7 +1076,22 @@ class UniversalContractMonitor extends EventEmitter {
       };
     }
 
-    // ── 4. ESTRATÉGIAS POR MODALIDADE ────────────────────────────
+    // ── 4. PROTEÇÃO GLOBAL DE LUCRO (ignora holdSignal) ──────────
+    // Se o lucro caiu ≥50% a partir do pico e ainda está positivo → fechar SEMPRE
+    // Isso garante que nenhum sinal de "hold" deixe escapar um lucro que virou prejuízo
+    if (state.peakProfit > 0 && state.profit > 0) {
+      const dropFromPeak = state.peakProfit - state.profit;
+      const dropRatioPct = (dropFromPeak / state.peakProfit) * 100;
+      if (dropRatioPct >= 50 && state.peakProfit > state.input.buyPrice * 0.03) {
+        return {
+          shouldSell: true,
+          reason: `PRESERVAÇÃO DE LUCRO: caiu ${dropRatioPct.toFixed(0)}% do pico ($${state.peakProfit.toFixed(2)} → $${state.profit.toFixed(2)}) — fechando com lucro restante`,
+          urgency: 'high',
+        };
+      }
+    }
+
+    // ── 5. ESTRATÉGIAS POR MODALIDADE ────────────────────────────
 
     // ── ACCUMULATOR — 100% DECISÃO IA EM TEMPO REAL ──────────────
     if (ct === 'ACCU') {
@@ -1202,10 +1217,9 @@ class UniversalContractMonitor extends EventEmitter {
       if (state.profitPct <= -thresholds.earlyLossExitPct) {
         return { shouldSell: true, reason: `MULT: corte de perda ${state.profitPct.toFixed(1)}%`, urgency: 'emergency' };
       }
-      if (state.peakProfit > state.input.buyPrice * 0.2 && state.profit < state.peakProfit * (1 - thresholds.trailingStopPct / 100)) {
-        if (!supremeHold) {
-          return { shouldSell: true, reason: `MULT: trailing (pico $${state.peakProfit.toFixed(2)} → $${state.profit.toFixed(2)}) | regime=${supreme.regime}`, urgency: 'high' };
-        }
+      // Trailing stop NUNCA é bloqueado pelo holdSignal — proteger lucro é prioridade máxima
+      if (state.peakProfit > state.input.buyPrice * 0.05 && state.profit < state.peakProfit * (1 - thresholds.trailingStopPct / 100)) {
+        return { shouldSell: true, reason: `MULT: trailing (pico $${state.peakProfit.toFixed(2)} → $${state.profit.toFixed(2)}) | hold ignorado para preservar lucro | regime=${supreme.regime}`, urgency: 'high' };
       }
       if (!supremeHold && (confirmedReversal || supreme.urgency === 'high') && state.profitPct > 10) {
         return { shouldSell: true, reason: `MULT: ${supreme.exitReason || 'reversão suprema'} | lucro=${state.profitPct.toFixed(1)}%`, urgency: supreme.urgency };
@@ -1253,16 +1267,17 @@ class UniversalContractMonitor extends EventEmitter {
       if (bidDecline >= thresholds.earlyLossExitPct) {
         return { shouldSell: true, reason: `CALL/PUT: bid caiu ${bidDecline.toFixed(1)}% — saída preventiva`, urgency: 'medium' };
       }
-      // Trailing stop por bid — arma quando bid sobe ≥20% acima do buy price
-      // GUARDA: só vende se bid ainda estiver ACIMA do preço de compra (nunca sai com perda pelo trailing)
-      if (!supremeHold && state.peakBidPrice > state.input.buyPrice * 1.20) {
+      // Trailing stop por bid — arma quando bid sobe ≥10% acima do buy price
+      // holdSignal NÃO bloqueia: preservar lucro tem prioridade sobre "aguardar tendência"
+      if (state.peakBidPrice > state.input.buyPrice * 1.10) {
         const trailingThreshold = state.peakBidPrice * (1 - thresholds.trailingStopPct / 100);
         if (state.bidPrice < trailingThreshold && state.bidPrice > state.input.buyPrice) {
           return { shouldSell: true, reason: `CALL/PUT: trailing bid (pico $${state.peakBidPrice.toFixed(4)} → $${state.bidPrice.toFixed(4)}, queda ${thresholds.trailingStopPct.toFixed(0)}%) regime=${supreme.regime}`, urgency: 'high' };
         }
       }
       // Trailing stop por lucro % — protege qualquer pico de lucro positivo
-      if (!supremeHold && state.peakProfit > 0 && state.profitPct > 3) {
+      // holdSignal NÃO bloqueia: trailing stop é proteção de lucro, não entrada
+      if (state.peakProfit > 0 && state.profitPct > 3) {
         const peakPct = (state.peakProfit / state.input.buyPrice) * 100;
         const dropFromPeak = peakPct - state.profitPct;
         if (dropFromPeak >= thresholds.trailingStopPct) {
