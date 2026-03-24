@@ -697,7 +697,7 @@ export class TursoStorage implements IStorage {
     return 0.75;
   }
 
-  async canExecuteTradeWithoutViolatingMinimum(userId: string, potentialLoss: number): Promise<{ canExecute: boolean; reason?: string; currentBalance: number; minimumRequired: number }> {
+  async canExecuteTradeWithoutViolatingMinimum(userId: string, potentialLoss: number, isMartingaleRecovery = false): Promise<{ canExecute: boolean; reason?: string; currentBalance: number; minimumRequired: number }> {
     let todayPnL = await this.getDailyPnL(userId);
     if (!todayPnL) {
       const tokenData = await this.getUserDerivToken(userId);
@@ -715,22 +715,26 @@ export class TursoStorage implements IStorage {
       }
     }
 
-    // PROTEÇÃO ORIENTADA AO MERCADO:
-    // Usa apenas a abertura do dia como referência — sem depender do fechamento anterior.
-    // O Recovery Mode (consenso ≥75%) já garante que o mercado esteja favorável.
     const tokenData = await this.getUserDerivToken(userId);
     const accountType = tokenData?.accountType || 'demo';
-    const maxDrawdownPct = accountType === 'demo' ? 0.15 : 0.10;
+    // Martingale recovery usa limite mais amplo — é a operação de recuperação, não pode ser bloqueada
+    const maxDrawdownPct = isMartingaleRecovery
+      ? (accountType === 'demo' ? 0.40 : 0.28)
+      : (accountType === 'demo' ? 0.25 : 0.15);
+
     const minimumRequired = todayPnL.openingBalance * (1 - maxDrawdownPct);
+    const absoluteFloor = todayPnL.currentBalance * 0.20;
 
     const projectedBalance = todayPnL.currentBalance - potentialLoss;
-    if (projectedBalance < minimumRequired) {
+    if (projectedBalance < minimumRequired || projectedBalance < absoluteFloor) {
+      const effectiveFloor = Math.max(minimumRequired, absoluteFloor);
       const lostPct = (((todayPnL.openingBalance - projectedBalance) / todayPnL.openingBalance) * 100).toFixed(1);
+      const limitLabel = isMartingaleRecovery ? `${(maxDrawdownPct*100).toFixed(0)}% (martingale)` : `${(maxDrawdownPct*100).toFixed(0)}%`;
       return {
         canExecute: false,
-        reason: `Trade bloqueado: queda de ${lostPct}% excede limite de ${(maxDrawdownPct*100).toFixed(0)}% da abertura ($${todayPnL.openingBalance.toFixed(2)}) — aguardando mercado melhorar`,
+        reason: `Trade bloqueado: queda de ${lostPct}% excede limite de ${limitLabel} da abertura ($${todayPnL.openingBalance.toFixed(2)}) — aguardando mercado melhorar`,
         currentBalance: todayPnL.currentBalance,
-        minimumRequired
+        minimumRequired: effectiveFloor
       };
     }
     return { canExecute: true, currentBalance: todayPnL.currentBalance, minimumRequired };

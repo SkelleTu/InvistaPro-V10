@@ -1641,12 +1641,16 @@ export class AutoTradingScheduler {
       }
 
       // 🛡️ PROTEÇÃO FUNDAMENTAL: JAMAIS FECHAR ABAIXO DO ANTERIOR OU ABERTURA
+      // Martingale partes 2 e 3 são operações de RECUPERAÇÃO — usam limite ampliado
       try {
-        const protectionCheck = await storage.canExecuteTradeWithoutViolatingMinimum(config.userId, tradeParams.amount);
+        const mgState = this.getMartingaleState(config.userId);
+        const isMartingaleRecovery = mgState.isActive && mgState.currentPart > 1;
+        const protectionCheck = await storage.canExecuteTradeWithoutViolatingMinimum(config.userId, tradeParams.amount, isMartingaleRecovery || isRecoveryMode);
         
         if (!protectionCheck.canExecute) {
           console.log(`🛡️ [${operationId}] PROTEÇÃO ATIVADA - TRADE BLOQUEADO:`);
           console.log(`   • Motivo: ${protectionCheck.reason}`);
+          console.log(`   • Modo: ${isMartingaleRecovery ? 'Martingale Recovery' : isRecoveryMode ? 'Recovery Mode' : 'Trade Normal'}`);
           console.log(`   • Saldo atual: $${protectionCheck.currentBalance.toFixed(2)}`);
           console.log(`   • Mínimo requerido: $${protectionCheck.minimumRequired.toFixed(2)}`);
           console.log(`   • Valor do trade: $${tradeParams.amount.toFixed(2)}`);

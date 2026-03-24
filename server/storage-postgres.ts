@@ -703,7 +703,7 @@ export class PostgresStorage implements IStorage {
     return 0.75;
   }
 
-  async canExecuteTradeWithoutViolatingMinimum(userId: string, potentialLoss: number): Promise<any> {
+  async canExecuteTradeWithoutViolatingMinimum(userId: string, potentialLoss: number, isMartingaleRecovery = false): Promise<any> {
     return { canExecute: true, currentBalance: 0, minimumRequired: 0 };
   }
 

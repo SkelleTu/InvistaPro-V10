@@ -1379,7 +1379,8 @@ export class DatabaseStorage implements IStorage {
   }
 
   // 🔥 PROTEÇÃO CONTRA FECHAMENTO ABAIXO DO ANTERIOR/ABERTURA
-  async canExecuteTradeWithoutViolatingMinimum(userId: string, potentialLoss: number): Promise<{canExecute: boolean, reason?: string, currentBalance: number, minimumRequired: number}> {
+  // isMartingaleRecovery=true → limites mais amplos (a operação É a recuperação)
+  async canExecuteTradeWithoutViolatingMinimum(userId: string, potentialLoss: number, isMartingaleRecovery = false): Promise<{canExecute: boolean, reason?: string, currentBalance: number, minimumRequired: number}> {
     let todayPnL = await this.getDailyPnL(userId);
     
     if (!todayPnL) {
@@ -1415,19 +1416,31 @@ export class DatabaseStorage implements IStorage {
     const tokenData = await this.getUserDerivToken(userId);
     const accountType = tokenData?.accountType || 'demo';
 
-    // Demo: tolera até 15% de queda da abertura | Real: até 10%
-    const maxDrawdownPct = accountType === 'demo' ? 0.15 : 0.10;
+    // Limites por tipo de operação:
+    //   Trade normal    → Demo 25% | Real 15%  (ampliado para não bloquear IA prematuramente)
+    //   Martingale rec. → Demo 40% | Real 28%  (a operação É a recuperação, não pode ser bloqueada)
+    const maxDrawdownPct = isMartingaleRecovery
+      ? (accountType === 'demo' ? 0.40 : 0.28)
+      : (accountType === 'demo' ? 0.25 : 0.15);
+
     const minimumRequired = openingBalance * (1 - maxDrawdownPct);
 
-    if (projectedBalance < minimumRequired) {
+    // Proteção absoluta: nunca deixar o saldo projetado abaixo de 20% do saldo atual
+    // (garante que mesmo martingale não aposte tudo de uma vez)
+    const absoluteFloor = currentBalance * 0.20;
+
+    if (projectedBalance < minimumRequired || projectedBalance < absoluteFloor) {
+      const effectiveFloor = Math.max(minimumRequired, absoluteFloor);
       const lostPct = (((openingBalance - projectedBalance) / openingBalance) * 100).toFixed(1);
-      const reason = `Trade bloqueado: queda de ${lostPct}% excede limite de ${(maxDrawdownPct * 100).toFixed(0)}% da abertura do dia ($${openingBalance.toFixed(2)})`;
+      const limitLabel = isMartingaleRecovery ? `${(maxDrawdownPct*100).toFixed(0)}% (martingale)` : `${(maxDrawdownPct*100).toFixed(0)}%`;
+      const reason = `Trade bloqueado: queda de ${lostPct}% excede limite de ${limitLabel} da abertura ($${openingBalance.toFixed(2)})`;
 
       console.log(`🚫 PROTEÇÃO ATIVADA: ${reason}`);
+      console.log(`   • Modo: ${isMartingaleRecovery ? 'MARTINGALE RECOVERY' : 'TRADE NORMAL'}`);
       console.log(`   • Saldo atual: $${currentBalance.toFixed(2)}`);
       console.log(`   • Perda potencial: $${potentialLoss.toFixed(2)}`);
       console.log(`   • Saldo projetado: $${projectedBalance.toFixed(2)}`);
-      console.log(`   • Mínimo permitido: $${minimumRequired.toFixed(2)} (${(maxDrawdownPct*100).toFixed(0)}% abaixo da abertura)`);
+      console.log(`   • Mínimo permitido: $${effectiveFloor.toFixed(2)} (${limitLabel} abaixo da abertura)`);
       console.log(`   • Abertura do dia: $${openingBalance.toFixed(2)}`);
       console.log(`   ⏳ Sistema aguardará mercado melhorar (consenso ≥75%) antes de operar.`);
 
@@ -1435,7 +1448,7 @@ export class DatabaseStorage implements IStorage {
         canExecute: false,
         reason,
         currentBalance,
-        minimumRequired
+        minimumRequired: effectiveFloor
       };
     }
 

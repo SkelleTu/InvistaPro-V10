@@ -428,8 +428,8 @@ export class DualStorage implements IStorage {
   async getRecoveryThresholdRecommendation(uid: string) {
     return this.localRead(() => this.turso!.getRecoveryThresholdRecommendation(uid), () => this.sqlite.getRecoveryThresholdRecommendation(uid), 'getRecoveryThresholdRecommendation');
   }
-  async canExecuteTradeWithoutViolatingMinimum(uid: string, potentialLoss: number) {
-    return this.localRead(() => this.turso!.canExecuteTradeWithoutViolatingMinimum(uid, potentialLoss), () => this.sqlite.canExecuteTradeWithoutViolatingMinimum(uid, potentialLoss), 'canExecuteTradeWithoutViolatingMinimum');
+  async canExecuteTradeWithoutViolatingMinimum(uid: string, potentialLoss: number, isMartingaleRecovery = false) {
+    return this.localRead(() => this.turso!.canExecuteTradeWithoutViolatingMinimum(uid, potentialLoss, isMartingaleRecovery), () => this.sqlite.canExecuteTradeWithoutViolatingMinimum(uid, potentialLoss, isMartingaleRecovery), 'canExecuteTradeWithoutViolatingMinimum');
   }
   async getMinimumBalanceRequired(uid: string)  { return this.sqlite.getMinimumBalanceRequired(uid); }
   async getBalanceAnalysis(uid: string)          { return this.sqlite.getBalanceAnalysis(uid); }
