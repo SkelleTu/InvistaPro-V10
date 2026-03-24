@@ -124,12 +124,13 @@ export class AutoTradingScheduler {
 
   // 🚀 MODO ALAVANCAGEM — disparo raro e cirúrgico quando o mercado geral está excepcional
   private leverageLastFiredAt: number = 0;
-  private readonly LEVERAGE_COOLDOWN_MS       = 60 * 1000; // 60 segundos entre disparos (antes: 25 min — IA opera livre)
-  private readonly LEVERAGE_MIN_ASSETS        = 2;               // Reduzido de 3→2: mais fácil atingir com índices sintéticos
-  private readonly LEVERAGE_CONSENSUS_MIN     = 65;              // Reduzido de 78→65: opportunityScore real dos sintéticos fica 55-70
+  private readonly LEVERAGE_COOLDOWN_MS       = 5 * 60 * 1000;  // 5 minutos entre disparos (antes: 60s — muito agressivo)
+  private readonly LEVERAGE_MIN_ASSETS        = 3;               // Mínimo 3 ativos alinhados (antes: 2 — fácil demais)
+  private readonly LEVERAGE_CONSENSUS_MIN     = 72;              // Score mínimo 72 (antes: 65 — muito permissivo)
   private readonly LEVERAGE_STAKE_PCT         = 0.05;            // 5% da banca
-  private readonly LEVERAGE_MIN_STAKE         = 2.50;            // mínimo $2.50 → gera ≥$0.05 lucro em ACCU 2%
+  private readonly LEVERAGE_MIN_STAKE         = 1.00;            // mínimo $1.00 (antes: $2.50 — agressivo para saldos baixos)
   private readonly LEVERAGE_MAX_STAKE         = 50.00;           // teto absoluto de segurança
+  private readonly LEVERAGE_MAX_BALANCE_PCT   = 0.20;            // não arriscar mais de 20% da banca por trade ACCU
 
   private setPhase(phase: string, detail: string, type: 'info' | 'success' | 'warning' | 'trade' = 'info'): void {
     this.currentPhase = phase;
@@ -321,6 +322,33 @@ export class AutoTradingScheduler {
         }
       } catch (statsErr) {
         console.error('❌ [LEARNING] Erro ao registrar win/loss no realStatsTracker:', statsErr);
+      }
+
+      // 💾 FIX PERSISTÊNCIA: Gravar resultado diretamente no banco (evita dependência do deriv-sync)
+      // Problema: quando o monitor vende antecipadamente, o result só fica na memória.
+      // O deriv-sync às vezes marca o trade como expired antes de buscar o resultado,
+      // e depois pula o contrato expirado. Isso causa lucros/perdas sem registro no banco.
+      try {
+        const contractIdStr = data.contractId ? String(data.contractId) : null;
+        if (contractIdStr) {
+          const op = await storage.getTradeOperationByDerivContractId(contractIdStr);
+          if (op && op.status !== 'won' && op.status !== 'lost') {
+            const finalProfit = data.finalProfit ?? 0;
+            const newStatus = finalProfit > 0 ? 'won' : data.status === 'sold' ? 'won' : 'lost';
+            await storage.updateTradeOperation(op.id, {
+              status: newStatus,
+              profit: finalProfit,
+              derivProfit: finalProfit,
+              derivStatus: data.status || newStatus,
+              completedAt: new Date().toISOString(),
+              statusChangedAt: new Date().toISOString(),
+              lastSyncAt: new Date().toISOString(),
+            });
+            console.log(`💾 [CONTRACT CLOSED] Trade ${contractIdStr} persistido no banco: ${newStatus} | Profit=$${finalProfit.toFixed(4)}`);
+          }
+        }
+      } catch (dbErr: any) {
+        console.error('❌ [CONTRACT CLOSED] Falha ao persistir resultado no banco:', dbErr?.message);
       }
 
       // 🎰 ATUALIZAR ESTADO DO MARTINGALE com base no resultado do contrato
@@ -794,8 +822,14 @@ export class AutoTradingScheduler {
     }
     const leverageStake = Math.min(
       this.LEVERAGE_MAX_STAKE,
-      Math.max(this.LEVERAGE_MIN_STAKE, Math.round(bankBalance * this.LEVERAGE_STAKE_PCT * 100) / 100)
+      Math.min(bankBalance * this.LEVERAGE_MAX_BALANCE_PCT, // nunca arriscar mais de 20% da banca
+      Math.max(this.LEVERAGE_MIN_STAKE, Math.round(bankBalance * this.LEVERAGE_STAKE_PCT * 100) / 100))
     );
+    // Proteção: saldo muito baixo para o stake mínimo
+    if (leverageStake < this.LEVERAGE_MIN_STAKE) {
+      console.log(`🚀 [LEVERAGE] Saldo insuficiente para stake mínimo ($${leverageStake.toFixed(2)} < $${this.LEVERAGE_MIN_STAKE}) — abortando`);
+      return;
+    }
 
     // 9. Growth rate dinâmico por volatilidade — respeita taxas e ticks configurados pelo usuário
     const levVolatility = Math.max(0, Math.min(1, 1 - best.hurst));
@@ -859,7 +893,28 @@ export class AutoTradingScheduler {
         console.log(`✅ [LEVERAGE] Contrato aberto: ${contract.contract_id} | ${best.symbol} | $${leverageStake} | growth=${(levGrowth*100).toFixed(0)}% | ticks=${levTargetTicks}`);
         this.setPhase('AGUARDANDO', `✅ Alavancagem executada: ${best.symbol} $${leverageStake}`, 'success');
 
-        // Auto-sell após N ticks — inicia ANTES do salvamento para garantir monitoramento
+        // 🔑 CORREÇÃO RACE CONDITION: salvar no banco PRIMEIRO, depois iniciar monitor
+        // Contratos ACCU fecham em 2-4 segundos — se o monitor inicia antes do registro DB,
+        // o contract_closed handler não acha o registro para atualizar → trade perdido no DB.
+        try {
+          await storage.createTradeOperation({
+            userId: config.userId,
+            symbol: best.symbol,
+            direction: 'accumulator',
+            contractType: 'ACCU',
+            tradeType: 'accumulator',
+            amount: leverageStake,
+            duration: 1,
+            status: 'pending',
+            derivContractId: contract.contract_id?.toString(),
+            aiConsensus: JSON.stringify({ leverageMode: true, assetsAligned: exceptional.length, score: best.consensus, growthRate: levGrowth }),
+          });
+          console.log(`💾 [LEVERAGE] Operação salva no banco: contrato ${contract.contract_id}`);
+        } catch (dbErr) {
+          console.error('❌ [LEVERAGE] Falha ao salvar operação no banco (crítico):', dbErr);
+        }
+
+        // Iniciar monitor DEPOIS do registro DB para evitar race condition
         if (contract.contract_id) {
           contractMonitor.setToken(tokenData.token);
           await contractMonitor.startMonitoring({
@@ -875,20 +930,6 @@ export class AutoTradingScheduler {
           });
           console.log(`🎯 [LEVERAGE] Monitor de auto-sell ativo: contrato ${contract.contract_id} | alvo=${levTargetTicks} ticks`);
         }
-
-        // Registrar operação no banco (await para garantir persistência em ambos os bancos)
-        await storage.createTradeOperation({
-          userId: config.userId,
-          symbol: best.symbol,
-          direction: 'accumulator',
-          contractType: 'ACCU',
-          tradeType: 'accumulator',
-          amount: leverageStake,
-          duration: 1,
-          status: 'pending',
-          derivContractId: contract.contract_id?.toString(),
-          aiConsensus: JSON.stringify({ leverageMode: true, assetsAligned: exceptional.length, score: best.consensus, growthRate: levGrowth }),
-        }).catch(err => console.error('⚠️ [LEVERAGE] Erro ao salvar operação:', err));
       } else {
         console.warn(`⚠️ [LEVERAGE] Contrato rejeitado pela Deriv para ${best.symbol}`);
       }
@@ -3619,10 +3660,12 @@ export class AutoTradingScheduler {
       } else if (m === 'touch' || m === 'no_touch') {
         // Touch é melhor com tendência forte; no_touch com mercado lateral
         if (m === 'touch') {
-          score = 40 + marketAnalysis.trendStrength * 40;
+          score = 42 + marketAnalysis.trendStrength * 40;
           reason = `força de tendência ${(marketAnalysis.trendStrength * 100).toFixed(0)}%`;
         } else {
-          score = 55 + (1 - marketAnalysis.trendStrength) * 25;
+          // no_touch: base elevada (melhor performer histórico 56W/11L)
+          // Mercado lateral = ideal; tendência = barreira ameaçada (penaliza)
+          score = 68 + (1 - marketAnalysis.trendStrength) * 22;
           reason = `mercado ${marketAnalysis.trend} → ${marketAnalysis.trend === 'sideways' ? 'IDEAL para no_touch' : 'barreira ameaçada'}`;
         }
       } else {

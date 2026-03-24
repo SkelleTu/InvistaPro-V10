@@ -498,6 +498,20 @@ export class PostgresStorage implements IStorage {
     return ops as TradeOperation[];
   }
 
+  async getTradeOperationByDerivContractId(derivContractId: string): Promise<TradeOperation | null> {
+    try {
+      const ops = await neon
+        .select()
+        .from(pgSchema.tradeOperations)
+        .where(eq(pgSchema.tradeOperations.derivContractId, derivContractId))
+        .orderBy(desc(pgSchema.tradeOperations.createdAt))
+        .limit(1);
+      return (ops[0] as TradeOperation) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   async updateTradeOperation(id: string, updates: Partial<TradeOperation>): Promise<TradeOperation> {
     // 🔧 FIX: Whitelist apenas colunas que existem na tabela Neon.
     // Sem o whitelist, campos extras (syncCount, lastSyncAt, derivStatus, etc.)

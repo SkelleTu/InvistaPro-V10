@@ -425,6 +425,16 @@ export class TursoStorage implements IStorage {
       .limit(limit);
   }
 
+  async getTradeOperationByDerivContractId(derivContractId: string): Promise<TradeOperation | null> {
+    const [op] = await getDb()
+      .select()
+      .from(tradeOperations)
+      .where(eq(tradeOperations.derivContractId, derivContractId))
+      .orderBy(desc(tradeOperations.createdAt))
+      .limit(1);
+    return op ?? null;
+  }
+
   async updateTradeOperation(id: string, updates: Partial<TradeOperation>): Promise<TradeOperation> {
     const allowedFields = [
       'status', 'profit', 'entryPrice', 'exitPrice', 'derivContractId', 'completedAt',

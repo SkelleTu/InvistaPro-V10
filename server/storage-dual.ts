@@ -345,6 +345,13 @@ export class DualStorage implements IStorage {
     });
     return limit ? result.slice(0, limit) : result;
   }
+  async getTradeOperationByDerivContractId(derivContractId: string): Promise<TradeOperation | null> {
+    return this.localRead(
+      () => this.turso!.getTradeOperationByDerivContractId(derivContractId),
+      () => this.sqlite.getTradeOperationByDerivContractId(derivContractId),
+      'getTradeOperationByDerivContractId'
+    );
+  }
   async updateTradeOperation(id: string, updates: Partial<TradeOperation>) { return this.write(() => this.turso!.updateTradeOperation(id, updates), () => this.sqlite.updateTradeOperation(id, updates), 'updateTradeOperation'); }
   async getActiveTradeOperations(uid: string) {
     // Alta frequência (sync a cada 30s) → SQLite first

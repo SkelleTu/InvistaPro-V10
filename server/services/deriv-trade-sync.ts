@@ -227,11 +227,17 @@ export class DerivTradeSync {
             continue;
           }
 
-          // PASSO 2: Tentar proposal_open_contract (somente para trades não expirados)
-          // Trades já marcados como expired não estão abertos — pular chamada ao vivo
+          // PASSO 2: Tentar proposal_open_contract
+          // Para trades expirados sem resultado na profit_table, ainda tentamos getContractInfo
+          // pois contratos vendidos antecipadamente podem não aparecer na profit_table imediatamente.
+          // Se o trade está expirado e syncCount >= 10 (>2.5 min), desistimos.
           if (operation.status === 'expired') {
-            console.log(`⚠️ [DERIV SYNC] Trade ${operation.derivContractId} expirado sem resultado na profit_table — sem dados`);
-            continue;
+            const syncCount = (operation.syncCount || 0);
+            if (syncCount >= 10) {
+              console.log(`⚠️ [DERIV SYNC] Trade ${operation.derivContractId} expirado sem resultado após ${syncCount} tentativas — descartando`);
+              continue;
+            }
+            console.log(`🔄 [DERIV SYNC] Trade ${operation.derivContractId} expirado sem resultado na profit_table — tentando getContractInfo (tentativa ${syncCount + 1})`);
           }
 
           const contractInfo = await this.syncApi.getContractInfo(Number(operation.derivContractId));

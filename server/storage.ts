@@ -192,6 +192,7 @@ export interface IStorage {
   createTradeOperation(operation: InsertTradeOperation): Promise<TradeOperation>;
   getUserTradeOperations(userId: string, limit?: number): Promise<TradeOperation[]>;
   updateTradeOperation(id: string, updates: Partial<TradeOperation>): Promise<TradeOperation>;
+  getTradeOperationByDerivContractId(derivContractId: string): Promise<TradeOperation | null>;
   getActiveTradeOperations(userId: string): Promise<TradeOperation[]>;
   
   // AI logs operations
@@ -785,6 +786,16 @@ export class DatabaseStorage implements IStorage {
       .where(eq(tradeOperations.userId, userId))
       .orderBy(desc(tradeOperations.createdAt))
       .limit(limit);
+  }
+
+  async getTradeOperationByDerivContractId(derivContractId: string): Promise<TradeOperation | null> {
+    const [op] = await db
+      .select()
+      .from(tradeOperations)
+      .where(eq(tradeOperations.derivContractId, derivContractId))
+      .orderBy(desc(tradeOperations.createdAt))
+      .limit(1);
+    return op ?? null;
   }
 
   async updateTradeOperation(id: string, updates: Partial<TradeOperation>): Promise<TradeOperation> {
