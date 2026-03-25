@@ -85,6 +85,13 @@ export interface AIConsensus {
   spikeConfluence?: string;
 }
 
+export interface ExternalMarketContext {
+  newsDirection: 'bullish' | 'bearish' | 'neutral';
+  newsStrength: number;        // 0-100
+  girassolBias: 'BUY' | 'SELL' | 'NEUTRAL';
+  girassolLevels: number;      // 0-3
+}
+
 export interface DigitDifferAnalysis {
   lastDigit: number;
   predictedDigit: number;
@@ -272,7 +279,7 @@ export class HuggingFaceAIService {
     }
   }
 
-  async analyzeMarketData(tickData: DerivTickData[], symbol: string, userId?: string): Promise<AIConsensus> {
+  async analyzeMarketData(tickData: DerivTickData[], symbol: string, userId?: string, externalContext?: ExternalMarketContext): Promise<AIConsensus> {
     // SHORT-CIRCUIT: Se API não configurada, usar fallback imediatamente
     if (!this.isConfigured) {
       console.log(`⚠️ [FAST FALLBACK] API não configurada - usando análise técnica local para ${symbol}`);
@@ -401,7 +408,66 @@ export class HuggingFaceAIService {
         ? Math.min(95, rawConsensus * 1.15)
         : rawConsensus;
 
-      const finalConsensus = Math.round(Math.min(95, Math.max(0, boostedConsensus)));
+      let finalConsensus = Math.round(Math.min(95, Math.max(0, boostedConsensus)));
+
+      // ═══════════════════════════════════════════════════════════════════
+      // INJEÇÃO DE CONTEXTO EXTERNO: Noticiário BR + Girassol como votante
+      // ═══════════════════════════════════════════════════════════════════
+      // Os modelos de IA recebem apenas ticks de preço — sem contexto macro.
+      // Quando o noticiário BR e o Girassol confirmam uma direção com força,
+      // eles entram como "votante ponderado adicional" no consenso, corrigindo
+      // a tendência dos modelos de retornar 'neutral' em mercado lateral.
+      //
+      //  Girassol 3/3 + Notícias ≥ 60% alinhados: peso do votante externo = 1.5
+      //  Girassol 2/3 + Notícias ≥ 30% alinhados: peso do votante externo = 1.0
+      //  Girassol qualquer, sem notícias:          peso = 0.7
+      //  Sem contexto externo:                     sem injeção
+      let contextInjectedDir = finalDir; // pode ser sobrescrito
+      if (externalContext && externalContext.girassolBias !== 'NEUTRAL') {
+        const extDir = externalContext.girassolBias === 'BUY' ? 'up' : 'down';
+        const newsAligned = externalContext.newsDirection === (extDir === 'up' ? 'bullish' : 'bearish');
+        const newsStr = externalContext.newsStrength;
+        const gLevels = externalContext.girassolLevels;
+
+        // Determinar peso do votante externo com base na confluência
+        let externalVoterWeight = 0;
+        if (gLevels >= 3 && newsAligned && newsStr >= 60) {
+          externalVoterWeight = 1.5;
+        } else if (gLevels >= 2 && newsAligned && newsStr >= 30) {
+          externalVoterWeight = 1.0;
+        } else if (gLevels >= 1 && newsAligned && newsStr >= 20) {
+          externalVoterWeight = 0.7;
+        } else if (gLevels >= 3) {
+          externalVoterWeight = 0.6; // Girassol forte mesmo sem notícia alinhada
+        }
+
+        if (externalVoterWeight > 0) {
+          // Recalcular agreementScore incluindo o votante externo
+          const extAgrees = (finalDir === extDir || finalDir === 'neutral') ? 1.0 : 0.0;
+          const newAgreementScore = agreementScore + extAgrees * externalVoterWeight;
+          const newTotalWeight = totalWeight + externalVoterWeight;
+          const newAgreementRatio = newAgreementScore / newTotalWeight;
+
+          // Recalcular consenso com votante externo
+          // Confiança do votante externo = newsStrength (capped a 90)
+          const extConf = Math.min(90, newsAligned ? newsStr : gLevels * 28);
+          const newConfTotalWeight = confTotalWeight + externalVoterWeight;
+          const newWeightedConf = (weightedConf * confTotalWeight + extConf * externalVoterWeight) / newConfTotalWeight;
+
+          const newRaw = (newAgreementRatio * 0.6 + (newWeightedConf / 100) * 0.4) * 100;
+          const newBoosted = newAgreementRatio >= 0.99 ? Math.min(95, newRaw * 1.15) : newRaw;
+          const newConsensus = Math.round(Math.min(95, Math.max(0, newBoosted)));
+
+          // Se a IA estava neutra mas contexto externo é forte → adotar direção do contexto
+          if (finalDir === 'neutral' && externalVoterWeight >= 0.7) {
+            contextInjectedDir = extDir;
+            console.log(`🌻🇧🇷 [CONTEXT INJECT] IA neutra → sobrescrita pelo contexto externo: ${extDir.toUpperCase()} | Girassol ${gLevels}/3 + Notícias ${newsStr}% ${newsAligned ? '✅ alinhadas' : '⚠️ não-alinhadas'}`);
+          }
+
+          console.log(`🌻🇧🇷 [EXTERNAL VOTER] Peso: ${externalVoterWeight} | Consenso antes: ${finalConsensus}% → depois: ${newConsensus}% | Dir IA: ${finalDir} | Dir externa: ${extDir}`);
+          finalConsensus = newConsensus;
+        }
+      }
 
       // Não inflar o consenso — mantemos o valor real das IAs
       // O threshold de recovery é exposto separadamente via requiredConsensus
@@ -482,14 +548,21 @@ export class HuggingFaceAIService {
         bbPositionVal = this.computeBollingerPosition(tickPrices);
       }
 
-      // upScore/downScore/neutralScore derivados da direção final e força do sinal
-      const upScoreVal = finalDir === 'up' ? adjustedConsensus : finalDir === 'neutral' ? 30 : 100 - adjustedConsensus;
-      const downScoreVal = finalDir === 'down' ? adjustedConsensus : finalDir === 'neutral' ? 30 : 100 - adjustedConsensus;
-      const neutralScoreVal = finalDir === 'neutral' ? adjustedConsensus : Math.max(0, 50 - adjustedConsensus / 2);
+      // upScore/downScore/neutralScore derivados da direção final (já corrigida pelo contexto externo)
+      const effectiveFinalDir = contextInjectedDir;
+      const upScoreVal = effectiveFinalDir === 'up' ? adjustedConsensus : effectiveFinalDir === 'neutral' ? 30 : 100 - adjustedConsensus;
+      const downScoreVal = effectiveFinalDir === 'down' ? adjustedConsensus : effectiveFinalDir === 'neutral' ? 30 : 100 - adjustedConsensus;
+      const neutralScoreVal = effectiveFinalDir === 'neutral' ? adjustedConsensus : Math.max(0, 50 - adjustedConsensus / 2);
+
+      const contextNote = externalContext && contextInjectedDir !== finalDir
+        ? ` | 🌻🇧🇷 Direção sobrescrita: IA=${finalDir} → Contexto externo=${contextInjectedDir} (Girassol ${externalContext.girassolLevels}/3 + Notícias ${externalContext.newsStrength}% ${externalContext.newsDirection})`
+        : externalContext && externalContext.girassolBias !== 'NEUTRAL'
+          ? ` | 🌻🇧🇷 Votante externo: Girassol ${externalContext.girassolLevels}/3 + Notícias ${externalContext.newsStrength}% ${externalContext.newsDirection}`
+          : '';
 
       const hybridConsensus: AIConsensus = {
-        finalDecision: hybridResult.prediction,
-        consensusStrength: adjustedConsensus,       // valor REAL das IAs (não inflado)
+        finalDecision: effectiveFinalDir,
+        consensusStrength: adjustedConsensus,       // valor REAL das IAs (+ votante externo se aplicável)
         requiredConsensus: requiredConsensusValue,  // threshold mínimo exigido pelo sistema
         isRecoveryMode,
         upScore: upScoreVal,
@@ -497,7 +570,7 @@ export class HuggingFaceAIService {
         neutralScore: neutralScoreVal,
         participatingModels: models.length + (hybridResult.systems.quantum ? 1 : 0) + (hybridResult.systems.microscopic ? 1 : 0),
         analyses: perModelAnalyses,
-        reasoning: `🌌 HÍBRIDO: ${hybridResult.reasoning} | Concordância: ${(agreementRatio * 100).toFixed(0)}% | Consenso: ${finalConsensus}%`,
+        reasoning: `🌌 HÍBRIDO: ${hybridResult.reasoning} | Concordância: ${(agreementRatio * 100).toFixed(0)}% | Consenso: ${finalConsensus}%${contextNote}`,
 
         // Campos dos motores cooperativos
         quantumPrediction: (hybridResult.systems.quantum?.prediction as 'up' | 'down' | 'neutral') ?? null,

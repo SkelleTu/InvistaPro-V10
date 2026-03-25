@@ -2360,6 +2360,36 @@ class MetaTraderBridge extends EventEmitter {
           }));
 
       // ============================================================
+      // PRÉ-CONTEXTO: Girassol + Noticiário BR (injetados na IA)
+      // Coletamos ANTES da chamada da IA para que ela receba contexto
+      // externo completo — corrigindo o viés "neutral" de ticks laterais.
+      // ============================================================
+      const preGirassolLive = this.getGirassolBias(symbol);
+      let preExternalContext: import('./huggingface-ai').ExternalMarketContext | undefined;
+
+      try {
+        const { brazilNewsService: preNews } = await import('./brazil-news-service');
+        const preNewsSentiment = await Promise.race([
+          preNews.getBrazilMarketSentiment(),
+          new Promise<null>(res => setTimeout(() => res(null), 600))
+        ]);
+
+        if (preGirassolLive && preGirassolLive.bias !== 'NEUTRAL') {
+          preExternalContext = {
+            newsDirection: preNewsSentiment
+              ? (preNewsSentiment.direction as 'bullish' | 'bearish' | 'neutral')
+              : 'neutral',
+            newsStrength: preNewsSentiment ? preNewsSentiment.strength : 0,
+            girassolBias: preGirassolLive.bias as 'BUY' | 'SELL',
+            girassolLevels: preGirassolLive.levelCount
+          };
+          console.log(`[MT5Bridge] 🌻🇧🇷 ${symbol}: Contexto externo pré-IA → Girassol ${preGirassolLive.bias} (${preGirassolLive.levelCount}/3) | Notícias: ${preExternalContext.newsDirection} ${preExternalContext.newsStrength}%`);
+        }
+      } catch {
+        // Sem contexto externo — IA opera só com ticks (fallback seguro)
+      }
+
+      // ============================================================
       // ANÁLISE REAL: HuggingFace AI (FinBERT + RoBERTa + modelos)
       // ============================================================
       let aiConsensus: number = 0;
@@ -2369,7 +2399,7 @@ class MetaTraderBridge extends EventEmitter {
       let participatingModels = 0;
 
       try {
-        const consensus = await huggingFaceAI.analyzeMarketData(tickData, symbol);
+        const consensus = await huggingFaceAI.analyzeMarketData(tickData, symbol, undefined, preExternalContext);
         aiConsensus = consensus.consensusStrength;
         aiDirection = consensus.finalDecision;
         aiReasoning = consensus.reasoning;
@@ -2524,9 +2554,20 @@ class MetaTraderBridge extends EventEmitter {
         }
       }
 
-      // Quando recovery mode forçava neutral (antes desta correção), aiDirection chegava
-      // como 'neutral' aqui e bloqueava mesmo com Girassol forte. Agora o huggingface
-      // preserva a direção real e o threshold real — verificamos apenas o threshold ajustado.
+      // ── OVERRIDE NEUTRO: Girassol forte + notícias alinhadas substituem 'neutral' da IA ──
+      // A IA retorna 'neutral' quando os ticks de preço estão laterais — mas isso não
+      // significa ausência de direção. Quando o Girassol ≥2/3 confirma a direção E o
+      // consenso já atingiu o threshold reduzido, adotamos a direção do Girassol em vez
+      // de bloquear o sinal. O votante externo já foi injetado na IA, portanto este
+      // override cobre apenas os casos em que o threshold reduzido foi satisfeito.
+      if (aiDirection === 'neutral' && girassolLive && girassolLive.bias !== 'NEUTRAL' && aiConsensus >= effectiveMinConsensus) {
+        const overrideDir = girassolLive.bias === 'BUY' ? 'up' : 'down';
+        console.log(`[MT5Bridge] 🌻 ${symbol}: IA NEUTRO (${aiConsensus.toFixed(1)}%) mas consenso ≥ ${effectiveMinConsensus}% (threshold Girassol ${girassolLive.levelCount}/3) → direção sobrescrita: ${overrideDir.toUpperCase()}`);
+        aiDirection = overrideDir;
+        aiReasoning = `${aiReasoning} | 🌻 Direção Girassol ${girassolLive.bias} (${girassolLive.levelCount}/3 níveis) — IA neutra em ticks, Girassol dita direção`;
+      }
+
+      // Verificar se passa o threshold após possível override do neutro
       if (aiConsensus < effectiveMinConsensus || aiDirection === 'neutral') {
         // ── FALLBACK: tentar sinal do bot Deriv (mesmo ativo, análise recente) ──
         const derivSym = this.mapMT5ToDerivSymbol(symbol);
