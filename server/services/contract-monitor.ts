@@ -1132,9 +1132,12 @@ class UniversalContractMonitor extends EventEmitter {
     }
 
     // ── 4. PROTEÇÃO GLOBAL DE LUCRO (ignora holdSignal) ──────────
-    // Se o lucro caiu ≥50% a partir do pico e ainda está positivo → fechar SEMPRE
-    // Isso garante que nenhum sinal de "hold" deixe escapar um lucro que virou prejuízo
-    if (state.peakProfit > 0 && state.profit > 0) {
+    // EXCEÇÃO CRÍTICA: NOTOUCH e ONETOUCH são contratos binários de vencimento fixo.
+    // A bid price deles flutua muito mas o resultado final é binário (paga tudo ou nada).
+    // Vender cedo por queda de bid significa trocar $0.39 de ganho por $0.08 — destroça o EV.
+    // Eles têm sua própria lógica abaixo (apenas barreira crítica + corte de perda).
+    const isBinaryBarrierContract = ['ONETOUCH', 'NOTOUCH', 'RANGE', 'EXPIRYRANGE', 'EXPIRYMISS', 'UPORDOWN'].includes(ct);
+    if (!isBinaryBarrierContract && state.peakProfit > 0 && state.profit > 0) {
       const dropFromPeak = state.peakProfit - state.profit;
       const dropRatioPct = (dropFromPeak / state.peakProfit) * 100;
       if (dropRatioPct >= 50 && state.peakProfit > state.input.buyPrice * 0.03) {
@@ -1346,73 +1349,57 @@ class UniversalContractMonitor extends EventEmitter {
     }
 
     // ── ONETOUCH/NOTOUCH/RANGE/EXPIRYMISS ────────────────────────────────────
+    // FILOSOFIA: contratos binários de barreira têm payout BINÁRIO (tudo ou nada no vencimento).
+    // Vender cedo com base em flutuação de bid é matematicamente destrutivo:
+    //   EV(venda antecipada) = ganhinho × WR - stakeTotal × (1-WR) → sempre negativo
+    //   EV(vencimento natural) = payoutFull × WR - stakeTotal × (1-WR) → positivo se WR > 66%
+    // Portanto: SEGURAR até o vencimento, exceto em emergências (barreira literal ou perda >80%).
     if (['ONETOUCH', 'NOTOUCH', 'RANGE', 'EXPIRYRANGE', 'EXPIRYMISS', 'UPORDOWN'].includes(ct)) {
-      // 1. Alvo de lucro atingido → realizar
-      if (state.profitPct >= thresholds.profitTargetPct) {
-        return { shouldSell: true, reason: `BARRIER: lucro ${state.profitPct.toFixed(1)}% atingiu alvo de ${thresholds.profitTargetPct.toFixed(0)}% (regime=${supreme.regime})`, urgency: 'high' };
-      }
 
-      // 2. TRAILING STOP — protege pico de lucro (BID)
-      // Arma apenas quando bid subiu ≥20% acima do buy price (zona de lucro real)
-      // GUARDA CRÍTICA: só vende pelo trailing se o bid ainda estiver ACIMA do preço de compra
-      // (evita sair com perda quando o preço salta um tick inteiro abaixo do limiar de trailing)
-      const peakBidRiseBarrier = state.input.buyPrice * 1.20;
-      if (state.peakBidPrice > peakBidRiseBarrier) {
-        const trailingThreshold = state.peakBidPrice * (1 - thresholds.trailingStopPct / 100);
-        const minProfitFloor = state.input.buyPrice * 1.01; // mínimo: vender com pelo menos 1% de lucro
-        const effectiveThreshold = Math.max(trailingThreshold, minProfitFloor);
-        if (state.bidPrice < effectiveThreshold && state.bidPrice > state.input.buyPrice) {
-          // bid ainda está acima do preço de compra — saída com lucro garantido
-          return {
-            shouldSell: true,
-            reason: `BARRIER trailing: bid caiu de $${state.peakBidPrice.toFixed(4)} → $${state.bidPrice.toFixed(4)} (queda de ${thresholds.trailingStopPct.toFixed(0)}% do pico) | lucro atual=${state.profitPct.toFixed(1)}%`,
-            urgency: 'high',
-          };
+      // NOTOUCH: barreira se aproximando CRITICAMENTE (< 0.05% → quase tocando = perda iminente)
+      // Vender agora com o que tiver é melhor que perder 100% do stake em 1-2 ticks
+      if (ct === 'NOTOUCH') {
+        // Aproximação acelerada e muito próxima
+        if (state.barrierDistanceHistory.length >= 5) {
+          const hist = state.barrierDistanceHistory;
+          const oldest = hist[0];
+          const newest = hist[hist.length - 1];
+          const approachingFast = (oldest - newest) > 0.04 && newest < 0.08; // muito perto E acelerando
+          if (approachingFast) {
+            return { shouldSell: true, reason: `NOTOUCH: barreira crítica se aproximando rápido (${oldest.toFixed(3)}%→${newest.toFixed(3)}%) — saída de emergência`, urgency: 'emergency' };
+          }
         }
-        // bid caiu ABAIXO do preço de compra — trailing não dispara aqui (evita saída com perda)
-        // o earlyLossExitPct abaixo tratará saídas com perda excessiva
-      }
-
-      // 3. Trailing baseado em lucro % (proteção extra quando em % de lucro alto)
-      if (state.peakProfit > 0 && state.profitPct > 5) {
-        const peakProfitPct = (state.peakProfit / state.input.buyPrice) * 100;
-        const dropFromPeak = peakProfitPct - state.profitPct;
-        if (dropFromPeak >= thresholds.trailingStopPct) {
-          return {
-            shouldSell: true,
-            reason: `BARRIER trailing %: lucro caiu de pico ${peakProfitPct.toFixed(1)}% → ${state.profitPct.toFixed(1)}% (queda ${dropFromPeak.toFixed(1)}% > limiar ${thresholds.trailingStopPct.toFixed(0)}%)`,
-            urgency: 'high',
-          };
+        // Distância literal da barreira abaixo do limiar de perigo
+        if (state.barrierDistance !== undefined && thresholds.barrierDangerPct > 0 && state.barrierDistance < thresholds.barrierDangerPct) {
+          return { shouldSell: true, reason: `NOTOUCH: barreira a ${state.barrierDistance.toFixed(3)}% — limite crítico ${thresholds.barrierDangerPct}% | lucro=${state.profitPct.toFixed(1)}%`, urgency: 'emergency' };
         }
       }
 
-      // 4. Saída antecipada com corte de perda
-      if (state.profitPct <= -thresholds.earlyLossExitPct) {
-        return { shouldSell: true, reason: `BARRIER: corte de perda ${state.profitPct.toFixed(1)}% (limiar -${thresholds.earlyLossExitPct.toFixed(0)}%)`, urgency: 'high' };
+      // ONETOUCH: se o preço se afastou muito da barreira e não há momentum de volta → sair com o que tiver
+      if (ct === 'ONETOUCH' && state.profitPct < -60) {
+        return { shouldSell: true, reason: `ONETOUCH: perda >60% — recuperação improvável (lucro=${state.profitPct.toFixed(1)}%)`, urgency: 'high' };
       }
 
-      // 5a. NOTOUCH: aproximação rápida da barreira — vender para proteger lucro antes de tocar
-      if (ct === 'NOTOUCH' && state.barrierDistanceHistory.length >= 5) {
-        const hist = state.barrierDistanceHistory;
-        const oldest = hist[0];
-        const newest = hist[hist.length - 1];
-        const approachingFast = (oldest - newest) > 0.05 && newest < 0.3; // se aproximando rápido
-        if (approachingFast && state.profitPct >= 0) {
-          return { shouldSell: true, reason: `NOTOUCH: barreira se aproximando rápido (${oldest.toFixed(3)}%→${newest.toFixed(3)}%) | lucro=${state.profitPct.toFixed(1)}%`, urgency: 'high' };
+      // Perda profunda (bid caiu muito abaixo do preço de compra) — não há venda antecipada boa,
+      // mas se perda ultrapassar 80% pode ser melhor recuperar o que resta ao invés de zero
+      if (state.profitPct <= -80) {
+        return { shouldSell: true, reason: `BARRIER: perda severa ${state.profitPct.toFixed(1)}% — recuperando valor residual`, urgency: 'high' };
+      }
+
+      // ONETOUCH: barreira de perigo não dispara (barreira próxima = VITÓRIA para ONETOUCH)
+      // Para os demais (RANGE, EXPIRYRANGE etc.): verificar perigo de barreira se configurado
+      if (!['ONETOUCH', 'NOTOUCH'].includes(ct)) {
+        if (state.barrierDistance !== undefined && thresholds.barrierDangerPct > 0 && state.barrierDistance < thresholds.barrierDangerPct) {
+          return { shouldSell: true, reason: `BARRIER: barreira crítica a ${state.barrierDistance.toFixed(3)}% | lucro=${state.profitPct.toFixed(1)}%`, urgency: 'emergency' };
+        }
+        // Alvo de lucro para contratos de range (mas não NOTOUCH/ONETOUCH que são hold-to-expiry)
+        if (state.profitPct >= thresholds.profitTargetPct) {
+          return { shouldSell: true, reason: `BARRIER: lucro ${state.profitPct.toFixed(1)}% atingiu alvo de ${thresholds.profitTargetPct.toFixed(0)}%`, urgency: 'high' };
         }
       }
 
-      // 5b. Barreira física MUITO próxima (quase tocando) — salvamento de emergência
-      // Para ONETOUCH: barrierDangerPct=0 → check nunca dispara (barreira próxima = vitória)
-      // Para NOTOUCH: barrierDangerPct=0.08% → só dispara se spot estiver literalmente prestes a tocar
-      if (state.barrierDistance !== undefined && thresholds.barrierDangerPct > 0 && state.barrierDistance < thresholds.barrierDangerPct) {
-        return { shouldSell: true, reason: `BARRIER: barreira crítica a ${state.barrierDistance.toFixed(3)}% | lucro=${state.profitPct.toFixed(1)}%`, urgency: 'emergency' };
-      }
-
-      // 6. Reversão de IA — agora sensível a partir de qualquer lucro positivo (antes exigia >20%)
-      if (!supremeHold && (confirmedReversal || supreme.urgency !== 'low') && state.profitPct > 3) {
-        return { shouldSell: true, reason: `BARRIER: ${supreme.exitReason || 'reversão suprema'} | lucro=${state.profitPct.toFixed(1)}%`, urgency: supreme.urgency };
-      }
+      // Manter posição — deixar expirar naturalmente para receber o payout completo
+      return { shouldSell: false, reason: 'BARRIER: aguardando vencimento natural para payout completo', urgency: 'low' };
     }
 
     return { shouldSell: false, reason: '', urgency: 'low' };

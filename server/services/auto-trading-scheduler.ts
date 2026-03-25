@@ -3850,11 +3850,13 @@ export class AutoTradingScheduler {
           if (deficit > 0) {
             // ════════════════════════════════════════════════════════════════
             // 🎰 MARTINGALE DE RECUPERAÇÃO — stake cobre déficit acumulado
-            // Fórmula: stake_ideal = (déficit / payout) × 1.15
+            // Fórmula: stake_ideal = (déficit / payout_estimado) × 1.15
             //   → 1 vitória = déficit zerado + 15% de lucro extra
-            //   → Exemplo: déficit $1.00 → stake $1.21 → lucro $1.15 → net +$0.15
+            //   → RECOVERY_PAYOUT conservador (0.55) cobre NOTOUCH(52%) e demais modalidades
+            //   → Rise/Fall tem payout ~90% → stake ligeiramente maior → ganho extra na vitória
+            //   → NOTOUCH tem payout ~52% → calculado corretamente (antes: 0.95 → stake insuficiente)
             // ════════════════════════════════════════════════════════════════
-            const RECOVERY_PAYOUT = 0.95;
+            const RECOVERY_PAYOUT = 0.55; // conservador: cobre NOTOUCH (52%) e todos os demais
             const idealRecoveryStake = (deficit / RECOVERY_PAYOUT) * 1.15;
             // Teto em recovery: 12% da banca (abaixo do limite de proteção de 15% → nunca bloqueia)
             const maxRecoveryStake = Math.max(bankSize * 0.12, amount);
