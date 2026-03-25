@@ -37,6 +37,15 @@ interface MT5Status {
   recentTrades: any[];
   systemHealth: 'excellent' | 'good' | 'warning' | 'critical';
   cachedSymbols: string[];
+  lastBalance?: number;
+  lastEquity?: number;
+  latestAIConsensus?: number;
+  latestAIDirection?: 'up' | 'down' | 'neutral';
+  latestAnalysisSymbol?: string;
+  latestAnalysisAt?: number;
+  consecutiveLosses?: number;
+  circuitBreakerActive?: boolean;
+  circuitBreakerRemainingMin?: number;
 }
 
 interface MT5Config {
@@ -430,45 +439,73 @@ export default function MetaTraderPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <Card data-testid="card-status-health">
-            <CardContent className="pt-4">
+            <CardContent className="pt-4 pb-3">
               <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">Saúde</span>
+                <span className="text-xs text-muted-foreground">Saúde do Sistema</span>
                 <Shield className={`h-4 w-4 ${HEALTH_COLOR[status?.systemHealth || 'good']}`} />
               </div>
-              <p className={`text-2xl font-bold mt-1 ${HEALTH_COLOR[status?.systemHealth || 'good']}`}>
+              <p className={`text-xl font-bold mt-1 ${HEALTH_COLOR[status?.systemHealth || 'good']}`}>
                 {HEALTH_LABEL[status?.systemHealth || 'good']}
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">{status?.connected ? `EA: ${status.accountId || '—'}` : 'EA desconectado'}</p>
+            </CardContent>
+          </Card>
+          <Card data-testid="card-status-balance">
+            <CardContent className="pt-4 pb-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">Saldo EA</span>
+                <DollarSign className="h-4 w-4 text-green-500" />
+              </div>
+              <p className="text-xl font-bold mt-1 text-green-500">
+                {status?.lastBalance ? `$${status.lastBalance.toFixed(2)}` : '—'}
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Equity: {status?.lastEquity ? `$${status.lastEquity.toFixed(2)}` : '—'}
+              </p>
+            </CardContent>
+          </Card>
+          <Card data-testid="card-status-ai-live">
+            <CardContent className="pt-4 pb-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">IA ao Vivo</span>
+                <Brain className={`h-4 w-4 ${status?.latestAIConsensus !== undefined ? 'text-primary animate-pulse' : 'text-muted-foreground'}`} />
+              </div>
+              <p className={`text-xl font-bold mt-1 ${
+                status?.latestAIConsensus !== undefined
+                  ? status.latestAIConsensus >= 70 ? 'text-green-500' : 'text-yellow-500'
+                  : 'text-muted-foreground'
+              }`}>
+                {status?.latestAIConsensus !== undefined ? `${status.latestAIConsensus.toFixed(0)}%` : '—'}
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {status?.latestAnalysisSymbol || 'Aguardando'}{status?.latestAIDirection ? ` · ${status.latestAIDirection === 'up' ? '↑' : status.latestAIDirection === 'down' ? '↓' : '—'}` : ''}
               </p>
             </CardContent>
           </Card>
           <Card data-testid="card-status-signals">
-            <CardContent className="pt-4">
+            <CardContent className="pt-4 pb-3">
               <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">Sinais Gerados</span>
-                <Brain className="h-4 w-4 text-primary" />
+                <span className="text-xs text-muted-foreground">Sinais Gerados</span>
+                <Zap className="h-4 w-4 text-primary" />
               </div>
-              <p className="text-2xl font-bold mt-1">{status?.totalSignalsGenerated || 0}</p>
-            </CardContent>
-          </Card>
-          <Card data-testid="card-status-winrate">
-            <CardContent className="pt-4">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">Win Rate</span>
-                <Target className="h-4 w-4 text-green-500" />
-              </div>
-              <p className="text-2xl font-bold mt-1 text-green-500">
-                {status?.winRate?.toFixed(1) || 0}%
-              </p>
+              <p className="text-xl font-bold mt-1">{status?.totalSignalsGenerated || 0}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Win Rate: {status?.winRate?.toFixed(1) || 0}%</p>
             </CardContent>
           </Card>
           <Card data-testid="card-status-positions">
-            <CardContent className="pt-4">
+            <CardContent className="pt-4 pb-3">
               <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">Posições Abertas</span>
+                <span className="text-xs text-muted-foreground">Posições / Perdas</span>
                 <Activity className="h-4 w-4 text-blue-500" />
               </div>
-              <p className="text-2xl font-bold mt-1 text-blue-500">{status?.openPositions || 0}</p>
+              <p className="text-xl font-bold mt-1 text-blue-500">{status?.openPositions || 0}</p>
+              <p className={`text-xs mt-0.5 ${(status?.consecutiveLosses || 0) >= 2 ? 'text-red-500 font-semibold' : 'text-muted-foreground'}`}>
+                {status?.circuitBreakerActive
+                  ? `🛑 CB ativo — ${status.circuitBreakerRemainingMin}min`
+                  : `Perdas consec.: ${status?.consecutiveLosses ?? 0}/3`}
+              </p>
             </CardContent>
           </Card>
         </div>
@@ -600,17 +637,15 @@ export default function MetaTraderPage() {
               </Card>
 
               <Card>
-                <CardHeader>
+                <CardHeader className="pb-2">
                   <CardTitle className="flex items-center gap-2 text-base">
                     <Zap className="h-5 w-5 text-yellow-500" />
                     Sinal Ativo das IAs
-                    {activeSignal?.action && activeSignal.action !== 'HOLD' && (
-                      <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse ml-auto" />
-                    )}
+                    <div className={`w-2 h-2 rounded-full ml-auto ${activeSignal?.action && activeSignal.action !== 'HOLD' ? 'bg-green-500 animate-pulse' : 'bg-yellow-500 animate-pulse'}`} />
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  {activeSignal && activeSignal.action ? (
+                  {activeSignal && activeSignal.action && activeSignal.action !== 'HOLD' ? (
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
                         <span className="text-xl font-bold">{activeSignal.symbol || '—'}</span>
@@ -618,7 +653,7 @@ export default function MetaTraderPage() {
                           {activeSignal.source === 'deriv_bot' && (
                             <Badge variant="outline" className="text-xs border-primary/40 text-primary">Deriv Bot</Badge>
                           )}
-                          <Badge className={activeSignal.action === 'BUY' ? 'bg-green-500' : activeSignal.action === 'SELL' ? 'bg-red-500' : 'bg-gray-500'}>
+                          <Badge className={activeSignal.action === 'BUY' ? 'bg-green-500' : 'bg-red-500'}>
                             {activeSignal.action}
                           </Badge>
                         </div>
@@ -635,37 +670,74 @@ export default function MetaTraderPage() {
                         <div>
                           <span className="text-muted-foreground">Stop Loss</span>
                           <p className="font-medium text-red-500">
-                            {activeSignal.stopLoss > 0
-                              ? activeSignal.stopLoss.toFixed(2)
-                              : activeSignal.stopLossPips > 0
-                                ? `${activeSignal.stopLossPips} pips`
-                                : 'IA monit.'}
+                            {activeSignal.stopLoss > 0 ? activeSignal.stopLoss.toFixed(2) : activeSignal.stopLossPips > 0 ? `${activeSignal.stopLossPips} pips` : 'IA dinâmico'}
                           </p>
                         </div>
                         <div>
                           <span className="text-muted-foreground">Take Profit</span>
                           <p className="font-medium text-green-500">
-                            {activeSignal.takeProfit > 0
-                              ? activeSignal.takeProfit.toFixed(2)
-                              : activeSignal.takeProfitPips > 0
-                                ? `${activeSignal.takeProfitPips} pips`
-                                : 'IA monit.'}
+                            {activeSignal.takeProfit > 0 ? activeSignal.takeProfit.toFixed(2) : activeSignal.takeProfitPips > 0 ? `${activeSignal.takeProfitPips} pips` : 'IA dinâmico'}
                           </p>
                         </div>
                       </div>
                       {activeSignal?.girassolDescription && (
-                        <GirassolStatusBadge
-                          bias={activeSignal.girassolBias}
-                          description={activeSignal.girassolDescription}
-                        />
+                        <GirassolStatusBadge bias={activeSignal.girassolBias} description={activeSignal.girassolDescription} />
                       )}
                       <p className="text-xs text-muted-foreground border-t pt-2">{activeSignal?.reason}</p>
                     </div>
                   ) : (
-                    <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
-                      <Clock className="h-8 w-8 mb-2 opacity-50" />
-                      <p className="text-sm">Aguardando análise das IAs...</p>
-                      {!status?.connected && <p className="text-xs mt-1">Conecte o EA primeiro</p>}
+                    <div className="space-y-3">
+                      {/* Status HOLD — mostra o que a IA está fazendo agora */}
+                      <div className="flex items-center gap-2 p-2 rounded-md bg-yellow-500/10 border border-yellow-500/30">
+                        <Clock className="h-4 w-4 text-yellow-500 shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-semibold text-yellow-600 dark:text-yellow-400">IAs monitorando — aguardando consenso ≥70%</p>
+                          <p className="text-xs text-muted-foreground truncate">{activeSignal?.reason || 'Análise em progresso...'}</p>
+                        </div>
+                        <Badge variant="outline" className="shrink-0 text-yellow-500 border-yellow-500">HOLD</Badge>
+                      </div>
+                      {/* Último consenso da IA */}
+                      {status?.latestAIConsensus !== undefined && (
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-muted-foreground flex items-center gap-1">
+                              <Brain className="h-3 w-3" />
+                              Último consenso — {status.latestAnalysisSymbol || '—'}
+                            </span>
+                            <span className={`font-bold ${status.latestAIConsensus >= 70 ? 'text-green-500' : 'text-yellow-500'}`}>
+                              {status.latestAIConsensus.toFixed(1)}%
+                              {status.latestAIDirection && <span className="ml-1">{status.latestAIDirection === 'up' ? '↑' : status.latestAIDirection === 'down' ? '↓' : '—'}</span>}
+                            </span>
+                          </div>
+                          <Progress value={status.latestAIConsensus} className="h-2" />
+                          <div className="flex justify-between text-xs text-muted-foreground">
+                            <span>0%</span>
+                            <span className="text-yellow-500">70% mínimo</span>
+                            <span>100%</span>
+                          </div>
+                        </div>
+                      )}
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div className="bg-muted/30 rounded p-2">
+                          <p className="text-muted-foreground">Stop Loss</p>
+                          <p className="font-semibold text-blue-400">IA dinâmico (ATR)</p>
+                        </div>
+                        <div className="bg-muted/30 rounded p-2">
+                          <p className="text-muted-foreground">Take Profit</p>
+                          <p className="font-semibold text-blue-400">IA dinâmico (Fib)</p>
+                        </div>
+                        <div className="bg-muted/30 rounded p-2">
+                          <p className="text-muted-foreground">Última análise</p>
+                          <p className="font-semibold">{status?.latestAnalysisAt ? formatTime(status.latestAnalysisAt) : '—'}</p>
+                        </div>
+                        <div className="bg-muted/30 rounded p-2">
+                          <p className="text-muted-foreground">Perdas consec.</p>
+                          <p className={`font-semibold ${(status?.consecutiveLosses || 0) >= 2 ? 'text-red-500' : 'text-green-500'}`}>
+                            {status?.consecutiveLosses ?? 0}/3
+                          </p>
+                        </div>
+                      </div>
+                      {!status?.connected && <p className="text-xs text-yellow-500 text-center">⚠️ Conecte o EA ao MT5 para receber sinais</p>}
                     </div>
                   )}
                 </CardContent>
@@ -777,32 +849,92 @@ export default function MetaTraderPage() {
               </Card>
             )}
 
-            {/* Status bar: consenso mínimo e perdas */}
-            <div className="grid grid-cols-3 gap-3">
+            {/* Status bar: consenso ao vivo */}
+            <div className="grid grid-cols-4 gap-3">
+              <Card data-testid="card-live-consensus">
+                <CardContent className="pt-4">
+                  <p className="text-xs text-muted-foreground">Consenso Atual</p>
+                  <p className={`text-2xl font-bold ${status?.latestAIConsensus !== undefined ? (status.latestAIConsensus >= 70 ? 'text-green-500' : 'text-yellow-500') : 'text-muted-foreground'}`}>
+                    {status?.latestAIConsensus !== undefined ? `${status.latestAIConsensus.toFixed(1)}%` : '—'}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+                    {status?.latestAnalysisSymbol || 'Aguardando símbolo'}
+                    {status?.latestAIDirection && <span>{status.latestAIDirection === 'up' ? ' ↑ COMPRA' : status.latestAIDirection === 'down' ? ' ↓ VENDA' : ' — NEUTRO'}</span>}
+                  </p>
+                </CardContent>
+              </Card>
               <Card data-testid="card-min-consensus">
                 <CardContent className="pt-4">
-                  <p className="text-xs text-muted-foreground">Consenso Mínimo Exigido</p>
+                  <p className="text-xs text-muted-foreground">Mínimo Exigido</p>
                   <p className="text-2xl font-bold text-primary">70%</p>
-                  <p className="text-xs text-muted-foreground mt-1">Limiar de segurança da IA</p>
+                  <p className="text-xs text-muted-foreground mt-1">Limiar de segurança</p>
                 </CardContent>
               </Card>
               <Card data-testid="card-consecutive-losses">
                 <CardContent className="pt-4">
                   <p className="text-xs text-muted-foreground">Perdas Consecutivas</p>
-                  <p className={`text-2xl font-bold ${(aiAnalysis?.latest?.consecutiveLosses || 0) >= 2 ? 'text-red-500' : 'text-green-500'}`}>
-                    {aiAnalysis?.latest?.consecutiveLosses ?? 0}/3
+                  <p className={`text-2xl font-bold ${(status?.consecutiveLosses || 0) >= 2 ? 'text-red-500' : 'text-green-500'}`}>
+                    {status?.consecutiveLosses ?? aiAnalysis?.latest?.consecutiveLosses ?? 0}/3
                   </p>
-                  <p className="text-xs text-muted-foreground mt-1">Circuit breaker em 3</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {status?.circuitBreakerActive ? `🛑 CB ativo — ${status.circuitBreakerRemainingMin}min restantes` : 'Circuit breaker em 3'}
+                  </p>
                 </CardContent>
               </Card>
               <Card data-testid="card-analyses-count">
                 <CardContent className="pt-4">
                   <p className="text-xs text-muted-foreground">Análises Realizadas</p>
                   <p className="text-2xl font-bold">{aiAnalysis?.total ?? 0}</p>
-                  <p className="text-xs text-muted-foreground mt-1">Desde o último restart</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {status?.latestAnalysisAt ? `Última: ${formatTime(status.latestAnalysisAt)}` : 'Desde o último restart'}
+                  </p>
                 </CardContent>
               </Card>
             </div>
+
+            {/* Live AI activity — sempre visível mesmo sem log entries */}
+            {status?.connected && (
+              <Card className="border-primary/30 bg-primary/5" data-testid="card-live-ai-activity">
+                <CardHeader className="pb-2 pt-3">
+                  <CardTitle className="flex items-center gap-2 text-sm">
+                    <Brain className="h-4 w-4 text-primary animate-pulse" />
+                    Atividade das IAs em Tempo Real
+                    <Badge variant="outline" className="text-xs gap-1 ml-auto">
+                      <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                      Live
+                    </Badge>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="pb-3">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                    <div className="bg-background/60 rounded-lg p-2.5 border">
+                      <p className="text-muted-foreground mb-1">EA Conectado</p>
+                      <p className="font-bold text-green-500">{status.broker || '—'}</p>
+                      <p className="text-muted-foreground">{status.accountId}</p>
+                    </div>
+                    <div className="bg-background/60 rounded-lg p-2.5 border">
+                      <p className="text-muted-foreground mb-1">Saldo / Equity</p>
+                      <p className="font-bold">{status.lastBalance ? `$${status.lastBalance.toFixed(2)}` : '—'}</p>
+                      <p className="text-muted-foreground">{status.lastEquity ? `Eq: $${status.lastEquity.toFixed(2)}` : '—'}</p>
+                    </div>
+                    <div className="bg-background/60 rounded-lg p-2.5 border">
+                      <p className="text-muted-foreground mb-1">Último símbolo analisado</p>
+                      <p className="font-bold">{status.latestAnalysisSymbol || status.cachedSymbols?.[0] || '—'}</p>
+                      <p className="text-muted-foreground">{status.latestAnalysisAt ? formatTime(status.latestAnalysisAt) : 'aguardando...'}</p>
+                    </div>
+                    <div className="bg-background/60 rounded-lg p-2.5 border">
+                      <p className="text-muted-foreground mb-1">Próxima entrada</p>
+                      <p className={`font-bold ${status.latestAIConsensus !== undefined && status.latestAIConsensus >= 70 ? 'text-green-500' : 'text-yellow-500'}`}>
+                        {status.latestAIConsensus !== undefined && status.latestAIConsensus >= 70 ? '⚡ Consenso OK!' : '⏳ Aguardando'}
+                      </p>
+                      <p className="text-muted-foreground">
+                        {status.latestAIConsensus !== undefined ? `${status.latestAIConsensus.toFixed(0)}% / 70% mínimo` : 'analisando...'}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             {/* Última análise — detalhes completos */}
             {aiAnalysis?.latest && (
@@ -1018,10 +1150,39 @@ export default function MetaTraderPage() {
                     ))}
                   </div>
                 ) : (
-                  <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-                    <Cpu className="h-10 w-10 mb-3 opacity-30" />
-                    <p className="font-medium">Aguardando análises das IAs...</p>
-                    <p className="text-xs mt-1">As análises aparecem aqui assim que o EA envia dados de mercado</p>
+                  <div className="space-y-3 py-4">
+                    <div className="flex flex-col items-center text-muted-foreground gap-2 pb-2">
+                      <Cpu className="h-8 w-8 opacity-30" />
+                      <p className="font-medium text-sm">Aguardando primeiras análises...</p>
+                      <p className="text-xs text-center max-w-sm">
+                        O feed é preenchido automaticamente à medida que o EA envia dados do MT5. O EA está {status?.connected ? <span className="text-green-500 font-medium">conectado</span> : <span className="text-yellow-500 font-medium">aguardando</span>}.
+                      </p>
+                    </div>
+                    {status?.connected && (
+                      <div className="grid grid-cols-3 gap-2 text-xs">
+                        <div className="flex items-center gap-2 p-2.5 rounded-lg border bg-muted/20">
+                          <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse shrink-0" />
+                          <div>
+                            <p className="font-semibold">EA Ativo</p>
+                            <p className="text-muted-foreground">{status.broker} · {status.accountId}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 p-2.5 rounded-lg border bg-muted/20">
+                          <Brain className="h-4 w-4 text-primary shrink-0" />
+                          <div>
+                            <p className="font-semibold">HuggingFace + 4 IAs</p>
+                            <p className="text-muted-foreground">Analisando mercado</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 p-2.5 rounded-lg border bg-muted/20">
+                          <Target className="h-4 w-4 text-yellow-500 shrink-0" />
+                          <div>
+                            <p className="font-semibold">Limiar: 70%</p>
+                            <p className="text-muted-foreground">Consenso mínimo</p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </CardContent>
@@ -1522,15 +1683,35 @@ export default function MetaTraderPage() {
                     </div>
                   </>
                 ) : (
-                  <div className="flex flex-col items-center py-16 text-muted-foreground gap-3">
-                    <History className="h-14 w-14 opacity-20" />
-                    <p className="font-medium">Nenhuma operação encontrada</p>
-                    <p className="text-xs max-w-sm text-center">
-                      Operações do Deriv Bot e do EA MetaTrader aparecem aqui automaticamente em tempo real
-                    </p>
-                    <div className="flex items-center gap-1.5 text-xs">
+                  <div className="space-y-4 py-6">
+                    <div className="flex flex-col items-center text-muted-foreground gap-2">
+                      <History className="h-12 w-12 opacity-20" />
+                      <p className="font-medium">Nenhuma operação registrada ainda</p>
+                      <p className="text-xs max-w-sm text-center">
+                        Operações do EA aparecem aqui automaticamente ao fechar. A IA aguarda consenso ≥70% para entrar.
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                      <div className="bg-muted/30 rounded-lg p-3 text-center">
+                        <p className="text-muted-foreground">Sinais gerados</p>
+                        <p className="text-lg font-bold">{status?.totalSignalsGenerated || 0}</p>
+                      </div>
+                      <div className="bg-muted/30 rounded-lg p-3 text-center">
+                        <p className="text-muted-foreground">Ganho hoje</p>
+                        <p className="text-lg font-bold text-green-500">+${status?.dailyProfit?.toFixed(2) || '0.00'}</p>
+                      </div>
+                      <div className="bg-muted/30 rounded-lg p-3 text-center">
+                        <p className="text-muted-foreground">Perda hoje</p>
+                        <p className="text-lg font-bold text-red-500">-${status?.dailyLoss?.toFixed(2) || '0.00'}</p>
+                      </div>
+                      <div className="bg-muted/30 rounded-lg p-3 text-center">
+                        <p className="text-muted-foreground">Win Rate</p>
+                        <p className="text-lg font-bold text-primary">{status?.winRate?.toFixed(1) || 0}%</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
                       <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-                      Aguardando operações...
+                      EA {status?.connected ? 'conectado e aguardando sinal' : 'desconectado — conecte o MT5'}
                     </div>
                   </div>
                 )}

@@ -216,6 +216,16 @@ export interface MT5Status {
   activeSignal: MT5Signal | null;
   recentTrades: MT5TradeResult[];
   systemHealth: 'excellent' | 'good' | 'warning' | 'critical';
+  lastBalance?: number;
+  lastEquity?: number;
+  latestAIConsensus?: number;
+  latestAIDirection?: 'up' | 'down' | 'neutral';
+  latestAnalysisSymbol?: string;
+  latestAnalysisAt?: number;
+  consecutiveLosses?: number;
+  circuitBreakerActive?: boolean;
+  circuitBreakerRemainingMin?: number;
+  cachedSymbols?: string[];
 }
 
 const DEFAULT_CONFIG: MT5Config = {
@@ -1554,6 +1564,12 @@ class MetaTraderBridge extends EventEmitter {
       health = 'warning';
     }
 
+    const now2 = Date.now();
+    const latestAnalysis = this.analysisLog[0] || null;
+    const circuitBreakerRem = this.circuitBreakerUntil > now2
+      ? Math.ceil((this.circuitBreakerUntil - now2) / 60000)
+      : 0;
+
     return {
       ...this.status,
       connected,
@@ -1561,7 +1577,16 @@ class MetaTraderBridge extends EventEmitter {
       activeSignal: this.getLatestActiveSignal(),
       recentTrades: this.recentTrades.slice(-20),
       openPositions: this.openPositions.size,
-      cachedSymbols: this.getCachedSymbols()
+      cachedSymbols: this.getCachedSymbols(),
+      lastBalance: this.currentBalance || undefined,
+      lastEquity: this.currentEquity || undefined,
+      latestAIConsensus: latestAnalysis?.aiConsensus,
+      latestAIDirection: latestAnalysis?.aiDirection,
+      latestAnalysisSymbol: latestAnalysis?.symbol,
+      latestAnalysisAt: latestAnalysis?.timestamp,
+      consecutiveLosses: this.consecutiveLosses,
+      circuitBreakerActive: this.circuitBreakerUntil > now2,
+      circuitBreakerRemainingMin: circuitBreakerRem,
     };
   }
 
