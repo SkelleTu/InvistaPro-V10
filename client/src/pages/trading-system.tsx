@@ -2499,123 +2499,87 @@ export default function TradingSystemPage() {
                                       </div>
                                     </div>
 
-                                    {/* ── Duração controlada por IA ou manual (todas as modalidades compatíveis) ── */}
+                                    {/* ── Máx de Ticks/Duração por Operação (igual ao ACCU) ── */}
                                     {(TICK_MODALITIES.has(modality.id) || MINUTE_MODALITIES.has(modality.id)) && (() => {
                                       const isTick = TICK_MODALITIES.has(modality.id);
                                       const rawVal = modalityTicks[modality.id];
-                                      // Modos: 0=IA livre, >0=Fixo, <0=IA com Máx |N|
-                                      const mode = rawVal === 0 ? 'ai_free' : (rawVal !== undefined && rawVal < 0) ? 'ai_max' : 'fixed';
-                                      const absVal = rawVal !== undefined ? Math.abs(rawVal) : 0;
                                       const defaultVal = isTick ? 5 : 15;
-                                      const tickOptions = [1,2,3,4,5,6,7,8,9,10];
-                                      const minOptions = [5,10,15,30,60];
+                                      // Negativo = IA dinâmico com máximo |N|; Positivo ou 0 = fixo em N (0 vira defaultVal)
+                                      const isDynamic = rawVal !== undefined && rawVal < 0;
+                                      const absVal = rawVal !== undefined && rawVal !== 0 ? Math.abs(rawVal) : defaultVal;
+                                      const tickOptions = [1,2,3,4,5,7,10,15,20];
+                                      const minOptions = [1,2,3,5,10,15,30,60];
                                       const options = isTick ? tickOptions : minOptions;
                                       const unit = isTick ? 'ticks' : 'min';
 
-                                      const setMode = (newMode: 'ai_free' | 'fixed' | 'ai_max') => {
-                                        let newVal: number;
-                                        if (newMode === 'ai_free') {
-                                          newVal = 0;
-                                        } else if (newMode === 'fixed') {
-                                          newVal = absVal > 0 ? absVal : defaultVal;
-                                        } else {
-                                          newVal = -(absVal > 0 ? absVal : defaultVal);
-                                        }
-                                        const next = { ...modalityTicks, [modality.id]: newVal };
-                                        setModalityTicks(next);
-                                        saveModalityTicks(next);
-                                        const desc = newMode === 'ai_free'
-                                          ? 'IA decide livremente a duração ideal.'
-                                          : newMode === 'ai_max'
-                                            ? `IA escolhe entre 1 e ${Math.abs(newVal)} ${unit}.`
-                                            : `Fixo em ${newVal} ${unit}.`;
-                                        toast({ title: `${modality.name}: modo alterado`, description: desc, duration: 1800 });
-                                      };
-
-                                      const setVal = (v: number) => {
-                                        const newVal = mode === 'ai_max' ? -v : v;
-                                        const next = { ...modalityTicks, [modality.id]: newVal };
-                                        setModalityTicks(next);
-                                        saveModalityTicks(next);
-                                        toast({ title: `${modality.name}: ${mode === 'ai_max' ? `IA+Máx ${v}` : v} ${unit}`, duration: 1200 });
-                                      };
-
                                       return (
-                                        <div className="rounded-md bg-violet-50 dark:bg-violet-900/20 border border-violet-200 dark:border-violet-800 p-2 space-y-1.5">
-                                          <p className="text-[11px] font-semibold text-violet-700 dark:text-violet-300 flex items-center gap-1">
+                                        <div className="rounded-md bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-800 p-2 space-y-1.5">
+                                          <p className="text-[11px] font-semibold text-teal-700 dark:text-teal-300 flex items-center gap-1">
                                             <span>⏱️</span> {isTick ? 'Ticks por operação' : 'Duração (minutos)'}
                                           </p>
-                                          {/* ── Seletor de modo ── */}
-                                          <div className="flex gap-1">
+                                          <div className="flex items-center gap-1.5">
+                                            {/* Botão IA — toggle de modo dinâmico */}
                                             <button
                                               type="button"
-                                              data-testid={`modality-ticks-${modality.id}-ai-free`}
-                                              onClick={(e) => { e.stopPropagation(); setMode('ai_free'); }}
-                                              className={`flex-1 py-1 rounded text-[10px] font-bold border transition-all ${
-                                                mode === 'ai_free'
-                                                  ? 'bg-purple-600 text-white border-purple-600'
-                                                  : 'bg-white dark:bg-gray-800 text-muted-foreground border-border hover:border-purple-400'
-                                              }`}
-                                            >
-                                              🤖 IA livre
-                                            </button>
-                                            <button
-                                              type="button"
-                                              data-testid={`modality-ticks-${modality.id}-fixed`}
-                                              onClick={(e) => { e.stopPropagation(); setMode('fixed'); }}
-                                              className={`flex-1 py-1 rounded text-[10px] font-bold border transition-all ${
-                                                mode === 'fixed'
+                                              data-testid={`modality-ticks-${modality.id}-ia`}
+                                              title={isDynamic ? `IA ativo: decide entre 1 e ${absVal} ${unit}` : 'Ativar modo IA (IA decide entre 1 e o número selecionado)'}
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                const newVal = isDynamic ? absVal : -absVal;
+                                                const next = { ...modalityTicks, [modality.id]: newVal };
+                                                setModalityTicks(next);
+                                                saveModalityTicks(next);
+                                                toast({
+                                                  title: isDynamic
+                                                    ? `${modality.name}: fixo em ${absVal} ${unit}`
+                                                    : `${modality.name}: IA decide (1 a ${absVal} ${unit})`,
+                                                  duration: 1500
+                                                });
+                                              }}
+                                              className={`px-1.5 py-0.5 rounded text-[10px] font-bold border transition-all ${
+                                                isDynamic
                                                   ? 'bg-violet-500 text-white border-violet-500'
-                                                  : 'bg-white dark:bg-gray-800 text-muted-foreground border-border hover:border-violet-400'
+                                                  : 'bg-white dark:bg-gray-800 text-violet-500 dark:text-violet-400 border-violet-300 dark:border-violet-700 hover:border-violet-500'
                                               }`}
                                             >
-                                              ⚙️ Fixo
+                                              IA
                                             </button>
-                                            <button
-                                              type="button"
-                                              data-testid={`modality-ticks-${modality.id}-ai-max`}
-                                              onClick={(e) => { e.stopPropagation(); setMode('ai_max'); }}
-                                              className={`flex-1 py-1 rounded text-[10px] font-bold border transition-all ${
-                                                mode === 'ai_max'
-                                                  ? 'bg-emerald-600 text-white border-emerald-600'
-                                                  : 'bg-white dark:bg-gray-800 text-muted-foreground border-border hover:border-emerald-400'
-                                              }`}
-                                            >
-                                              🤖 IA+Máx
-                                            </button>
-                                          </div>
-                                          {/* ── Seletor de valor (oculto no modo IA livre) ── */}
-                                          {mode !== 'ai_free' && (
-                                            <div className="flex flex-wrap gap-1">
-                                              {options.map((t) => {
-                                                const isSel = absVal === t;
-                                                return (
-                                                  <button
-                                                    key={t}
-                                                    type="button"
-                                                    data-testid={`modality-ticks-${modality.id}-${t}`}
-                                                    onClick={(e) => { e.stopPropagation(); setVal(t); }}
-                                                    className={`px-2 py-1 rounded text-[11px] font-bold border transition-all ${
-                                                      isSel
-                                                        ? mode === 'ai_max'
-                                                          ? 'bg-emerald-500 text-white border-emerald-500'
-                                                          : 'bg-violet-500 text-white border-violet-500'
-                                                        : 'bg-white dark:bg-gray-800 text-muted-foreground border-border hover:border-violet-400'
-                                                    }`}
-                                                  >
-                                                    {t}
-                                                  </button>
-                                                );
-                                              })}
+                                            {/* Seletor de valor */}
+                                            <div className="flex flex-wrap items-center gap-1">
+                                              {options.map((t) => (
+                                                <button
+                                                  key={t}
+                                                  type="button"
+                                                  data-testid={`modality-ticks-${modality.id}-${t}`}
+                                                  title={isDynamic ? `Máximo: ${t} ${unit} (IA decide entre 1 e ${t})` : `Fixo: ${t} ${unit}`}
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    const newVal = isDynamic ? -t : t;
+                                                    const next = { ...modalityTicks, [modality.id]: newVal };
+                                                    setModalityTicks(next);
+                                                    saveModalityTicks(next);
+                                                    toast({
+                                                      title: isDynamic
+                                                        ? `${modality.name}: IA decide (1 a ${t} ${unit})`
+                                                        : `${modality.name}: fixo em ${t} ${unit}`,
+                                                      duration: 1200
+                                                    });
+                                                  }}
+                                                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold border transition-all ${
+                                                    absVal === t
+                                                      ? isDynamic
+                                                        ? 'bg-violet-400 text-white border-violet-400'
+                                                        : 'bg-teal-500 text-white border-teal-500'
+                                                      : 'bg-white dark:bg-gray-800 text-muted-foreground border-border hover:border-teal-400'
+                                                  }`}
+                                                >
+                                                  {t}
+                                                </button>
+                                              ))}
                                             </div>
-                                          )}
-                                          {/* ── Descrição do modo atual ── */}
-                                          <p className="text-[10px] text-violet-600 dark:text-violet-400">
-                                            {mode === 'ai_free'
-                                              ? '🤖 IA decide livremente a duração ideal a cada operação com base no regime de mercado.'
-                                              : mode === 'ai_max'
-                                                ? `🤖 IA escolhe entre 1 e ${absVal || defaultVal} ${unit} — limite máximo definido por você.`
-                                                : `⚙️ Fixo em ${absVal || defaultVal} ${unit} por operação.`}
+                                          </div>
+                                          <p className="text-[10px] text-teal-600 dark:text-teal-400 mt-1">
+                                            <span className="font-semibold text-violet-600 dark:text-violet-400">IA</span> ligado = IA decide entre 1 e o número selecionado (máximo). <span className="font-semibold text-teal-600 dark:text-teal-400">IA</span> desligado = fixo exatamente no número.
                                           </p>
                                         </div>
                                       );
