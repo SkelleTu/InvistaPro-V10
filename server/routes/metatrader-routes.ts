@@ -1765,6 +1765,35 @@ router.get('/girassol-pivots', (req: Request, res: Response) => {
 });
 
 /**
+ * POST /api/mt5/reset-session
+ * Zera o estado operacional de sessão de testes sem apagar dados de aprendizado da IA.
+ *
+ * O que é zerado:
+ *   - Perdas consecutivas (remove modo Recovery e thresholds elevados)
+ *   - Circuit Breaker (remove bloqueio de pausa)
+ *   - Log de análise em memória da sessão atual
+ *   - Modo pós-perda e ativo bloqueado do RealStatsTracker
+ *
+ * O que NÃO é alterado:
+ *   - Dados de aprendizado da IA (pesos, acurácia, padrões)
+ *   - Banco de dados (trades, configurações, usuários)
+ *   - Contadores cumulativos de sinais e trades
+ */
+router.post('/reset-session', async (req: Request, res: Response) => {
+  try {
+    const result = await metaTraderBridge.resetSessionState();
+    res.json({
+      ok: true,
+      message: 'Estado de sessão zerado com sucesso',
+      cleared: result.cleared,
+      resetAt: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
  * GET /api/mt5/brazil-news
  * Retorna o sentimento atual do mercado brasileiro baseado em noticiário em tempo real.
  * Atualizado automaticamente a cada 60 segundos pelo BrazilNewsService.

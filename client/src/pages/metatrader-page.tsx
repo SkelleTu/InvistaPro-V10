@@ -343,6 +343,24 @@ export default function MetaTraderPage() {
     }
   });
 
+  const resetSessionMutation = useMutation({
+    mutationFn: async () => {
+      return await apiRequest('POST', '/api/mt5/reset-session', {});
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/mt5/status'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/mt5/ai-analysis'] });
+      const cleared = data?.cleared?.join(', ') || 'estado de sessão';
+      toast({
+        title: '✅ Sessão zerada com sucesso',
+        description: `Removido: ${cleared}. Dados de aprendizado da IA preservados.`,
+      });
+    },
+    onError: () => {
+      toast({ title: 'Erro ao zerar sessão', description: 'Tente novamente.', variant: 'destructive' });
+    }
+  });
+
   const handleSaveConfig = () => {
     const updates = { ...configEdits };
     if (newApiToken) updates.apiToken = newApiToken;
@@ -854,12 +872,55 @@ export default function MetaTraderPage() {
                 <CardContent className="pt-4">
                   <div className="flex items-center gap-3">
                     <Shield className="h-6 w-6 text-red-500 shrink-0" />
-                    <div>
+                    <div className="flex-1">
                       <p className="font-bold text-red-500">Circuit Breaker Ativo</p>
                       <p className="text-sm text-muted-foreground">
                         {aiAnalysis.latest.consecutiveLosses} perdas consecutivas — Pausa de {aiAnalysis.latest.circuitBreakerRemainingMin} min para proteção da banca
                       </p>
                     </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="border-red-500/50 text-red-500 hover:bg-red-500/10 shrink-0"
+                      onClick={() => resetSessionMutation.mutate()}
+                      disabled={resetSessionMutation.isPending}
+                      data-testid="button-reset-session-cb"
+                    >
+                      <RefreshCw className={`h-3.5 w-3.5 mr-1 ${resetSessionMutation.isPending ? 'animate-spin' : ''}`} />
+                      Zerar Sessão
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Reset de Sessão — visível quando há Recovery ou perdas consecutivas */}
+            {(status?.latestIsRecoveryMode || (status?.consecutiveLosses ?? 0) > 0) && !aiAnalysis?.latest?.circuitBreakerActive && (
+              <Card className="border-orange-500/40 bg-orange-500/5" data-testid="card-recovery-reset">
+                <CardContent className="pt-3 pb-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle className="h-4 w-4 text-orange-500 shrink-0" />
+                      <div>
+                        <p className="text-sm font-semibold text-orange-500">
+                          {status?.latestIsRecoveryMode ? '🔴 Modo Recovery ativo' : `⚠️ ${status?.consecutiveLosses} perda(s) consecutiva(s)`}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Threshold elevado de dados de testes. Zere para novo contexto de análise.
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="border-orange-500/50 text-orange-500 hover:bg-orange-500/10 shrink-0"
+                      onClick={() => resetSessionMutation.mutate()}
+                      disabled={resetSessionMutation.isPending}
+                      data-testid="button-reset-session-recovery"
+                    >
+                      <RefreshCw className={`h-3.5 w-3.5 mr-1 ${resetSessionMutation.isPending ? 'animate-spin' : ''}`} />
+                      {resetSessionMutation.isPending ? 'Zerando...' : 'Zerar Sessão de Testes'}
+                    </Button>
                   </div>
                 </CardContent>
               </Card>
@@ -1972,6 +2033,56 @@ export default function MetaTraderPage() {
           </TabsContent>
 
           <TabsContent value="config" className="space-y-4 mt-4">
+
+            {/* ── GERENCIAMENTO DE SESSÃO ────────────────────────────── */}
+            <Card className="border-blue-500/30 bg-blue-500/5" data-testid="card-session-management">
+              <CardHeader className="pb-2 pt-3">
+                <CardTitle className="flex items-center gap-2 text-sm">
+                  <RefreshCw className="h-4 w-4 text-blue-400" />
+                  Gerenciamento de Sessão de Testes
+                </CardTitle>
+                <CardDescription className="text-xs">
+                  Zera dados operacionais de testes sem apagar aprendizado da IA ou banco de dados
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="pb-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="space-y-1 text-xs text-muted-foreground flex-1">
+                    <p className="font-medium text-foreground text-sm">O que é zerado:</p>
+                    <p>• Perdas consecutivas → 0 (remove modo Recovery e thresholds elevados)</p>
+                    <p>• Circuit Breaker → desativado</p>
+                    <p>• Modo pós-perda e ativo bloqueado</p>
+                    <p>• Log de análise em memória da sessão atual</p>
+                    <p className="font-medium text-foreground text-sm mt-2">O que é preservado:</p>
+                    <p>• Pesos e aprendizado de todos os modelos de IA</p>
+                    <p>• Histórico de trades e dados do banco</p>
+                    <p>• Configurações do sistema</p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    className="border-blue-500/50 text-blue-400 hover:bg-blue-500/10 shrink-0 self-start"
+                    onClick={() => resetSessionMutation.mutate()}
+                    disabled={resetSessionMutation.isPending}
+                    data-testid="button-reset-session-config"
+                  >
+                    <RefreshCw className={`h-4 w-4 mr-2 ${resetSessionMutation.isPending ? 'animate-spin' : ''}`} />
+                    {resetSessionMutation.isPending ? 'Zerando...' : 'Zerar Sessão'}
+                  </Button>
+                </div>
+                {(status?.latestIsRecoveryMode || (status?.consecutiveLosses ?? 0) > 0) && (
+                  <div className="mt-3 flex items-center gap-2 px-3 py-2 rounded-lg bg-orange-500/10 border border-orange-500/30">
+                    <AlertTriangle className="h-3.5 w-3.5 text-orange-500 shrink-0" />
+                    <p className="text-xs text-orange-500">
+                      {status?.latestIsRecoveryMode
+                        ? `🔴 Recovery ativo — threshold elevado para ${status?.latestRequiredConsensus ?? '?'}%`
+                        : `⚠️ ${status?.consecutiveLosses} perda(s) consecutiva(s) afetando thresholds`}
+                      {' '}— Recomendado zerar para novo contexto.
+                    </p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-base">

@@ -260,6 +260,23 @@ class RealStatsTracker {
   }
 
   /**
+   * RESET DE SESSÃO — Limpa o estado operacional de testes sem apagar dados de aprendizado.
+   * Zera: perdas consecutivas, circuit breaker, modo recovery, ativo bloqueado.
+   * Preserva: wonTrades, lostTrades, totalProfit e todos os dados históricos de aprendizado.
+   */
+  resetSessionState(): void {
+    const prev = {
+      consecutiveLosses: this.consecutiveLosses,
+      postLossMode: this.postLossMode,
+      circuitBreakerUntil: this.circuitBreakerUntil,
+      blockedAsset: this.blockedAsset,
+    };
+    this._clearRecoveryMode();
+    this.lastTradedAssetByUser.clear();
+    console.log(`[RealStatsTracker] 🔄 Sessão resetada — perdas consec: ${prev.consecutiveLosses}→0 | recovery: ${prev.postLossMode}→false | CB: ${prev.circuitBreakerUntil > Date.now() ? 'ativo→inativo' : 'inativo'} | ativo bloqueado: "${prev.blockedAsset}"→""`);
+  }
+
+  /**
    * Retorna o déficit de capital a recuperar (quanto falta para voltar ao saldo pré-perda).
    * Retorna 0 se não estiver em modo recovery ou se o saldo já superou o alvo.
    */

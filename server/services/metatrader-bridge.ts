@@ -1420,6 +1420,53 @@ class MetaTraderBridge extends EventEmitter {
     return this.analysisLog[0] || null;
   }
 
+  /**
+   * RESET DE SESSÃO — Zera o estado operacional de testes sem apagar dados de aprendizado.
+   *
+   * O que é ZERADO (estado de sessão):
+   *   • consecutiveLosses → 0 (remove thresholds elevados por "Recovery")
+   *   • circuitBreakerUntil → 0 (remove bloqueio de circuit breaker)
+   *   • analysisLog em memória → limpo (logs de análise da sessão atual)
+   *   • RealStatsTracker recovery state → resetado (remove modo pós-perda e ativo bloqueado)
+   *
+   * O que NÃO é alterado (dados permanentes):
+   *   • totalSignalsGenerated, totalTradesExecuted (contadores cumulativos)
+   *   • Dados de aprendizado da IA (pesos, acurácia, padrões aprendidos)
+   *   • Banco de dados (trades, configurações, usuários)
+   *   • Configurações do sistema
+   */
+  async resetSessionState(): Promise<{ cleared: string[] }> {
+    const cleared: string[] = [];
+
+    // 1. Zerar perdas consecutivas e circuit breaker no Bridge
+    const prevLosses = this.consecutiveLosses;
+    const prevCB = this.circuitBreakerUntil;
+    this.consecutiveLosses = 0;
+    this.circuitBreakerUntil = 0;
+    if (prevLosses > 0) cleared.push(`perdas consecutivas (${prevLosses}→0)`);
+    if (prevCB > Date.now()) cleared.push(`circuit breaker (${Math.round((prevCB - Date.now()) / 60000)}min restantes→removido)`);
+
+    // 2. Limpar log de análise em memória (apenas sessão atual)
+    const prevLogSize = this.analysisLog.length;
+    this.analysisLog = [];
+    cleared.push(`log de análise em memória (${prevLogSize} entradas)`);
+
+    // 3. Persistir estado resetado no SQLite
+    this.saveBridgeState();
+
+    // 4. Resetar RealStatsTracker (modo recovery, ativo bloqueado, CB do tracker)
+    try {
+      const { realStatsTracker } = await import('./real-stats-tracker');
+      realStatsTracker.resetSessionState();
+      cleared.push('modo recovery (RealStatsTracker)');
+    } catch {
+      // fallback silencioso
+    }
+
+    console.log(`[MT5Bridge] 🔄 RESET DE SESSÃO — Zerado: ${cleared.join(' | ')}`);
+    return { cleared };
+  }
+
   getConfig(): MT5Config {
     return { ...this.config };
   }
