@@ -2197,6 +2197,18 @@ export class AutoTradingScheduler {
           const clampedTouchDuration = isNoTouch
             ? Math.min(Math.max(touchDuration, 1), 5)   // NOTOUCH: 1-5 min
             : Math.min(Math.max(touchDuration, 5), 30);  // ONETOUCH: 5-30 min
+
+          // ── FILTRO DE EV: lucro potencial deve superar a perda potencial ──────
+          // A IA estima a prob. de acerto via consenso. Para EV > 0:
+          //   consenso × lucro_ratio > (1 - consenso) × 1.0
+          //   → lucro_ratio_mínimo = (1 - wr) / wr  (com +5% margem de segurança)
+          const winProb = Math.max(0.5, Math.min(0.99, (aiConsensus.consensusStrength ?? 70) / 100));
+          const touchMinProfitRatio = parseFloat((((1 - winProb) / winProb) * 1.05).toFixed(4));
+          console.log(
+            `🧮 [EV CHECK] ${contractType} ${selectedSymbol}: consenso=${(winProb*100).toFixed(1)}% → ` +
+            `lucro_mínimo_exigido=${(touchMinProfitRatio*100).toFixed(1)}% sobre o stake`
+          );
+
           contract = await derivAPI.buyFlexibleContract({
             contract_type: contractType,
             symbol: selectedSymbol,
@@ -2204,7 +2216,13 @@ export class AutoTradingScheduler {
             duration: clampedTouchDuration,
             duration_unit: 'm',
             barrier,
+            minProfitRatio: touchMinProfitRatio,
           });
+
+          if (!contract) {
+            console.warn(`🚫 [${operationId}] ${contractType} ${selectedSymbol} — EV insuficiente ou proposta rejeitada. Trade cancelado para proteger o capital.`);
+            return { success: false, error: `${contractType}: payout insuficiente para o consenso atual (${(winProb*100).toFixed(1)}%) — ganho potencial menor que perda potencial` };
+          }
           resolvedTradeType = selectedModality;
 
         } else if (MULTIPLIER_TYPES[selectedModality]) {

@@ -1324,6 +1324,7 @@ export class DerivAPIService extends EventEmitter {
     growth_rate?: number;
     date_expiry?: number;
     basis?: string;
+    minProfitRatio?: number; // Ex: 0.25 = lucro mínimo de 25% sobre o stake. Se payout não atingir, aborta.
   }): Promise<DerivContractInfo | null> {
     if (!this.isConnected) return null;
 
@@ -1372,7 +1373,7 @@ export class DerivAPIService extends EventEmitter {
     console.log(`📋 [FLEX CONTRACT] ${params.contract_type} | ${params.symbol} | $${params.amount} | Iniciando proposal...`);
 
     const proposalStart = Date.now();
-    const proposal = await new Promise<{ id: string; ask_price: number } | null>((resolve) => {
+    const proposal = await new Promise<{ id: string; ask_price: number; payout: number } | null>((resolve) => {
       const handler = (message: any) => {
         if (message.req_id === reqProposalId) {
           this.removeListener('message', handler);
@@ -1383,7 +1384,8 @@ export class DerivAPIService extends EventEmitter {
             if (proposalMs > 3000) {
               console.warn(`⚠️ [LATÊNCIA ALTA] Proposta demorou ${proposalMs}ms — mercado pode ter se movido!`);
             }
-            resolve({ id: message.proposal.id, ask_price: message.proposal.ask_price });
+            const payout = message.proposal.payout ?? message.proposal.ask_price ?? 0;
+            resolve({ id: message.proposal.id, ask_price: message.proposal.ask_price, payout });
           } else {
             console.error(`❌ Proposta ${params.contract_type} falhou:`, message.error?.message || message.error);
             resolve(null);
@@ -1400,6 +1402,25 @@ export class DerivAPIService extends EventEmitter {
     });
 
     if (!proposal) return null;
+
+    // ── VERIFICAÇÃO DE EV (Expected Value) ──────────────────────────────────
+    // Se minProfitRatio estiver definido, só executa se o lucro potencial ≥ minProfitRatio × stake
+    // Garante que nunca perdemos mais do que ganhamos quando a IA tem edge suficiente.
+    if (params.minProfitRatio !== undefined && params.minProfitRatio > 0) {
+      const netProfit = proposal.payout - proposal.ask_price;
+      const profitRatio = proposal.ask_price > 0 ? netProfit / proposal.ask_price : 0;
+      if (profitRatio < params.minProfitRatio) {
+        console.warn(
+          `🚫 [EV BLOCK] ${params.contract_type} ${params.symbol} — payout insuficiente: ` +
+          `lucro=${(profitRatio * 100).toFixed(1)}% < mínimo=${(params.minProfitRatio * 100).toFixed(1)}% | ` +
+          `ask=$${proposal.ask_price.toFixed(2)} payout=$${proposal.payout.toFixed(2)} — trade cancelado.`
+        );
+        return null;
+      }
+      console.log(
+        `✅ [EV OK] ${params.contract_type} ${params.symbol} — lucro=${(profitRatio * 100).toFixed(1)}% ≥ mínimo=${(params.minProfitRatio * 100).toFixed(1)}% | prosseguindo com compra`
+      );
+    }
 
     const buyStart = Date.now();
     const reqBuyId = this.generateRequestId();
