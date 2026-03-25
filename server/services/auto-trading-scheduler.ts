@@ -103,7 +103,7 @@ export class AutoTradingScheduler {
   private badMarketPausedUntil: number = 0;             // Timestamp até quando operações estão pausadas
   private badMarketReducedGrowthActive: boolean = false; // true = opera com growth 1% (recuperação parcial)
   private readonly BAD_MARKET_PAUSE_MS = 30 * 1000;      // 30 segundos (antes: 15 min) — IA retoma quase imediatamente
-  private readonly BAD_MARKET_QUALITY_THRESHOLD = 20;    // Qualidade ≤ 20% → pausa (antes: 40%) — só pausa em mercado muito ruim
+  private readonly BAD_MARKET_QUALITY_THRESHOLD = 30;    // Qualidade ≤ 30% → pausa — pausa quando mercado está claramente desfavorável
   private readonly BAD_MARKET_RECOVERED_THRESHOLD = 60;  // Qualidade > 60% → recuperação plena (5%)
   private readonly BAD_MARKET_PARTIAL_THRESHOLD = 30;    // Qualidade 31-60% → recuperação parcial (antes: 40%)
   private readonly BAD_MARKET_GROWTH_REDUCED = 0.01;     // Taxa de crescimento reduzida (1%)
@@ -1301,13 +1301,13 @@ export class AutoTradingScheduler {
         return { success: false, error: 'IAs com sinal neutro — sem edge direcional. Aguardando próximo ciclo.' };
       }
 
-      const MIN_DIRECTIONAL_CONSENSUS = 55; // abaixo de 55% de acordo não há edge real
+      const MIN_DIRECTIONAL_CONSENSUS = 65; // abaixo de 65% de acordo (nota "A") não há edge real de lucro
       if (aiDirectionalConsensus < MIN_DIRECTIONAL_CONSENSUS) {
-        console.log(`⛔ [${operationId}] CONSENSO FRACO BLOQUEADO: ${aiDirectionalDecision.toUpperCase()} ${selectedSymbol} | consenso=${aiDirectionalConsensus.toFixed(1)}% < ${MIN_DIRECTIONAL_CONSENSUS}% mínimo — sem edge suficiente.`);
-        return { success: false, error: `Consenso ${aiDirectionalConsensus.toFixed(1)}% insuficiente (mín ${MIN_DIRECTIONAL_CONSENSUS}%) — aguardando sinal mais forte.` };
+        console.log(`⛔ [${operationId}] CONSENSO FRACO BLOQUEADO: ${aiDirectionalDecision.toUpperCase()} ${selectedSymbol} | consenso=${aiDirectionalConsensus.toFixed(1)}% < ${MIN_DIRECTIONAL_CONSENSUS}% mínimo — sinal não é BOM o suficiente para lucro real.`);
+        return { success: false, error: `Consenso ${aiDirectionalConsensus.toFixed(1)}% insuficiente (mín ${MIN_DIRECTIONAL_CONSENSUS}%) — aguardando sinal de qualidade BOA (nota A/S).` };
       }
 
-      console.log(`✅ [${operationId}] SINAL VÁLIDO: ${aiDirectionalDecision.toUpperCase()} ${selectedSymbol} | consenso=${aiDirectionalConsensus.toFixed(1)}% ≥ ${MIN_DIRECTIONAL_CONSENSUS}% — operação autorizada.`);
+      console.log(`✅ [${operationId}] SINAL VÁLIDO: ${aiDirectionalDecision.toUpperCase()} ${selectedSymbol} | consenso=${aiDirectionalConsensus.toFixed(1)}% ≥ ${MIN_DIRECTIONAL_CONSENSUS}% (nota A/S) — operação autorizada com edge real de lucro.`);
 
       // 🎯 DIVERSIFICAÇÃO INTELIGENTE: Verificar se ativo pode ser aberto + jogo de cintura
       const diversityCheck = await this.canOpenTradeForAsset(
