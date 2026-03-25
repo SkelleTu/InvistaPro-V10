@@ -1071,19 +1071,43 @@ void CheckAndExecuteSignal() {
    }
 
    //--- Garantir distância mínima exigida pelo broker
-   long   stopsLevel = SymbolInfoInteger(symbol, SYMBOL_TRADE_STOPS_LEVEL);
-   double minDist    = MathMax((double)stopsLevel * point, (SymbolInfoDouble(symbol, SYMBOL_ASK) - SymbolInfoDouble(symbol, SYMBOL_BID)) * 3.0);
+   //--- IMPORTANTE: Deriv retorna SYMBOL_TRADE_STOPS_LEVEL=0 para índices sintéticos,
+   //--- por isso usamos mínimos fixos por família de ativo como fallback obrigatório.
+   long   stopsLevel  = SymbolInfoInteger(symbol, SYMBOL_TRADE_STOPS_LEVEL);
+   double brokerMin   = (double)stopsLevel * point;
+
+   //--- Mínimos fixos por família (baseados nos requisitos reais da Deriv MT5)
+   double fixedMinSL = 0;
+   string symUpLocal = symbol; StringToUpper(symUpLocal);
+   if(StringFind(symUpLocal, "JUMP 100") >= 0 || StringFind(symUpLocal, "JUMP100") >= 0 || StringFind(symUpLocal, "JD100") >= 0)
+      fixedMinSL = 1500 * point;
+   else if(StringFind(symUpLocal, "JUMP 75") >= 0  || StringFind(symUpLocal, "JUMP75") >= 0  || StringFind(symUpLocal, "JD75") >= 0)
+      fixedMinSL = 1000 * point;
+   else if(StringFind(symUpLocal, "JUMP 50") >= 0  || StringFind(symUpLocal, "JUMP50") >= 0  || StringFind(symUpLocal, "JD50") >= 0)
+      fixedMinSL = 500 * point;
+   else if(StringFind(symUpLocal, "JUMP 25") >= 0  || StringFind(symUpLocal, "JUMP25") >= 0  || StringFind(symUpLocal, "JD25") >= 0)
+      fixedMinSL = 300 * point;
+   else if(StringFind(symUpLocal, "JUMP 10") >= 0  || StringFind(symUpLocal, "JUMP10") >= 0  || StringFind(symUpLocal, "JD10") >= 0)
+      fixedMinSL = 200 * point;
+   else if(StringFind(symUpLocal, "CRASH") >= 0 || StringFind(symUpLocal, "BOOM") >= 0)
+      fixedMinSL = 200 * point;
+   else if(StringFind(symUpLocal, "VOLATILITY") >= 0 || StringFind(symUpLocal, "R_") >= 0)
+      fixedMinSL = 50 * point;
+
+   double minDist = MathMax(MathMax(brokerMin, fixedMinSL),
+                            (SymbolInfoDouble(symbol, SYMBOL_ASK) - SymbolInfoDouble(symbol, SYMBOL_BID)) * 3.0);
+
    if(minDist > 0)
    {
       if(action == "BUY")
       {
-         if(slPrice > 0 && (entryPrice - slPrice) < minDist) slPrice = NormalizeDouble(entryPrice - minDist, digits);
-         if(tpPrice > 0 && (tpPrice - entryPrice) < minDist) tpPrice = NormalizeDouble(entryPrice + minDist, digits);
+         if(slPrice > 0 && (entryPrice - slPrice) < minDist) { slPrice = NormalizeDouble(entryPrice - minDist, digits); Print("⚠️ SL ajustado para mínimo broker: ", DoubleToString(slPrice, digits)); }
+         if(tpPrice > 0 && (tpPrice - entryPrice) < minDist) { tpPrice = NormalizeDouble(entryPrice + minDist, digits); Print("⚠️ TP ajustado para mínimo broker: ", DoubleToString(tpPrice, digits)); }
       }
       else
       {
-         if(slPrice > 0 && (slPrice - entryPrice) < minDist) slPrice = NormalizeDouble(entryPrice + minDist, digits);
-         if(tpPrice > 0 && (entryPrice - tpPrice) < minDist) tpPrice = NormalizeDouble(entryPrice - minDist, digits);
+         if(slPrice > 0 && (slPrice - entryPrice) < minDist) { slPrice = NormalizeDouble(entryPrice + minDist, digits); Print("⚠️ SL ajustado para mínimo broker: ", DoubleToString(slPrice, digits)); }
+         if(tpPrice > 0 && (entryPrice - tpPrice) < minDist) { tpPrice = NormalizeDouble(entryPrice - minDist, digits); Print("⚠️ TP ajustado para mínimo broker: ", DoubleToString(tpPrice, digits)); }
       }
    }
    if(slPrice > 0) slPrice = NormalizeDouble(slPrice, digits);
