@@ -269,6 +269,11 @@ export default function MetaTraderPage() {
     refetchInterval: 3000
   });
 
+  const { data: brazilNews } = useQuery<any>({
+    queryKey: ['/api/mt5/brazil-news'],
+    refetchInterval: 30000,
+  });
+
   // Atualizar timestamp de "última atualização"
   useEffect(() => {
     setLastUpdated(new Date());
@@ -912,6 +917,224 @@ export default function MetaTraderPage() {
                 </CardContent>
               </Card>
             </div>
+
+            {/* ── CARD: Noticiário Brasileiro em Tempo Real ───────────── */}
+            <Card className="border-yellow-500/30 bg-yellow-500/5" data-testid="card-brazil-news">
+              <CardHeader className="pb-2 pt-3">
+                <CardTitle className="flex items-center gap-2 text-sm">
+                  <span className="text-base">🇧🇷</span>
+                  Sentimento Mercado Brasileiro — Noticiário em Tempo Real
+                  <Badge variant="outline" className="text-xs gap-1 ml-auto">
+                    <div className="w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse" />
+                    Atualiza a cada 30s
+                  </Badge>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pb-3 space-y-3">
+                {brazilNews ? (
+                  <>
+                    {/* Barra de sentimento geral */}
+                    <div className="flex items-center gap-4">
+                      <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border font-bold text-sm ${
+                        brazilNews.direction === 'bullish' ? 'border-green-500/50 bg-green-500/10 text-green-400' :
+                        brazilNews.direction === 'bearish' ? 'border-red-500/50 bg-red-500/10 text-red-400' :
+                        'border-yellow-500/50 bg-yellow-500/10 text-yellow-400'
+                      }`}>
+                        {brazilNews.direction === 'bullish' ? '↑ BULLISH' :
+                         brazilNews.direction === 'bearish' ? '↓ BEARISH' : '— NEUTRO'}
+                        <span className="text-lg font-black ml-1">{brazilNews.strength}%</span>
+                      </div>
+                      <div className="flex-1">
+                        <Progress
+                          value={brazilNews.strength}
+                          className={`h-2.5 ${brazilNews.direction === 'bullish' ? '[&>div]:bg-green-500' : brazilNews.direction === 'bearish' ? '[&>div]:bg-red-500' : '[&>div]:bg-yellow-500'}`}
+                        />
+                        <p className="text-xs text-muted-foreground mt-1">{brazilNews.newsCount} notícias analisadas · Score: {brazilNews.score?.toFixed(3)}</p>
+                      </div>
+                      {/* Bloqueios ativos */}
+                      {(brazilNews.aiInfluence?.blocksBuy || brazilNews.aiInfluence?.blocksSell) && (
+                        <div className="flex items-center gap-1 px-2 py-1.5 rounded border border-red-500/50 bg-red-500/10 text-red-400 text-xs font-semibold">
+                          🛑 {brazilNews.aiInfluence.blocksBuy ? 'BUY Suspenso' : 'SELL Suspenso'}
+                        </div>
+                      )}
+                      {!brazilNews.aiInfluence?.blocksBuy && !brazilNews.aiInfluence?.blocksSell && Math.abs(brazilNews.aiInfluence?.confidenceModifier ?? 0) > 0.02 && (
+                        <div className={`flex items-center gap-1 px-2 py-1.5 rounded border text-xs font-semibold ${
+                          (brazilNews.aiInfluence?.confidenceModifier ?? 0) > 0 ? 'border-green-500/50 bg-green-500/10 text-green-400' : 'border-red-500/50 bg-red-500/10 text-red-400'
+                        }`}>
+                          {(brazilNews.aiInfluence?.confidenceModifier ?? 0) > 0 ? '▲' : '▼'} Conf {Math.round((brazilNews.aiInfluence?.confidenceModifier ?? 0) * 100)}%
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Scores por categoria */}
+                    {brazilNews.categories && (
+                      <div className="grid grid-cols-5 gap-1.5 text-xs">
+                        {[
+                          { key: 'cambio', label: 'Câmbio', icon: '💱' },
+                          { key: 'bolsa', label: 'Bolsa', icon: '📈' },
+                          { key: 'juros', label: 'SELIC', icon: '🏦' },
+                          { key: 'economia', label: 'Economia', icon: '🏭' },
+                          { key: 'politica', label: 'Política', icon: '🏛️' },
+                        ].map(cat => {
+                          const val = brazilNews.categories[cat.key] ?? 0;
+                          return (
+                            <div key={cat.key} className="bg-background/60 rounded-md p-2 border text-center">
+                              <p className="text-base">{cat.icon}</p>
+                              <p className="text-muted-foreground">{cat.label}</p>
+                              <p className={`font-bold ${val > 0.1 ? 'text-green-400' : val < -0.1 ? 'text-red-400' : 'text-yellow-400'}`}>
+                                {val > 0.1 ? '↑' : val < -0.1 ? '↓' : '—'} {Math.abs(val * 100).toFixed(0)}%
+                              </p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* Top headlines recentes */}
+                    {brazilNews.headlines && brazilNews.headlines.length > 0 && (
+                      <div className="space-y-1.5">
+                        <p className="text-xs font-semibold text-muted-foreground flex items-center gap-1">
+                          <span>📰</span> Últimas Notícias Coletadas
+                        </p>
+                        <div className="max-h-44 overflow-y-auto space-y-1 pr-1">
+                          {brazilNews.headlines.slice(0, 12).map((h: any, i: number) => (
+                            <div key={i} className={`flex items-start gap-2 p-2 rounded text-xs border-l-2 ${
+                              h.sentiment === 'bullish' ? 'border-green-500 bg-green-500/5' :
+                              h.sentiment === 'bearish' ? 'border-red-500 bg-red-500/5' :
+                              'border-border bg-muted/10'
+                            }`}>
+                              <span className="shrink-0 mt-0.5">
+                                {h.sentiment === 'bullish' ? '📗' : h.sentiment === 'bearish' ? '📕' : '📄'}
+                              </span>
+                              <div className="flex-1 min-w-0">
+                                <p className="leading-snug text-foreground/90 line-clamp-2">{h.title}</p>
+                                <p className="text-muted-foreground mt-0.5">{h.source} · {h.sentiment === 'bullish' ? <span className="text-green-400">alta</span> : h.sentiment === 'bearish' ? <span className="text-red-400">baixa</span> : 'neutro'}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Razão de influência */}
+                    {brazilNews.aiInfluence?.reason && (
+                      <p className="text-xs text-muted-foreground bg-muted/30 rounded p-2 border-l-2 border-yellow-500/50">
+                        {brazilNews.aiInfluence.reason}
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <div className="flex items-center gap-3 text-muted-foreground py-2">
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                    <p className="text-sm">Coletando notícias brasileiras em tempo real...</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* ── CARD: Quadro de Votos das IAs ao Vivo ──────────────── */}
+            {aiAnalysis?.latest?.modelResults && aiAnalysis.latest.modelResults.length > 0 && (
+              <Card className="border-primary/30" data-testid="card-ai-vote-board">
+                <CardHeader className="pb-2 pt-3">
+                  <CardTitle className="flex items-center gap-2 text-sm">
+                    <Brain className="h-4 w-4 text-primary animate-pulse" />
+                    Quadro de Votos — {aiAnalysis.latest.modelResults.length} IAs Analisando Agora
+                    <span className="text-xs text-muted-foreground ml-1">· {aiAnalysis.latest.symbol}</span>
+                    <Badge variant="outline" className="text-xs gap-1 ml-auto">
+                      <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                      {new Date(aiAnalysis.latest.timestamp).toLocaleTimeString('pt-BR')}
+                    </Badge>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="pb-3 space-y-3">
+                  {/* Grade de votos por modelo */}
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+                    {aiAnalysis.latest.modelResults.map((model: any, i: number) => {
+                      const pred = model.prediction || model.direction || 'neutral';
+                      const conf = ((model.confidence ?? 0) * 100);
+                      const isUp   = pred === 'up'   || pred === 'BUY';
+                      const isDown = pred === 'down'  || pred === 'SELL';
+                      return (
+                        <div key={i} className={`rounded-lg p-2.5 border text-xs ${
+                          isUp   ? 'border-green-500/40 bg-green-500/8' :
+                          isDown ? 'border-red-500/40 bg-red-500/8' :
+                          'border-border bg-muted/20'
+                        }`} data-testid={`vote-model-${i}`}>
+                          <p className="font-semibold leading-tight mb-1.5 line-clamp-2 text-foreground/80" style={{fontSize:'10px'}}>
+                            {model.modelName?.replace('FinBERT','FB').replace('RoBERTa','Rb').replace('XLM-','').replace('DistilRoBERTa','DistilRb').replace('CryptoBERT','CrypBT').replace('FinTwits','FTwits').replace('Zero-Shot','ZeroShot') || `IA ${i+1}`}
+                          </p>
+                          <div className="flex items-center justify-between gap-1">
+                            <span className={`font-black text-sm ${isUp ? 'text-green-400' : isDown ? 'text-red-400' : 'text-yellow-400'}`}>
+                              {isUp ? '↑' : isDown ? '↓' : '—'}
+                            </span>
+                            <span className={`font-bold ${conf >= 70 ? 'text-green-400' : conf >= 50 ? 'text-yellow-400' : 'text-muted-foreground'}`}>
+                              {conf.toFixed(0)}%
+                            </span>
+                          </div>
+                          <Progress value={conf} className={`h-1 mt-1 ${isUp ? '[&>div]:bg-green-500' : isDown ? '[&>div]:bg-red-500' : '[&>div]:bg-yellow-500'}`} />
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Linha de sistemas especializados */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                    {/* Quantum */}
+                    {aiAnalysis.latest.quantumPrediction !== undefined && (
+                      <div className="bg-background/60 rounded-lg p-2.5 border">
+                        <p className="text-muted-foreground mb-1 flex items-center gap-1"><Zap className="h-3 w-3 text-purple-400"/>Sistema Quântico</p>
+                        <p className={`font-bold ${aiAnalysis.latest.quantumPrediction === 'up' ? 'text-green-400' : aiAnalysis.latest.quantumPrediction === 'down' ? 'text-red-400' : 'text-yellow-400'}`}>
+                          {aiAnalysis.latest.quantumPrediction === 'up' ? '↑ COMPRA' : aiAnalysis.latest.quantumPrediction === 'down' ? '↓ VENDA' : '— NEUTRO'}
+                        </p>
+                        {aiAnalysis.latest.quantumConfidence !== undefined && (
+                          <Progress value={aiAnalysis.latest.quantumConfidence * 100} className="h-1 mt-1 [&>div]:bg-purple-500" />
+                        )}
+                      </div>
+                    )}
+                    {/* Microscopic */}
+                    {aiAnalysis.latest.microscopicPrediction !== undefined && (
+                      <div className="bg-background/60 rounded-lg p-2.5 border">
+                        <p className="text-muted-foreground mb-1 flex items-center gap-1"><Gauge className="h-3 w-3 text-blue-400"/>Microscópico</p>
+                        <p className={`font-bold ${aiAnalysis.latest.microscopicPrediction === 'up' ? 'text-green-400' : aiAnalysis.latest.microscopicPrediction === 'down' ? 'text-red-400' : 'text-yellow-400'}`}>
+                          {aiAnalysis.latest.microscopicPrediction === 'up' ? '↑ COMPRA' : aiAnalysis.latest.microscopicPrediction === 'down' ? '↓ VENDA' : '— NEUTRO'}
+                        </p>
+                        {aiAnalysis.latest.microscopicConfidence !== undefined && (
+                          <Progress value={aiAnalysis.latest.microscopicConfidence * 100} className="h-1 mt-1 [&>div]:bg-blue-500" />
+                        )}
+                      </div>
+                    )}
+                    {/* Volatilidade */}
+                    {aiAnalysis.latest.volatility !== undefined && (
+                      <div className="bg-background/60 rounded-lg p-2.5 border">
+                        <p className="text-muted-foreground mb-1 flex items-center gap-1"><Activity className="h-3 w-3 text-orange-400"/>Volatilidade</p>
+                        <p className="font-bold">{(aiAnalysis.latest.volatility * 100).toFixed(2)}%</p>
+                        <p className="text-muted-foreground">{aiAnalysis.latest.marketRegime || '—'}</p>
+                      </div>
+                    )}
+                    {/* Consenso geral */}
+                    <div className={`rounded-lg p-2.5 border ${
+                      aiAnalysis.latest.aiConsensus >= (aiAnalysis.latest.requiredConsensus ?? 70) ? 'border-green-500/50 bg-green-500/5' : 'border-red-500/30 bg-red-500/5'
+                    }`}>
+                      <p className="text-muted-foreground mb-1 flex items-center gap-1"><CheckCircle2 className="h-3 w-3"/>Consenso Final</p>
+                      <p className={`font-black text-lg ${aiAnalysis.latest.aiConsensus >= (aiAnalysis.latest.requiredConsensus ?? 70) ? 'text-green-400' : 'text-red-400'}`}>
+                        {aiAnalysis.latest.aiConsensus?.toFixed(1)}%
+                      </p>
+                      <p className="text-muted-foreground">mín: {aiAnalysis.latest.requiredConsensus ?? 70}%{aiAnalysis.latest.isRecoveryMode ? ' 🔴' : ''}</p>
+                    </div>
+                  </div>
+
+                  {/* Narrativa completa */}
+                  {aiAnalysis.latest.decisionReason && (
+                    <div className="bg-muted/30 rounded-lg p-3 border-l-4 border-primary text-xs leading-relaxed">
+                      <p className="font-semibold text-primary mb-1 flex items-center gap-1">
+                        <Brain className="h-3 w-3" /> Decisão das IAs
+                      </p>
+                      <p className="text-foreground/90">{aiAnalysis.latest.decisionReason}</p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
 
             {/* Live AI activity — sempre visível mesmo sem log entries */}
             {status?.connected && (
