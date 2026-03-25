@@ -97,7 +97,7 @@ export class AutoTradingScheduler {
   // 📉 Qualidade de mercado detectada no último scan (0-100)
   // Baixa = muitos ativos com consenso ruim simultaneamente → modo defensivo
   private lastScanMarketQuality: number = 100;
-  private readonly CYCLE_INTERVAL_MS = 60000;
+  private readonly CYCLE_INTERVAL_MS = 5000; // 5 segundos — análise contínua, IA decide livremente quando operar
 
   // 🚫 PAUSA POR MERCADO RUIM — Bloqueia operações quando o mercado global está desfavorável
   private badMarketPausedUntil: number = 0;             // Timestamp até quando operações estão pausadas
@@ -1175,30 +1175,10 @@ export class AutoTradingScheduler {
     }
   }
 
-  private shouldExecuteNow(session: ActiveTradeSession): boolean {
-    if (!session.lastExecutionTime) {
-      return true; // Primeira execução
-    }
-
-    const now = new Date();
-    const timeDiff = now.getTime() - session.lastExecutionTime.getTime();
-    
-    let intervalMs = 0;
-    switch (session.intervalType) {
-      case 'minutes':
-        intervalMs = session.intervalValue * 60 * 1000;
-        break;
-      case 'hours':
-        intervalMs = session.intervalValue * 60 * 60 * 1000;
-        break;
-      case 'days':
-        intervalMs = session.intervalValue * 24 * 60 * 60 * 1000;
-        break;
-      default:
-        intervalMs = 60 * 1000; // Default: 1 minuto
-    }
-
-    return timeDiff >= intervalMs;
+  private shouldExecuteNow(_session: ActiveTradeSession): boolean {
+    // ✅ IA livre de ciclos fixos — a IA analisa e decide quando operar com base no mercado.
+    // Mecanismos de proteção (circuit breaker, consenso, bad market pause) controlam a execução.
+    return true;
   }
 
   private async executeAutomaticTrade(config: any, tokenData: any, operationId: string): Promise<{success: boolean, error?: string}> {
@@ -4056,10 +4036,9 @@ export class AutoTradingScheduler {
       return;
     }
     
-    // ⚡ OTIMIZAÇÃO: Criar intervalo com stagger entre trades para evitar congestão
-    // Intervalo de 60 segundos (1 minuto) entre ciclos de análise
-    // Cada ciclo pode abrir 1 trade (com stagger de 10s entre múltiplas configs)
-    // = Máximo ~1 trade por minuto por config (controlado e previsível)
+    // ⚡ ANÁLISE CONTÍNUA: Ciclo a cada 5 segundos — IA decide livremente quando operar
+    // Sem restrições de tempo: circuit breaker, consenso e bad market pause são os guardiões
+    // A IA analisa o mercado continuamente e entra quando identifica oportunidade real
     
     // ▶️ A IA decide sozinha quando e como operar — sem restrições artificiais de tempo
     (async () => {
@@ -4078,12 +4057,12 @@ export class AutoTradingScheduler {
           console.error('❌ [SCHEDULER] Erro crítico na execução do ciclo:', error);
         }
       }
-    }, 60000); // 60 segundos (1 minuto) entre execuções
+    }, this.CYCLE_INTERVAL_MS); // 5 segundos — análise contínua, IA decide livremente
     
     // 🔄 Iniciar sincronização automática de trades da Deriv
     derivTradeSync.startAutoSync();
     
-    console.log('▶️ Auto Trading Scheduler iniciado - análise a cada 60 segundos (com duração distribuída 10-15 ticks)');
+    console.log('▶️ Auto Trading Scheduler iniciado - análise contínua a cada 5 segundos — IA livre para operar quando identificar oportunidade');
     console.log('🔄 Sincronização automática de trades ativada a cada 30 segundos');
   }
 
