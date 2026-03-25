@@ -1076,23 +1076,24 @@ void CheckAndExecuteSignal() {
    long   stopsLevel  = SymbolInfoInteger(symbol, SYMBOL_TRADE_STOPS_LEVEL);
    double brokerMin   = (double)stopsLevel * point;
 
-   //--- Mínimos fixos por família (baseados nos requisitos reais da Deriv MT5)
+   //--- Mínimos por família baseados em % do preço atual (Deriv retorna STOPS_LEVEL=0)
+   //--- Usando percentual do preço porque os índices sintéticos têm preços muito variados.
    double fixedMinSL = 0;
    string symUpLocal = symbol; StringToUpper(symUpLocal);
    if(StringFind(symUpLocal, "JUMP 100") >= 0 || StringFind(symUpLocal, "JUMP100") >= 0 || StringFind(symUpLocal, "JD100") >= 0)
-      fixedMinSL = 1500 * point;
+      fixedMinSL = entryPrice * 0.040;   // Jump 100: 4% do preço
    else if(StringFind(symUpLocal, "JUMP 75") >= 0  || StringFind(symUpLocal, "JUMP75") >= 0  || StringFind(symUpLocal, "JD75") >= 0)
-      fixedMinSL = 1000 * point;
+      fixedMinSL = entryPrice * 0.030;   // Jump 75:  3% do preço
    else if(StringFind(symUpLocal, "JUMP 50") >= 0  || StringFind(symUpLocal, "JUMP50") >= 0  || StringFind(symUpLocal, "JD50") >= 0)
-      fixedMinSL = 500 * point;
+      fixedMinSL = entryPrice * 0.020;   // Jump 50:  2% do preço (~600 pts em 30000)
    else if(StringFind(symUpLocal, "JUMP 25") >= 0  || StringFind(symUpLocal, "JUMP25") >= 0  || StringFind(symUpLocal, "JD25") >= 0)
-      fixedMinSL = 300 * point;
+      fixedMinSL = entryPrice * 0.015;   // Jump 25:  1.5% do preço
    else if(StringFind(symUpLocal, "JUMP 10") >= 0  || StringFind(symUpLocal, "JUMP10") >= 0  || StringFind(symUpLocal, "JD10") >= 0)
-      fixedMinSL = 200 * point;
+      fixedMinSL = entryPrice * 0.010;   // Jump 10:  1% do preço
    else if(StringFind(symUpLocal, "CRASH") >= 0 || StringFind(symUpLocal, "BOOM") >= 0)
-      fixedMinSL = 200 * point;
+      fixedMinSL = entryPrice * 0.005;   // Crash/Boom: 0.5% do preço
    else if(StringFind(symUpLocal, "VOLATILITY") >= 0 || StringFind(symUpLocal, "R_") >= 0)
-      fixedMinSL = 50 * point;
+      fixedMinSL = entryPrice * 0.002;   // Volatility (R_X): 0.2% do preço
 
    double minDist = MathMax(MathMax(brokerMin, fixedMinSL),
                             (SymbolInfoDouble(symbol, SYMBOL_ASK) - SymbolInfoDouble(symbol, SYMBOL_BID)) * 3.0);
