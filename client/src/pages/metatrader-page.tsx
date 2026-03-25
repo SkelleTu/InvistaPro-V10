@@ -702,9 +702,13 @@ export default function MetaTraderPage() {
                           <div className="flex items-center justify-between text-xs">
                             <span className="text-muted-foreground flex items-center gap-1">
                               <Brain className="h-3 w-3" />
-                              Último consenso — {status.latestAnalysisSymbol || '—'}
+                              Consenso real — {status.latestAnalysisSymbol || '—'}
+                              {status.latestIsRecoveryMode && <span className="text-orange-500 font-semibold ml-1">🔴 Recovery</span>}
                             </span>
-                            <span className={`font-bold ${status.latestAIConsensus >= 70 ? 'text-green-500' : 'text-yellow-500'}`}>
+                            <span className={`font-bold ${
+                              status.latestAIDirection === 'neutral' ? 'text-yellow-500'
+                              : status.latestAIConsensus >= (status.latestRequiredConsensus ?? 70) ? 'text-green-500' : 'text-red-500'
+                            }`}>
                               {status.latestAIConsensus.toFixed(1)}%
                               {status.latestAIDirection && <span className="ml-1">{status.latestAIDirection === 'up' ? '↑' : status.latestAIDirection === 'down' ? '↓' : '—'}</span>}
                             </span>
@@ -712,9 +716,16 @@ export default function MetaTraderPage() {
                           <Progress value={status.latestAIConsensus} className="h-2" />
                           <div className="flex justify-between text-xs text-muted-foreground">
                             <span>0%</span>
-                            <span className="text-yellow-500">70% mínimo</span>
+                            <span className={status.latestIsRecoveryMode ? 'text-orange-500 font-semibold' : 'text-yellow-500'}>
+                              {status.latestRequiredConsensus ?? 70}% mínimo{status.latestIsRecoveryMode ? ' (recovery)' : ''}
+                            </span>
                             <span>100%</span>
                           </div>
+                          {status.latestAIDirection === 'neutral' && (
+                            <p className="text-xs text-yellow-600 dark:text-yellow-400 bg-yellow-50 dark:bg-yellow-950/30 rounded px-2 py-1">
+                              ⚠️ IAs retornaram NEUTRO — sem direção clara, operação bloqueada
+                            </p>
+                          )}
                         </div>
                       )}
                       <div className="grid grid-cols-2 gap-2 text-xs">
@@ -853,8 +864,12 @@ export default function MetaTraderPage() {
             <div className="grid grid-cols-4 gap-3">
               <Card data-testid="card-live-consensus">
                 <CardContent className="pt-4">
-                  <p className="text-xs text-muted-foreground">Consenso Atual</p>
-                  <p className={`text-2xl font-bold ${status?.latestAIConsensus !== undefined ? (status.latestAIConsensus >= 70 ? 'text-green-500' : 'text-yellow-500') : 'text-muted-foreground'}`}>
+                  <p className="text-xs text-muted-foreground">Consenso Real das IAs</p>
+                  <p className={`text-2xl font-bold ${
+                    status?.latestAIConsensus === undefined ? 'text-muted-foreground'
+                    : status.latestAIDirection === 'neutral' ? 'text-yellow-500'
+                    : status.latestAIConsensus >= (status.latestRequiredConsensus ?? 70) ? 'text-green-500' : 'text-red-500'
+                  }`}>
                     {status?.latestAIConsensus !== undefined ? `${status.latestAIConsensus.toFixed(1)}%` : '—'}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
@@ -863,11 +878,17 @@ export default function MetaTraderPage() {
                   </p>
                 </CardContent>
               </Card>
-              <Card data-testid="card-min-consensus">
+              <Card data-testid="card-min-consensus" className={status?.latestIsRecoveryMode ? 'border-orange-500/50 bg-orange-500/5' : ''}>
                 <CardContent className="pt-4">
-                  <p className="text-xs text-muted-foreground">Mínimo Exigido</p>
-                  <p className="text-2xl font-bold text-primary">70%</p>
-                  <p className="text-xs text-muted-foreground mt-1">Limiar de segurança</p>
+                  <p className="text-xs text-muted-foreground">
+                    {status?.latestIsRecoveryMode ? '🔴 Mínimo (Recovery)' : 'Mínimo Exigido'}
+                  </p>
+                  <p className={`text-2xl font-bold ${status?.latestIsRecoveryMode ? 'text-orange-500' : 'text-primary'}`}>
+                    {status?.latestRequiredConsensus !== undefined ? `${status.latestRequiredConsensus}%` : '70%'}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {status?.latestIsRecoveryMode ? 'Elevado por perdas consecutivas' : 'Limiar de segurança'}
+                  </p>
                 </CardContent>
               </Card>
               <Card data-testid="card-consecutive-losses">
@@ -924,11 +945,19 @@ export default function MetaTraderPage() {
                     </div>
                     <div className="bg-background/60 rounded-lg p-2.5 border">
                       <p className="text-muted-foreground mb-1">Próxima entrada</p>
-                      <p className={`font-bold ${status.latestAIConsensus !== undefined && status.latestAIConsensus >= 70 ? 'text-green-500' : 'text-yellow-500'}`}>
-                        {status.latestAIConsensus !== undefined && status.latestAIConsensus >= 70 ? '⚡ Consenso OK!' : '⏳ Aguardando'}
+                      <p className={`font-bold ${
+                        status.latestAIDirection === 'neutral' ? 'text-yellow-500'
+                        : status.latestAIConsensus !== undefined && status.latestAIConsensus >= (status.latestRequiredConsensus ?? 70) ? 'text-green-500'
+                        : 'text-red-500'
+                      }`}>
+                        {status.latestAIDirection === 'neutral' ? '— NEUTRO'
+                          : status.latestAIConsensus !== undefined && status.latestAIConsensus >= (status.latestRequiredConsensus ?? 70) ? '⚡ Pronto!'
+                          : '⏳ Aguardando'}
                       </p>
                       <p className="text-muted-foreground">
-                        {status.latestAIConsensus !== undefined ? `${status.latestAIConsensus.toFixed(0)}% / 70% mínimo` : 'analisando...'}
+                        {status.latestAIConsensus !== undefined
+                          ? `${status.latestAIConsensus.toFixed(0)}% / ${status.latestRequiredConsensus ?? 70}% mínimo${status.latestIsRecoveryMode ? ' 🔴' : ''}`
+                          : 'analisando...'}
                       </p>
                     </div>
                   </div>

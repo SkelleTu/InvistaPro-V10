@@ -48,7 +48,9 @@ export interface MarketAnalysis {
 
 export interface AIConsensus {
   finalDecision: 'up' | 'down' | 'neutral';
-  consensusStrength: number; // 0-100%
+  consensusStrength: number; // 0-100% — valor REAL do consenso das IAs
+  requiredConsensus?: number; // threshold mínimo exigido (pode ser elevado em modo recovery)
+  isRecoveryMode?: boolean;   // indica se o sistema está em modo de recuperação
   upScore?: number;
   downScore?: number;
   neutralScore?: number;
@@ -328,11 +330,10 @@ export class HuggingFaceAIService {
       console.log(`🎯 [QUANTUM ADVANTAGE] Vantagem quântica: ${(hybridResult.quantumAdvantage * 100).toFixed(1)}%`);
       console.log(`💰 [PROJECTED RETURN] Retorno projetado: ${(hybridResult.projectedReturn * 100).toFixed(2)}%`);
       
-      // Aplicar ajustes de modo recuperação se necessário
-      let adjustedConfidence = hybridResult.confidence;
-      if (isRecoveryMode && hybridResult.confidence < (recoveryThreshold * 100)) {
-        console.log(`🔥 [RECOVERY MODE] Ajustando threshold: ${hybridResult.confidence}% → ${recoveryThreshold * 100}%`);
-        adjustedConfidence = Math.max(hybridResult.confidence, recoveryThreshold * 100);
+      // Mantemos a confiança real — threshold de recovery é comunicado separadamente
+      const adjustedConfidence = hybridResult.confidence;
+      if (isRecoveryMode) {
+        console.log(`🔥 [RECOVERY MODE] Threshold exigido: ${recoveryThreshold * 100}% | Confiança real das IAs: ${hybridResult.confidence.toFixed(1)}%`);
       }
       
       // ═══════════════════════════════════════════════════════════════════
@@ -402,11 +403,10 @@ export class HuggingFaceAIService {
 
       const finalConsensus = Math.round(Math.min(95, Math.max(0, boostedConsensus)));
 
-      // Aplicar ajuste de modo recuperação
-      let adjustedConsensus = finalConsensus;
-      if (isRecoveryMode && finalConsensus < (recoveryThreshold * 100)) {
-        adjustedConsensus = Math.max(finalConsensus, Math.round(recoveryThreshold * 100));
-      }
+      // Não inflar o consenso — mantemos o valor real das IAs
+      // O threshold de recovery é exposto separadamente via requiredConsensus
+      const adjustedConsensus = finalConsensus;
+      const requiredConsensusValue = Math.round(recoveryThreshold * 100);
 
       // ═══════════════════════════════════════════════════════════════════
       // ANÁLISES POR MODELO: perspectivas independentes com variação real
@@ -489,7 +489,9 @@ export class HuggingFaceAIService {
 
       const hybridConsensus: AIConsensus = {
         finalDecision: hybridResult.prediction,
-        consensusStrength: adjustedConsensus,
+        consensusStrength: adjustedConsensus,       // valor REAL das IAs (não inflado)
+        requiredConsensus: requiredConsensusValue,  // threshold mínimo exigido pelo sistema
+        isRecoveryMode,
         upScore: upScoreVal,
         downScore: downScoreVal,
         neutralScore: neutralScoreVal,
@@ -511,7 +513,8 @@ export class HuggingFaceAIService {
         bbPosition: bbPositionVal,
       };
       
-      console.log(`🎉 [HYBRID SUCCESS] Consenso híbrido: ${hybridConsensus.finalDecision} (${hybridConsensus.consensusStrength}%)`);
+      const statusEmoji = hybridConsensus.finalDecision !== 'neutral' && adjustedConsensus >= requiredConsensusValue ? '✅' : '⏳';
+      console.log(`🎉 [HYBRID RESULT] ${statusEmoji} Direção: ${hybridConsensus.finalDecision.toUpperCase()} | Consenso real: ${adjustedConsensus}% | Requerido: ${requiredConsensusValue}%${isRecoveryMode ? ' (RECOVERY)' : ''}`);
       console.log(`🧠 Participaram: ${hybridConsensus.participatingModels} sistemas integrados`);
       
       return hybridConsensus;

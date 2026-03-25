@@ -219,6 +219,8 @@ export interface MT5Status {
   lastBalance?: number;
   lastEquity?: number;
   latestAIConsensus?: number;
+  latestRequiredConsensus?: number;
+  latestIsRecoveryMode?: boolean;
   latestAIDirection?: 'up' | 'down' | 'neutral';
   latestAnalysisSymbol?: string;
   latestAnalysisAt?: number;
@@ -326,6 +328,8 @@ export interface AIAnalysisEntry {
   status: 'processing' | 'approved' | 'rejected' | 'waiting' | 'blocked';
   // HuggingFace AI
   aiConsensus?: number;
+  requiredConsensus?: number;   // threshold exigido (pode ser elevado em modo recovery)
+  isRecoveryMode?: boolean;
   aiDirection?: 'up' | 'down' | 'neutral';
   aiReasoning?: string;
   modelResults?: AIModelResult[];
@@ -1609,6 +1613,8 @@ class MetaTraderBridge extends EventEmitter {
       lastBalance: this.currentBalance || undefined,
       lastEquity: this.currentEquity || undefined,
       latestAIConsensus: latestAnalysis?.aiConsensus,
+      latestRequiredConsensus: latestAnalysis?.requiredConsensus,
+      latestIsRecoveryMode: latestAnalysis?.isRecoveryMode,
       latestAIDirection: latestAnalysis?.aiDirection,
       latestAnalysisSymbol: latestAnalysis?.symbol,
       latestAnalysisAt: latestAnalysis?.timestamp,
@@ -2379,25 +2385,31 @@ class MetaTraderBridge extends EventEmitter {
           }));
         }
 
+        const requiredMin = consensus.requiredConsensus ?? this.MIN_AI_CONSENSUS;
+        const inRecovery = consensus.isRecoveryMode ?? false;
+        const meetThreshold = aiConsensus >= requiredMin && aiDirection !== 'neutral';
+
         this.logAnalysis({
           id: `${entryId}_hf`,
           timestamp: Date.now(),
           symbol,
           phase: 'huggingface',
-          status: aiConsensus >= this.MIN_AI_CONSENSUS && aiDirection !== 'neutral' ? 'processing' : 'rejected',
+          status: meetThreshold ? 'processing' : 'rejected',
           aiConsensus,
+          requiredConsensus: requiredMin,
+          isRecoveryMode: inRecovery,
           aiDirection,
           aiReasoning,
           modelResults,
           participatingModels,
-          decisionReason: aiConsensus < this.MIN_AI_CONSENSUS
-            ? `Consenso insuficiente: ${aiConsensus.toFixed(1)}% < ${this.MIN_AI_CONSENSUS}% mínimo exigido`
-            : aiDirection === 'neutral'
-              ? `Mercado neutro — IAs não identificaram direção clara (${participatingModels} modelos)`
-              : `Consenso aprovado: ${aiConsensus.toFixed(1)}% → ${aiDirection.toUpperCase()} | ${participatingModels} modelos participaram`
+          decisionReason: aiDirection === 'neutral'
+            ? `Mercado NEUTRO — IAs não identificaram direção clara (${participatingModels} modelos) | Consenso real: ${aiConsensus.toFixed(1)}%${inRecovery ? ` | Recovery exige: ${requiredMin}%` : ''}`
+            : aiConsensus < requiredMin
+              ? `Consenso insuficiente: ${aiConsensus.toFixed(1)}% < ${requiredMin}% exigido${inRecovery ? ' (modo recovery)' : ''}`
+              : `Consenso aprovado: ${aiConsensus.toFixed(1)}% ≥ ${requiredMin}% → ${aiDirection.toUpperCase()} | ${participatingModels} modelos`
         });
 
-        console.log(`[MT5Bridge] 🧠 IA HuggingFace: ${aiDirection.toUpperCase()} | Consenso: ${aiConsensus.toFixed(1)}% | ${symbol}`);
+        console.log(`[MT5Bridge] 🧠 IA: ${aiDirection.toUpperCase()} | Consenso real: ${aiConsensus.toFixed(1)}% | Exigido: ${requiredMin}%${inRecovery ? ' (RECOVERY)' : ''} | ${symbol}`);
       } catch (aiErr) {
         this.logAnalysis({
           id: `${entryId}_hf_err`,
