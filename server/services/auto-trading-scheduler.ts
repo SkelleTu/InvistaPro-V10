@@ -48,7 +48,7 @@ export interface ActiveTradeSession {
 export class AutoTradingScheduler {
   private activeSessions: Map<string, ActiveTradeSession> = new Map();
   private schedulerRunning: boolean = false;
-  private cronJob: any = null;
+  private continuousLoopActive: boolean = false;
   private emergencyStop: boolean = false; // SISTEMA REATIVADO PARA MODO SEM LIMITES
   private maxOperationsPerSession: number = 1000; // LIMITE AMPLIADO PARA MODO ANÁLISE CONTÍNUA
   private maxDailyOperations: number = 5000; // LIMITE DIÁRIO AMPLIADO PARA ANÁLISE CONTÍNUA
@@ -97,7 +97,7 @@ export class AutoTradingScheduler {
   // 📉 Qualidade de mercado detectada no último scan (0-100)
   // Baixa = muitos ativos com consenso ruim simultaneamente → modo defensivo
   private lastScanMarketQuality: number = 100;
-  private readonly CYCLE_INTERVAL_MS = 5000; // 5 segundos — análise contínua, IA decide livremente quando operar
+  // IA livre: sem intervalo fixo entre ciclos — loop contínuo decide autonomamente
 
   // 🚫 PAUSA POR MERCADO RUIM — Bloqueia operações quando o mercado global está desfavorável
   private badMarketPausedUntil: number = 0;             // Timestamp até quando operações estão pausadas
@@ -599,8 +599,7 @@ export class AutoTradingScheduler {
     
     this.schedulerRunning = true;
     this.lastCycleStartedAt = Date.now();
-    this.nextCycleAt = this.lastCycleStartedAt + this.CYCLE_INTERVAL_MS;
-    this.setPhase('ANALISANDO', '🔍 Iniciando ciclo de análise de mercado...', 'info');
+    this.setPhase('ANALISANDO', '🔍 Analisando mercado — IA decidindo autonomamente...', 'info');
 
     const operationId = `ANALISE_NATURAL_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
     this.lastOperationId = operationId;
@@ -704,10 +703,7 @@ export class AutoTradingScheduler {
       
     } finally {
       this.schedulerRunning = false;
-      const secsUntilNext = Math.round((this.nextCycleAt - Date.now()) / 1000);
-      if (secsUntilNext > 0) {
-        this.setPhase('AGUARDANDO', `⏳ Próximo ciclo de análise em ${secsUntilNext}s`, 'info');
-      }
+      this.setPhase('AGUARDANDO', '⚡ IA retomando análise imediatamente...', 'info');
     }
   }
 
@@ -4028,15 +4024,15 @@ export class AutoTradingScheduler {
     const isPaused = this.badMarketPausedUntil > nowSt;
     const secsLeft = isPaused ? Math.round((this.badMarketPausedUntil - nowSt) / 1000) : 0;
     return {
-      isRunning: !!this.cronJob,
+      isRunning: this.continuousLoopActive,
       hasActiveSessions: this.activeSessions.size > 0,
       emergencyStop: this.emergencyStop,
       isInitialized: this.isInitialized,
       currentPhase: this.currentPhase,
       currentPhaseDetail: this.currentPhaseDetail,
       lastCycleStartedAt: this.lastCycleStartedAt,
-      nextCycleAt: this.nextCycleAt,
-      cycleIntervalMs: this.CYCLE_INTERVAL_MS,
+      nextCycleAt: nowSt, // Loop contínuo: próxima análise já está iniciando
+      cycleIntervalMs: 0, // Sem intervalo fixo — IA completamente livre
       activityLog: this.activityLog.slice(0, 10),
       marketQuality: this.lastScanMarketQuality,
       badMarketPaused: isPaused && !this.badMarketReducedGrowthActive,
@@ -4046,9 +4042,8 @@ export class AutoTradingScheduler {
   }
 
   stopScheduler(): void {
-    if (this.cronJob) {
-      clearInterval(this.cronJob);
-      this.cronJob = null;
+    if (this.continuousLoopActive) {
+      this.continuousLoopActive = false;
       console.log('🛑 Auto Trading Scheduler parado');
     }
   }
@@ -4060,9 +4055,9 @@ export class AutoTradingScheduler {
       return;
     }
     
-    // Se já está rodando, não criar outro intervalo
-    if (this.cronJob) {
-      console.log('⚠️ Scheduler já está rodando');
+    // Se loop já está ativo, não criar outro
+    if (this.continuousLoopActive) {
+      console.log('⚠️ IA já está em loop contínuo — ignorando chamada duplicada');
       return;
     }
     
@@ -4073,39 +4068,39 @@ export class AutoTradingScheduler {
       console.log('✅ Inicialização completa!');
     }
     
-    // Re-checar cronJob após await (prevenir race condition com múltiplas chamadas concorrentes)
-    if (this.cronJob) {
-      console.log('⚠️ Scheduler já foi iniciado por outra chamada concorrente');
+    // Re-checar após await (prevenir race condition com múltiplas chamadas concorrentes)
+    if (this.continuousLoopActive) {
+      console.log('⚠️ Loop já foi iniciado por outra chamada concorrente');
       return;
     }
     
-    // ⚡ ANÁLISE CONTÍNUA: Ciclo a cada 5 segundos — IA decide livremente quando operar
-    // Sem restrições de tempo: circuit breaker, consenso e bad market pause são os guardiões
-    // A IA analisa o mercado continuamente e entra quando identifica oportunidade real
-    
-    // ▶️ A IA decide sozinha quando e como operar — sem restrições artificiais de tempo
+    // ⚡ IA TOTALMENTE LIVRE — loop contínuo sem intervalo fixo
+    // Cada análise começa imediatamente após a anterior terminar.
+    // As próprias IAs decidem quando e se operam: circuit breaker, consenso,
+    // bad market pause, recovery mode e gestão de banca são os únicos guardiões.
+    this.continuousLoopActive = true;
     (async () => {
-      try {
-        await this.executeAnaliseNaturalAnalysis();
-      } catch (error) {
-        console.error('❌ [SCHEDULER] Erro no ciclo inicial:', error);
-      }
-    })();
-    
-    this.cronJob = setInterval(async () => {
-      if (!this.schedulerRunning) {
-        try {
-          await this.executeAnaliseNaturalAnalysis();
-        } catch (error) {
-          console.error('❌ [SCHEDULER] Erro crítico na execução do ciclo:', error);
+      console.log('🧠 [AI LOOP] IA em modo completamente livre — análise contínua sem intervalo fixo');
+      while (this.continuousLoopActive && !this.emergencyStop) {
+        if (!this.schedulerRunning) {
+          try {
+            await this.executeAnaliseNaturalAnalysis();
+          } catch (error) {
+            console.error('❌ [AI LOOP] Erro crítico na execução:', error);
+            // Em caso de erro inesperado, aguardar 1s antes de retry para evitar loop de erro intenso
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          }
         }
+        // Yield mínimo ao event loop para não bloquear I/O (WebSocket, DB, etc.)
+        await new Promise(resolve => setImmediate(resolve));
       }
-    }, this.CYCLE_INTERVAL_MS); // 5 segundos — análise contínua, IA decide livremente
+      console.log('🛑 [AI LOOP] Loop de IA encerrado.');
+    })();
     
     // 🔄 Iniciar sincronização automática de trades da Deriv
     derivTradeSync.startAutoSync();
     
-    console.log('▶️ Auto Trading Scheduler iniciado - análise contínua a cada 5 segundos — IA livre para operar quando identificar oportunidade');
+    console.log('▶️ Auto Trading Scheduler iniciado — IA livre, loop contínuo sem ciclo fixo');
     console.log('🔄 Sincronização automática de trades ativada a cada 30 segundos');
   }
 
@@ -4119,15 +4114,7 @@ export class AutoTradingScheduler {
     this.emergencyStop = true;
     this.activeSessions.clear();
     
-    if (this.cronJob) {
-      // Suporte para ambos node-cron e setInterval
-      if (typeof this.cronJob.stop === 'function') {
-        this.cronJob.stop();
-      } else {
-        clearInterval(this.cronJob);
-      }
-      this.cronJob = null;
-    }
+    this.continuousLoopActive = false; // Sinaliza o loop contínuo para encerrar
     
     console.log('✅ Sistema de trading totalmente parado por segurança');
   }
