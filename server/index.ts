@@ -21,6 +21,7 @@ import { derivTradeSync } from "./services/deriv-trade-sync";
 import { realStatsTracker } from "./services/real-stats-tracker";
 import { runPostgresMigration } from "./migrate-postgres";
 import { initUrlRegistry } from "./services/url-registry";
+import { brazilNewsService } from "./services/brazil-news-service";
 
 const app = express();
 app.use(express.json());
@@ -302,6 +303,13 @@ app.use((req, res, next) => {
   }, async () => {
     log(`serving on port ${port}`);
     
+    // 🇧🇷 INICIAR MONITORAMENTO DE NOTICIÁRIO BRASILEIRO
+    try {
+      brazilNewsService.startAutoUpdate();
+    } catch (brazilErr: any) {
+      console.warn('⚠️ [BrazilNews] Falha ao iniciar serviço de notícias BR:', brazilErr?.message);
+    }
+
     // Inicializar Auto Trading Scheduler DEPOIS que o servidor estiver rodando
     console.log('🤖 Inicializando Auto Trading Scheduler...');
     try {

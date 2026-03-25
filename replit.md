@@ -33,6 +33,36 @@
 - ✅ Proteção de capital: saldo mínimo $2.00 + anti-Martingale infinito
 - ✅ Contrato ativo detectado → busca ativo alternativo automaticamente
 
+## 🇧🇷 BRAZIL NEWS SERVICE + FIBONACCI TIMING - Março 2026
+
+### Novas funcionalidades implementadas:
+
+#### Brazil News Service (`server/services/brazil-news-service.ts`)
+- **Monitoramento em tempo real**: Coleta notícias de 6 feeds Google News BR (câmbio, bolsa, SELIC, economia, política)
+- **Análise de sentimento em português**: Keyword-based (sem API key) — 60+ palavras bullish e bearish PT-BR
+- **Atualização**: A cada 60 segundos automaticamente via `startAutoUpdate()`
+- **Saída**: `BrazilMarketSentiment` — score (-1 a +1), direction, strength (0-100%), categories, aiInfluence
+- **Integração no pipeline**: Lê sentimento no endpoint `/signal-with-indicators` antes de executar
+  - Sentimento BR BEARISH ≥60% → bloqueia BUY (risco macro)
+  - Sentimento BR BULLISH ≥60% → bloqueia SELL (ambiente positivo)
+  - Sentimento moderado → ajuste ±30% na confiança
+- **Endpoint público**: `GET /api/mt5/brazil-news` → retorna sentimento atual com headlines filtradas
+- **Inicialização**: `brazilNewsService.startAutoUpdate()` chamado em `server/index.ts` na subida do servidor
+
+#### Fibonacci como Confirmação de Timing do Girassol
+- **Dupla função**: Fibonacci agora faz (A) BLOQUEIO + (B) CONFIRMAÇÃO DE TIMING
+- **CONFIRMAÇÃO IDEAL** (`fibTimingStatus = 'confirmed'`): Girassol BUY + preço em suporte Fibonacci → GATILHO IDEAL → boost máximo (+80% para 3/3 níveis)
+- **TIMING PREMATURO** (`fibTimingStatus = 'premature'`): Fibonacci detectado mas preço no meio do range → boost reduzido (+15% máx, -10% se 1 nível)
+- **SEM DADOS** (`fibTimingStatus = 'no_data'`): Fibonacci não detectado → boost padrão Girassol (+60%/+40%/+25%)
+- **Hierarquia de boost final**:
+  - Girassol 3/3 + Fibonacci confirma → +80%
+  - Girassol 2/3 + Fibonacci confirma → +65%
+  - Girassol 1/3 + Fibonacci confirma → +45%
+  - Girassol 3/3 sem Fibonacci → +60%
+  - Girassol 2/3 sem Fibonacci → +40%
+  - Girassol 1/3 sem Fibonacci → +25%
+  - Timing prematuro (1/3) → bloqueia entrada
+
 ## 🤖 METATRADER INTEGRATION - Março 2026
 
 ### Arquitetura MT4/MT5

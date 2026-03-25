@@ -12,6 +12,7 @@ import {
   getExternalGirassolPivots,
   ExternalGirassolPivot,
 } from '../services/crash-boom-spike-engine';
+import { brazilNewsService } from '../services/brazil-news-service';
 
 
 const router = Router();
@@ -426,58 +427,90 @@ router.post('/signal-with-indicators', async (req: Request, res: Response) => {
       }
     }
 
-    // ── VALIDAÇÃO FIBONACCI: bloquear operação contra zona de S/R ────────
-    // Fibonacci automático determina suporte e resistência estruturais.
-    // Se o preço está em um nível CHAVE de Fibonacci (0%, 38.2%, 50%, 61.8%, 100%),
-    // o sinal da IA deve estar ALINHADO com essa zona:
-    //   • Preço em SUPORTE Fibonacci → apenas BUY é permitido (SELL bloqueado)
-    //   • Preço em RESISTÊNCIA Fibonacci → apenas SELL é permitido (BUY bloqueado)
-    if (fibonacci?.detected && Array.isArray(fibonacci.levels) && fibonacci.levels.length > 0 && finalAction !== 'HOLD') {
+    // ── VALIDAÇÃO FIBONACCI: bloquear contra S/R E confirmar timing de entrada ─
+    //
+    // O Fibonacci automático tem DUPLA FUNÇÃO no sistema:
+    //  A) BLOQUEIO: impede operações contra zonas de suporte/resistência
+    //     • Preço em SUPORTE Fibonacci → SELL bloqueado
+    //     • Preço em RESISTÊNCIA Fibonacci → BUY bloqueado
+    //  B) CONFIRMAÇÃO DE TIMING: quando o Girassol dispara, o Fibonacci diz
+    //     se o MOMENTO é ideal (preço no nível certo) ou prematuro (meio do range)
+    //     • Girassol BUY + preço em suporte Fibonacci → GATILHO IDEAL ✅
+    //     • Girassol SELL + preço em resistência Fibonacci → GATILHO IDEAL ✅
+    //     • Girassol ativo mas preço longe de qualquer nível → timing prematuro ⏳
+    let fibTimingStatus: 'confirmed' | 'premature' | 'no_data' = 'no_data';
+    let fibTimingLevelName  = '';
+    let fibTimingLevelPrice = 0;
+    let fibTimingDistPct    = 0;
+
+    if (fibonacci?.detected && Array.isArray(fibonacci.levels) && fibonacci.levels.length > 0) {
       const currentPrice = ask || bid || 0;
       if (currentPrice > 0) {
         const fibLevels = (fibonacci.levels as Array<{ level: string; price: number }>).filter(l => l.price > 0);
-        // Determina a direção do Fibonacci: 0% acima de 100% = topo→fundo
         const fib0   = fibLevels.find(l => l.level === '0.0%'   || l.level === '0%');
         const fib100 = fibLevels.find(l => l.level === '100.0%' || l.level === '100%');
+
+        const getSRType = (levelName: string, topToBottom: boolean): 'support' | 'resistance' | null => {
+          if (topToBottom) {
+            if (['0.0%', '0%', '23.6%', '38.2%'].includes(levelName)) return 'resistance';
+            if (['61.8%', '78.6%', '100.0%', '100%'].includes(levelName)) return 'support';
+          } else {
+            if (['0.0%', '0%', '23.6%', '38.2%'].includes(levelName)) return 'support';
+            if (['61.8%', '78.6%', '100.0%', '100%'].includes(levelName)) return 'resistance';
+          }
+          return null;
+        };
+
         if (fib0 && fib100) {
           const fibDrawnTopToBottom = fib0.price > fib100.price;
-          // Classifica cada nível como suporte ou resistência
-          const getSRType = (levelName: string): 'support' | 'resistance' | null => {
-            if (fibDrawnTopToBottom) {
-              // 0% = topo/resistência, 100% = fundo/suporte
-              if (['0.0%', '0%', '23.6%', '38.2%'].includes(levelName)) return 'resistance';
-              if (['61.8%', '78.6%', '100.0%', '100%'].includes(levelName)) return 'support';
-            } else {
-              // 0% = fundo/suporte, 100% = topo/resistência
-              if (['0.0%', '0%', '23.6%', '38.2%'].includes(levelName)) return 'support';
-              if (['61.8%', '78.6%', '100.0%', '100%'].includes(levelName)) return 'resistance';
-            }
-            if (levelName === '50%' || levelName === '50.0%') return null; // neutro
-            return null;
-          };
-          // Verifica se o preço está próximo de algum nível chave (< 0.5%)
-          const keyFibNames = ['0.0%', '0%', '38.2%', '50%', '50.0%', '61.8%', '78.6%', '100.0%', '100%'];
+          const keyFibNames = ['0.0%', '0%', '23.6%', '38.2%', '50%', '50.0%', '61.8%', '78.6%', '100.0%', '100%'];
+          let foundNearLevel = false;
+
           for (const lv of fibLevels) {
             if (!keyFibNames.includes(lv.level)) continue;
             const distPct = Math.abs(lv.price - currentPrice) / currentPrice * 100;
-            if (distPct >= 0.5) continue;
-            const srType = getSRType(lv.level);
+            if (distPct >= 0.5) continue; // fora da zona de influência
+            const srType = getSRType(lv.level, fibDrawnTopToBottom);
             if (!srType) continue;
-            if (srType === 'support' && finalAction === 'SELL') {
-              indicatorNotes.push(`🛑 Fibonacci BLOQUEOU VENDA: preço em SUPORTE Fibonacci ${lv.level} @ ${lv.price.toFixed(5)} (Δ${distPct.toFixed(3)}%) — operar VENDA em suporte é de alto risco`);
-              console.log(`[MT5-Indicators] 🛑 ${sym}: SELL BLOQUEADO pelo Fibonacci — preço em suporte ${lv.level} @ ${lv.price.toFixed(5)}`);
-              finalAction     = 'HOLD';
-              finalConfidence = 0;
-              finalReason     = `Fibonacci bloqueia SELL: preço em suporte ${lv.level} @ ${lv.price.toFixed(5)} — aguardar rompimento ou sinal de compra`;
-              break;
-            } else if (srType === 'resistance' && finalAction === 'BUY') {
-              indicatorNotes.push(`🛑 Fibonacci BLOQUEOU COMPRA: preço em RESISTÊNCIA Fibonacci ${lv.level} @ ${lv.price.toFixed(5)} (Δ${distPct.toFixed(3)}%) — operar COMPRA em resistência é de alto risco`);
-              console.log(`[MT5-Indicators] 🛑 ${sym}: BUY BLOQUEADO pelo Fibonacci — preço em resistência ${lv.level} @ ${lv.price.toFixed(5)}`);
-              finalAction     = 'HOLD';
-              finalConfidence = 0;
-              finalReason     = `Fibonacci bloqueia BUY: preço em resistência ${lv.level} @ ${lv.price.toFixed(5)} — aguardar rompimento ou sinal de venda`;
-              break;
+
+            foundNearLevel = true;
+
+            // ── A) BLOQUEIO: trade contra a zona ────────────────────────────
+            if (finalAction !== 'HOLD') {
+              if (srType === 'support' && finalAction === 'SELL') {
+                indicatorNotes.push(`🛑 Fibonacci BLOQUEOU VENDA: preço em SUPORTE ${lv.level} @ ${lv.price.toFixed(5)} (Δ${distPct.toFixed(3)}%) — operar contra suporte é de alto risco`);
+                console.log(`[MT5-Indicators] 🛑 ${sym}: SELL BLOQUEADO pelo Fibonacci — suporte ${lv.level}`);
+                finalAction = 'HOLD'; finalConfidence = 0;
+                finalReason = `Fibonacci bloqueia SELL: preço em suporte ${lv.level} @ ${lv.price.toFixed(5)} — aguardar rompimento`;
+                break;
+              } else if (srType === 'resistance' && finalAction === 'BUY') {
+                indicatorNotes.push(`🛑 Fibonacci BLOQUEOU COMPRA: preço em RESISTÊNCIA ${lv.level} @ ${lv.price.toFixed(5)} (Δ${distPct.toFixed(3)}%) — operar contra resistência é de alto risco`);
+                console.log(`[MT5-Indicators] 🛑 ${sym}: BUY BLOQUEADO pelo Fibonacci — resistência ${lv.level}`);
+                finalAction = 'HOLD'; finalConfidence = 0;
+                finalReason = `Fibonacci bloqueia BUY: preço em resistência ${lv.level} @ ${lv.price.toFixed(5)} — aguardar rompimento`;
+                break;
+              }
             }
+
+            // ── B) CONFIRMAÇÃO DE TIMING: trade alinhado com a zona ──────────
+            // Se chegou aqui, trade NÃO foi bloqueado → zona confirma o timing
+            if (finalAction !== 'HOLD') {
+              const matchesBuy  = srType === 'support'    && finalAction === 'BUY';
+              const matchesSell = srType === 'resistance' && finalAction === 'SELL';
+              if (matchesBuy || matchesSell) {
+                fibTimingStatus     = 'confirmed';
+                fibTimingLevelName  = lv.level;
+                fibTimingLevelPrice = lv.price;
+                fibTimingDistPct    = distPct;
+                console.log(`[MT5-Indicators] ✅ ${sym}: Fibonacci CONFIRMA timing ${finalAction} — ${srType} ${lv.level} @ ${lv.price.toFixed(5)} (Δ${distPct.toFixed(3)}%)`);
+              }
+            }
+            break;
+          }
+
+          // Fibonacci detectado mas preço longe de qualquer nível chave → timing prematuro
+          if (!foundNearLevel && finalAction !== 'HOLD') {
+            fibTimingStatus = 'premature';
           }
         }
       }
@@ -486,22 +519,63 @@ router.post('/signal-with-indicators', async (req: Request, res: Response) => {
     if (girassol?.detected && girassolBias !== 'NEUTRAL') {
       // ── CASO 1: Girassol com sinal claro ────────────────────────────────
       if (girassolBias === finalAction) {
-        // Girassol CONFIRMA o sinal da IA — boost escalonado por confluência
-        const baseBoost = girassolConfluence >= 3 ? 1.60   // 3/3 níveis: +60%
-                        : girassolConfluence >= 2 ? 1.40   // 2/3 níveis: +40%
-                        : 1.25;                            // 1/3 nível:  +25%
+        // ── Boost escalonado por Girassol + confirmação de timing do Fibonacci ──
+        //
+        // Hierarquia de boost:
+        //  MÁXIMO (Girassol 3/3 + Fibonacci confirma timing) → +80% confiança
+        //  ÓTIMO  (Girassol 2-3/3 + Fibonacci confirma)      → +65% confiança
+        //  BOM    (Girassol 1-2/3 + Fibonacci confirma)      → +45% confiança
+        //  NORMAL (Girassol 3/3, sem Fibonacci)              → +60% (padrão)
+        //  REDUZIDO (Fibonacci detectado mas timing prematuro) → +15% máx (aguardar)
+        //  MÍNIMO (Girassol 1/3, sem Fibonacci)              → +25%
+        let baseBoost: number;
+        let confluenceNote: string;
+
+        if (fibTimingStatus === 'confirmed') {
+          // GATILHO IDEAL: Girassol + Fibonacci no nível certo → máxima certeza
+          baseBoost = girassolConfluence >= 3 ? 1.80   // 3/3 + Fibonacci: +80%
+                    : girassolConfluence >= 2 ? 1.65   // 2/3 + Fibonacci: +65%
+                    : 1.45;                            // 1/3 + Fibonacci: +45%
+          confluenceNote = `🎯 GATILHO CONFIRMADO: Girassol (${girassolConfluence}/3 níveis) + Fibonacci ${fibTimingLevelName} @ ${fibTimingLevelPrice.toFixed(5)} (Δ${fibTimingDistPct.toFixed(3)}%) → ENTRADA IDEAL`;
+          finalReason = `GATILHO CONFLUENTE: ${finalReason} | ${girassolDesc} | Fibonacci confirma timing`;
+        } else if (fibTimingStatus === 'premature') {
+          // Fibonacci detectado mas preço não está no nível certo → timing prematuro
+          // Reduz o boost: Girassol disparou mas o momento ainda não chegou
+          baseBoost = girassolConfluence >= 3 ? 1.15   // 3/3 mas timing prematuro: +15%
+                    : girassolConfluence >= 2 ? 1.10   // 2/3 mas timing prematuro: +10%
+                    : 0.90;                            // 1/3 e timing prematuro: -10% (aguardar)
+          confluenceNote = `⏳ Girassol ATIVO (${girassolConfluence}/3 níveis ${finalAction}) mas Fibonacci indica timing PREMATURO — preço não está em zona S/R chave. Aguardar confluência.`;
+          finalReason = `${finalReason} | ${girassolDesc} | ⏳ Fibonacci: aguardar zona`;
+        } else {
+          // Fibonacci não detectado → boost padrão do Girassol
+          baseBoost = girassolConfluence >= 3 ? 1.60   // 3/3 níveis: +60%
+                    : girassolConfluence >= 2 ? 1.40   // 2/3 níveis: +40%
+                    : 1.25;                            // 1/3 nível:  +25%
+          confluenceNote = `✅ Girassol CONFIRMA ${finalAction} (${girassolConfluence}/3 níveis) → +${((baseBoost - 1) * 100).toFixed(0)}% confiança`;
+          finalReason = `${finalReason} | ${girassolDesc}`;
+        }
+
         finalConfidence = Math.min(100, finalConfidence * baseBoost);
-        const boostPct = ((baseBoost - 1) * 100).toFixed(0);
-        indicatorNotes.push(`✅ Girassol CONFIRMA ${finalAction} (${girassolConfluence}/3 níveis) → +${boostPct}% confiança`);
-        finalReason = `${finalReason} | ${girassolDesc}`;
-        if (fibBonus > 0) {
-          finalConfidence = Math.min(100, finalConfidence * (1 + fibBonus));
+        indicatorNotes.push(confluenceNote);
+
+        // Bônus adicional do Fibonacci por proximidade (quando timing confirmado, bônus maior)
+        if (fibBonus > 0 && fibTimingStatus !== 'premature') {
+          const adjustedFibBonus = fibTimingStatus === 'confirmed' ? fibBonus * 1.5 : fibBonus;
+          finalConfidence = Math.min(100, finalConfidence * (1 + adjustedFibBonus));
           indicatorNotes.push(fibBonusNote);
+        }
+
+        // Se boost ficou menor que 1 (timing prematuro + 1 nível), bloquear
+        if (baseBoost < 1.0 && fibTimingStatus === 'premature') {
+          finalAction     = 'HOLD';
+          finalConfidence = 0;
+          finalReason     = `Timing prematuro: Girassol ${girassolBias} (${girassolConfluence}/3) ativo mas Fibonacci indica preço fora de zona chave — aguardar nível`;
         }
       } else if (finalAction === 'HOLD') {
         // IA ainda sem sinal mas Girassol disparou: nenhuma acão adicional aqui.
         // O bridge vai gerar sinal com threshold reduzido no próximo ciclo.
-        indicatorNotes.push(`🌻 Girassol ATIVO (${girassolConfluence}/3 níveis ${girassolBias}) — aguardando confirmação da IA (threshold reduzido para próximo ciclo)`);
+        const fibHint = fibTimingStatus === 'confirmed' ? ` | 📐 Fibonacci confirma zona — pronto para gatilho` : fibTimingStatus === 'premature' ? ` | ⏳ Fibonacci: aguardar zona` : '';
+        indicatorNotes.push(`🌻 Girassol ATIVO (${girassolConfluence}/3 níveis ${girassolBias}) — aguardando confirmação da IA (threshold reduzido para próximo ciclo)${fibHint}`);
       } else {
         // Girassol CONTRADIZ o sinal da IA → bloquear SEMPRE
         indicatorNotes.push(`🚫 Girassol CONTRADIZ IA: ${finalAction}→${girassolBias} (${girassolConfluence}/3 níveis) — operação bloqueada`);
@@ -537,6 +611,43 @@ router.post('/signal-with-indicators', async (req: Request, res: Response) => {
     // ── Log do Fibonacci (integração de entrada já aplicada acima) ──────
     if (fibonacci?.detected) {
       indicatorNotes.push(fibDesc);
+    }
+
+    // ── Sentimento de Mercado Brasileiro (noticiário em tempo real) ───────
+    // As IAs brasileiras monitoram notícias BR a cada 60s e influenciam:
+    //  • Sentimento bearish forte (≥60%) → BUY bloqueado por risco macro
+    //  • Sentimento bullish forte (≥60%) → SELL bloqueado por ambiente positivo
+    //  • Sentimento moderado → ajuste de ±30% na confiança do sinal
+    if (finalAction !== 'HOLD') {
+      try {
+        const brazilSentiment = await brazilNewsService.getBrazilMarketSentiment();
+        const { aiInfluence, direction, strength, topHeadline, newsCount } = brazilSentiment;
+
+        // Bloqueio por sentimento macro BR extremo
+        if (aiInfluence.blocksBuy && finalAction === 'BUY') {
+          indicatorNotes.push(`🇧🇷 Noticiário BR BEARISH (${strength}%) bloqueia COMPRA — risco macroeconômico elevado`);
+          console.log(`[MT5-Indicators] 🇧🇷 ${sym}: BUY BLOQUEADO por sentimento BR BEARISH (${strength}%)`);
+          finalAction     = 'HOLD';
+          finalConfidence = 0;
+          finalReason     = `${aiInfluence.reason} | "${topHeadline.substring(0, 60)}..."`;
+        } else if (aiInfluence.blocksSell && finalAction === 'SELL') {
+          indicatorNotes.push(`🇧🇷 Noticiário BR BULLISH (${strength}%) bloqueia VENDA — ambiente de mercado positivo`);
+          console.log(`[MT5-Indicators] 🇧🇷 ${sym}: SELL BLOQUEADO por sentimento BR BULLISH (${strength}%)`);
+          finalAction     = 'HOLD';
+          finalConfidence = 0;
+          finalReason     = `${aiInfluence.reason} | "${topHeadline.substring(0, 60)}..."`;
+        } else if (Math.abs(aiInfluence.confidenceModifier) > 0.02) {
+          // Ajuste moderado de confiança sem bloquear
+          finalConfidence = Math.max(0, Math.min(100, finalConfidence * (1 + aiInfluence.confidenceModifier)));
+          const modStr = aiInfluence.confidenceModifier > 0 ? `+${(aiInfluence.confidenceModifier * 100).toFixed(0)}%` : `${(aiInfluence.confidenceModifier * 100).toFixed(0)}%`;
+          indicatorNotes.push(`🇧🇷 Noticiário BR ${direction.toUpperCase()} (${strength}% força, ${newsCount} notícias) → confiança ${modStr} | "${topHeadline.substring(0, 50)}..."`);
+        } else {
+          indicatorNotes.push(`🇧🇷 Noticiário BR NEUTRO (${newsCount} notícias analisadas) — sem impacto direcional`);
+        }
+      } catch (brazilErr) {
+        // Não bloquear trade por falha no serviço de notícias
+        indicatorNotes.push(`🇧🇷 Noticiário BR: serviço temporariamente indisponível`);
+      }
     }
 
     // ── Recalcular SL/TP usando indicadores reais do EA ──────────────────
@@ -1622,6 +1733,34 @@ router.get('/girassol-pivots', (req: Request, res: Response) => {
     if (!symbol) return res.status(400).json({ error: 'symbol é obrigatório' });
     const pivots = getExternalGirassolPivots(symbol);
     res.json({ symbol, pivots, count: pivots.length });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/mt5/brazil-news
+ * Retorna o sentimento atual do mercado brasileiro baseado em noticiário em tempo real.
+ * Atualizado automaticamente a cada 60 segundos pelo BrazilNewsService.
+ *
+ * Response:
+ *   { score, direction, strength, topHeadline, newsCount, updatedAt, categories, aiInfluence }
+ */
+router.get('/brazil-news', async (req: Request, res: Response) => {
+  try {
+    const sentiment = await brazilNewsService.getBrazilMarketSentiment();
+    res.json({
+      success: true,
+      ...sentiment,
+      headlines: sentiment.headlines.map(h => ({
+        title:       h.title,
+        source:      h.source,
+        sentiment:   h.sentiment,
+        score:       h.score,
+        publishedAt: h.publishedAt,
+        keywords:    h.keywords.slice(0, 5),
+      })),
+    });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
