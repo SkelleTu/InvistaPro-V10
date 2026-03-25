@@ -2471,8 +2471,62 @@ class MetaTraderBridge extends EventEmitter {
                               : girassolLive.levelCount >= 2 ? 45
                               : 55;
         console.log(`[MT5Bridge] 🌻 ${symbol}: Girassol ${girassolLive.bias} (${girassolLive.levelCount}/3 níveis) → threshold IA: ${prevThreshold}% → ${effectiveMinConsensus}%`);
+
+        // ── CONFLUÊNCIA GIRASSOL + NOTICIÁRIO BR ──────────────────────────────
+        // Quando Girassol e sentimento do noticiário brasileiro estão fortemente
+        // alinhados na mesma direção, o threshold de consenso da IA é reduzido
+        // adicionalmente. Isso garante que setups técnicos de alta qualidade
+        // (Girassol disparado + macro BR confirmando) sejam aprovados mesmo quando
+        // as IAs estão abaixo do threshold de recovery (ex: 42% vs 78%).
+        //
+        //  Girassol 3/3 + BR forte (≥60%):    threshold → 35% (mantém mínimo Girassol)
+        //  Girassol 2/3 + BR forte (≥60%):    threshold → 40% (reduz de 45% para 40%)
+        //  Girassol 2/3 + BR moderado (≥30%): threshold → 42% (reduz de 45% para 42%)
+        //  Girassol 1/3 + BR forte (≥60%):    threshold → 45% (reduz de 55% para 45%)
+        //  Sem confluência de notícias:        threshold permanece como Girassol definiu
+        try {
+          const { brazilNewsService: bns } = await import('./brazil-news-service');
+          const brSentiment = await Promise.race([
+            bns.getBrazilMarketSentiment(),
+            new Promise<null>(res => setTimeout(() => res(null), 800))
+          ]);
+          if (brSentiment) {
+            const brDir   = brSentiment.direction;
+            const brStr   = brSentiment.strength;
+            const girassolDir = girassolLive.bias === 'BUY' ? 'bullish' : 'bearish';
+            const newsAligned = brDir === girassolDir;
+
+            if (newsAligned && brStr >= 60) {
+              const prevEff = effectiveMinConsensus;
+              // Forte confluência: reduzir threshold em ~5-10pp adicionais
+              effectiveMinConsensus = girassolLive.levelCount >= 3
+                ? Math.min(effectiveMinConsensus, 35)  // 3/3 já no mínimo
+                : girassolLive.levelCount >= 2
+                  ? Math.min(effectiveMinConsensus, 40) // 2/3: 45→40
+                  : Math.min(effectiveMinConsensus, 45); // 1/3: 55→45
+              console.log(`[MT5Bridge] 🌻🇧🇷 CONFLUÊNCIA FORTE: Girassol ${girassolLive.bias} (${girassolLive.levelCount}/3) + BR ${brDir.toUpperCase()} ${brStr}% → threshold: ${prevEff}% → ${effectiveMinConsensus}%`);
+            } else if (newsAligned && brStr >= 30) {
+              const prevEff = effectiveMinConsensus;
+              // Confluência moderada: reduzir threshold em ~3pp adicionais
+              effectiveMinConsensus = girassolLive.levelCount >= 2
+                ? Math.min(effectiveMinConsensus, 42)
+                : Math.min(effectiveMinConsensus, 50);
+              console.log(`[MT5Bridge] 🌻🇧🇷 CONFLUÊNCIA MODERADA: Girassol ${girassolLive.bias} (${girassolLive.levelCount}/3) + BR ${brDir.toUpperCase()} ${brStr}% → threshold: ${prevEff}% → ${effectiveMinConsensus}%`);
+            } else if (!newsAligned && brStr >= 60) {
+              // Notícias CONTRA o Girassol com força alta → threshold sobe ligeiramente como cautela
+              const prevEff = effectiveMinConsensus;
+              effectiveMinConsensus = Math.min(this.MIN_AI_CONSENSUS, effectiveMinConsensus + 5);
+              console.log(`[MT5Bridge] 🌻⚠️🇧🇷 DIVERGÊNCIA: Girassol ${girassolLive.bias} vs BR ${brDir.toUpperCase()} ${brStr}% → threshold cautela: ${prevEff}% → ${effectiveMinConsensus}%`);
+            }
+          }
+        } catch {
+          // Sem dados de notícias — threshold permanece como Girassol definiu
+        }
       }
 
+      // Quando recovery mode forçava neutral (antes desta correção), aiDirection chegava
+      // como 'neutral' aqui e bloqueava mesmo com Girassol forte. Agora o huggingface
+      // preserva a direção real e o threshold real — verificamos apenas o threshold ajustado.
       if (aiConsensus < effectiveMinConsensus || aiDirection === 'neutral') {
         // ── FALLBACK: tentar sinal do bot Deriv (mesmo ativo, análise recente) ──
         const derivSym = this.mapMT5ToDerivSymbol(symbol);

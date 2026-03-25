@@ -614,35 +614,61 @@ router.post('/signal-with-indicators', async (req: Request, res: Response) => {
     }
 
     // ── Sentimento de Mercado Brasileiro (noticiário em tempo real) ───────
-    // As IAs brasileiras monitoram notícias BR a cada 60s e influenciam:
-    //  • Sentimento bearish forte (≥60%) → BUY bloqueado por risco macro
-    //  • Sentimento bullish forte (≥60%) → SELL bloqueado por ambiente positivo
-    //  • Sentimento moderado → ajuste de ±30% na confiança do sinal
+    // REGRA POR MODALIDADE:
+    //  • Day Trade / Scalp: notícias são CONTEXTO — apenas ajustam confiança (±30%).
+    //    Nunca bloqueiam a entrada. Girassol + Fibonacci + IA são os gatilhos primários.
+    //    Scalp opera em janelas de minutos; o macro do dia inteiro é contexto, não veto.
+    //  • Swing / Posição: notícias podem BLOQUEAR operações na direção contrária
+    //    quando o sentimento macro BR é forte (≥60%). Horizonte mais longo = maior peso macro.
     if (finalAction !== 'HOLD') {
       try {
         const brazilSentiment = await brazilNewsService.getBrazilMarketSentiment();
         const { aiInfluence, direction, strength, topHeadline, newsCount } = brazilSentiment;
 
-        // Bloqueio por sentimento macro BR extremo
-        if (aiInfluence.blocksBuy && finalAction === 'BUY') {
-          indicatorNotes.push(`🇧🇷 Noticiário BR BEARISH (${strength}%) bloqueia COMPRA — risco macroeconômico elevado`);
-          console.log(`[MT5-Indicators] 🇧🇷 ${sym}: BUY BLOQUEADO por sentimento BR BEARISH (${strength}%)`);
-          finalAction     = 'HOLD';
-          finalConfidence = 0;
-          finalReason     = `${aiInfluence.reason} | "${topHeadline.substring(0, 60)}..."`;
-        } else if (aiInfluence.blocksSell && finalAction === 'SELL') {
-          indicatorNotes.push(`🇧🇷 Noticiário BR BULLISH (${strength}%) bloqueia VENDA — ambiente de mercado positivo`);
-          console.log(`[MT5-Indicators] 🇧🇷 ${sym}: SELL BLOQUEADO por sentimento BR BULLISH (${strength}%)`);
-          finalAction     = 'HOLD';
-          finalConfidence = 0;
-          finalReason     = `${aiInfluence.reason} | "${topHeadline.substring(0, 60)}..."`;
-        } else if (Math.abs(aiInfluence.confidenceModifier) > 0.02) {
-          // Ajuste moderado de confiança sem bloquear
-          finalConfidence = Math.max(0, Math.min(100, finalConfidence * (1 + aiInfluence.confidenceModifier)));
-          const modStr = aiInfluence.confidenceModifier > 0 ? `+${(aiInfluence.confidenceModifier * 100).toFixed(0)}%` : `${(aiInfluence.confidenceModifier * 100).toFixed(0)}%`;
-          indicatorNotes.push(`🇧🇷 Noticiário BR ${direction.toUpperCase()} (${strength}% força, ${newsCount} notícias) → confiança ${modStr} | "${topHeadline.substring(0, 50)}..."`);
+        const bridgeConfig     = metaTraderBridge.getConfig();
+        const tradingTimeframe = bridgeConfig.tradingTimeframe ?? 'day_trade';
+        const tradingStyle     = bridgeConfig.tradingStyle     ?? 'scalp';
+        const isScalpMode      = tradingTimeframe === 'day_trade' && tradingStyle === 'scalp';
+
+        if (isScalpMode) {
+          // SCALP: noticiário é contexto, nunca veto — Girassol + Fibonacci + IA prioridade máxima
+          if (Math.abs(aiInfluence.confidenceModifier) > 0.02) {
+            finalConfidence = Math.max(0, Math.min(100, finalConfidence * (1 + aiInfluence.confidenceModifier)));
+            const modStr = aiInfluence.confidenceModifier > 0
+              ? `+${(aiInfluence.confidenceModifier * 100).toFixed(0)}%`
+              : `${(aiInfluence.confidenceModifier * 100).toFixed(0)}%`;
+            indicatorNotes.push(`🇧🇷 [SCALP] Noticiário BR ${direction.toUpperCase()} (${strength}% força, ${newsCount} notícias) → confiança ${modStr} | Girassol é o gatilho primário — sem veto macro | "${topHeadline.substring(0, 45)}..."`);
+          } else {
+            indicatorNotes.push(`🇧🇷 [SCALP] Noticiário BR ${direction.toUpperCase()} (${newsCount} notícias) — contexto diário, sem impacto no scalp`);
+          }
+          if (aiInfluence.blocksBuy && finalAction === 'BUY') {
+            console.log(`[MT5-Indicators] 🇧🇷 [SCALP] ${sym}: notícia BR BEARISH ${strength}% — registrado como contexto, Girassol permite entrada`);
+          } else if (aiInfluence.blocksSell && finalAction === 'SELL') {
+            console.log(`[MT5-Indicators] 🇧🇷 [SCALP] ${sym}: notícia BR BULLISH ${strength}% — registrado como contexto, Girassol permite entrada`);
+          }
         } else {
-          indicatorNotes.push(`🇧🇷 Noticiário BR NEUTRO (${newsCount} notícias analisadas) — sem impacto direcional`);
+          // SWING / POSIÇÃO: bloqueio por sentimento macro BR extremo
+          if (aiInfluence.blocksBuy && finalAction === 'BUY') {
+            indicatorNotes.push(`🇧🇷 Noticiário BR BEARISH (${strength}%) bloqueia COMPRA — risco macroeconômico elevado`);
+            console.log(`[MT5-Indicators] 🇧🇷 ${sym}: BUY BLOQUEADO por sentimento BR BEARISH (${strength}%)`);
+            finalAction     = 'HOLD';
+            finalConfidence = 0;
+            finalReason     = `${aiInfluence.reason} | "${topHeadline.substring(0, 60)}..."`;
+          } else if (aiInfluence.blocksSell && finalAction === 'SELL') {
+            indicatorNotes.push(`🇧🇷 Noticiário BR BULLISH (${strength}%) bloqueia VENDA — ambiente de mercado positivo`);
+            console.log(`[MT5-Indicators] 🇧🇷 ${sym}: SELL BLOQUEADO por sentimento BR BULLISH (${strength}%)`);
+            finalAction     = 'HOLD';
+            finalConfidence = 0;
+            finalReason     = `${aiInfluence.reason} | "${topHeadline.substring(0, 60)}..."`;
+          } else if (Math.abs(aiInfluence.confidenceModifier) > 0.02) {
+            finalConfidence = Math.max(0, Math.min(100, finalConfidence * (1 + aiInfluence.confidenceModifier)));
+            const modStr = aiInfluence.confidenceModifier > 0
+              ? `+${(aiInfluence.confidenceModifier * 100).toFixed(0)}%`
+              : `${(aiInfluence.confidenceModifier * 100).toFixed(0)}%`;
+            indicatorNotes.push(`🇧🇷 Noticiário BR ${direction.toUpperCase()} (${strength}% força, ${newsCount} notícias) → confiança ${modStr} | "${topHeadline.substring(0, 50)}..."`);
+          } else {
+            indicatorNotes.push(`🇧🇷 Noticiário BR NEUTRO (${newsCount} notícias analisadas) — sem impacto direcional`);
+          }
         }
       } catch (brazilErr) {
         // Não bloquear trade por falha no serviço de notícias

@@ -1334,20 +1334,19 @@ COMPOSITE SIGNAL SCORE: ${overallSentiment > 0 ? '+' : ''}${overallSentiment}/6 
 
     console.log(`🎯 [CONSENSUS DEBUG] Decisão final: ${finalDecision} (força: ${consensusStrength}%, votos vencedores: ${winningVotes.toFixed(3)})`);
 
-    // 🔥 MODO RECUPERAÇÃO: Aplicar threshold elevado para maior precisão
+    // 🔥 MODO RECUPERAÇÃO: Threshold elevado comunicado via requiredConsensus
+    // CORREÇÃO ESTRUTURAL: NÃO forçamos 'neutral' aqui — o filtro técnico (Girassol + Fibonacci)
+    // no bridge decide se o consenso real é suficiente com base em confluência técnica.
+    // Forçar neutral aqui impedia que setups de alta qualidade (Girassol 3/3 + notícias
+    // confirmando) fossem aprovados mesmo com IAs em 42%, pois o bridge nunca chegava
+    // a verificar o Girassol porque a direção já vinha como 'neutral'.
     if (isRecoveryMode) {
       const requiredStrength = Math.round(recoveryThreshold * 100);
-      
+
       if (consensusStrength < requiredStrength) {
-        console.log(`🔥 [RECOVERY MODE] Consenso insuficiente: ${consensusStrength}% < ${requiredStrength}% - Forçando NEUTRAL para segurança`);
-        
-        return {
-          finalDecision: 'neutral',
-          consensusStrength: 0,
-          participatingModels: enhancedAnalyses.length,
-          analyses: enhancedAnalyses,
-          reasoning: `Modo recuperação ativado: Consenso de ${consensusStrength}% abaixo do threshold de segurança (${requiredStrength}%). Cooperação das IAs determinou aguardar por sinais mais claros. Cooperação: ${cooperationMetrics.agreementLevel}%.`
-        };
+        console.log(`🔥 [RECOVERY MODE] Consenso ${consensusStrength}% < ${requiredStrength}% — mantendo direção real: ${finalDecision.toUpperCase()}. Girassol + Fibonacci decidirão no bridge.`);
+        // Não forçamos neutral: deixamos o threshold de recovery ser comunicado via
+        // requiredConsensus (abaixo) para que o bridge aplique os filtros técnicos.
       } else {
         console.log(`🔥 [RECOVERY MODE] Consenso aprovado: ${consensusStrength}% >= ${requiredStrength}% - Executando operação com alta confiança`);
         // Boost consensus strength in recovery mode for approved operations
