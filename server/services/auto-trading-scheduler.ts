@@ -1302,10 +1302,10 @@ export class AutoTradingScheduler {
         return { success: false, error: 'IAs com sinal neutro — sem edge direcional. Aguardando próximo ciclo.' };
       }
 
-      const MIN_DIRECTIONAL_CONSENSUS = 65; // abaixo de 65% de acordo (nota "A") não há edge real de lucro
+      const MIN_DIRECTIONAL_CONSENSUS = 72; // ≥72% exigido: ONETOUCH precisa ≥75% WR para lucro com payout 34-45%
       if (aiDirectionalConsensus < MIN_DIRECTIONAL_CONSENSUS) {
         console.log(`⛔ [${operationId}] CONSENSO FRACO BLOQUEADO: ${aiDirectionalDecision.toUpperCase()} ${selectedSymbol} | consenso=${aiDirectionalConsensus.toFixed(1)}% < ${MIN_DIRECTIONAL_CONSENSUS}% mínimo — sinal não é BOM o suficiente para lucro real.`);
-        return { success: false, error: `Consenso ${aiDirectionalConsensus.toFixed(1)}% insuficiente (mín ${MIN_DIRECTIONAL_CONSENSUS}%) — aguardando sinal de qualidade BOA (nota A/S).` };
+        return { success: false, error: `Consenso ${aiDirectionalConsensus.toFixed(1)}% insuficiente (mín ${MIN_DIRECTIONAL_CONSENSUS}%) — aguardando sinal de qualidade EXCEPCIONAL.` };
       }
 
       console.log(`✅ [${operationId}] SINAL VÁLIDO: ${aiDirectionalDecision.toUpperCase()} ${selectedSymbol} | consenso=${aiDirectionalConsensus.toFixed(1)}% ≥ ${MIN_DIRECTIONAL_CONSENSUS}% (nota A/S) — operação autorizada com edge real de lucro.`);
@@ -2171,6 +2171,20 @@ export class AutoTradingScheduler {
         } else if (TOUCH_TYPES[selectedModality]) {
           // ── Contratos Touch / No Touch (ONETOUCH, NOTOUCH) ──
           const contractType = TOUCH_TYPES[selectedModality];
+
+          // 🛡️ FILTRO DE HISTÓRICO TOUCH: bloquear ativo com WR real < 68% (mínimo lucrativo)
+          // ONETOUCH break-even ≈ 75% WR (payout 34%). Com margem de segurança: exigir ≥68%.
+          // Se o ativo tem histórico suficiente E está perdendo → não abrir novo TOUCH aqui.
+          const touchGuardPerf = this.assetPerformance.get(selectedSymbol);
+          const touchGuardTotal = touchGuardPerf ? touchGuardPerf.wins + touchGuardPerf.losses : 0;
+          if (touchGuardTotal >= 10) {
+            const touchGuardWR = touchGuardPerf!.wins / touchGuardTotal;
+            if (touchGuardWR < 0.62) {
+              console.log(`🚫 [TOUCH GUARD] ${contractType} ${selectedSymbol} BLOQUEADO: WR_real=${(touchGuardWR*100).toFixed(1)}% < 62% (${touchGuardPerf!.wins}W/${touchGuardPerf!.losses}L) — ativo em fase negativa. Aguardando recuperação.`);
+              return { success: false, error: `${contractType} bloqueado: WR histórico ${(touchGuardWR*100).toFixed(1)}% abaixo do mínimo lucrativo (62%) em ${selectedSymbol}` };
+            }
+          }
+
           const currentPrice = await derivAPI.getCurrentPrice(selectedSymbol);
           let barrier: string;
 
@@ -2222,15 +2236,28 @@ export class AutoTradingScheduler {
             ? Math.min(Math.max(touchDuration, 1), 5)   // NOTOUCH: 1-5 min
             : Math.min(Math.max(touchDuration, 5), 30);  // ONETOUCH: 5-30 min
 
-          // ── FILTRO DE EV: lucro potencial deve superar a perda potencial ──────
-          // A IA estima a prob. de acerto via consenso. Para EV > 0:
-          //   consenso × lucro_ratio > (1 - consenso) × 1.0
-          //   → lucro_ratio_mínimo = (1 - wr) / wr  (com +5% margem de segurança)
-          const winProb = Math.max(0.5, Math.min(0.99, (aiConsensus.consensusStrength ?? 70) / 100));
+          // ── FILTRO DE EV CONSERVADOR: usa taxa real de vitória como âncora ────
+          // Problema identificado: IA reclama 70% de confiança mas taxa real é ~65%.
+          // Essa diferença pequena inverte o EV de positivo para negativo.
+          // Solução: aplicar 15% de desconto no consenso da IA para compensar viés
+          // de otimismo, e usar o MENOR valor entre IA e WR histórico do ativo.
+          const rawClaimedProb = (aiConsensus.consensusStrength ?? 70) / 100;
+          const touchPerfData   = this.assetPerformance.get(selectedSymbol);
+          const touchPerfTrades = touchPerfData ? touchPerfData.wins + touchPerfData.losses : 0;
+          const touchHistWR     = touchPerfTrades >= 8 ? touchPerfData!.wins / touchPerfTrades : null;
+          // Desconto de 15% no consenso da IA para evitar entradas com EV negativo oculto
+          const conservativeIAProb = rawClaimedProb * 0.85;
+          // Se há histórico suficiente do ativo, usa o menor entre IA e real
+          const winProb = Math.max(0.55, Math.min(0.95,
+            touchHistWR !== null
+              ? Math.min(conservativeIAProb, touchHistWR)
+              : conservativeIAProb
+          ));
           const touchMinProfitRatio = parseFloat((((1 - winProb) / winProb) * 1.05).toFixed(4));
           console.log(
-            `🧮 [EV CHECK] ${contractType} ${selectedSymbol}: consenso=${(winProb*100).toFixed(1)}% → ` +
-            `lucro_mínimo_exigido=${(touchMinProfitRatio*100).toFixed(1)}% sobre o stake`
+            `🧮 [EV CHECK] ${contractType} ${selectedSymbol}: IA=${(rawClaimedProb*100).toFixed(1)}% → conservador=${(conservativeIAProb*100).toFixed(1)}%` +
+            (touchHistWR !== null ? ` | WR_real=${(touchHistWR*100).toFixed(1)}%(${touchPerfTrades}ops)` : ' | WR_real=sem_histórico') +
+            ` → winProb_efetiva=${(winProb*100).toFixed(1)}% → payout_mínimo=${(touchMinProfitRatio*100).toFixed(1)}%`
           );
 
           contract = await derivAPI.buyFlexibleContract({

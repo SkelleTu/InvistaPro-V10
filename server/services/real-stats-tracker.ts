@@ -2,40 +2,39 @@
  * REAL STATS TRACKER
  * Rastreia resultados reais de trades (won/lost) baseado em dados do banco.
  *
- * 🤖 MODO IA LIVRE — SEM RESTRIÇÕES DE TIMING
+ * 🛡️ MODO PROTEÇÃO DE BANCA — CIRCUIT BREAKER REAL
  *
- * CAMADA 1 - ANTI-REPETIÇÃO MÍNIMA:
- *   O mesmo ativo é evitado apenas uma vez após perda (rotação natural de ativos).
- *   Bloqueio de apenas 90 segundos para permitir rotação e retornar ao ativo.
+ * CAMADA 1 - ANTI-REPETIÇÃO:
+ *   O mesmo ativo é bloqueado por 5 min após perda — tempo real para o mercado mudar.
  *
- * CAMADA 2 - CONSENSO LEVEMENTE ESCALADO:
- *   A IA opera livremente. Qualquer sinal gerado pela IA é considerado válido.
- *   Sem escalada agressiva de consenso — a IA já analisa milimetricamente.
+ * CAMADA 2 - CONSENSO ESCALADO POR STREAK:
+ *   A cada perda consecutiva o sistema exige consenso progressivamente maior.
+ *   Evita entrar em mercado ruim com sinal fraco.
  *
- * CAMADA 3 - CIRCUIT BREAKER MÍNIMO:
- *   Pausa mínima (5s) apenas para dar tempo de processar dados do trade anterior.
- *   A IA não fica bloqueada — retoma imediatamente.
+ * CAMADA 3 - CIRCUIT BREAKER COM PAUSA REAL:
+ *   Pausas significativas (2-15 min) por streak de perdas.
+ *   Dá tempo real de o mercado mudar condições antes de nova entrada.
  *
- * CAMADA 4 - BLOQUEIO DE ATIVO PERDEDOR REDUZIDO:
- *   Ativo bloqueado por apenas 90 segundos (rotação, não penalidade).
+ * CAMADA 4 - BLOQUEIO DE ATIVO PERDEDOR:
+ *   Ativo bloqueado por 5 minutos após causar perda.
  */
 
-const RECOVERY_ASSET_BLOCK_MS = 90 * 1000; // 90 segundos — rotação de ativo, não penalidade longa
+const RECOVERY_ASSET_BLOCK_MS = 5 * 60 * 1000; // 5 minutos — ativo perdedor precisa de pausa real
 
 // Consenso mínimo por nível de perdas consecutivas
-// Mantido próximo do nível base: a IA já analisa profundamente — não precisamos dobrar exigência
+// Escala progressiva: após perdas consecutivas, exige sinal muito mais forte
 const RECOVERY_CONSENSUS_BY_STREAK: Record<number, number> = {
-  1: 52,  // 1 perda consecutiva → 52% (praticamente livre — a IA decide)
-  2: 55,  // 2 perdas consecutivas → 55%
-  3: 58,  // 3+ perdas consecutivas → 58% (ainda muito permissivo para não travar)
+  1: 72,  // 1 perda consecutiva → 72% (mesmo threshold do gate principal)
+  2: 78,  // 2 perdas consecutivas → 78% (sinal forte exigido)
+  3: 85,  // 3+ perdas consecutivas → 85% (sinal excepcional — mercado claramente contra)
 };
 
-// Pausa mínima entre trades por perdas consecutivas (em ms)
-// Apenas tempo suficiente para processar o resultado anterior — IA não fica parada
+// Pausas reais por perdas consecutivas para proteção de banca
+// Cada pausa dá tempo para as condições de mercado mudarem
 const CIRCUIT_BREAKER_PAUSE_MS: Record<number, number> = {
-  1:  3 * 1000,   // 1 perda  → 3 segundos (tempo de processamento)
-  2:  5 * 1000,   // 2 perdas → 5 segundos
-  3: 10 * 1000,   // 3+ perdas → 10 segundos (máximo — IA retoma em seguida)
+  1:  2 * 60 * 1000,   // 1 perda  → 2 minutos (avaliar condições)
+  2:  5 * 60 * 1000,   // 2 perdas → 5 minutos (mercado pode estar adverso)
+  3: 15 * 60 * 1000,   // 3+ perdas → 15 minutos (sinal claro de mercado ruim)
 };
 
 export interface PersistedRecoveryState {
