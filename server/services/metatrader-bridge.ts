@@ -1837,12 +1837,14 @@ class MetaTraderBridge extends EventEmitter {
       tpPrice = action === 'BUY' ? entryPrice + rawTp : entryPrice - rawTp;
     }
 
-    // Garantir que SL/TP respeitam o perfil do ativo (com limites ajustados pelo estilo)
+    // Garantir que SL/TP respeitam o perfil do ativo
+    // IMPORTANTE: o piso mínimo (minSl/minTp) NÃO é comprimido pelo fator de escala
+    // para evitar rejeição do broker por "invalid stops" (erro 10016)
     if (profile) {
-      const minSl = profile.minSlPips * pipSize * slScaleFactor;
-      const maxSl = profile.maxSlPips * pipSize * slScaleFactor;
-      const minTp = profile.minTpPips * pipSize * tpScaleFactor;
-      const maxTp = profile.maxTpPips * pipSize * tpScaleFactor;
+      const minSl = profile.minSlPips * pipSize;
+      const maxSl = Math.max(profile.maxSlPips * pipSize * slScaleFactor, minSl);
+      const minTp = profile.minTpPips * pipSize;
+      const maxTp = Math.max(profile.maxTpPips * pipSize * tpScaleFactor, minTp);
 
       const slDist = Math.abs(slPrice - entryPrice);
       const tpDist = Math.abs(tpPrice - entryPrice);
