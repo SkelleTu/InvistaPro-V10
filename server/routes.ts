@@ -3503,6 +3503,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ========================== CLEAR TAB DATA ==========================
+  app.post('/api/trading/clear-tab/:tab', isAuthenticated, isTradingAuthorized, async (req: any, res: any) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: 'Usuário não autenticado' });
+
+      const { tab } = req.params;
+      const validTabs = ['dashboard', 'operations', 'ai-analysis', 'blocked', 'monitor', 'learning', 'stats'];
+      if (!validTabs.includes(tab)) {
+        return res.status(400).json({ message: `Aba inválida: ${tab}` });
+      }
+
+      // Tabs sem dados limpáveis (config e metatrader)
+      if (tab === 'config' || tab === 'metatrader') {
+        return res.json({ success: true, message: 'Aba sem dados limpáveis', rowsDeleted: 0, cleared: [] });
+      }
+
+      // Para o monitor, também encerra sessões ativas na memória
+      if (tab === 'monitor') {
+        autoTradingScheduler.clearAllSessions();
+      }
+
+      // Para learning/stats também reseta a memória em tempo real
+      if (tab === 'dashboard' || tab === 'stats' || tab === 'learning') {
+        realStatsTracker.resetUserMemory(userId);
+      }
+
+      const result = await dbStorage.clearTabData(userId, tab);
+
+      console.log(`🧹 [CLEAR-TAB] Usuário ${userId} limpou aba "${tab}": ${result.rowsDeleted} registros removidos`);
+
+      res.json({
+        success: true,
+        message: `Aba "${tab}" limpa com sucesso`,
+        rowsDeleted: result.rowsDeleted,
+        cleared: result.cleared,
+      });
+    } catch (error) {
+      console.error('❌ Erro ao limpar aba:', error);
+      res.status(500).json({ message: 'Erro ao limpar dados', error: String(error) });
+    }
+  });
+
   // =========================== SYSTEM HEALTH STATUS (TPM - Total Productive Maintenance) ===========================
 
   app.get('/api/trading/system-health', isAuthenticated, isTradingAuthorized, async (req, res) => {

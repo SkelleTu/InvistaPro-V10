@@ -1213,6 +1213,91 @@ export default function TradingSystemPage() {
     },
   });
 
+  // Mapa de queryKeys por aba para refresh seletivo
+  const tabQueryKeys: Record<string, string[][]> = {
+    dashboard: [
+      ["/api/trading/stats"],
+      ["/api/trading/operations"],
+      ["/api/trading/account-info"],
+      ["/api/trading/live-balance"],
+      ["/api/trading/realtime-data"],
+      ["/api/trading/ai-logs"],
+      ["/api/auto-trading/status"],
+    ],
+    config: [
+      ["/api/trading/config"],
+    ],
+    blocked: [
+      ["/api/trading/blocked-assets"],
+    ],
+    operations: [
+      ["/api/trading/operations"],
+      ["/api/trading/stats"],
+    ],
+    "ai-analysis": [
+      ["/api/trading/ai-logs"],
+      ["/api/trading/ai-analysis"],
+      ["/api/trading/live-analysis"],
+    ],
+    learning: [
+      ["/api/auto-trading/ai-threshold-stats"],
+      ["/api/trading/ai-logs"],
+    ],
+    monitor: [
+      ["/api/monitor/status"],
+      ["/api/auto-trading/status"],
+    ],
+    metatrader: [
+      ["/api/mt5/status"],
+      ["/api/mt5/positions"],
+      ["/api/mt5/trades"],
+      ["/api/mt5/signal"],
+    ],
+  };
+
+  // Nomes de exibição por aba
+  const tabDisplayNames: Record<string, string> = {
+    dashboard: "Dashboard (estatísticas e histórico)",
+    operations: "Operações (histórico de trades)",
+    "ai-analysis": "IA e Análises (logs)",
+    blocked: "Bloqueio (ativos bloqueados)",
+    monitor: "Monitor IA (sessões ativas)",
+    learning: "Aprendizado (memória de análises)",
+  };
+
+  // Abas sem limpeza disponível
+  const nonClearableTabs = ["config", "metatrader"];
+
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+
+  const handleRefreshTab = () => {
+    const keys = tabQueryKeys[activeTab] || [];
+    keys.forEach((key) => queryClient.invalidateQueries({ queryKey: key }));
+    toast({ title: "Atualizado", description: `Dados da aba "${activeTab}" recarregados.` });
+  };
+
+  const clearTabMutation = useMutation({
+    mutationFn: async (tab: string) => {
+      const response = await apiRequest(`/api/trading/clear-tab/${tab}`, { method: "POST" });
+      return response.json();
+    },
+    onSuccess: (data) => {
+      toast({
+        title: "Aba limpa",
+        description: data.rowsDeleted > 0
+          ? `${data.rowsDeleted} registros removidos. Aba pronta para novo ciclo.`
+          : "Dados em memória limpos. Aba pronta para novo ciclo.",
+      });
+      const keys = tabQueryKeys[activeTab] || [];
+      keys.forEach((key) => queryClient.invalidateQueries({ queryKey: key }));
+      setShowClearConfirm(false);
+    },
+    onError: (error: any) => {
+      toast({ title: "Erro ao limpar", description: error.message, variant: "destructive" });
+      setShowClearConfirm(false);
+    },
+  });
+
   // Verificar acesso
   if (!hasAccess) {
     return (
@@ -1326,6 +1411,56 @@ export default function TradingSystemPage() {
               </TabsTrigger>
             </TabsList>
           </div>
+
+          {/* Barra de ações da aba ativa */}
+          <div className="flex items-center justify-end gap-2 -mt-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRefreshTab}
+              data-testid="button-refresh-tab"
+              className="h-7 px-2 text-xs gap-1 text-muted-foreground hover:text-foreground"
+            >
+              <RefreshCw className="h-3 w-3" />
+              Refresh
+            </Button>
+            {!nonClearableTabs.includes(activeTab) && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowClearConfirm(true)}
+                data-testid="button-clear-tab"
+                className="h-7 px-2 text-xs gap-1 text-red-500 hover:text-red-600 border-red-200 hover:border-red-400 dark:border-red-800 dark:hover:border-red-600"
+                disabled={clearTabMutation.isPending}
+              >
+                <Trash2 className="h-3 w-3" />
+                {clearTabMutation.isPending ? "Limpando..." : "Limpar aba"}
+              </Button>
+            )}
+          </div>
+
+          {/* Dialog de confirmação — Limpar aba */}
+          <AlertDialog open={showClearConfirm} onOpenChange={setShowClearConfirm}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Limpar dados da aba?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Isso vai apagar todos os dados de <strong>{tabDisplayNames[activeTab] ?? activeTab}</strong>.
+                  A configuração e o token Deriv serão preservados. Esta ação não pode ser desfeita.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() => clearTabMutation.mutate(activeTab)}
+                  className="bg-red-600 hover:bg-red-700"
+                  data-testid="button-confirm-clear-tab"
+                >
+                  Sim, limpar
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
 
           {/* Dashboard Tab */}
           <TabsContent value="dashboard" className="space-y-6">

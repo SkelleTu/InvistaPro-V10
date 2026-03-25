@@ -266,6 +266,9 @@ export interface IStorage {
 
   // Reset total de dados operacionais (mantém usuário, token e configurações)
   resetAllTradingData(userId: string): Promise<{ tablesCleared: string[]; rowsDeleted: number }>;
+
+  // Limpeza específica por aba do sistema
+  clearTabData(userId: string, tab: string): Promise<{ cleared: string[]; rowsDeleted: number }>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1888,6 +1891,64 @@ export class DatabaseStorage implements IStorage {
     // performance_analytics) é preservada — representa conhecimento acumulado valioso.
 
     return { tablesCleared, rowsDeleted };
+  }
+
+  async clearTabData(userId: string, tab: string): Promise<{ cleared: string[]; rowsDeleted: number }> {
+    const cleared: string[] = [];
+    let rowsDeleted = 0;
+
+    const del = async (table: any, condition: any, name: string) => {
+      try {
+        const rows = await db.delete(table).where(condition).returning();
+        cleared.push(name);
+        rowsDeleted += rows.length;
+      } catch {}
+    };
+
+    switch (tab) {
+      case 'dashboard':
+      case 'stats':
+        await del(tradeOperations, eq(tradeOperations.userId, userId), 'trade_operations');
+        await del(aiLogs, eq(aiLogs.userId, userId), 'ai_logs');
+        await del(dailyPnL, eq(dailyPnL.userId, userId), 'daily_pnl');
+        break;
+
+      case 'operations':
+        await del(tradeOperations, eq(tradeOperations.userId, userId), 'trade_operations');
+        await del(dailyPnL, eq(dailyPnL.userId, userId), 'daily_pnl');
+        break;
+
+      case 'ai-analysis':
+        await del(aiLogs, eq(aiLogs.userId, userId), 'ai_logs');
+        break;
+
+      case 'blocked':
+        await del(blockedAssets, eq(blockedAssets.userId, userId), 'blocked_assets');
+        await del(assetBlacklist, eq(assetBlacklist.userId, userId), 'asset_blacklist');
+        break;
+
+      case 'monitor':
+        try {
+          const sessions = await db.delete(activeTradingSessions).returning();
+          cleared.push('active_trading_sessions');
+          rowsDeleted += sessions.length;
+        } catch {}
+        try {
+          const wsSubs = await db.delete(activeWebSocketSubscriptions).returning();
+          cleared.push('active_websocket_subscriptions');
+          rowsDeleted += wsSubs.length;
+        } catch {}
+        break;
+
+      case 'learning':
+        await del(aiLogs, eq(aiLogs.userId, userId), 'ai_logs');
+        break;
+
+      default:
+        break;
+    }
+
+    return { cleared, rowsDeleted };
   }
 
 }
