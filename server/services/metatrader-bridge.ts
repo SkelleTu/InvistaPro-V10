@@ -1133,6 +1133,34 @@ class MetaTraderBridge extends EventEmitter {
 
   private latencyHistory: number[] = [];
 
+  // ── Estado do Girassol recebido do EA via signal-with-indicators ──
+  // Permite que generateSignal ajuste o limiar de consenso da IA dinamicamente
+  // com base na força e confluência do sinal do Girassol (primário gatilho de entrada).
+  private girassolStateCache: Map<string, {
+    bias: 'BUY' | 'SELL' | 'NEUTRAL';
+    levelCount: number;      // quantos dos 3 níveis estão ativos na mesma direção
+    timestamp: number;
+  }> = new Map();
+
+  /**
+   * Chamado pela rota signal-with-indicators toda vez que o EA envia dados do Girassol.
+   * Armazena o estado atual para uso em generateSignal (ajuste dinâmico de threshold de IA).
+   */
+  public setGirassolBias(symbol: string, bias: 'BUY' | 'SELL' | 'NEUTRAL', levelCount: number): void {
+    this.girassolStateCache.set(symbol, { bias, levelCount, timestamp: Date.now() });
+  }
+
+  /**
+   * Retorna o estado do Girassol armazenado para um símbolo, se fresco (< 90 segundos).
+   * Retorna null se não há dados ou estão expirados.
+   */
+  public getGirassolBias(symbol: string): { bias: 'BUY' | 'SELL' | 'NEUTRAL'; levelCount: number } | null {
+    const state = this.girassolStateCache.get(symbol);
+    if (!state) return null;
+    if (Date.now() - state.timestamp > 90_000) return null; // expirado
+    return { bias: state.bias, levelCount: state.levelCount };
+  }
+
   constructor() {
     super();
     this.status = this.initStatus();
@@ -2381,7 +2409,41 @@ class MetaTraderBridge extends EventEmitter {
         return null;
       }
 
-      if (aiConsensus < this.MIN_AI_CONSENSUS || aiDirection === 'neutral') {
+      // ── Integrar Girassol como modulador dinâmico do limiar de consenso da IA ──
+      // O Girassol é o GATILHO PRIMÁRIO de entrada. Sua presença e confluência
+      // determinam quanto do consenso da IA é necessário para validar a operação:
+      //   • 3 níveis confluentes → threshold reduz para 35% (Girassol confirma forte)
+      //   • 2 níveis confluentes → threshold reduz para 45%
+      //   • 1 nível ativo       → threshold reduz para 55%
+      //   • Girassol NEUTRO     → bloquear (aguardar Girassol antes de operar)
+      //   • Sem dados Girassol  → threshold normal 70% (fallback)
+      const girassolLive = this.getGirassolBias(symbol);
+      let effectiveMinConsensus = this.MIN_AI_CONSENSUS; // 70% padrão
+
+      if (girassolLive) {
+        if (girassolLive.bias === 'NEUTRAL') {
+          // Girassol instalado no gráfico mas sem sinal direcional → aguardar
+          this.logAnalysis({
+            id: `${entryId}_girassol_neutral`,
+            timestamp: Date.now(),
+            symbol,
+            phase: 'decision',
+            status: 'rejected',
+            consecutiveLosses: this.consecutiveLosses,
+            decisionReason: `⏸️ Girassol NEUTRO — aguardando sinal direcional do indicador antes de operar (IA não atua sem o Girassol)`
+          });
+          console.log(`[MT5Bridge] ⏸️ ${symbol}: Girassol detectado mas NEUTRO — IA aguardando sinal do indicador`);
+          return null;
+        }
+        // Girassol com sinal claro → reduzir threshold proporcionalmente à confluência
+        const prevThreshold = effectiveMinConsensus;
+        effectiveMinConsensus = girassolLive.levelCount >= 3 ? 35
+                              : girassolLive.levelCount >= 2 ? 45
+                              : 55;
+        console.log(`[MT5Bridge] 🌻 ${symbol}: Girassol ${girassolLive.bias} (${girassolLive.levelCount}/3 níveis) → threshold IA: ${prevThreshold}% → ${effectiveMinConsensus}%`);
+      }
+
+      if (aiConsensus < effectiveMinConsensus || aiDirection === 'neutral') {
         // ── FALLBACK: tentar sinal do bot Deriv (mesmo ativo, análise recente) ──
         const derivSym = this.mapMT5ToDerivSymbol(symbol);
         const storedSignal = getSignal(symbol) || (derivSym ? getSignal(derivSym) : undefined);
@@ -2391,6 +2453,9 @@ class MetaTraderBridge extends EventEmitter {
           aiReasoning = storedSignal.reason;
           console.log(`[MT5Bridge] 🔄 Usando sinal do bot Deriv para ${symbol}: ${aiDirection.toUpperCase()} ${aiConsensus}%`);
         } else {
+          if (girassolLive && aiConsensus < effectiveMinConsensus) {
+            console.log(`[MT5Bridge] 🌻 ${symbol}: IA ${aiConsensus.toFixed(1)}% < ${effectiveMinConsensus}% — Girassol aguarda confirmação da IA`);
+          }
           return null;
         }
       }

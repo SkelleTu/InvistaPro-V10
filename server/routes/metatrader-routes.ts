@@ -344,62 +344,114 @@ router.post('/signal-with-indicators', async (req: Request, res: Response) => {
       if (resBuf && resBuf.value > 0) girassolResistanceLevel = resBuf.value;
     }
 
-    // ── Aplica filtro do Girassol ────────────────────────────────────────
+    // ── GATILHO PRIMÁRIO: Girassol com peso máximo + confirmação Fibonacci ─
+    //
+    // Hierarquia de decisão:
+    //  1. Girassol com sinal claro (BUY/SELL) → gatilho de entrada (peso primário)
+    //     Confluência dos 3 níveis amplifica a confiança:
+    //       1 nível ativo  → +25% boost
+    //       2 níveis ativos → +40% boost
+    //       3 níveis ativos → +60% boost (sinal de máxima força)
+    //  2. Fibonacci próximo → +10-20% adicional por confluência de zona
+    //     Chave (38.2%, 50%, 61.8%) em distância < 0.1%: +20%
+    //     Qualquer nível em distância < 0.5%: +10%
+    //  3. Girassol NEUTRO (instalado mas sem sinal) → HOLD obrigatório
+    //     (IA não opera sem o gatilho do Girassol quando o indicador está presente)
+    //  4. Girassol CONTRADIZ a IA → HOLD obrigatório
+    //  5. Girassol NÃO detectado → fallback para IA + Técnica (threshold 70%)
+
     let finalAction: string = baseSignal?.action || 'HOLD';
     let finalConfidence: number = baseSignal?.confidence || 0;
     let finalReason: string = baseSignal?.reason || 'Aguardando sinal';
     const indicatorNotes: string[] = [];
 
-    const requireGirassol = metaTraderBridge.getConfig().requireGirassolConfirmation;
+    // Quantos dos 3 níveis do Girassol estão ativos e na mesma direção
+    const activeLevels = girassolLevelSummary.filter(l => l.active).length;
+    const activeBuyLevels  = girassolLevelSummary.filter(l => l.active && l.recent_buy  && !l.recent_sell).length;
+    const activeSellLevels = girassolLevelSummary.filter(l => l.active && l.recent_sell && !l.recent_buy).length;
+    const girassolConfluence = girassolBias === 'BUY' ? activeBuyLevels : girassolBias === 'SELL' ? activeSellLevels : 0;
 
-    if (girassol?.detected && girassolBias !== 'NEUTRAL') {
-      if (girassolBias === finalAction) {
-        // Girassol CONFIRMA o sinal da IA — aumentar confiança
-        const girassolBoost = derivProfile?.trendType === 'mean-reverting' ? 1.20 : 1.15;
-        finalConfidence = Math.min(100, finalConfidence * girassolBoost);
-        indicatorNotes.push(`✅ Girassol CONFIRMA ${finalAction} — confiança elevada (+${((girassolBoost - 1) * 100).toFixed(0)}%)`);
-        finalReason = `${finalReason} | ${girassolDesc}`;
-      } else if (finalAction !== 'HOLD' && girassolBias !== finalAction) {
-        // Girassol CONTRADIZ o sinal da IA → filtra (HOLD) — sempre, independente da configuração
-        indicatorNotes.push(`🚫 Girassol CONTRADIZ IA (${finalAction}→${girassolBias}) — operação bloqueada`);
-        console.log(`[MT5-Indicators] 🚫 Sinal ${finalAction} BLOQUEADO pelo Girassol (indicador diz ${girassolBias}) | ${sym}`);
-        finalAction     = 'HOLD';
-        finalConfidence = 0;
-        finalReason     = `Bloqueado: ${girassolDesc}`;
-      }
-    } else if (girassol?.detected && girassolBias === 'NEUTRAL') {
-      // Girassol detectado mas sem sinal claro (NEUTRO)
-      indicatorNotes.push(girassolDesc);
-      if (requireGirassol && finalAction !== 'HOLD') {
-        // Modo "Girassol Obrigatório": sem sinal do Girassol = não opera
-        indicatorNotes.push(`⏸️ Girassol NEUTRO — operação aguardando sinal claro do indicador`);
-        console.log(`[MT5-Indicators] ⏸️ ${sym}: Girassol obrigatório ativo — aguardando sinal (NEUTRO)`);
-        finalAction     = 'HOLD';
-        finalConfidence = 0;
-        finalReason     = `Aguardando: Girassol sem sinal direcional claro`;
-      }
-    } else if (!girassol?.detected) {
-      // Girassol não detectado no gráfico
-      if (requireGirassol && finalAction !== 'HOLD') {
-        indicatorNotes.push(`⚠️ Girassol NÃO DETECTADO no gráfico — operação bloqueada (modo Girassol Obrigatório ativo)`);
-        console.log(`[MT5-Indicators] ⚠️ ${sym}: Girassol obrigatório ativo mas indicador não encontrado no gráfico`);
-        finalAction     = 'HOLD';
-        finalConfidence = 0;
-        finalReason     = `Bloqueado: Girassol não detectado no gráfico MT5`;
-      } else {
-        indicatorNotes.push(`ℹ️ Girassol não detectado no gráfico — IA operando sem confirmação do indicador`);
-      }
+    // Registrar estado do Girassol no bridge para uso no próximo generateSignal
+    if (girassol?.detected) {
+      metaTraderBridge.setGirassolBias(sym, girassolBias, girassolConfluence);
     }
 
-    // ── Aplica filtro do Fibonacci ───────────────────────────────────────
-    if (fibonacci?.detected && fibNearestLevel !== null) {
+    // ── Calcular bônus do Fibonacci ──────────────────────────────────────
+    let fibBonus = 0;
+    let fibBonusNote = '';
+    if (girassolBias !== 'NEUTRAL' && fibonacci?.detected && fibNearestLevel !== null) {
       const currentPrice = ask || bid || 0;
       if (currentPrice > 0) {
         const distPct = Math.abs(fibNearestLevel - currentPrice) / currentPrice * 100;
-        if (distPct < 0.05) {
-          indicatorNotes.push(`⚡ Preço em zona de Fibonacci (${distPct.toFixed(3)}% do nível) — zona de reversão/suporte`);
+        const fibLevels = (fibonacci.levels || []) as Array<{ level: string; price: number }>;
+        const nearestFib = fibLevels.reduce((best: any, lv: any) => {
+          const d = Math.abs(lv.price - currentPrice);
+          return (!best || d < Math.abs(best.price - currentPrice)) ? lv : best;
+        }, null as any);
+        const isKeyLevel = nearestFib && ['38.2%', '50%', '61.8%'].includes(nearestFib.level);
+        if (distPct < 0.1) {
+          fibBonus = isKeyLevel ? 0.20 : 0.10;
+          fibBonusNote = `📐 Fibonacci ${isKeyLevel ? 'CHAVE (' + nearestFib.level + ')' : 'próximo'} @ ${fibNearestLevel.toFixed(5)} (Δ${distPct.toFixed(3)}%) → confluência com Girassol +${(fibBonus * 100).toFixed(0)}%`;
+        } else if (distPct < 0.5) {
+          fibBonus = isKeyLevel ? 0.10 : 0.05;
+          fibBonusNote = `📐 Fibonacci ${isKeyLevel ? nearestFib.level : ''} @ ${fibNearestLevel.toFixed(5)} (Δ${distPct.toFixed(3)}%) → zona próxima +${(fibBonus * 100).toFixed(0)}%`;
         }
       }
+    }
+
+    if (girassol?.detected && girassolBias !== 'NEUTRAL') {
+      // ── CASO 1: Girassol com sinal claro ────────────────────────────────
+      if (girassolBias === finalAction) {
+        // Girassol CONFIRMA o sinal da IA — boost escalonado por confluência
+        const baseBoost = girassolConfluence >= 3 ? 1.60   // 3/3 níveis: +60%
+                        : girassolConfluence >= 2 ? 1.40   // 2/3 níveis: +40%
+                        : 1.25;                            // 1/3 nível:  +25%
+        finalConfidence = Math.min(100, finalConfidence * baseBoost);
+        const boostPct = ((baseBoost - 1) * 100).toFixed(0);
+        indicatorNotes.push(`✅ Girassol CONFIRMA ${finalAction} (${girassolConfluence}/3 níveis) → +${boostPct}% confiança`);
+        finalReason = `${finalReason} | ${girassolDesc}`;
+        if (fibBonus > 0) {
+          finalConfidence = Math.min(100, finalConfidence * (1 + fibBonus));
+          indicatorNotes.push(fibBonusNote);
+        }
+      } else if (finalAction === 'HOLD') {
+        // IA ainda sem sinal mas Girassol disparou: nenhuma acão adicional aqui.
+        // O bridge vai gerar sinal com threshold reduzido no próximo ciclo.
+        indicatorNotes.push(`🌻 Girassol ATIVO (${girassolConfluence}/3 níveis ${girassolBias}) — aguardando confirmação da IA (threshold reduzido para próximo ciclo)`);
+      } else {
+        // Girassol CONTRADIZ o sinal da IA → bloquear SEMPRE
+        indicatorNotes.push(`🚫 Girassol CONTRADIZ IA: ${finalAction}→${girassolBias} (${girassolConfluence}/3 níveis) — operação bloqueada`);
+        console.log(`[MT5-Indicators] 🚫 Sinal ${finalAction} BLOQUEADO pelo Girassol (${girassolBias}, ${girassolConfluence} níveis) | ${sym}`);
+        finalAction     = 'HOLD';
+        finalConfidence = 0;
+        finalReason     = `Bloqueado: Girassol ${girassolBias} contradiz IA ${baseSignal?.action || '?'} — ${girassolDesc}`;
+      }
+    } else if (girassol?.detected && girassolBias === 'NEUTRAL') {
+      // ── CASO 2: Girassol instalado mas NEUTRO → HOLD obrigatório ────────
+      // Quando o Girassol está presente no gráfico, ele É o gatilho.
+      // Sem sinal do Girassol = sem entrada, independentemente do consenso da IA.
+      indicatorNotes.push(`⏸️ Girassol NEUTRO — ${girassolDesc}`);
+      console.log(`[MT5-Indicators] ⏸️ ${sym}: Girassol detectado mas sem sinal direcional (NEUTRO) — IA aguarda gatilho`);
+      finalAction     = 'HOLD';
+      finalConfidence = 0;
+      finalReason     = `Aguardando gatilho: Girassol ativo mas sem sinal nos 3 níveis — ${girassolDesc}`;
+    } else if (!girassol?.detected) {
+      // ── CASO 3: Girassol não instalado no gráfico → fallback ────────────
+      // Sem o indicador instalado, a IA opera com threshold normal (70%).
+      const requireGirassol = metaTraderBridge.getConfig().requireGirassolConfirmation;
+      if (requireGirassol && finalAction !== 'HOLD') {
+        indicatorNotes.push(`⚠️ Girassol NÃO DETECTADO — operação bloqueada (modo Girassol Obrigatório ativo)`);
+        console.log(`[MT5-Indicators] ⚠️ ${sym}: Girassol obrigatório mas não encontrado no gráfico`);
+        finalAction     = 'HOLD';
+        finalConfidence = 0;
+        finalReason     = `Bloqueado: Girassol não detectado no gráfico MT5 — instalar o indicador para ativar o sistema`;
+      } else {
+        indicatorNotes.push(`ℹ️ Girassol não detectado no gráfico — IA operando em modo fallback (threshold 70%). Instale o Girassol para ativar o gatilho primário.`);
+      }
+    }
+
+    // ── Log do Fibonacci (integração de entrada já aplicada acima) ──────
+    if (fibonacci?.detected) {
       indicatorNotes.push(fibDesc);
     }
 
@@ -455,6 +507,7 @@ router.post('/signal-with-indicators', async (req: Request, res: Response) => {
         confidence: finalConfidence,
         indicatorNotes,
         girassolBias,
+        girassolConfluence,
         girassolDescription:   girassolDesc,
         girassolLevels:        girassolLevelSummary,
         girassolSupportLevel:  girassolSupportLevel ?? null,
@@ -485,6 +538,7 @@ router.post('/signal-with-indicators', async (req: Request, res: Response) => {
       reason:                finalReason,
       indicatorNotes,
       girassolBias,
+      girassolConfluence,
       girassolDescription:   girassolDesc,
       girassolLevels:        girassolLevelSummary,
       girassolSupportLevel:  girassolSupportLevel ?? null,
