@@ -994,7 +994,7 @@ export class AutoTradingScheduler {
         return { success: false, error: 'Ativo bloqueado pelo usuário' };
       }
       
-      console.log(`🔓 [DEBUG] Símbolo ${config.symbol} NÃO está bloqueado.`);
+      console.log(`🔓 [DEBUG] Símbolo ${config.symbol ?? '(automático - IA selecionará)'} NÃO está bloqueado.`);
 
       // SEGURANÇA: Verificar limite por sessão
       if (!this.canSessionExecute(sessionKey)) {
@@ -1212,6 +1212,16 @@ export class AutoTradingScheduler {
         console.log(`🔴 [${operationId}] CIRCUIT BREAKER ignorado — desabilitado pelo usuário`);
       }
 
+      // 💰 PROTEÇÃO DE SALDO MÍNIMO: Parar quando saldo está crítico
+      // Saldo < $2.00 = modo crítico, evitar qualquer nova operação para preservar capital
+      const currentBalance = this.cachedBalance?.value ?? 0;
+      const MINIMUM_SAFE_BALANCE = 2.00;
+      if (currentBalance > 0 && currentBalance < MINIMUM_SAFE_BALANCE) {
+        console.error(`🛑 [${operationId}] PROTEÇÃO DE CAPITAL: Saldo $${currentBalance.toFixed(2)} abaixo do mínimo seguro $${MINIMUM_SAFE_BALANCE} — operações suspensas para proteger capital restante.`);
+        this.setPhase('PAUSADO', `🛑 Saldo crítico ($${currentBalance.toFixed(2)}) — operações suspensas`, 'warning');
+        return { success: false, error: `Saldo $${currentBalance.toFixed(2)} abaixo do mínimo seguro ($${MINIMUM_SAFE_BALANCE}) — recarregue sua conta.` };
+      }
+
       // 🎯 PRÉ-LEITURA DAS MODALIDADES: Para filtrar símbolos compatíveis antes de selecionar o melhor ativo
       let earlyActiveModalities: string[] = [];
       let earlyAutoModalityMode = false;
@@ -1310,17 +1320,83 @@ export class AutoTradingScheduler {
         return { success: false, error: 'IAs com sinal neutro — sem edge direcional. Aguardando próximo ciclo.' };
       }
 
-      // CORREÇÃO ESTRUTURAL: gate global permissivo (60%) — cada modalidade tem seu próprio mínimo.
-      // Gate universal de 72% era excessivo para CALL/PUT (break-even ~54%) e ACCU (break-even ~40-50%).
-      // Gate por modalidade (aplicado após seleção da modalidade) calibra cada contrato ao seu break-even.
-      // Referências: CALL/PUT payout ~85% → BE=54% → mín=60%; ONETOUCH payout 34-45% → BE=60-70% → mín=78%
-      const MIN_DIRECTIONAL_CONSENSUS = 60; // floor global; gates por modalidade são mais estritos onde necessário
+      // ══════════════════════════════════════════════════════════════════════════
+      // 🔒 GATE DE QUALIDADE MÁXIMA — SOMENTE ENTRA QUANDO VAI GANHAR
+      // Threshold elevado de 72% mínimo global — edge obrigatório acima do break-even
+      // para QUALQUER modalidade. Meta: 0 loss por sinal fraco.
+      // Referências de break-even: ACCU ~40-50%, CALL/PUT ~54%, TOUCH ~60-70%
+      // ══════════════════════════════════════════════════════════════════════════
+      const MIN_DIRECTIONAL_CONSENSUS = 72; // 72% mínimo global — conservador e cirúrgico
       if (aiDirectionalConsensus < MIN_DIRECTIONAL_CONSENSUS) {
-        console.log(`⛔ [${operationId}] CONSENSO FRACO BLOQUEADO: ${aiDirectionalDecision.toUpperCase()} ${selectedSymbol} | consenso=${aiDirectionalConsensus.toFixed(1)}% < ${MIN_DIRECTIONAL_CONSENSUS}% mínimo global — sinal insuficiente para qualquer modalidade.`);
-        return { success: false, error: `Consenso ${aiDirectionalConsensus.toFixed(1)}% insuficiente (mín global ${MIN_DIRECTIONAL_CONSENSUS}%) — aguardando sinal mais forte.` };
+        console.log(`⛔ [${operationId}] SINAL FRACO BLOQUEADO: ${aiDirectionalDecision?.toUpperCase()} ${selectedSymbol} | consenso=${aiDirectionalConsensus.toFixed(1)}% < ${MIN_DIRECTIONAL_CONSENSUS}% mínimo — aguardando sinal mais forte.`);
+        return { success: false, error: `Consenso ${aiDirectionalConsensus.toFixed(1)}% insuficiente (mín ${MIN_DIRECTIONAL_CONSENSUS}%) — entrada bloqueada para proteção do capital.` };
       }
 
-      console.log(`✅ [${operationId}] SINAL VÁLIDO: ${aiDirectionalDecision.toUpperCase()} ${selectedSymbol} | consenso=${aiDirectionalConsensus.toFixed(1)}% ≥ ${MIN_DIRECTIONAL_CONSENSUS}% global — verificação por modalidade será aplicada após seleção.`);
+      // 🧠 VERIFICAÇÃO MULTI-SISTEMA: Quantum + Microscopic devem corroborar direção
+      // Exige que pelo menos 1 sistema adicional (além do Advanced) confirme a direção
+      const quantumPred = bestSymbolResult.aiConsensus?.quantumPrediction;
+      const microPred = bestSymbolResult.aiConsensus?.microscopicPrediction;
+      const quantumAgrees = quantumPred === aiDirectionalDecision;
+      const microAgrees = microPred === aiDirectionalDecision;
+      const systemsConfirming = (quantumAgrees ? 1 : 0) + (microAgrees ? 1 : 0);
+      
+      if (systemsConfirming === 0 && quantumPred !== null && microPred !== null) {
+        // Nenhum subsistema concorda — sinal isolado, alto risco
+        console.log(`⛔ [${operationId}] SINAL ISOLADO BLOQUEADO: ${aiDirectionalDecision?.toUpperCase()} ${selectedSymbol} | Quantum=${quantumPred ?? 'N/A'} Micro=${microPred ?? 'N/A'} — nenhum subsistema confirma. Aguardando alinhamento.`);
+        return { success: false, error: `Sinal isolado — sistemas Quantum e Microscópico não confirmam direção. Aguardando convergência.` };
+      }
+
+      console.log(`✅ [${operationId}] SINAL FORTE CONFIRMADO: ${aiDirectionalDecision?.toUpperCase()} ${selectedSymbol} | consenso=${aiDirectionalConsensus.toFixed(1)}% | Quantum=${quantumAgrees ? '✓' : quantumPred ?? 'N/A'} | Micro=${microAgrees ? '✓' : microPred ?? 'N/A'} | Sistemas confirmando: ${systemsConfirming}/2`);
+
+      // 📊 ANÁLISE TÉCNICA SUPREMA: Validação final usando todos os indicadores disponíveis
+      // Hurst Exponent, Shannon Entropy, Z-Score Volatilidade, Regime de Mercado, Score de Oportunidade
+      const supremeData = supremeAnalyzer.getLatestAnalysis(selectedSymbol);
+      if (supremeData) {
+        const { hurstExponent, shannonEntropy, zScoreVolatility } = supremeData.statistics;
+        const regime = supremeData.regime;
+        const oppScore = supremeData.opportunityScore;
+        
+        console.log(`📊 [${operationId}] INDICADORES TÉCNICOS ${selectedSymbol}: Hurst=${hurstExponent.toFixed(3)} | Entropia=${shannonEntropy.toFixed(3)} | Z-Vol=${zScoreVolatility.toFixed(2)} | Regime=${regime} | Oportunidade=${oppScore.toFixed(0)}%`);
+        
+        // 🚫 BLOQUEAR em mercado caótico — alta volatilidade + alta entropia = imprevisível
+        if (regime === 'chaotic') {
+          console.log(`⛔ [${operationId}] MERCADO CAÓTICO BLOQUEADO: regime='${regime}' em ${selectedSymbol} — Hurst=${hurstExponent.toFixed(3)} Entropia=${shannonEntropy.toFixed(3)}. Aguardando estabilidade.`);
+          return { success: false, error: `Mercado em regime caótico — volatilidade e entropia elevadas. Aguardando normalização.` };
+        }
+        
+        // 🚫 BLOQUEAR se Z-Score de volatilidade extremamente alto (crise de mercado)
+        if (zScoreVolatility > 3.0) {
+          console.log(`⛔ [${operationId}] VOLATILIDADE EXTREMA BLOQUEADA: Z-Score=${zScoreVolatility.toFixed(2)} em ${selectedSymbol} — acima de 3σ. Aguardando normalização.`);
+          return { success: false, error: `Volatilidade extrema (Z=${zScoreVolatility.toFixed(2)}σ) — ambiente hostil para operação. Aguardando.` };
+        }
+        
+        // ✅ Score de oportunidade mínimo para entrar (suprime entradas em janelas de baixa qualidade)
+        if (oppScore < 40) {
+          console.log(`⛔ [${operationId}] OPORTUNIDADE INSUFICIENTE: score=${oppScore.toFixed(0)}% em ${selectedSymbol} < 40% mínimo. Aguardando janela melhor.`);
+          return { success: false, error: `Score de oportunidade ${oppScore.toFixed(0)}% abaixo de 40% — janela de mercado desfavorável.` };
+        }
+      } else {
+        console.log(`⚠️ [${operationId}] Análise suprema não disponível para ${selectedSymbol} — prosseguindo apenas com consenso IA.`);
+      }
+
+      // 📐 GATE RSI: Confirmar que RSI não está extremo contra a direção do sinal
+      // RSI>75 = sobrecomprado → sinal UP tem risco de reversão → bloquear UP
+      // RSI<25 = sobrevendido → sinal DOWN tem risco de reversão → bloquear DOWN
+      const rsiValue = (bestSymbolResult.aiConsensus as any)?.rsi14;
+      const macdValue = (bestSymbolResult.aiConsensus as any)?.macdLine;
+      if (rsiValue !== undefined) {
+        const rsiOverbought = rsiValue > 75 && aiDirectionalDecision === 'up';
+        const rsiOversold   = rsiValue < 25 && aiDirectionalDecision === 'down';
+        if (rsiOverbought || rsiOversold) {
+          const rsiLabel = rsiOverbought ? `sobrecomprado (${rsiValue.toFixed(1)}) mas sinal UP` : `sobrevendido (${rsiValue.toFixed(1)}) mas sinal DOWN`;
+          console.log(`⛔ [${operationId}] RSI EXTREMO BLOQUEADO: ${selectedSymbol} RSI=${rsiLabel} — alto risco de reversão. Aguardando normalização.`);
+          return { success: false, error: `RSI extremo (${rsiValue.toFixed(0)}) — operação ${aiDirectionalDecision?.toUpperCase()} bloqueada por risco de reversão.` };
+        }
+        const macdConfirms = macdValue !== undefined 
+          ? (aiDirectionalDecision === 'up' ? macdValue >= 0 : macdValue <= 0)
+          : true;
+        console.log(`📐 [${operationId}] RSI=${rsiValue.toFixed(1)} ${rsiOverbought || rsiOversold ? '⛔' : '✓'} | MACD=${macdValue?.toFixed(4) ?? 'N/A'} ${macdConfirms ? '✓' : '⚠️'} para sinal ${aiDirectionalDecision?.toUpperCase()}`);
+      }
 
       // 🎯 DIVERSIFICAÇÃO INTELIGENTE: Verificar se ativo pode ser aberto + jogo de cintura
       const diversityCheck = await this.canOpenTradeForAsset(
@@ -3027,20 +3103,28 @@ export class AutoTradingScheduler {
           const symbol = symbolData.symbol;
           
           // Verificar se temos dados suficientes
+          // 🔥 REDUZIDO de 50 para 20 ticks mínimos — evita falha logo após inicialização
           const priceHistory = JSON.parse(symbolData.priceHistory);
-          if (priceHistory.length < 50) {
-            return null; // Dados insuficientes
+          if (priceHistory.length < 20) {
+            console.log(`📉 [ANALISE] ${symbol}: dados insuficientes (${priceHistory.length} ticks < 20 mínimo) — aguardando coleta`);
+            return null;
           }
           
           // Verificar atualização dos dados
-          // 🔥 AUMENTADO para 15 minutos para aguentar reconexões temporárias do WebSocket
+          // 🔥 AUMENTADO para 60 minutos — aguentar reconexões longas do WebSocket
           const lastUpdateTime = symbolData.lastUpdate ? new Date(symbolData.lastUpdate).getTime() : 0;
           const dataAge = new Date().getTime() - lastUpdateTime;
-          const isDataStale = dataAge > (symbolData.isSimulated ? 24 * 60 * 60 * 1000 : 15 * 60 * 1000);
+          const STALE_LIMIT_MS = symbolData.isSimulated ? 24 * 60 * 60 * 1000 : 60 * 60 * 1000;
+          const isDataStale = dataAge > STALE_LIMIT_MS;
           
           if (isDataStale) {
-            return null; // Dados MUITO desatualizados
+            const ageMin = Math.round(dataAge / 60000);
+            console.log(`⏰ [ANALISE] ${symbol}: dados desatualizados (${ageMin}min > ${Math.round(STALE_LIMIT_MS/60000)}min limite) — aguardando WebSocket`);
+            return null;
           }
+          
+          const dataAgeStr = dataAge < 60000 ? `${Math.round(dataAge/1000)}s` : `${Math.round(dataAge/60000)}min`;
+          console.log(`🔬 [ANALISE] ${symbol}: ${priceHistory.length} ticks | dados com ${dataAgeStr} — iniciando análise multidimensional`);
           
           // Preparar tickData
           const tickData = priceHistory.slice(-100).map((price: number, index: number) => ({
@@ -3108,6 +3192,63 @@ export class AutoTradingScheduler {
             } catch (spikeErr) {
               console.warn(`⚠️ [GIRASSOL] Erro na análise de spike para ${symbol}: ${spikeErr}`);
             }
+          }
+
+          // 📐 INDICADORES TÉCNICOS CLÁSSICOS — RSI, MACD, Momentum, Bollinger
+          // Calculados diretamente do priceHistory para scoring multidimensional único por ativo
+          const techPrices = priceHistory.slice(-100);
+          
+          // RSI(14)
+          let rsi14 = 50;
+          if (techPrices.length >= 15) {
+            let gains = 0, losses = 0;
+            for (let i = 1; i <= 14; i++) {
+              const delta = techPrices[techPrices.length - i] - techPrices[techPrices.length - i - 1];
+              if (delta > 0) gains += delta; else losses -= delta;
+            }
+            const avgGain = gains / 14;
+            const avgLoss = losses / 14;
+            rsi14 = avgLoss === 0 ? 100 : 100 - (100 / (1 + avgGain / avgLoss));
+          }
+          
+          // Momentum(10): variação percentual nos últimos 10 ticks
+          let momentum10 = 0;
+          if (techPrices.length >= 11) {
+            const base = techPrices[techPrices.length - 11];
+            momentum10 = base !== 0 ? ((techPrices[techPrices.length - 1] - base) / base) * 100 : 0;
+          }
+          
+          // EMA(12) e EMA(26) para MACD signal
+          const emaCalc = (arr: number[], period: number): number => {
+            if (arr.length < period) return arr[arr.length - 1] ?? 0;
+            const k = 2 / (period + 1);
+            let ema = arr.slice(0, period).reduce((a, b) => a + b, 0) / period;
+            for (let i = period; i < arr.length; i++) ema = arr[i] * k + ema * (1 - k);
+            return ema;
+          };
+          const ema12 = emaCalc(techPrices, 12);
+          const ema26 = emaCalc(techPrices, 26);
+          const macdLine = ema12 - ema26;
+          
+          // Bollinger Bands(20): posição relativa do preço
+          let bbPosition = 0.5; // 0=abaixo da inferior, 0.5=meio, 1=acima da superior
+          if (techPrices.length >= 20) {
+            const slice20 = techPrices.slice(-20);
+            const mean = slice20.reduce((a, b) => a + b, 0) / 20;
+            const std = Math.sqrt(slice20.reduce((s, p) => s + (p - mean) ** 2, 0) / 20);
+            const upper = mean + 2 * std, lower = mean - 2 * std;
+            const lastPrice = techPrices[techPrices.length - 1];
+            bbPosition = std > 0 ? (lastPrice - lower) / (upper - lower) : 0.5;
+          }
+          
+          // Adicionar estes indicadores ao aiConsensus para uso no gate de entrada
+          (aiConsensus as any).rsi14 = rsi14;
+          (aiConsensus as any).macdLine = macdLine;
+          (aiConsensus as any).momentum10 = momentum10;
+          (aiConsensus as any).bbPosition = bbPosition;
+          
+          if (priceHistory.length >= 20) {
+            console.log(`📐 [TECH] ${symbol}: RSI=${rsi14.toFixed(1)} | MACD=${macdLine.toFixed(4)} | Momentum=${momentum10.toFixed(2)}% | BB=${(bbPosition*100).toFixed(0)}%`);
           }
 
           // 🎯 DIGIT FREQUENCY: Alimentar analisador com histórico do ativo

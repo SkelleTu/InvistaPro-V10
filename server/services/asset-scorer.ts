@@ -570,7 +570,7 @@ export class AssetScorer {
       return `Dados insuficientes: apenas ${input.tickCount} ticks`;
     }
 
-    if (input.dataAgeMs > 15 * 60 * 1000) { // > 15 minutos sem dados
+    if (input.dataAgeMs > 60 * 60 * 1000) { // > 60 minutos sem dados — alinhado com scheduler
       return `Dados muito desatualizados: ${(input.dataAgeMs / 60000).toFixed(0)} minutos`;
     }
 

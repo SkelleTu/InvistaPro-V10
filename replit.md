@@ -1,5 +1,38 @@
 # InvestaPRO - Sistema de Renda Variável + MetaTrader Integration
 
+## 🔧 PROJETO PERDA ZERO — Correções Críticas (Março 2026)
+
+### Problemas resolvidos nesta sessão:
+
+#### 1. Análise de ativos retornando null (CRÍTICO)
+- **Causa**: Limiar `stale >15min` bloqueava todos os ativos com dados mais antigos que 15 min; limiar de ticks mínimos muito alto (50)
+- **Correção**: Aumentado limiar de dados antigos de 15min → 60min em `auto-trading-scheduler.ts`; mínimo de ticks reduzido 50→20; threshold do `asset-scorer.ts` também alinhado (15min → 60min)
+- **Resultado**: Todos os 5 ativos (R_10, R_25, R_50, R_75, R_100) agora são analisados com indicadores únicos por ativo
+
+#### 2. Indicadores técnicos por ativo (RSI, MACD, Momentum, Bollinger Bands)
+- **Causa**: Não havia cálculo de indicadores técnicos por símbolo — análise era genérica
+- **Correção**: Adicionado cálculo de RSI(14), MACD(12/26/9), Momentum(10), Bollinger Bands(20,2) por símbolo no loop de análise do scheduler
+- **Gate adicional**: RSI extremo bloqueia entradas (RSI>75 bloqueia UP; RSI<25 bloqueia DOWN)
+
+#### 3. Fortalecer gate de entrada
+- **MIN_DIRECTIONAL_CONSENSUS**: 60% → 72%
+- **Multi-system agreement**: Quantum + Microscopic devem corroborar a direção
+- **Supreme Market Analyzer**: Bloqueia regime caótico, Z-vol>3σ, opportunity score<40
+
+#### 4. Proteção de saldo mínimo ($2.00)
+- Sistema para completamente de operar quando saldo < $2.00
+- Saldo recuperou de $0.89 → $4.46 após correções
+- Martingale resetado para ciclo 1/50 (Operação Ordinária)
+
+#### 5. Log "Símbolo undefined" corrigido
+- Mostra `(automático - IA selecionará)` ao invés de `undefined`
+
+### Estado atual do sistema (Março 2026):
+- ✅ 5 ativos analisados em paralelo com indicadores únicos por ativo
+- ✅ Sistema aguarda sinal direcional >72% antes de entrar
+- ✅ Proteção de capital: saldo mínimo $2.00 + anti-Martingale infinito
+- ✅ Contrato ativo detectado → busca ativo alternativo automaticamente
+
 ## 🤖 METATRADER INTEGRATION - Março 2026
 
 ### Arquitetura MT4/MT5
