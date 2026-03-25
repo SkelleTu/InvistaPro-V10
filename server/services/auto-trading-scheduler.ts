@@ -99,6 +99,9 @@ export class AutoTradingScheduler {
   private lastScanMarketQuality: number = 100;
   // IA livre: sem intervalo fixo entre ciclos — loop contínuo decide autonomamente
 
+  // ⏱️ SLEEP INTELIGENTE — evita girar em vazio quando há bloqueio com cooldown conhecido
+  private loopSleepUntil: number = 0;
+
   // 🚫 PAUSA POR MERCADO RUIM — Bloqueia operações quando o mercado global está desfavorável
   private badMarketPausedUntil: number = 0;             // Timestamp até quando operações estão pausadas
   private badMarketReducedGrowthActive: boolean = false; // true = opera com growth 1% (recuperação parcial)
@@ -1190,6 +1193,8 @@ export class AutoTradingScheduler {
         const reqs = realStatsTracker.getRecoveryRequirements();
         const remainingSec = Math.ceil(reqs.circuitBreakerRemainingMs / 1000);
         const remainingMin = Math.ceil(remainingSec / 60);
+        // 🛑 Sinaliza o loop para dormir pelo tempo restante do circuit breaker (máx 90s por fatia)
+        this.loopSleepUntil = Date.now() + Math.min(reqs.circuitBreakerRemainingMs, 90_000);
         console.log(`🔴 [${operationId}] CIRCUIT BREAKER ATIVO: ${reqs.consecutiveLosses} perdas consecutivas — pausa obrigatória (${remainingMin} min restantes)`);
         return {
           success: false,
@@ -4082,6 +4087,19 @@ export class AutoTradingScheduler {
     (async () => {
       console.log('🧠 [AI LOOP] IA em modo completamente livre — análise contínua sem intervalo fixo');
       while (this.continuousLoopActive && !this.emergencyStop) {
+        // ⏱️ SLEEP INTELIGENTE: respeitar cooldowns conhecidos sem girar em vazio
+        const now = Date.now();
+        const sleepTargets = [
+          this.loopSleepUntil,
+          this.badMarketPausedUntil,
+        ];
+        const maxSleepUntil = Math.max(...sleepTargets);
+        if (maxSleepUntil > now) {
+          const sleepMs = Math.min(maxSleepUntil - now, 90_000); // máx 90s por fatia (permite verificar emergência)
+          await new Promise(resolve => setTimeout(resolve, sleepMs));
+          continue; // volta ao início do while para re-checar
+        }
+
         if (!this.schedulerRunning) {
           try {
             await this.executeAnaliseNaturalAnalysis();
