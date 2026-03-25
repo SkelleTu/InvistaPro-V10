@@ -587,6 +587,20 @@ class UniversalContractMonitor extends EventEmitter {
       const allUsers = await storage.getAllUsers();
       let recovered = 0;
       for (const user of allUsers) {
+        // ── CRÍTICO: garantir que o monitor tem token ANTES de tentar conectar ──
+        // Sem token, o WebSocket não consegue autenticar e os contratos ficam sem monitoramento
+        if (!this.apiToken) {
+          try {
+            const tokenData = await storage.getUserDerivToken(user.id);
+            if (tokenData?.token) {
+              this.apiToken = tokenData.token;
+              console.log(`🔑 [MONITOR] Token inicializado para ${user.id} — monitor pode conectar WebSocket`);
+            }
+          } catch {
+            // Token não encontrado para este usuário — continua para próximo
+          }
+        }
+
         // Buscar tanto 'active' quanto 'pending' — contratos novos começam como pending
         const activeOps = await storage.getActiveTradeOperations(user.id);
         const recentOps = await storage.getUserTradeOperations(user.id, 20);
@@ -611,6 +625,17 @@ class UniversalContractMonitor extends EventEmitter {
           if (ageMs > 2 * 60 * 60 * 1000) {
             console.log(`⏭️ [MONITOR] Ignorando contrato antigo ${contractId} (${Math.round(ageMs / 60000)}min) — provavelmente já expirou`);
             continue;
+          }
+
+          // Buscar token específico do usuário deste contrato se ainda não temos
+          if (!this.apiToken) {
+            try {
+              const tokenData = await storage.getUserDerivToken(op.userId || user.id);
+              if (tokenData?.token) {
+                this.apiToken = tokenData.token;
+                console.log(`🔑 [MONITOR] Token inicializado via contrato ${contractId} do usuário ${op.userId || user.id}`);
+              }
+            } catch { /* sem token, monitor em standby para este contrato */ }
           }
 
           const contractTypeRaw = (op.contractType || op.tradeType || 'CALL').toUpperCase();
