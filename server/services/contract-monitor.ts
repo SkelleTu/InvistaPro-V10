@@ -731,6 +731,18 @@ class UniversalContractMonitor extends EventEmitter {
   }
 
   /**
+   * Retorna quantos contratos estão ativamente sendo monitorados (não encerrados).
+   * Usado pelo scheduler para limitar o número de operações abertas simultâneas.
+   */
+  getOpenContractCount(): number {
+    let count = 0;
+    for (const [, state] of this.monitored) {
+      if (!state.isSold && !state.isExpired) count++;
+    }
+    return count;
+  }
+
+  /**
    * Retorna o ID do contrato ativo no símbolo informado (para log).
    */
   getActiveContractIdOnSymbol(symbol: string): number | undefined {

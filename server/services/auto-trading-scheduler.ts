@@ -1286,6 +1286,29 @@ export class AutoTradingScheduler {
         }
       }
 
+      // ══════════════════════════════════════════════════════════════════════════
+      // 🎯 GATE DE QUALIDADE DO SINAL — bloqueia sinal neutro ou fraco
+      // As IAs devem concordar em uma direção clara (up/down) E com força mínima.
+      // • finalDecision='neutral': IAs sem consenso direcional → operar é aleatório
+      // • consenso direcional < 55%: acordo muito fraco → edge insuficiente
+      // Em ambos os casos o sistema aguarda o próximo ciclo (5s) por um sinal melhor.
+      // ══════════════════════════════════════════════════════════════════════════
+      const aiDirectionalDecision = bestSymbolResult.aiConsensus?.finalDecision;
+      const aiDirectionalConsensus = bestSymbolResult.aiConsensus?.consensusStrength ?? 0;
+
+      if (aiDirectionalDecision === 'neutral') {
+        console.log(`⛔ [${operationId}] SINAL NEUTRO BLOQUEADO: IAs sem consenso direcional — aguardando mercado dar direção clara (up/down).`);
+        return { success: false, error: 'IAs com sinal neutro — sem edge direcional. Aguardando próximo ciclo.' };
+      }
+
+      const MIN_DIRECTIONAL_CONSENSUS = 55; // abaixo de 55% de acordo não há edge real
+      if (aiDirectionalConsensus < MIN_DIRECTIONAL_CONSENSUS) {
+        console.log(`⛔ [${operationId}] CONSENSO FRACO BLOQUEADO: ${aiDirectionalDecision.toUpperCase()} ${selectedSymbol} | consenso=${aiDirectionalConsensus.toFixed(1)}% < ${MIN_DIRECTIONAL_CONSENSUS}% mínimo — sem edge suficiente.`);
+        return { success: false, error: `Consenso ${aiDirectionalConsensus.toFixed(1)}% insuficiente (mín ${MIN_DIRECTIONAL_CONSENSUS}%) — aguardando sinal mais forte.` };
+      }
+
+      console.log(`✅ [${operationId}] SINAL VÁLIDO: ${aiDirectionalDecision.toUpperCase()} ${selectedSymbol} | consenso=${aiDirectionalConsensus.toFixed(1)}% ≥ ${MIN_DIRECTIONAL_CONSENSUS}% — operação autorizada.`);
+
       // 🎯 DIVERSIFICAÇÃO INTELIGENTE: Verificar se ativo pode ser aberto + jogo de cintura
       const diversityCheck = await this.canOpenTradeForAsset(
         config.userId, 
