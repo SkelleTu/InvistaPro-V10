@@ -1672,9 +1672,9 @@ export class AutoTradingScheduler {
         // 🔥 SISTEMA DE RECUPERAÇÃO INTELIGENTE DE PERDAS
       // 🚀 FLEXIBILIDADE DINÂMICA: Passar consenso + aplicar dynamic stake/ticks
       let tradeParams = await this.getTradeParamsForMode(config.mode, selectedSymbol, aiConsensus.finalDecision, config.userId, aiConsensus.consensusStrength, aiConsensus.volatility || 0.5, {
-        enableMartingale: (config as any)?.enableMartingale ?? true,
-        martingaleMultipliers: (() => { try { return JSON.parse((config as any)?.martingaleMultipliers || '[1.3,1.6,2.0]'); } catch { return [1.3,1.6,2.0]; } })(),
-        enableRecoveryMode: (config as any)?.enableRecoveryMode ?? true,
+        enableMartingale: (config as any)?.enableMartingale ?? false,
+        martingaleMultipliers: (() => { try { return JSON.parse((config as any)?.martingaleMultipliers || '[1.0,1.0,1.0]'); } catch { return [1.0,1.0,1.0]; } })(),
+        enableRecoveryMode: (config as any)?.enableRecoveryMode ?? false,
         stakeMode: (config as any)?.stakeMode ?? 'ai',
         fixedStake: (config as any)?.fixedStake ?? 0.35,
       });
@@ -3896,33 +3896,26 @@ export class AutoTradingScheduler {
         // 🔺 RECOVERY STAKE — calcular stake baseado no déficit a recuperar
         // Objetivo: um único trade bem-sucedido cobre o déficit + 15% de lucro extra.
         // Não é sequencial: o sistema aguarda sinal com consenso ≥ minConsensus antes de operar.
-        if ((riskConfig?.enableRecoveryMode ?? true) && realStatsTracker.isPostLossMode()) {
+        if ((riskConfig?.enableRecoveryMode ?? false) && realStatsTracker.isPostLossMode()) {
           const deficit = realStatsTracker.getLossDeficit();
           if (deficit > 0) {
-            // ════════════════════════════════════════════════════════════════
-            // 🎰 MARTINGALE DE RECUPERAÇÃO — stake cobre déficit acumulado
-            // Fórmula: stake_ideal = (déficit / payout_estimado) × 1.15
-            //   → 1 vitória = déficit zerado + 15% de lucro extra
-            //   → RECOVERY_PAYOUT conservador (0.55) cobre NOTOUCH(52%) e demais modalidades
-            //   → Rise/Fall tem payout ~90% → stake ligeiramente maior → ganho extra na vitória
-            //   → NOTOUCH tem payout ~52% → calculado corretamente (antes: 0.95 → stake insuficiente)
-            // ════════════════════════════════════════════════════════════════
-            const RECOVERY_PAYOUT = 0.55; // conservador: cobre NOTOUCH (52%) e todos os demais
-            const idealRecoveryStake = (deficit / RECOVERY_PAYOUT) * 1.15;
-            // Teto em recovery: 12% da banca (abaixo do limite de proteção de 15% → nunca bloqueia)
-            const maxRecoveryStake = Math.max(bankSize * 0.12, amount);
-            // Não usar menos que o stake base, nem menos que $1 (mínimo ACCU)
+            // RECOVERY MODE DESATIVADO por padrão — escalada de stake com payout 37%
+            // matematicamente impossível: precisaria de 2.7× para cobrir cada perda,
+            // mas com 1.3× nunca recupera e piora o déficit quando perde novamente.
+            // Com stake FLAT e WR 80%+ o EV já é positivo sem escalada.
+            const RECOVERY_PAYOUT = 0.37; // payout real ONETOUCH/NOTOUCH
+            const idealRecoveryStake = (deficit / RECOVERY_PAYOUT) * 1.05;
+            const maxRecoveryStake = Math.max(bankSize * 0.05, amount); // max 5% da banca
             amount = Math.max(Math.min(idealRecoveryStake, maxRecoveryStake), amount);
             const reqs = realStatsTracker.getRecoveryRequirements();
-            const expectedProfit = amount * RECOVERY_PAYOUT;
-            const profitAfterRecovery = expectedProfit - deficit;
-            const recoversInOneWin = profitAfterRecovery >= 0;
-            console.log(`🎰 [MARTINGALE RECUPERAÇÃO] Déficit: $${deficit.toFixed(2)} | Stake: $${amount.toFixed(2)} | Ideal era: $${idealRecoveryStake.toFixed(2)}`);
-            console.log(`   → 1 vitória esperada: +$${expectedProfit.toFixed(2)} | ${recoversInOneWin ? '✅ Recupera déficit em 1 trade' : '⚠️ Déficit residual: $' + Math.abs(profitAfterRecovery).toFixed(2)}`);
+            console.log(`📊 [RECOVERY INFO] Déficit: $${deficit.toFixed(2)} | Stake (flat): $${amount.toFixed(2)} | Recuperação orgânica via WR`);
             console.log(`   → Consenso mínimo exigido: ${reqs.minConsensus}% (${reqs.consecutiveLosses} perda(s) consecutiva(s))`);
           } else {
             console.log(`✅ [RECOVERY] Déficit = $0 (saldo recuperado) → stake normal`);
           }
+        } else if (realStatsTracker.isPostLossMode()) {
+          const deficit = realStatsTracker.getLossDeficit();
+          console.log(`📊 [STAKE FLAT] Pós-perda: déficit=$${deficit.toFixed(2)} | stake normal ($${amount.toFixed(2)}) — sem escalada (EV positivo com WR atual)`);
         }
 
         // calculateDynamicStake() removido: calculateAIStakePercentage() já incorpora
