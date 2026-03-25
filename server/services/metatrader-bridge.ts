@@ -2374,16 +2374,23 @@ class MetaTraderBridge extends EventEmitter {
           new Promise<null>(res => setTimeout(() => res(null), 600))
         ]);
 
-        if (preGirassolLive && preGirassolLive.bias !== 'NEUTRAL') {
+        const hasGirassol = preGirassolLive && preGirassolLive.bias !== 'NEUTRAL';
+        const newsStrengthOk = preNewsSentiment && preNewsSentiment.strength >= 30;
+
+        if (hasGirassol || newsStrengthOk) {
           preExternalContext = {
             newsDirection: preNewsSentiment
               ? (preNewsSentiment.direction as 'bullish' | 'bearish' | 'neutral')
               : 'neutral',
             newsStrength: preNewsSentiment ? preNewsSentiment.strength : 0,
-            girassolBias: preGirassolLive.bias as 'BUY' | 'SELL',
-            girassolLevels: preGirassolLive.levelCount
+            girassolBias: hasGirassol ? (preGirassolLive!.bias as 'BUY' | 'SELL') : 'NEUTRAL',
+            girassolLevels: hasGirassol ? preGirassolLive!.levelCount : 0
           };
-          console.log(`[MT5Bridge] 🌻🇧🇷 ${symbol}: Contexto externo pré-IA → Girassol ${preGirassolLive.bias} (${preGirassolLive.levelCount}/3) | Notícias: ${preExternalContext.newsDirection} ${preExternalContext.newsStrength}%`);
+          if (hasGirassol) {
+            console.log(`[MT5Bridge] 🌻🇧🇷 ${symbol}: Contexto externo → Girassol ${preGirassolLive!.bias} (${preGirassolLive!.levelCount}/3) | Notícias: ${preExternalContext.newsDirection} ${preExternalContext.newsStrength}%`);
+          } else {
+            console.log(`[MT5Bridge] 🇧🇷 ${symbol}: Noticiário BR ${preExternalContext.newsDirection.toUpperCase()} ${preExternalContext.newsStrength}% injetado na IA (sem Girassol ativo)`);
+          }
         }
       } catch {
         // Sem contexto externo — IA opera só com ticks (fallback seguro)

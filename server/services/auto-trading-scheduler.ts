@@ -3133,8 +3133,26 @@ export class AutoTradingScheduler {
             epoch: Date.now() - (100 - index) * 1000
           }));
           
-          // Executar análise de IA (sentimento geral de mercado)
-          const aiConsensus = await huggingFaceAI.analyzeMarketData(tickData, symbol, userId);
+          // Injetar sentimento do noticiário BR como contexto externo na IA
+          let schedulerExternalContext: import('./huggingface-ai').ExternalMarketContext | undefined;
+          try {
+            const { brazilNewsService: schedNews } = await import('./brazil-news-service');
+            const schedNewsSentiment = await Promise.race([
+              schedNews.getBrazilMarketSentiment(),
+              new Promise<null>(res => setTimeout(() => res(null), 500))
+            ]);
+            if (schedNewsSentiment && schedNewsSentiment.strength >= 30) {
+              schedulerExternalContext = {
+                newsDirection: schedNewsSentiment.direction as 'bullish' | 'bearish' | 'neutral',
+                newsStrength: schedNewsSentiment.strength,
+                girassolBias: 'NEUTRAL',   // sem Girassol no scheduler
+                girassolLevels: 0
+              };
+            }
+          } catch { /* sem notícias — IA opera só com ticks */ }
+
+          // Executar análise de IA (sentimento geral de mercado + noticiário BR)
+          const aiConsensus = await huggingFaceAI.analyzeMarketData(tickData, symbol, userId, schedulerExternalContext);
 
           // 📝 GRAVAR LOGS DAS IAs COOPERATIVAS NO BANCO DE DADOS (CRASH/BOOM)
           if (aiConsensus.analyses && aiConsensus.analyses.length > 0) {

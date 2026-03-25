@@ -421,10 +421,15 @@ export class HuggingFaceAIService {
       //  Girassol 3/3 + Notícias ≥ 60% alinhados: peso do votante externo = 1.5
       //  Girassol 2/3 + Notícias ≥ 30% alinhados: peso do votante externo = 1.0
       //  Girassol qualquer, sem notícias:          peso = 0.7
+      //  Notícias ≥ 70% sem Girassol:             peso = 0.35 (macro puro)
+      //  Notícias ≥ 45% sem Girassol:             peso = 0.20 (macro moderado)
       //  Sem contexto externo:                     sem injeção
       let contextInjectedDir = finalDir; // pode ser sobrescrito
-      if (externalContext && externalContext.girassolBias !== 'NEUTRAL') {
-        const extDir = externalContext.girassolBias === 'BUY' ? 'up' : 'down';
+      if (externalContext && (externalContext.girassolBias !== 'NEUTRAL' || externalContext.newsStrength >= 45)) {
+        // Direção do votante externo: Girassol tem prioridade, depois usa direção do noticiário
+        const extDir: 'up' | 'down' = externalContext.girassolBias === 'BUY' ? 'up'
+          : externalContext.girassolBias === 'SELL' ? 'down'
+          : externalContext.newsDirection === 'bullish' ? 'up' : 'down';
         const newsAligned = externalContext.newsDirection === (extDir === 'up' ? 'bullish' : 'bearish');
         const newsStr = externalContext.newsStrength;
         const gLevels = externalContext.girassolLevels;
@@ -439,6 +444,13 @@ export class HuggingFaceAIService {
           externalVoterWeight = 0.7;
         } else if (gLevels >= 3) {
           externalVoterWeight = 0.6; // Girassol forte mesmo sem notícia alinhada
+        } else if (gLevels === 0 && newsStr >= 70) {
+          // Noticiário FORTE sem Girassol — votante mais leve (não há confirmação técnica)
+          // Peso 0.35: suficiente para mover o consenso de 41% → ~54% e mudar a direção
+          externalVoterWeight = 0.35;
+        } else if (gLevels === 0 && newsStr >= 45) {
+          // Noticiário MODERADO sem Girassol
+          externalVoterWeight = 0.2;
         }
 
         if (externalVoterWeight > 0) {
@@ -458,10 +470,13 @@ export class HuggingFaceAIService {
           const newBoosted = newAgreementRatio >= 0.99 ? Math.min(95, newRaw * 1.15) : newRaw;
           const newConsensus = Math.round(Math.min(95, Math.max(0, newBoosted)));
 
-          // Se a IA estava neutra mas contexto externo é forte → adotar direção do contexto
-          if (finalDir === 'neutral' && externalVoterWeight >= 0.7) {
+          // Se a IA estava neutra mas contexto externo tem peso suficiente → adotar direção do contexto
+          // ≥ 0.7 = confirmação técnica (Girassol ativo) — substitui sem restrições
+          // ≥ 0.2 = apenas noticiário — sobrescreve neutro, mas consenso ainda precisa passar threshold
+          if (finalDir === 'neutral' && externalVoterWeight >= 0.2) {
             contextInjectedDir = extDir;
-            console.log(`🌻🇧🇷 [CONTEXT INJECT] IA neutra → sobrescrita pelo contexto externo: ${extDir.toUpperCase()} | Girassol ${gLevels}/3 + Notícias ${newsStr}% ${newsAligned ? '✅ alinhadas' : '⚠️ não-alinhadas'}`);
+            const contextType = gLevels >= 1 ? `Girassol ${gLevels}/3 + Notícias ${newsStr}%` : `Noticiário BR ${newsStr}% ${externalContext!.newsDirection.toUpperCase()} (sem Girassol)`;
+            console.log(`🌻🇧🇷 [CONTEXT INJECT] IA neutra → direção do contexto externo: ${extDir.toUpperCase()} | ${contextType}`);
           }
 
           console.log(`🌻🇧🇷 [EXTERNAL VOTER] Peso: ${externalVoterWeight} | Consenso antes: ${finalConsensus}% → depois: ${newConsensus}% | Dir IA: ${finalDir} | Dir externa: ${extDir}`);
