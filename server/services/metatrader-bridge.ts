@@ -2561,6 +2561,77 @@ class MetaTraderBridge extends EventEmitter {
         }
       }
 
+      // ══════════════════════════════════════════════════════════════════
+      // BOOST DIRETO DO GIRASSOL NO CONSENSO DA IA
+      // O Girassol é um indicador técnico de primeira ordem e age como
+      // VOTANTE ADICIONAL — ele não apenas baixa a barra, mas também
+      // ADICIONA PONTOS DIRETAMENTE ao consenso na direção do sinal.
+      //
+      // A lógica é simples: se o Girassol disparou 2 sinais de compra
+      // no fundo, isso é evidência técnica real de BUY — deve aumentar
+      // o número de consenso, não só facilitar a passagem do threshold.
+      //
+      //   • 1/3 níveis ativos → +12% consenso direto na direção
+      //   • 2/3 níveis ativos → +22% consenso direto (girassol duplo)
+      //   • 3/3 níveis ativos → +30% consenso direto (triplo — máxima força)
+      //
+      // O boost só é aplicado quando Girassol e IA concordam (ou IA neutro).
+      // Se contradiz, o bloco anterior já bloqueou a operação.
+      // ══════════════════════════════════════════════════════════════════
+      if (girassolLive && girassolLive.bias !== 'NEUTRAL') {
+        const girassolDir = girassolLive.bias === 'BUY' ? 'up' : 'down';
+        const girassolAgrees = aiDirection === 'neutral' || aiDirection === girassolDir;
+        if (girassolAgrees) {
+          const girassolBoost = girassolLive.levelCount >= 3 ? 30
+                              : girassolLive.levelCount >= 2 ? 22
+                              : 12;
+          const prevConsensus = aiConsensus;
+          aiConsensus = Math.min(97, aiConsensus + girassolBoost);
+          // Se IA estava neutro, o Girassol agora define a direção
+          if (aiDirection === 'neutral') aiDirection = girassolDir;
+          console.log(`[MT5Bridge] 🌻 VOTO DIRETO ${symbol}: Girassol ${girassolLive.bias} (${girassolLive.levelCount}/3) → +${girassolBoost}% consenso: ${prevConsensus.toFixed(1)}% → ${aiConsensus.toFixed(1)}%`);
+          aiReasoning = `${aiReasoning} | 🌻 Girassol ${girassolLive.levelCount}/3 voto direto +${girassolBoost}% ${girassolLive.bias}`;
+        }
+      }
+
+      // ══════════════════════════════════════════════════════════════════
+      // BOOST DIRETO DO AUTO-FIBONACCI NO CONSENSO DA IA
+      // Quando o preço está em zona de confluência Fibonacci (especialmente
+      // nos níveis chave: 38.2%, 50%, 61.8%, 100%), o Auto-Fibonacci age
+      // como votante adicional que confirma ou reforça a direção da IA.
+      //
+      // Zona de suporte Fib → reforça BUY (ex: girassol duplo no 100%)
+      // Zona de resistência Fib → reforça SELL
+      //
+      //   • confluenceScore ≥ 70 + zona alinhada → +15% consenso direto
+      //   • confluenceScore ≥ 50 + zona alinhada → +8% consenso direto
+      //   • confluenceScore ≥ 30 + zona alinhada → +4% consenso direto
+      // ══════════════════════════════════════════════════════════════════
+      if (!aiOnlyMode && marketData && marketData.length >= 10) {
+        try {
+          const currentPrice = marketData[marketData.length - 1]?.close;
+          if (currentPrice) {
+            const fibForBoost = this.calcMultiLayerFibonacci(marketData, currentPrice);
+            if (fibForBoost && fibForBoost.zoneType !== 'neutral' && fibForBoost.confluenceScore >= 30) {
+              const fibDir = fibForBoost.zoneType === 'support' ? 'up' : 'down';
+              const fibAligned = aiDirection === 'neutral' || aiDirection === fibDir;
+              if (fibAligned) {
+                const fibBoostPct = fibForBoost.confluenceScore >= 70 ? 15
+                                  : fibForBoost.confluenceScore >= 50 ? 8
+                                  : 4;
+                const prevConsensus = aiConsensus;
+                aiConsensus = Math.min(97, aiConsensus + fibBoostPct);
+                if (aiDirection === 'neutral') aiDirection = fibDir;
+                console.log(`[MT5Bridge] 📐 VOTO DIRETO ${symbol}: Auto-Fib ${fibForBoost.zoneType.toUpperCase()} (confluência ${fibForBoost.confluenceScore}) → +${fibBoostPct}% consenso: ${prevConsensus.toFixed(1)}% → ${aiConsensus.toFixed(1)}%`);
+                aiReasoning = `${aiReasoning} | 📐 Auto-Fib ${fibForBoost.zoneType} (score ${fibForBoost.confluenceScore}) voto direto +${fibBoostPct}%`;
+              }
+            }
+          }
+        } catch {
+          // Fibonacci indisponível — consenso permanece sem boost Fib
+        }
+      }
+
       // ── OVERRIDE NEUTRO: Girassol forte + notícias alinhadas substituem 'neutral' da IA ──
       // A IA retorna 'neutral' quando os ticks de preço estão laterais — mas isso não
       // significa ausência de direção. Quando o Girassol ≥2/3 confirma a direção E o
