@@ -255,7 +255,7 @@ const DEFAULT_CONFIG: MT5Config = {
   useAILotSize: false,
   useAITrailing: false,
   useAIRiskLimits: false,
-  requireGirassolConfirmation: false,
+  requireGirassolConfirmation: true,
   maxPositionsPerSymbol: 1,
   invertGirassolBuffers: false,
   tradingTimeframe: 'day_trade',
@@ -2447,6 +2447,22 @@ class MetaTraderBridge extends EventEmitter {
             decisionReason: `⏸️ Girassol NEUTRO — aguardando sinal direcional do indicador antes de operar (IA não atua sem o Girassol)`
           });
           console.log(`[MT5Bridge] ⏸️ ${symbol}: Girassol detectado mas NEUTRO — IA aguardando sinal do indicador`);
+          return null;
+        }
+        // Girassol com sinal claro → verificar se IA não contradiz o indicador
+        const girassolExpectedDir = girassolLive.bias === 'BUY' ? 'up' : 'down';
+        if (aiDirection !== 'neutral' && aiDirection !== girassolExpectedDir) {
+          // IA contradiz Girassol → bloquear SEMPRE, independente do consenso
+          this.logAnalysis({
+            id: `${entryId}_girassol_contradiz`,
+            timestamp: Date.now(),
+            symbol,
+            phase: 'decision',
+            status: 'rejected',
+            consecutiveLosses: this.consecutiveLosses,
+            decisionReason: `🚫 Girassol ${girassolLive.bias} (${girassolLive.levelCount}/3 níveis) contradiz IA ${aiDirection.toUpperCase()} — operação BLOQUEADA. Girassol tem peso máximo.`
+          });
+          console.log(`[MT5Bridge] 🚫 ${symbol}: Girassol ${girassolLive.bias} BLOQUEIA IA ${aiDirection.toUpperCase()} — sem sinal`);
           return null;
         }
         // Girassol com sinal claro → reduzir threshold proporcionalmente à confluência

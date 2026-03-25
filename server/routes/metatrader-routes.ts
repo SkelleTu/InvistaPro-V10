@@ -79,6 +79,33 @@ router.get('/signal', (req: Request, res: Response) => {
         timestamp: Date.now()
       });
     }
+
+    // ── Validação Girassol no polling simples ──────────────────────────────
+    // O Girassol é o GATILHO PRIMÁRIO. Mesmo no endpoint /signal, o sinal
+    // da IA deve ser bloqueado se o Girassol contradiz ou está NEUTRO.
+    const girassolStored = metaTraderBridge.getGirassolBias(resolvedSymbol);
+    if (girassolStored) {
+      const signalDir = signal.action === 'BUY' ? 'BUY' : 'SELL';
+      if (girassolStored.bias === 'NEUTRAL') {
+        console.log(`[MT5-Signal] ⏸️ ${resolvedSymbol}: Girassol NEUTRO — sinal ${signalDir} bloqueado no polling`);
+        return res.json({
+          action: 'HOLD',
+          reason: 'Girassol NEUTRO — aguardando gatilho direcional do indicador',
+          confidence: 0,
+          timestamp: Date.now()
+        });
+      }
+      if (girassolStored.bias !== signalDir) {
+        console.log(`[MT5-Signal] 🚫 ${resolvedSymbol}: Girassol ${girassolStored.bias} contradiz sinal ${signalDir} — bloqueado no polling`);
+        return res.json({
+          action: 'HOLD',
+          reason: `Bloqueado: Girassol ${girassolStored.bias} contradiz sinal IA ${signalDir}`,
+          confidence: 0,
+          timestamp: Date.now()
+        });
+      }
+    }
+
     res.json({
       id: signal.id,
       symbol: signal.symbol,
@@ -197,8 +224,8 @@ router.post('/signal-with-indicators', async (req: Request, res: Response) => {
             [buySigs, sellSigs] = [sellSigs, buySigs];
           }
 
-          const recentBuy  = buySigs.find((s: any)  => s.bar <= 2 && s.value !== 0);
-          const recentSell = sellSigs.find((s: any) => s.bar <= 2 && s.value !== 0);
+          const recentBuy  = buySigs.find((s: any)  => s.bar <= 5 && s.value !== 0);
+          const recentSell = sellSigs.find((s: any) => s.bar <= 5 && s.value !== 0);
 
           girassolLevelSummary.push({
             level_id:    lv.level_id,
@@ -239,7 +266,7 @@ router.post('/signal-with-indicators', async (req: Request, res: Response) => {
           }
         } else {
           girassolBias = 'NEUTRAL';
-          girassolDesc = `Girassol ativo (${girassol.name}) — sem sinal novo nos 3 níveis nas últimas 2 barras`;
+          girassolDesc = `Girassol ativo (${girassol.name}) — sem sinal novo nos 3 níveis nas últimas 5 barras`;
         }
 
         // Conta sinais ativos por nível para informar a IA
@@ -259,9 +286,9 @@ router.post('/signal-with-indicators', async (req: Request, res: Response) => {
           .filter((s: any) => s.bar <= 4 && s.value !== 0)
           .forEach((s: any) => girassolRawBufferDiag.push({ buffer: s.buffer, bar: s.bar, value: s.value }));
 
-        const recentBuy  = legacyBuySigs.find((s: any)  => s.bar <= 2 && s.value !== 0);
-        const recentSell = legacySellSigs.find((s: any) => s.bar <= 2 && s.value !== 0);
-        const recentExit = legacyExitSigs.find((s: any) => s.bar <= 2 && s.value !== 0);
+        const recentBuy  = legacyBuySigs.find((s: any)  => s.bar <= 5 && s.value !== 0);
+        const recentSell = legacySellSigs.find((s: any) => s.bar <= 5 && s.value !== 0);
+        const recentExit = legacyExitSigs.find((s: any) => s.bar <= 5 && s.value !== 0);
 
         if (recentExit) {
           girassolBias = 'NEUTRAL';
@@ -277,7 +304,7 @@ router.post('/signal-with-indicators', async (req: Request, res: Response) => {
           girassolDesc = `Girassol: sinais conflitantes — aguardando confirmação`;
         } else {
           girassolBias = 'NEUTRAL';
-          girassolDesc = `Girassol ativo (${girassol.name}) — sem sinal novo nas últimas 2 barras`;
+          girassolDesc = `Girassol ativo (${girassol.name}) — sem sinal novo nas últimas 5 barras`;
         }
       }
 
@@ -395,6 +422,63 @@ router.post('/signal-with-indicators', async (req: Request, res: Response) => {
         } else if (distPct < 0.5) {
           fibBonus = isKeyLevel ? 0.10 : 0.05;
           fibBonusNote = `📐 Fibonacci ${isKeyLevel ? nearestFib.level : ''} @ ${fibNearestLevel.toFixed(5)} (Δ${distPct.toFixed(3)}%) → zona próxima +${(fibBonus * 100).toFixed(0)}%`;
+        }
+      }
+    }
+
+    // ── VALIDAÇÃO FIBONACCI: bloquear operação contra zona de S/R ────────
+    // Fibonacci automático determina suporte e resistência estruturais.
+    // Se o preço está em um nível CHAVE de Fibonacci (0%, 38.2%, 50%, 61.8%, 100%),
+    // o sinal da IA deve estar ALINHADO com essa zona:
+    //   • Preço em SUPORTE Fibonacci → apenas BUY é permitido (SELL bloqueado)
+    //   • Preço em RESISTÊNCIA Fibonacci → apenas SELL é permitido (BUY bloqueado)
+    if (fibonacci?.detected && Array.isArray(fibonacci.levels) && fibonacci.levels.length > 0 && finalAction !== 'HOLD') {
+      const currentPrice = ask || bid || 0;
+      if (currentPrice > 0) {
+        const fibLevels = (fibonacci.levels as Array<{ level: string; price: number }>).filter(l => l.price > 0);
+        // Determina a direção do Fibonacci: 0% acima de 100% = topo→fundo
+        const fib0   = fibLevels.find(l => l.level === '0.0%'   || l.level === '0%');
+        const fib100 = fibLevels.find(l => l.level === '100.0%' || l.level === '100%');
+        if (fib0 && fib100) {
+          const fibDrawnTopToBottom = fib0.price > fib100.price;
+          // Classifica cada nível como suporte ou resistência
+          const getSRType = (levelName: string): 'support' | 'resistance' | null => {
+            if (fibDrawnTopToBottom) {
+              // 0% = topo/resistência, 100% = fundo/suporte
+              if (['0.0%', '0%', '23.6%', '38.2%'].includes(levelName)) return 'resistance';
+              if (['61.8%', '78.6%', '100.0%', '100%'].includes(levelName)) return 'support';
+            } else {
+              // 0% = fundo/suporte, 100% = topo/resistência
+              if (['0.0%', '0%', '23.6%', '38.2%'].includes(levelName)) return 'support';
+              if (['61.8%', '78.6%', '100.0%', '100%'].includes(levelName)) return 'resistance';
+            }
+            if (levelName === '50%' || levelName === '50.0%') return null; // neutro
+            return null;
+          };
+          // Verifica se o preço está próximo de algum nível chave (< 0.5%)
+          const keyFibNames = ['0.0%', '0%', '38.2%', '50%', '50.0%', '61.8%', '78.6%', '100.0%', '100%'];
+          for (const lv of fibLevels) {
+            if (!keyFibNames.includes(lv.level)) continue;
+            const distPct = Math.abs(lv.price - currentPrice) / currentPrice * 100;
+            if (distPct >= 0.5) continue;
+            const srType = getSRType(lv.level);
+            if (!srType) continue;
+            if (srType === 'support' && finalAction === 'SELL') {
+              indicatorNotes.push(`🛑 Fibonacci BLOQUEOU VENDA: preço em SUPORTE Fibonacci ${lv.level} @ ${lv.price.toFixed(5)} (Δ${distPct.toFixed(3)}%) — operar VENDA em suporte é de alto risco`);
+              console.log(`[MT5-Indicators] 🛑 ${sym}: SELL BLOQUEADO pelo Fibonacci — preço em suporte ${lv.level} @ ${lv.price.toFixed(5)}`);
+              finalAction     = 'HOLD';
+              finalConfidence = 0;
+              finalReason     = `Fibonacci bloqueia SELL: preço em suporte ${lv.level} @ ${lv.price.toFixed(5)} — aguardar rompimento ou sinal de compra`;
+              break;
+            } else if (srType === 'resistance' && finalAction === 'BUY') {
+              indicatorNotes.push(`🛑 Fibonacci BLOQUEOU COMPRA: preço em RESISTÊNCIA Fibonacci ${lv.level} @ ${lv.price.toFixed(5)} (Δ${distPct.toFixed(3)}%) — operar COMPRA em resistência é de alto risco`);
+              console.log(`[MT5-Indicators] 🛑 ${sym}: BUY BLOQUEADO pelo Fibonacci — preço em resistência ${lv.level} @ ${lv.price.toFixed(5)}`);
+              finalAction     = 'HOLD';
+              finalConfidence = 0;
+              finalReason     = `Fibonacci bloqueia BUY: preço em resistência ${lv.level} @ ${lv.price.toFixed(5)} — aguardar rompimento ou sinal de venda`;
+              break;
+            }
+          }
         }
       }
     }
