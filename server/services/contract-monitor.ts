@@ -87,6 +87,9 @@ interface ContractState {
   aiSnapshot?: AITickSnapshot;
   openReason?: string;
   spotHistory: number[];      // histórico de spots do próprio contrato desde a entrada
+  // CORREÇÃO: venda urgente enfileirada quando isValidToSell=false no momento da decisão
+  // Executada imediatamente no próximo tick em que isValidToSell=true — evita perda de trailing stop
+  pendingUrgentSell?: { reason: string; urgency: 'high' | 'emergency'; queuedAt: number };
 }
 
 interface SellDecision {
@@ -987,6 +990,19 @@ class UniversalContractMonitor extends EventEmitter {
       return;
     }
 
+    // ── VENDA URGENTE PENDENTE: executar imediatamente quando isValidToSell volta a true ──────
+    // CORREÇÃO ESTRUTURAL: trailing stops e emergências detectados durante janela de indisponibilidade
+    // (isValidToSell=false por 1-3 ticks) eram descartados — lucros acumulados podiam se dissipar.
+    // Agora ficam enfileirados e executados no primeiro tick com liquidez disponível.
+    if (state.pendingUrgentSell && state.isValidToSell && state.status === 'monitoring') {
+      const elapsedSec = ((Date.now() - state.pendingUrgentSell.queuedAt) / 1000).toFixed(1);
+      console.log(`🚨 [MONITOR] VENDA URGENTE DESBLOQUEADA após ${elapsedSec}s — ${contractId} | urgência=${state.pendingUrgentSell.urgency} | ${state.pendingUrgentSell.reason}`);
+      const pendingReason = `[DESBLOQUEADA +${elapsedSec}s] ${state.pendingUrgentSell.reason}`;
+      state.pendingUrgentSell = undefined;
+      await this.executeSell(state, pendingReason);
+      return;
+    }
+
     // Calcular distância da barreira (se houver)
     if (state.currentSpot > 0) {
       const barrierStr = contract.barrier || state.input.barrier;
@@ -1038,7 +1054,33 @@ class UniversalContractMonitor extends EventEmitter {
 
     // Verificar se está pronto para decisão
     if (state.status !== 'monitoring') return;
-    if (!state.isValidToSell) return;
+
+    if (!state.isValidToSell) {
+      // CORREÇÃO ESTRUTURAL: em vez de descartar silenciosamente, avaliar se há trailing stop
+      // ou emergência pendente — enfileirar para execução imediata quando liquidez voltar.
+      // Deriv bloqueia is_valid_to_sell por 1-5 ticks em condições de volatilidade alta.
+      // Sem este mecanismo, um lucro de +70% pode reverter para +0% antes de podermos vender.
+      const baseThresholds = getThresholds(state.input.contractType);
+      if (state.tickCount >= baseThresholds.minTicksBeforeSell && !state.pendingUrgentSell) {
+        const thresholds = getAdaptiveThresholds(baseThresholds, state.input.symbol, state.profitPct);
+        const urgentDecision = this.shouldSell(state, thresholds, contract);
+        if (
+          urgentDecision.shouldSell &&
+          (urgentDecision.urgency === 'emergency' ||
+           (urgentDecision.urgency === 'high' && state.peakProfit > state.input.buyPrice * 0.05))
+        ) {
+          state.pendingUrgentSell = {
+            reason: urgentDecision.reason,
+            urgency: urgentDecision.urgency as 'high' | 'emergency',
+            queuedAt: Date.now(),
+          };
+          console.log(`⚠️ [MONITOR] VENDA URGENTE ENFILEIRADA (isValidToSell=false) — ${contractId} | urgência=${urgentDecision.urgency} | ${urgentDecision.reason}`);
+        }
+      }
+      return;
+    }
+    // Limpar venda urgente se o mercado voltou a condições normais sem necessidade de saída
+    if (state.pendingUrgentSell) state.pendingUrgentSell = undefined;
 
     // Executar análise de saída com limiares adaptativos do Motor Supremo
     const baseThresholds = getThresholds(state.input.contractType);
@@ -1184,6 +1226,24 @@ class UniversalContractMonitor extends EventEmitter {
           return {
             shouldSell: true,
             reason: `ACCU trailing: lucro caiu de pico ${peakPct.toFixed(2)}% → ${state.profitPct.toFixed(2)}% (queda ${dropFromPeak.toFixed(2)}% > limiar ${thresholds.trailingStopPct.toFixed(0)}%)`,
+            urgency: 'high',
+          };
+        }
+      }
+
+      // ── FLOOR DE SEGURANÇA MÁXIMA: protege pico excepcional (>50% do stake) ──────────────
+      // CORREÇÃO ESTRUTURAL: ACCU pode knockout INSTANTANEAMENTE — um ganho excepcional pode
+      // se converter em $0 em 1 tick. Este floor garante que nunca se entrega >60% de um pico
+      // excepcional. Complementa o trailing stop (5%) com uma proteção de magnitude maior.
+      // Ativado apenas quando peakProfit > 50% do stake — sem distorcer operações normais.
+      if (state.peakProfit > state.input.buyPrice * 0.50 && state.profit > 0) {
+        const securityFloorProfit = state.peakProfit * 0.40; // manter pelo menos 40% do pico
+        if (state.profit < securityFloorProfit) {
+          const peakPct = (state.peakProfit / state.input.buyPrice) * 100;
+          const floorPct = (securityFloorProfit / state.input.buyPrice) * 100;
+          return {
+            shouldSell: true,
+            reason: `ACCU FLOOR SEGURANÇA: pico=${peakPct.toFixed(1)}% | floor=40% do pico (${floorPct.toFixed(1)}%) | atual=${state.profitPct.toFixed(1)}% — preservando ganho excepcional`,
             urgency: 'high',
           };
         }

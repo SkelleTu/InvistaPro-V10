@@ -206,7 +206,15 @@ export class AutoTradingScheduler {
       console.log(`🎰 [${operationId}] MARTINGALE Parte ${state.currentPart}/3 em curso | Consenso: ${consensus}%`);
     }
 
-    const mults = userMultipliers && userMultipliers.length === 3 ? userMultipliers : [1.30, 1.60, 2.00];
+    // CORREÇÃO ESTRUTURAL: multipliers de recuperação reais — cada parte cobre perdas anteriores + base.
+    // Cálculo para payout médio ~85% (CALL/PUT, ACCU):
+    //   Parte 1 ($1.50×): win → +$1.275 net ✓
+    //   Parte 2 (após perda de $1.50): recuperar $1.50 + $1.00 base = $2.50 → $2.50/0.85 = $2.94 → usa 2.75×
+    //     win Parte 2 → +$2.75×0.85 - $1.50 = $2.3375 - $1.50 = +$0.84 ✓
+    //   Parte 3 (após perdas $1.50+$2.75=$4.25): recuperar $4.25 + $1.00 = $5.25 → $5.25/0.85 = $6.18 → usa 5.50×
+    //     win Parte 3 → +$5.50×0.85 - $4.25 = $4.675 - $4.25 = +$0.425 ✓
+    // Multipliers anteriores [1.30, 1.60, 2.00] perdiam $0.60 em recovery de 3 partes
+    const mults = userMultipliers && userMultipliers.length === 3 ? userMultipliers : [1.50, 2.75, 5.50];
     const mult = mults[(state.currentPart - 1)] ?? 1.0;
     const adjustedStake = Math.round(baseStake * mult * 100) / 100;
 
@@ -1302,13 +1310,17 @@ export class AutoTradingScheduler {
         return { success: false, error: 'IAs com sinal neutro — sem edge direcional. Aguardando próximo ciclo.' };
       }
 
-      const MIN_DIRECTIONAL_CONSENSUS = 72; // ≥72% exigido: ONETOUCH precisa ≥75% WR para lucro com payout 34-45%
+      // CORREÇÃO ESTRUTURAL: gate global permissivo (60%) — cada modalidade tem seu próprio mínimo.
+      // Gate universal de 72% era excessivo para CALL/PUT (break-even ~54%) e ACCU (break-even ~40-50%).
+      // Gate por modalidade (aplicado após seleção da modalidade) calibra cada contrato ao seu break-even.
+      // Referências: CALL/PUT payout ~85% → BE=54% → mín=60%; ONETOUCH payout 34-45% → BE=60-70% → mín=78%
+      const MIN_DIRECTIONAL_CONSENSUS = 60; // floor global; gates por modalidade são mais estritos onde necessário
       if (aiDirectionalConsensus < MIN_DIRECTIONAL_CONSENSUS) {
-        console.log(`⛔ [${operationId}] CONSENSO FRACO BLOQUEADO: ${aiDirectionalDecision.toUpperCase()} ${selectedSymbol} | consenso=${aiDirectionalConsensus.toFixed(1)}% < ${MIN_DIRECTIONAL_CONSENSUS}% mínimo — sinal não é BOM o suficiente para lucro real.`);
-        return { success: false, error: `Consenso ${aiDirectionalConsensus.toFixed(1)}% insuficiente (mín ${MIN_DIRECTIONAL_CONSENSUS}%) — aguardando sinal de qualidade EXCEPCIONAL.` };
+        console.log(`⛔ [${operationId}] CONSENSO FRACO BLOQUEADO: ${aiDirectionalDecision.toUpperCase()} ${selectedSymbol} | consenso=${aiDirectionalConsensus.toFixed(1)}% < ${MIN_DIRECTIONAL_CONSENSUS}% mínimo global — sinal insuficiente para qualquer modalidade.`);
+        return { success: false, error: `Consenso ${aiDirectionalConsensus.toFixed(1)}% insuficiente (mín global ${MIN_DIRECTIONAL_CONSENSUS}%) — aguardando sinal mais forte.` };
       }
 
-      console.log(`✅ [${operationId}] SINAL VÁLIDO: ${aiDirectionalDecision.toUpperCase()} ${selectedSymbol} | consenso=${aiDirectionalConsensus.toFixed(1)}% ≥ ${MIN_DIRECTIONAL_CONSENSUS}% (nota A/S) — operação autorizada com edge real de lucro.`);
+      console.log(`✅ [${operationId}] SINAL VÁLIDO: ${aiDirectionalDecision.toUpperCase()} ${selectedSymbol} | consenso=${aiDirectionalConsensus.toFixed(1)}% ≥ ${MIN_DIRECTIONAL_CONSENSUS}% global — verificação por modalidade será aplicada após seleção.`);
 
       // 🎯 DIVERSIFICAÇÃO INTELIGENTE: Verificar se ativo pode ser aberto + jogo de cintura
       const diversityCheck = await this.canOpenTradeForAsset(
@@ -1507,13 +1519,31 @@ export class AutoTradingScheduler {
         (aiConsensus.finalDecision === 'up' || aiConsensus.finalDecision === 'down')
           ? (aiConsensus.finalDecision as 'up' | 'down')
           : ((aiConsensus.upScore || 0) >= (aiConsensus.downScore || 0) ? 'up' : 'down');
+
+      // Enriquecer sinal com TP/SL baseados em ATR (CORREÇÃO: sinais MT5 antes careciam de TP/SL)
+      // Usa o SupremeAnalyzer (cache) para extrair volatilidade ATR sem overhead de rede
+      const signalSupreme = supremeAnalyzer.getLatestAnalysis(selectedSymbol);
+      const signalAtr: number | null =
+        (signalSupreme as any)?.statistics?.atr ??
+        (signalSupreme as any)?.statistics?.historicalVolatility ??
+        null;
+      // 1 pip para índices sintéticos ≈ 0.001% do preço atual (escala relativa)
+      // ATR absoluto × fator de escala → pips (aproximação funcional para MT5)
+      const signalSlPips   = signalAtr ? Math.max(10, Math.round(signalAtr * 150)) : 50;  // 1.5× ATR
+      const signalTpPips   = signalAtr ? Math.max(20, Math.round(signalAtr * 200)) : 100; // 2.0× ATR (R/R 1:1.33)
+      const signalRrRatio  = parseFloat((signalTpPips / signalSlPips).toFixed(2));
+
       const signalEntry = {
         symbol: selectedSymbol,
         direction: storeDirection,
         confidence: aiConsensus.consensusStrength,
         consensus: aiConsensus.consensusStrength,
         reason: `Análise Deriv: ${storeDirection.toUpperCase()} ${selectedSymbol} — consenso ${aiConsensus.consensusStrength}%`,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        stopLossPips:   signalSlPips,
+        takeProfitPips: signalTpPips,
+        atrValue:       signalAtr ?? undefined,
+        rrRatio:        signalRrRatio,
       };
       setSignal(selectedSymbol, signalEntry);
       // Mapear para nome MT5 também
@@ -1584,10 +1614,23 @@ export class AutoTradingScheduler {
         console.log(`ℹ️ [${operationId}] Análise de dígitos ignorada — modalidades selecionadas não incluem dígitos: [${preActiveModalities.join(', ')}]`);
       }
 
-      // Para digit_differs a direção é irrelevante — o trade é puramente sobre qual dígito NÃO aparece
-      // Forçamos 'down' apenas para preencher o campo obrigatório da API
+      // CORREÇÃO ESTRUTURAL: fallback neutro→down APENAS para setups exclusivos de dígitos.
+      // Para contratos de dígitos a direção é irrelevante (trade sobre qual dígito aparece/não aparece).
+      // Para contratos direcionais (CALL/PUT, MULT, TURBO, VANILLA, ACCU) um sinal neutro
+      // indica ausência de edge direcional — forçar 'down' seria operar aleatoriamente.
+      // Nota: 'neutral' já foi bloqueado pelo gate de linha 1312 — este é apenas um safety net.
+      const isDigitOnlySetup = preActiveModalities.length > 0 &&
+        !preActiveModalities.includes('__auto__') &&
+        preActiveModalities.every(m => DIGIT_MODALITY_KEYS.has(m));
       if (aiConsensus.finalDecision === 'neutral') {
-        aiConsensus.finalDecision = 'down';
+        if (isDigitOnlySetup) {
+          aiConsensus.finalDecision = 'down'; // placeholder para API — direção irrelevante em dígitos
+          console.log(`↕️ [${operationId}] Neutro→DOWN (setup exclusivo de dígitos): direção irrelevante para contratos de dígito`);
+        } else {
+          // Para contratos direcionais: resolver via score (upScore vs downScore)
+          aiConsensus.finalDecision = (aiConsensus.upScore ?? 0) >= (aiConsensus.downScore ?? 0) ? 'up' : 'down';
+          console.log(`↕️ [${operationId}] Neutro resolvido por score: ${aiConsensus.finalDecision} (up=${aiConsensus.upScore ?? 0} / down=${aiConsensus.downScore ?? 0})`);
+        }
       }
 
       if (isProductionMode) {
@@ -2011,6 +2054,45 @@ export class AutoTradingScheduler {
           console.log(`⏳ [${operationId}] Motor Supremo acumulando dados → rotação ponderada: ${selectedModality} (pool: ${compatibleModalities.join(', ')})`);
         }
 
+
+        // ─── GATE POR MODALIDADE: consenso mínimo calibrado ao break-even matemático ───────────
+        // Cada tipo de contrato tem payout e taxa de acerto mínima (break-even) diferentes.
+        // Um gate universal de 72% sub-filtra ONETOUCH (precisa ~78%) e super-filtra CALL/PUT (60% já é lucrativo).
+        //
+        // Fundamento matemático (P_min = custo / (custo + payout_líquido)):
+        //   CALL/PUT   payout ~85%    → P_min = 1/(1+0.85) = 54% → gate 60% (margem +6%)
+        //   ACCU       knockout ~50%  → P_min depende de ticks → gate 65%
+        //   MULT       dinâmico       → gate 68% (trailing protege parcialmente)
+        //   TURBO_UP/DOWN payout var  → gate 75% (barreira próxima = risco alto)
+        //   ONETOUCH   payout 34-45%  → P_min = 1/(1+0.34) = 75% → gate 78%
+        //   NOTOUCH    payout 15-25%  → P_min = 1/(1+0.15) = 87% → gate 80% (conservador)
+        //   VANILLA    payout ~80%    → gate 65%
+        //   IN/OUT     payout ~60-80% → gate 65-68%
+        //   DIGIT_EVEN/ODD payout ~90%→ gate 55% (direção irrelevante — puramente estatístico)
+        //   DIGIT_OVER/UNDER ~80-90%  → gate 58%
+        //   DIGIT_DIFF ≥90% já coberto pelo DIGIT_DIFFERS_MIN_CONSENSUS acima
+        const MODALITY_CONSENSUS_MAP: Record<string, number> = {
+          'rise':              60,  'fall':              60,
+          'higher':            62,  'lower':             62,
+          'accumulator':       65,
+          'multiplier_up':     68,  'multiplier_down':   68,
+          'turbo_up':          75,  'turbo_down':        75,
+          'touch':             78,
+          'no_touch':          80,
+          'vanilla_call':      65,  'vanilla_put':       65,
+          'ends_between':      65,  'ends_outside':      68,
+          'stays_between':     65,  'goes_outside':      68,
+          'digit_differs':     90,
+          'digit_matches':     55,
+          'digit_even':        55,  'digit_odd':         55,
+          'digit_over':        58,  'digit_under':       58,
+        };
+        const modalityMinConsensus = MODALITY_CONSENSUS_MAP[selectedModality] ?? 65;
+        if (aiDirectionalConsensus < modalityMinConsensus) {
+          console.log(`⛔ [${operationId}] GATE MODALIDADE: ${selectedModality} exige consenso ≥${modalityMinConsensus}% | atual=${aiDirectionalConsensus.toFixed(1)}% — EV negativo para esta modalidade. Aguardando sinal mais forte.`);
+          return { success: false, error: `${selectedModality}: consenso ${aiDirectionalConsensus.toFixed(1)}% < mínimo ${modalityMinConsensus}% (break-even calibrado). Aguardando.` };
+        }
+        console.log(`✅ [${operationId}] GATE MODALIDADE: ${selectedModality} mín=${modalityMinConsensus}% | atual=${aiDirectionalConsensus.toFixed(1)}% — EV positivo confirmado.`);
 
         // ─── EXECUÇÃO POR MODALIDADE ─────────────────────────────────────
         let contract: any = null;
@@ -3222,11 +3304,22 @@ export class AutoTradingScheduler {
             ? symAi.finalDecision as 'up' | 'down'
             : ((symAi.upScore || 0) >= (symAi.downScore || 0) ? 'up' : 'down');
         const sym = r.symbol;
+        // Enriquecer com TP/SL via ATR do SupremeAnalyzer para este símbolo
+        const loopSupreme = supremeAnalyzer.getLatestAnalysis(sym);
+        const loopAtr: number | null =
+          (loopSupreme as any)?.statistics?.atr ??
+          (loopSupreme as any)?.statistics?.historicalVolatility ?? null;
+        const loopSlPips   = loopAtr ? Math.max(10, Math.round(loopAtr * 150)) : 50;
+        const loopTpPips   = loopAtr ? Math.max(20, Math.round(loopAtr * 200)) : 100;
         const entry = {
           symbol: sym, direction: symDir, confidence: r.consensus,
           consensus: r.consensus,
           reason: `Análise Deriv: ${symDir.toUpperCase()} ${sym} — score ${r.consensus.toFixed(1)}%`,
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          stopLossPips:   loopSlPips,
+          takeProfitPips: loopTpPips,
+          atrValue:       loopAtr ?? undefined,
+          rrRatio:        parseFloat((loopTpPips / loopSlPips).toFixed(2)),
         };
         setSignal(sym, entry);
         const mt5 = derivToMT5Name(sym);

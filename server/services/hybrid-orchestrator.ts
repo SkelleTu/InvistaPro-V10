@@ -364,13 +364,12 @@ export class HybridOrchestrator {
     }
     const avgActiveConf = confWeightSum > 0 ? confSum / confWeightSum : safeAdvancedConfidence;
 
-    // hybridConfidence = acordo direcional * confiança média dos que votaram
-    // Floor: 70% quando todos concordam, 50% quando há discordância
+    // hybridConfidence = acordo direcional × confiança média dos sistemas que votaram
+    // CORREÇÃO ESTRUTURAL: sem floor artificial — reportar confiança REAL do mercado.
+    // O gate de consenso mínimo no scheduler (por modalidade) filtra entradas fracas.
+    // Floor artificial de 70% causava entradas forçadas quando sinal real era ~35%.
     const rawHybridConf = directionAgreement * avgActiveConf;
-    const hybridConfidence = Math.min(95, Math.max(
-      rawHybridConf,
-      directionAgreement >= 1.0 ? 70 : 50
-    ));
+    const hybridConfidence = Math.min(95, Math.max(10, rawHybridConf));
     const quantumAdvantage = quantumResult ? (quantumResult.quantumAdvantage || 0) : 0;
     
     // Construir reasoning dinâmico baseado nos sistemas ativos

@@ -11,6 +11,12 @@ export interface AnalysisSignal {
   consensus: number;
   reason: string;
   timestamp: number;
+  // Sugestões de TP/SL baseadas em ATR para a ponte MT5
+  // Calculadas pelo scheduler com dados do SupremeAnalyzer no momento do sinal
+  stopLossPips?: number;    // Stop loss sugerido em pips (1.5× ATR)
+  takeProfitPips?: number;  // Take profit sugerido em pips (2.0× ATR — R/R 1:1.33)
+  atrValue?: number;        // ATR absoluto usado no cálculo (para debug e logging)
+  rrRatio?: number;         // Risk/Reward ratio efetivo do sinal
 }
 
 const store = new Map<string, AnalysisSignal>();
