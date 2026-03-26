@@ -234,6 +234,12 @@ export default function MetaTraderPage() {
   const [positionTimers, setPositionTimers] = useState<Record<number, number>>({});
   const analysisEndRef = useRef<HTMLDivElement>(null);
 
+  // Persistent AI values — never go blank between polls
+  const [stableAIConsensus, setStableAIConsensus] = useState<number | undefined>(undefined);
+  const [stableAIDirection, setStableAIDirection] = useState<'up' | 'down' | 'neutral' | undefined>(undefined);
+  const [stableAnalysisSymbol, setStableAnalysisSymbol] = useState<string | undefined>(undefined);
+  const [stableRequiredConsensus, setStableRequiredConsensus] = useState<number | undefined>(undefined);
+
   const { data: status, isLoading: statusLoading } = useQuery<MT5Status>({
     queryKey: ['/api/mt5/status'],
     refetchInterval: 2000,
@@ -282,6 +288,14 @@ export default function MetaTraderPage() {
     setLastUpdated(new Date());
     setSecondsAgo(0);
   }, [status, positions, trades, aiAnalysis]);
+
+  // Atualizar valores estáveis de IA — só atualiza quando chega valor real, nunca apaga
+  useEffect(() => {
+    if (status?.latestAIConsensus !== undefined) setStableAIConsensus(status.latestAIConsensus);
+    if (status?.latestAIDirection !== undefined) setStableAIDirection(status.latestAIDirection);
+    if (status?.latestAnalysisSymbol !== undefined) setStableAnalysisSymbol(status.latestAnalysisSymbol);
+    if (status?.latestRequiredConsensus !== undefined) setStableRequiredConsensus(status.latestRequiredConsensus);
+  }, [status?.latestAIConsensus, status?.latestAIDirection, status?.latestAnalysisSymbol, status?.latestRequiredConsensus]);
 
   // Contador de segundos desde última atualização
   useEffect(() => {
@@ -496,17 +510,17 @@ export default function MetaTraderPage() {
             <CardContent className="pt-4 pb-3">
               <div className="flex items-center justify-between">
                 <span className="text-xs text-muted-foreground">IA ao Vivo</span>
-                <Brain className={`h-4 w-4 transition-colors duration-500 ${status?.latestAIConsensus !== undefined ? 'text-primary' : 'text-muted-foreground'}`} />
+                <Brain className={`h-4 w-4 transition-colors duration-500 ${stableAIConsensus !== undefined ? 'text-primary' : 'text-muted-foreground'}`} />
               </div>
               <p className={`text-xl font-bold mt-1 transition-colors duration-500 ${
-                status?.latestAIConsensus !== undefined
-                  ? status.latestAIConsensus >= 70 ? 'text-green-500' : 'text-yellow-500'
+                stableAIConsensus !== undefined
+                  ? stableAIConsensus >= 70 ? 'text-green-500' : 'text-yellow-500'
                   : 'text-muted-foreground'
               }`}>
-                {status?.latestAIConsensus !== undefined ? `${status.latestAIConsensus.toFixed(0)}%` : '—'}
+                {stableAIConsensus !== undefined ? `${stableAIConsensus.toFixed(0)}%` : '—'}
               </p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                {status?.latestAnalysisSymbol || 'Aguardando'}{status?.latestAIDirection ? ` · ${status.latestAIDirection === 'up' ? '↑' : status.latestAIDirection === 'down' ? '↓' : '—'}` : ''}
+                {stableAnalysisSymbol || 'Aguardando'}{stableAIDirection ? ` · ${stableAIDirection === 'up' ? '↑' : stableAIDirection === 'down' ? '↓' : '—'}` : ''}
               </p>
             </CardContent>
           </Card>
@@ -726,36 +740,34 @@ export default function MetaTraderPage() {
                             </div>
                             <Badge variant="outline" className="shrink-0 text-yellow-500 border-yellow-500">HOLD</Badge>
                           </div>
-                          {status?.latestAIConsensus !== undefined && (
-                            <div className="space-y-1.5">
-                              <div className="flex items-center justify-between text-xs">
-                                <span className="text-muted-foreground flex items-center gap-1">
-                                  <Brain className="h-3 w-3" />
-                                  Consenso real — {status.latestAnalysisSymbol || '—'}
-                                </span>
-                                <span className={`font-bold transition-colors duration-500 ${
-                                  status.latestAIDirection === 'neutral' ? 'text-yellow-500'
-                                  : status.latestAIConsensus >= (status.latestRequiredConsensus ?? 70) ? 'text-green-500' : 'text-red-500'
-                                }`}>
-                                  {status.latestAIConsensus.toFixed(1)}%
-                                  {status.latestAIDirection && <span className="ml-1">{status.latestAIDirection === 'up' ? '↑' : status.latestAIDirection === 'down' ? '↓' : '—'}</span>}
-                                </span>
-                              </div>
-                              <Progress value={status.latestAIConsensus} className="h-2" />
-                              <div className="flex justify-between text-xs text-muted-foreground">
-                                <span>0%</span>
-                                <span className="text-yellow-500">
-                                  {status.latestRequiredConsensus ?? 70}% mínimo
-                                </span>
-                                <span>100%</span>
-                              </div>
-                              {status.latestAIDirection === 'neutral' && (
-                                <p className="text-xs text-yellow-600 dark:text-yellow-400 bg-yellow-50 dark:bg-yellow-950/30 rounded px-2 py-1">
-                                  ⚠️ IAs retornaram NEUTRO — sem direção clara, operação bloqueada
-                                </p>
-                              )}
+                          <div className="space-y-1.5">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-muted-foreground flex items-center gap-1">
+                                <Brain className="h-3 w-3" />
+                                Consenso real — {stableAnalysisSymbol || '—'}
+                              </span>
+                              <span className={`font-bold transition-colors duration-500 ${
+                                stableAIDirection === 'neutral' ? 'text-yellow-500'
+                                : stableAIConsensus !== undefined && stableAIConsensus >= (stableRequiredConsensus ?? 70) ? 'text-green-500' : 'text-red-500'
+                              }`}>
+                                {stableAIConsensus !== undefined ? stableAIConsensus.toFixed(1) : '—'}%
+                                {stableAIDirection && <span className="ml-1">{stableAIDirection === 'up' ? '↑' : stableAIDirection === 'down' ? '↓' : '—'}</span>}
+                              </span>
                             </div>
-                          )}
+                            <Progress value={stableAIConsensus ?? 0} className="h-2" />
+                            <div className="flex justify-between text-xs text-muted-foreground">
+                              <span>0%</span>
+                              <span className="text-yellow-500">
+                                {stableRequiredConsensus ?? 70}% mínimo
+                              </span>
+                              <span>100%</span>
+                            </div>
+                            {stableAIDirection === 'neutral' && (
+                              <p className="text-xs text-yellow-600 dark:text-yellow-400 bg-yellow-50 dark:bg-yellow-950/30 rounded px-2 py-1">
+                                ⚠️ IAs retornaram NEUTRO — sem direção clara, operação bloqueada
+                              </p>
+                            )}
+                          </div>
                           <div className="grid grid-cols-2 gap-2 text-xs">
                             <div className="bg-muted/30 rounded p-2">
                               <p className="text-muted-foreground">Stop Loss</p>
@@ -907,15 +919,15 @@ export default function MetaTraderPage() {
                 <CardContent className="pt-4">
                   <p className="text-xs text-muted-foreground">Consenso Real das IAs</p>
                   <p className={`text-2xl font-bold transition-colors duration-500 ${
-                    status?.latestAIConsensus === undefined ? 'text-muted-foreground'
-                    : status.latestAIDirection === 'neutral' ? 'text-yellow-500'
-                    : status.latestAIConsensus >= (status.latestRequiredConsensus ?? 70) ? 'text-green-500' : 'text-red-500'
+                    stableAIConsensus === undefined ? 'text-muted-foreground'
+                    : stableAIDirection === 'neutral' ? 'text-yellow-500'
+                    : stableAIConsensus >= (stableRequiredConsensus ?? 70) ? 'text-green-500' : 'text-red-500'
                   }`}>
-                    {status?.latestAIConsensus !== undefined ? `${status.latestAIConsensus.toFixed(1)}%` : '—'}
+                    {stableAIConsensus !== undefined ? `${stableAIConsensus.toFixed(1)}%` : '—'}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
-                    {status?.latestAnalysisSymbol || 'Aguardando símbolo'}
-                    {status?.latestAIDirection && <span>{status.latestAIDirection === 'up' ? ' ↑ COMPRA' : status.latestAIDirection === 'down' ? ' ↓ VENDA' : ' — NEUTRO'}</span>}
+                    {stableAnalysisSymbol || 'Aguardando símbolo'}
+                    {stableAIDirection && <span>{stableAIDirection === 'up' ? ' ↑ COMPRA' : stableAIDirection === 'down' ? ' ↓ VENDA' : ' — NEUTRO'}</span>}
                   </p>
                 </CardContent>
               </Card>
@@ -923,7 +935,7 @@ export default function MetaTraderPage() {
                 <CardContent className="pt-4">
                   <p className="text-xs text-muted-foreground">Mínimo Exigido</p>
                   <p className="text-2xl font-bold text-primary">
-                    {status?.latestRequiredConsensus !== undefined ? `${status.latestRequiredConsensus}%` : '70%'}
+                    {stableRequiredConsensus !== undefined ? `${stableRequiredConsensus}%` : '70%'}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">
                     Limiar de segurança
@@ -1197,23 +1209,23 @@ export default function MetaTraderPage() {
                     </div>
                     <div className="bg-background/60 rounded-lg p-2.5 border">
                       <p className="text-muted-foreground mb-1">Último símbolo analisado</p>
-                      <p className="font-bold">{status.latestAnalysisSymbol || status.cachedSymbols?.[0] || '—'}</p>
+                      <p className="font-bold">{stableAnalysisSymbol || status.cachedSymbols?.[0] || '—'}</p>
                       <p className="text-muted-foreground">{status.latestAnalysisAt ? formatTime(status.latestAnalysisAt) : 'aguardando...'}</p>
                     </div>
                     <div className="bg-background/60 rounded-lg p-2.5 border">
                       <p className="text-muted-foreground mb-1">Próxima entrada</p>
                       <p className={`font-bold ${
-                        status.latestAIDirection === 'neutral' ? 'text-yellow-500'
-                        : status.latestAIConsensus !== undefined && status.latestAIConsensus >= (status.latestRequiredConsensus ?? 70) ? 'text-green-500'
+                        stableAIDirection === 'neutral' ? 'text-yellow-500'
+                        : stableAIConsensus !== undefined && stableAIConsensus >= (stableRequiredConsensus ?? 70) ? 'text-green-500'
                         : 'text-red-500'
                       }`}>
-                        {status.latestAIDirection === 'neutral' ? '— NEUTRO'
-                          : status.latestAIConsensus !== undefined && status.latestAIConsensus >= (status.latestRequiredConsensus ?? 70) ? '⚡ Pronto!'
+                        {stableAIDirection === 'neutral' ? '— NEUTRO'
+                          : stableAIConsensus !== undefined && stableAIConsensus >= (stableRequiredConsensus ?? 70) ? '⚡ Pronto!'
                           : '⏳ Aguardando'}
                       </p>
                       <p className="text-muted-foreground">
-                        {status.latestAIConsensus !== undefined
-                          ? `${status.latestAIConsensus.toFixed(0)}% / ${status.latestRequiredConsensus ?? 70}% mínimo`
+                        {stableAIConsensus !== undefined
+                          ? `${stableAIConsensus.toFixed(0)}% / ${stableRequiredConsensus ?? 70}% mínimo`
                           : 'analisando...'}
                       </p>
                     </div>
