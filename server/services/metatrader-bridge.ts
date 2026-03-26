@@ -1415,7 +1415,7 @@ class MetaTraderBridge extends EventEmitter {
   }
 
   getLatestAnalysis(): AIAnalysisEntry | null {
-    return this.analysisLog[0] || null;
+    return this.analysisLog.find(e => e.aiConsensus !== undefined) || this.analysisLog[0] || null;
   }
 
   /**
@@ -1642,7 +1642,7 @@ class MetaTraderBridge extends EventEmitter {
     }
 
     const now2 = Date.now();
-    const latestAnalysis = this.analysisLog[0] || null;
+    const latestAnalysis = this.analysisLog.find(e => e.aiConsensus !== undefined) || null;
     const circuitBreakerRem = this.circuitBreakerUntil > now2
       ? Math.ceil((this.circuitBreakerUntil - now2) / 60000)
       : 0;
