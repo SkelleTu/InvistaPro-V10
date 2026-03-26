@@ -421,7 +421,7 @@ export default function MetaTraderPage() {
           <div className="flex items-center gap-3 flex-wrap">
             {/* Badge tempo real */}
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground border rounded-full px-2.5 py-1">
-              <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+              <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-breathe" />
               <Timer className="h-3 w-3" />
               <span>
                 {secondsAgo < 5 ? 'Agora mesmo' : `${secondsAgo}s atrás`}
@@ -664,7 +664,7 @@ export default function MetaTraderPage() {
                   <CardTitle className="flex items-center gap-2 text-base">
                     <Zap className="h-5 w-5 text-yellow-500" />
                     Sinal Ativo das IAs
-                    <div className={`w-2 h-2 rounded-full ml-auto ${activeSignal?.action && activeSignal.action !== 'HOLD' ? 'bg-green-500 animate-pulse' : 'bg-yellow-500'}`} />
+                    <div className={`w-2 h-2 rounded-full ml-auto ${activeSignal?.action && activeSignal.action !== 'HOLD' ? 'bg-green-500 animate-breathe' : 'bg-yellow-500'}`} />
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -785,7 +785,7 @@ export default function MetaTraderPage() {
                   <CardTitle className="flex items-center gap-2 text-base">
                     <Activity className="h-5 w-5 text-blue-500" />
                     Posições Abertas — Monitoramento em Tempo Real
-                    <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse ml-auto" />
+                    <div className="w-2 h-2 rounded-full bg-blue-500 animate-breathe ml-auto" />
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -986,7 +986,7 @@ export default function MetaTraderPage() {
                   <span className="text-base">🇧🇷</span>
                   Sentimento Mercado Brasileiro — Noticiário em Tempo Real
                   <Badge variant="outline" className="text-xs gap-1 ml-auto">
-                    <div className="w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse" />
+                    <div className="w-1.5 h-1.5 rounded-full bg-yellow-400 animate-breathe" />
                     Atualiza a cada 30s
                   </Badge>
                 </CardTitle>
@@ -1102,7 +1102,7 @@ export default function MetaTraderPage() {
                     Quadro de Votos — {aiAnalysis.latest.modelResults.length} IAs Analisando Agora
                     <span className="text-xs text-muted-foreground ml-1">· {aiAnalysis.latest.symbol}</span>
                     <Badge variant="outline" className="text-xs gap-1 ml-auto">
-                      <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                      <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-breathe" />
                       {new Date(aiAnalysis.latest.timestamp).toLocaleTimeString('pt-BR')}
                     </Badge>
                   </CardTitle>
@@ -1205,7 +1205,7 @@ export default function MetaTraderPage() {
                     <Brain className="h-4 w-4 text-primary" />
                     Atividade das IAs em Tempo Real
                     <Badge variant="outline" className="text-xs gap-1 ml-auto">
-                      <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                      <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-breathe" />
                       Live
                     </Badge>
                   </CardTitle>
@@ -1408,7 +1408,7 @@ export default function MetaTraderPage() {
                     Feed de Análises em Tempo Real
                   </span>
                   <Badge variant="outline" className="text-xs gap-1">
-                    <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                    <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-breathe" />
                     Atualiza a cada 3s
                   </Badge>
                 </CardTitle>
@@ -1474,7 +1474,7 @@ export default function MetaTraderPage() {
                     {status?.connected && (
                       <div className="grid grid-cols-3 gap-2 text-xs">
                         <div className="flex items-center gap-2 p-2.5 rounded-lg border bg-muted/20">
-                          <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse shrink-0" />
+                          <div className="w-2 h-2 rounded-full bg-green-500 animate-breathe shrink-0" />
                           <div>
                             <p className="font-semibold">EA Ativo</p>
                             <p className="text-muted-foreground">{status.broker} · {status.accountId}</p>
@@ -1817,7 +1817,7 @@ export default function MetaTraderPage() {
                     Posições Abertas ({positions?.length || 0})
                   </span>
                   <Badge variant="outline" className="text-xs gap-1">
-                    <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+                    <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-breathe" />
                     Atualiza a cada 2s
                   </Badge>
                 </CardTitle>
@@ -1894,7 +1894,7 @@ export default function MetaTraderPage() {
                               </>
                             )}
                             <span className="ml-auto flex items-center gap-1">
-                              <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+                              <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-breathe" />
                               IA monitorando
                             </span>
                           </div>
@@ -1908,7 +1908,7 @@ export default function MetaTraderPage() {
                     <p className="font-medium">Nenhuma posição aberta no momento</p>
                     <p className="text-xs mt-1">O EA abrirá posições automaticamente com base nos sinais das IAs</p>
                     <div className="flex items-center justify-center gap-1.5 mt-3 text-xs">
-                      <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                      <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-breathe" />
                       <span>Monitorando mercado em tempo real</span>
                     </div>
                   </div>
@@ -1932,7 +1932,7 @@ export default function MetaTraderPage() {
                       </Badge>
                     )}
                     <Badge variant="outline" className="text-xs gap-1">
-                      <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                      <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-breathe" />
                       Ao vivo
                     </Badge>
                   </div>
@@ -2023,7 +2023,7 @@ export default function MetaTraderPage() {
                       </div>
                     </div>
                     <div className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
-                      <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                      <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-breathe" />
                       EA {status?.connected ? 'conectado e aguardando sinal' : 'desconectado — conecte o MT5'}
                     </div>
                   </div>

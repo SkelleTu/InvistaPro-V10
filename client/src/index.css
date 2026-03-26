@@ -231,3 +231,16 @@
     background: rgba(0, 0, 0, 0.3) !important;
   }
 }
+
+@keyframes breathe {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.2;
+  }
+}
+
+.animate-breathe {
+  animation: breathe 2.8s ease-in-out infinite;
+}
