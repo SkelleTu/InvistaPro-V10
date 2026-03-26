@@ -78,13 +78,16 @@ const MIN_TICKS_FOR_ANALYSIS = 50; // Mínimo de ticks para análise válida
 const STALE_DATA_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutos
 
 // Pesos de cada dimensão (soma = 1.0)
+// D6 AI Sentiment elevado para 0.18: o consenso das IAs é o sinal mais direto do edge real
+// D1 Statistical reduzido para 0.14: mercados sintéticos aleatórios por design raramente atingem chi-square significativo
+// D2 Mathematical reduzido para 0.20: EV base já satura a fórmula, precisa de menos peso absoluto
 const WEIGHTS = {
-  statistical: 0.20,
-  mathematical: 0.25,
+  statistical: 0.14,
+  mathematical: 0.20,
   historical: 0.20,
   risk: 0.20,
-  dataQuality: 0.10,
-  aiSentiment: 0.05
+  dataQuality: 0.08,
+  aiSentiment: 0.18
 };
 
 // ─── AssetScorer ──────────────────────────────────────────────────────────────

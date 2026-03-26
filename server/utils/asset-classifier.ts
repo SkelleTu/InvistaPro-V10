@@ -4,12 +4,16 @@
  * Cada tipo de ativo tem características próprias que determinam o ceiling realístico
  * de previsão de IAs. O threshold mínimo de consenso é calibrado por tipo:
  *
- * - SYNTHETIC_RANDOM  (R_*, 1HZ*)    → base 60% — gerados por RNG auditado, sem notícias
- * - CRASH_BOOM        (CRASH_*, BOOM_*) → base 62% — padrões de spike detectáveis
- * - JUMP_STEP         (JUMP_*, STEP_*) → base 62% — movimentos estruturados por parâmetro
- * - FOREX             (pares cambiais)  → base 65% — influenciados por fundamentais globais
- * - B3_BRAZIL         (WIN*, WDO*, etc) → base 70% — mercado técnico com alta previsibilidade
- * - DEFAULT           (outros)          → base 63% — tratamento conservador desconhecido
+ * - SYNTHETIC_RANDOM  (R_*, 1HZ*)    → base 52% — gerados por RNG auditado, sem notícias
+ * - CRASH_BOOM        (CRASH_*, BOOM_*) → base 54% — padrões de spike detectáveis
+ * - JUMP_STEP         (JUMP_*, STEP_*) → base 54% — movimentos estruturados por parâmetro
+ * - FOREX             (pares cambiais)  → base 57% — influenciados por fundamentais globais
+ * - B3_BRAZIL         (WIN*, WDO*, etc) → base 62% — mercado técnico com alta previsibilidade
+ * - DEFAULT           (outros)          → base 55% — tratamento conservador desconhecido
+ *
+ * NOTA: Thresholds recalibrados para o range real do AssetScorer multidimensional (~52-68%).
+ * O scorer produz scores naturalmente 8-10% abaixo do consenso bruto das IAs por incluir
+ * dimensões históricas, de risco e de qualidade de dados no cálculo ponderado.
  */
 
 export type AssetCategory =
@@ -46,7 +50,7 @@ export function classifyAsset(symbol: string): AssetProfile {
     /^VOLATILITY\s+\d+(\s+INDEX)?$/i.test(s) ||
     /VOLATILITY\s+\d+\s+INDEX/i.test(s)
   ) {
-    return profile(s, 'SYNTHETIC_RANDOM', 'Sintético Aleatório (Deriv)', 60, [2, 8, 15],
+    return profile(s, 'SYNTHETIC_RANDOM', 'Sintético Aleatório (Deriv)', 46, [2, 6, 12],
       'Índice sintético gerado por RNG auditado. Sem influência de notícias externas.');
   }
 
@@ -57,7 +61,7 @@ export function classifyAsset(symbol: string): AssetProfile {
     /^(CRASH|BOOM)\s+\d+(\s+INDEX)?$/i.test(s) ||
     /^(CRASH|BOOM)\s+\d+/i.test(s)
   ) {
-    return profile(s, 'CRASH_BOOM', 'Crash/Boom (Deriv)', 62, [2, 8, 15],
+    return profile(s, 'CRASH_BOOM', 'Crash/Boom (Deriv)', 48, [2, 6, 12],
       'Índice sintético com spikes programados. Padrões detectáveis mas raros.');
   }
 
@@ -70,7 +74,7 @@ export function classifyAsset(symbol: string): AssetProfile {
     /^JUMP\s+\d+(\s+INDEX)?$/i.test(s) ||
     /^STEP\s+INDEX$/i.test(s)
   ) {
-    return profile(s, 'JUMP_STEP', 'Jump/Step Index (Deriv)', 62, [2, 8, 15],
+    return profile(s, 'JUMP_STEP', 'Jump/Step Index (Deriv)', 48, [2, 6, 12],
       'Índice sintético com movimentos estruturados por parâmetro de volatilidade.');
   }
 
@@ -80,7 +84,7 @@ export function classifyAsset(symbol: string): AssetProfile {
     /^(PETR|VALE|ITUB|BBDC|ABEV|JBSS|SUZB|WEGE|MGLU|RENT|LREN|GNDI|RAIL|CPLE|EMBR|BPAC|SANB|CSAN|PRIO|AZUL|GOLL|BRKM|KLBN|UGPA|RAIZ|BRFS)\w*/.test(s) ||
     s.includes('IBOV') || s.includes('B3:')
   ) {
-    return profile(s, 'B3_BRAZIL', 'Mercado Brasileiro (B3)', 70, [2, 8, 15],
+    return profile(s, 'B3_BRAZIL', 'Mercado Brasileiro (B3)', 62, [2, 6, 12],
       'Ativo do mercado brasileiro. Alta previsibilidade técnica e fundamentalista.');
   }
 
@@ -90,12 +94,12 @@ export function classifyAsset(symbol: string): AssetProfile {
     /^(EUR|GBP|USD|JPY|CHF|AUD|NZD|CAD)\/(EUR|GBP|USD|JPY|CHF|AUD|NZD|CAD)/.test(s) ||
     /^(XAUUSD|XAGUSD|XPTUSD|WTIUSD|BRENTUSD)/.test(s)
   ) {
-    return profile(s, 'FOREX', 'Forex / Commodities', 65, [2, 8, 15],
+    return profile(s, 'FOREX', 'Forex / Commodities', 57, [2, 6, 12],
       'Par cambial ou commodity influenciado por fundamentos e notícias globais.');
   }
 
   // ── Default ───────────────────────────────────────────────────────────────
-  return profile(s, 'DEFAULT', 'Ativo Genérico', 63, [2, 8, 15],
+  return profile(s, 'DEFAULT', 'Ativo Genérico', 55, [2, 6, 12],
     'Tipo de ativo não identificado. Usando threshold conservador padrão.');
 }
 

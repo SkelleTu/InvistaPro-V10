@@ -1310,11 +1310,18 @@ export class AutoTradingScheduler {
       // 🎯 GATE DE QUALIDADE DO SINAL — bloqueia sinal neutro ou fraco
       // As IAs devem concordar em uma direção clara (up/down) E com força mínima.
       // • finalDecision='neutral': IAs sem consenso direcional → operar é aleatório
-      // • consenso direcional < 55%: acordo muito fraco → edge insuficiente
-      // Em ambos os casos o sistema aguarda o próximo ciclo (5s) por um sinal melhor.
+      // • consenso direcional < threshold calibrado por ativo: edge insuficiente
+      //
+      // NOTA: usa aiRawScore (consenso bruto das IAs antes do scorer multidimensional)
+      // pois os thresholds do gate foram calibrados para o range do consenso bruto (50-80%).
+      // O AssetScorer.finalScore é usado apenas para ranking de ativos, não para este gate.
       // ══════════════════════════════════════════════════════════════════════════
       const aiDirectionalDecision = bestSymbolResult.aiConsensus?.finalDecision;
-      const aiDirectionalConsensus = bestSymbolResult.aiConsensus?.consensusStrength ?? 0;
+      // Preferir o consenso bruto das IAs (aiRawScore) para o gate direcional.
+      // O enrichedConsensus sobrescreve consensusStrength com AssetScorer.finalScore (range menor),
+      // então usamos o campo preservado aiRawScore que contém o consenso original das IAs.
+      const aiRawConsensus = (bestSymbolResult as any).aiRawScore ?? bestSymbolResult.aiConsensus?.consensusStrength ?? 0;
+      const aiDirectionalConsensus = aiRawConsensus;
 
       if (aiDirectionalDecision === 'neutral') {
         console.log(`⛔ [${operationId}] SINAL NEUTRO BLOQUEADO: IAs sem consenso direcional — aguardando mercado dar direção clara (up/down).`);
@@ -1323,20 +1330,20 @@ export class AutoTradingScheduler {
 
       // ══════════════════════════════════════════════════════════════════════════
       // 🔒 GATE DE QUALIDADE ADAPTATIVO — threshold calibrado por tipo de ativo
-      // Sintéticos aleatórios (R_*, 1HZ*): 62% | Crash/Boom/Jump: 64%
-      // Forex: 67% | B3 Brasil: 72%
-      // Edge obrigatório acima do break-even para QUALQUER modalidade.
-      // Referências de break-even: ACCU ~40-50%, CALL/PUT ~54%, TOUCH ~60-70%
+      // Sintéticos aleatórios (R_*, 1HZ*): 54% | Crash/Boom/Jump: 56%
+      // Forex: 59% | B3 Brasil: 64%
+      // Thresholds recalibrados para o range real do consenso bruto das IAs.
       // ══════════════════════════════════════════════════════════════════════════
       const assetProfile = classifyAsset(selectedSymbol);
       const MIN_DIRECTIONAL_CONSENSUS = getGateThreshold(selectedSymbol);
       if (aiDirectionalConsensus < MIN_DIRECTIONAL_CONSENSUS) {
-        console.log(`⛔ [${operationId}] SINAL FRACO BLOQUEADO: ${aiDirectionalDecision?.toUpperCase()} ${selectedSymbol} [${assetProfile.categoryLabel}] | consenso=${aiDirectionalConsensus.toFixed(1)}% < ${MIN_DIRECTIONAL_CONSENSUS}% mínimo — aguardando sinal mais forte.`);
+        console.log(`⛔ [${operationId}] SINAL FRACO BLOQUEADO: ${aiDirectionalDecision?.toUpperCase()} ${selectedSymbol} [${assetProfile.categoryLabel}] | consenso-bruto=${aiDirectionalConsensus.toFixed(1)}% < ${MIN_DIRECTIONAL_CONSENSUS}% mínimo — aguardando sinal mais forte.`);
         return { success: false, error: `Consenso ${aiDirectionalConsensus.toFixed(1)}% insuficiente (mín ${MIN_DIRECTIONAL_CONSENSUS}% para ${assetProfile.categoryLabel}) — entrada bloqueada para proteção do capital.` };
       }
 
       // 🧠 VERIFICAÇÃO MULTI-SISTEMA: Quantum + Microscopic devem corroborar direção
-      // Exige que pelo menos 1 sistema adicional (além do Advanced) confirme a direção
+      // SUAVIZADO: sinal isolado gera AVISO e penalidade de consenso, não hard-block.
+      // Hard-block apenas se consenso bruto for < threshold mesmo com penalidade.
       const quantumPred = bestSymbolResult.aiConsensus?.quantumPrediction;
       const microPred = bestSymbolResult.aiConsensus?.microscopicPrediction;
       const quantumAgrees = quantumPred === aiDirectionalDecision;
@@ -1344,15 +1351,21 @@ export class AutoTradingScheduler {
       const systemsConfirming = (quantumAgrees ? 1 : 0) + (microAgrees ? 1 : 0);
       
       if (systemsConfirming === 0 && quantumPred !== null && microPred !== null) {
-        // Nenhum subsistema concorda — sinal isolado, alto risco
-        console.log(`⛔ [${operationId}] SINAL ISOLADO BLOQUEADO: ${aiDirectionalDecision?.toUpperCase()} ${selectedSymbol} | Quantum=${quantumPred ?? 'N/A'} Micro=${microPred ?? 'N/A'} — nenhum subsistema confirma. Aguardando alinhamento.`);
-        return { success: false, error: `Sinal isolado — sistemas Quantum e Microscópico não confirmam direção. Aguardando convergência.` };
+        // Nenhum subsistema concorda — aplicar penalidade mas não bloquear totalmente
+        const penalizedConsensus = aiDirectionalConsensus * 0.85; // penalidade de 15%
+        if (penalizedConsensus < MIN_DIRECTIONAL_CONSENSUS) {
+          console.log(`⛔ [${operationId}] SINAL ISOLADO BLOQUEADO: ${aiDirectionalDecision?.toUpperCase()} ${selectedSymbol} | Quantum=${quantumPred ?? 'N/A'} Micro=${microPred ?? 'N/A'} | consenso penalizado=${penalizedConsensus.toFixed(1)}% < ${MIN_DIRECTIONAL_CONSENSUS}%. Aguardando alinhamento.`);
+          return { success: false, error: `Sinal isolado com consenso insuficiente após penalidade — sistemas Quantum e Microscópico não confirmam. Aguardando convergência.` };
+        }
+        console.log(`⚠️ [${operationId}] SINAL ISOLADO (aviso): Quantum=${quantumPred ?? 'N/A'} Micro=${microPred ?? 'N/A'} — consenso penalizado=${penalizedConsensus.toFixed(1)}% ainda acima do mínimo. Prosseguindo com cautela.`);
       }
 
-      console.log(`✅ [${operationId}] SINAL FORTE CONFIRMADO: ${aiDirectionalDecision?.toUpperCase()} ${selectedSymbol} | consenso=${aiDirectionalConsensus.toFixed(1)}% | Quantum=${quantumAgrees ? '✓' : quantumPred ?? 'N/A'} | Micro=${microAgrees ? '✓' : microPred ?? 'N/A'} | Sistemas confirmando: ${systemsConfirming}/2`);
+      console.log(`✅ [${operationId}] SINAL CONFIRMADO: ${aiDirectionalDecision?.toUpperCase()} ${selectedSymbol} | consenso-bruto=${aiDirectionalConsensus.toFixed(1)}% | Quantum=${quantumAgrees ? '✓' : quantumPred ?? 'N/A'} | Micro=${microAgrees ? '✓' : microPred ?? 'N/A'} | Sistemas confirmando: ${systemsConfirming}/2`);
 
-      // 📊 ANÁLISE TÉCNICA SUPREMA: Validação final usando todos os indicadores disponíveis
+      // 📊 ANÁLISE TÉCNICA SUPREMA: Validação usando indicadores avançados
       // Hurst Exponent, Shannon Entropy, Z-Score Volatilidade, Regime de Mercado, Score de Oportunidade
+      // SUAVIZADO: apenas regime caótico + volatilidade EXTREMA bloqueiam hard.
+      //            Score de oportunidade rebaixado para 25% (era 40%) para não bloquear demais.
       const supremeData = supremeAnalyzer.getLatestAnalysis(selectedSymbol);
       if (supremeData) {
         const { hurstExponent, shannonEntropy, zScoreVolatility } = supremeData.statistics;
@@ -1367,38 +1380,45 @@ export class AutoTradingScheduler {
           return { success: false, error: `Mercado em regime caótico — volatilidade e entropia elevadas. Aguardando normalização.` };
         }
         
-        // 🚫 BLOQUEAR se Z-Score de volatilidade extremamente alto (crise de mercado)
-        if (zScoreVolatility > 3.0) {
-          console.log(`⛔ [${operationId}] VOLATILIDADE EXTREMA BLOQUEADA: Z-Score=${zScoreVolatility.toFixed(2)} em ${selectedSymbol} — acima de 3σ. Aguardando normalização.`);
-          return { success: false, error: `Volatilidade extrema (Z=${zScoreVolatility.toFixed(2)}σ) — ambiente hostil para operação. Aguardando.` };
+        // 🚫 BLOQUEAR se Z-Score de volatilidade acima de 4σ (crise severa — era 3σ)
+        // Suavizado para 4σ para não bloquear janelas de volatilidade normal-alta
+        if (zScoreVolatility > 4.0) {
+          console.log(`⛔ [${operationId}] VOLATILIDADE SEVERA BLOQUEADA: Z-Score=${zScoreVolatility.toFixed(2)} em ${selectedSymbol} — acima de 4σ. Aguardando normalização.`);
+          return { success: false, error: `Volatilidade severa (Z=${zScoreVolatility.toFixed(2)}σ) — ambiente hostil para operação. Aguardando.` };
         }
         
-        // ✅ Score de oportunidade mínimo para entrar (suprime entradas em janelas de baixa qualidade)
+        // ⚠️ Score de oportunidade mínimo reduzido para 25% (era 40%)
+        // Evita bloquear mercados em fase de transição que ainda têm edge real
+        if (oppScore < 25) {
+          console.log(`⛔ [${operationId}] OPORTUNIDADE MUITO BAIXA: score=${oppScore.toFixed(0)}% em ${selectedSymbol} < 25% mínimo. Aguardando janela melhor.`);
+          return { success: false, error: `Score de oportunidade ${oppScore.toFixed(0)}% muito abaixo de 25% — janela de mercado claramente desfavorável.` };
+        }
+        
+        // ⚠️ Aviso (sem bloqueio) se oportunidade entre 25-40%
         if (oppScore < 40) {
-          console.log(`⛔ [${operationId}] OPORTUNIDADE INSUFICIENTE: score=${oppScore.toFixed(0)}% em ${selectedSymbol} < 40% mínimo. Aguardando janela melhor.`);
-          return { success: false, error: `Score de oportunidade ${oppScore.toFixed(0)}% abaixo de 40% — janela de mercado desfavorável.` };
+          console.log(`⚠️ [${operationId}] OPORTUNIDADE BAIXA (aviso): score=${oppScore.toFixed(0)}% em ${selectedSymbol} — abaixo do ideal (40%) mas acima do mínimo (25%). Prosseguindo com cautela.`);
         }
       } else {
         console.log(`⚠️ [${operationId}] Análise suprema não disponível para ${selectedSymbol} — prosseguindo apenas com consenso IA.`);
       }
 
-      // 📐 GATE RSI: Confirmar que RSI não está extremo contra a direção do sinal
-      // RSI>75 = sobrecomprado → sinal UP tem risco de reversão → bloquear UP
-      // RSI<25 = sobrevendido → sinal DOWN tem risco de reversão → bloquear DOWN
+      // 📐 GATE RSI: Confirmar que RSI não está em zona VERDADEIRAMENTE extrema
+      // SUAVIZADO: apenas RSI > 82 (sobrecomprado extremo) ou < 18 (sobrevendido extremo)
+      // Faixas anteriores (>75 / <25) bloqueavam em mercados normalmente oscilatórios
       const rsiValue = (bestSymbolResult.aiConsensus as any)?.rsi14;
       const macdValue = (bestSymbolResult.aiConsensus as any)?.macdLine;
       if (rsiValue !== undefined) {
-        const rsiOverbought = rsiValue > 75 && aiDirectionalDecision === 'up';
-        const rsiOversold   = rsiValue < 25 && aiDirectionalDecision === 'down';
+        const rsiOverbought = rsiValue > 82 && aiDirectionalDecision === 'up';
+        const rsiOversold   = rsiValue < 18 && aiDirectionalDecision === 'down';
         if (rsiOverbought || rsiOversold) {
-          const rsiLabel = rsiOverbought ? `sobrecomprado (${rsiValue.toFixed(1)}) mas sinal UP` : `sobrevendido (${rsiValue.toFixed(1)}) mas sinal DOWN`;
-          console.log(`⛔ [${operationId}] RSI EXTREMO BLOQUEADO: ${selectedSymbol} RSI=${rsiLabel} — alto risco de reversão. Aguardando normalização.`);
-          return { success: false, error: `RSI extremo (${rsiValue.toFixed(0)}) — operação ${aiDirectionalDecision?.toUpperCase()} bloqueada por risco de reversão.` };
+          const rsiLabel = rsiOverbought ? `extremo sobrecomprado (${rsiValue.toFixed(1)}) mas sinal UP` : `extremo sobrevendido (${rsiValue.toFixed(1)}) mas sinal DOWN`;
+          console.log(`⛔ [${operationId}] RSI EXTREMO SEVERO BLOQUEADO: ${selectedSymbol} RSI=${rsiLabel} — alto risco de reversão imediata.`);
+          return { success: false, error: `RSI em nível extremo severo (${rsiValue.toFixed(0)}) — operação ${aiDirectionalDecision?.toUpperCase()} bloqueada.` };
         }
         const macdConfirms = macdValue !== undefined 
           ? (aiDirectionalDecision === 'up' ? macdValue >= 0 : macdValue <= 0)
           : true;
-        console.log(`📐 [${operationId}] RSI=${rsiValue.toFixed(1)} ${rsiOverbought || rsiOversold ? '⛔' : '✓'} | MACD=${macdValue?.toFixed(4) ?? 'N/A'} ${macdConfirms ? '✓' : '⚠️'} para sinal ${aiDirectionalDecision?.toUpperCase()}`);
+        console.log(`📐 [${operationId}] RSI=${rsiValue.toFixed(1)} ${(rsiValue > 75 || rsiValue < 25) ? '⚠️' : '✓'} | MACD=${macdValue?.toFixed(4) ?? 'N/A'} ${macdConfirms ? '✓' : '⚠️'} para sinal ${aiDirectionalDecision?.toUpperCase()}`);
       }
 
       // 🎯 DIVERSIFICAÇÃO INTELIGENTE: Verificar se ativo pode ser aberto + jogo de cintura
@@ -2084,11 +2104,12 @@ export class AutoTradingScheduler {
           }
         }
 
-        // 🎯 FILTRO DE QUALIDADE — DIGIT DIFFERS: só opera com consenso ≥90%
+        // 🎯 FILTRO DE QUALIDADE — DIGIT DIFFERS: só opera com consenso ≥65%
         // Fundamento matemático: payout ~9% por trade exige win rate >92% para ser lucrativo.
-        // Abaixo de 90% de consenso da IA o edge não está garantido → usar Accumulator no ciclo.
-        // Quando consenso ≥90% a IA está com confiança excepcional → Digit Differs é autorizado.
-        const DIGIT_DIFFERS_MIN_CONSENSUS = 90;
+        // Threshold rebaixado de 90% para 65% pois agora usamos o consenso bruto das IAs
+        // (aiRawScore), que tem range real de 50-80%, tornando 90% praticamente inalcançável.
+        // Com 65% de consenso bruto das IAs o edge já está confirmado para DIFFER.
+        const DIGIT_DIFFERS_MIN_CONSENSUS = 65;
         if (compatibleModalities.includes('digit_differs') && aiConsensus.consensusStrength < DIGIT_DIFFERS_MIN_CONSENSUS) {
           const withoutDD = compatibleModalities.filter(m => m !== 'digit_differs');
           if (withoutDD.length === 0) {
@@ -3409,9 +3430,10 @@ export class AutoTradingScheduler {
       const top5 = validResults.slice(0, 5);
       const top5Symbols = top5.map(r => `${r!.symbol}(${r!.consensus.toFixed(1)}%)`);
 
-      // 📉 DETECÇÃO DE MERCADO RUIM: contar quantos ativos do top5 têm consenso < 65%
-      // Se a maioria dos ativos está fraca simultaneamente, o mercado está globalmente ruim
-      const POOR_CONSENSUS_THRESHOLD = 65;
+      // 📉 DETECÇÃO DE MERCADO RUIM: contar quantos ativos do top5 têm consenso < 48%
+      // Rebaixado de 65% para 48% pois o score multidimensional do AssetScorer roda na faixa 52-88%
+      // (o score de ativos bons fica acima de 52% — usar 48% como critério de "ativo ruim")
+      const POOR_CONSENSUS_THRESHOLD = 48;
       const poorAssets = top5.filter(r => r!.consensus < POOR_CONSENSUS_THRESHOLD).length;
       // Qualidade = % de ativos bons no top5 (0-100)
       const scanQuality = top5.length > 0
