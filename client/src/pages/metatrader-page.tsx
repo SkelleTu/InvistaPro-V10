@@ -496,7 +496,7 @@ export default function MetaTraderPage() {
             <CardContent className="pt-4 pb-3">
               <div className="flex items-center justify-between">
                 <span className="text-xs text-muted-foreground">IA ao Vivo</span>
-                <Brain className={`h-4 w-4 ${status?.latestAIConsensus !== undefined ? 'text-primary' : 'text-muted-foreground'}`} />
+                <Brain className={`h-4 w-4 transition-colors duration-500 ${status?.latestAIConsensus !== undefined ? 'text-primary' : 'text-muted-foreground'}`} />
               </div>
               <p className={`text-xl font-bold mt-1 transition-colors duration-500 ${
                 status?.latestAIConsensus !== undefined
@@ -670,113 +670,118 @@ export default function MetaTraderPage() {
                     <div className={`w-2 h-2 rounded-full ml-auto ${activeSignal?.action && activeSignal.action !== 'HOLD' ? 'bg-green-500 animate-breathe' : 'bg-yellow-500'}`} />
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="transition-all duration-300">
-                  {activeSignal && activeSignal.action && activeSignal.action !== 'HOLD' ? (
-                    <div className="space-y-3 animate-fadeIn">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xl font-bold">{activeSignal.symbol || '—'}</span>
-                        <div className="flex items-center gap-2">
-                          {activeSignal.source === 'deriv_bot' && (
-                            <Badge variant="outline" className="text-xs border-primary/40 text-primary">Deriv Bot</Badge>
-                          )}
-                          <Badge className={activeSignal.action === 'BUY' ? 'bg-green-500' : 'bg-red-500'}>
-                            {activeSignal.action}
-                          </Badge>
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2 text-sm">
-                        <div>
-                          <span className="text-muted-foreground">Confiança</span>
-                          <p className="font-medium text-primary">{((activeSignal.confidence || 0) * 100).toFixed(1)}%</p>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">IAs Ativas</span>
-                          <p className="font-medium">{activeSignal.aiSources?.length || 5}</p>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">Stop Loss</span>
-                          <p className="font-medium text-red-500">
-                            {activeSignal.stopLoss > 0 ? activeSignal.stopLoss.toFixed(2) : activeSignal.stopLossPips > 0 ? `${activeSignal.stopLossPips} pips` : 'IA dinâmico'}
-                          </p>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">Take Profit</span>
-                          <p className="font-medium text-green-500">
-                            {activeSignal.takeProfit > 0 ? activeSignal.takeProfit.toFixed(2) : activeSignal.takeProfitPips > 0 ? `${activeSignal.takeProfitPips} pips` : 'IA dinâmico'}
-                          </p>
-                        </div>
-                      </div>
-                      {activeSignal?.girassolDescription && (
-                        <GirassolStatusBadge bias={activeSignal.girassolBias} description={activeSignal.girassolDescription} />
-                      )}
-                      <p className="text-xs text-muted-foreground border-t pt-2">{activeSignal?.reason}</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-3 animate-fadeIn">
-                      {/* Status HOLD — mostra o que a IA está fazendo agora */}
-                      <div className="flex items-center gap-2 p-2 rounded-md bg-yellow-500/10 border border-yellow-500/30">
-                        <Clock className="h-4 w-4 text-yellow-500 shrink-0" />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-semibold text-yellow-600 dark:text-yellow-400">IAs monitorando — aguardando consenso ≥70%</p>
-                          <p className="text-xs text-muted-foreground truncate">{activeSignal?.reason || 'Análise em progresso...'}</p>
-                        </div>
-                        <Badge variant="outline" className="shrink-0 text-yellow-500 border-yellow-500">HOLD</Badge>
-                      </div>
-                      {/* Último consenso da IA */}
-                      {status?.latestAIConsensus !== undefined && (
-                        <div className="space-y-1.5">
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="text-muted-foreground flex items-center gap-1">
-                              <Brain className="h-3 w-3" />
-                              Consenso real — {status.latestAnalysisSymbol || '—'}
-                              {status.latestIsRecoveryMode && <span className="text-orange-500 font-semibold ml-1">🔴 Recovery</span>}
-                            </span>
-                            <span className={`font-bold ${
-                              status.latestAIDirection === 'neutral' ? 'text-yellow-500'
-                              : status.latestAIConsensus >= (status.latestRequiredConsensus ?? 70) ? 'text-green-500' : 'text-red-500'
-                            }`}>
-                              {status.latestAIConsensus.toFixed(1)}%
-                              {status.latestAIDirection && <span className="ml-1">{status.latestAIDirection === 'up' ? '↑' : status.latestAIDirection === 'down' ? '↓' : '—'}</span>}
-                            </span>
+                <CardContent>
+                  {(() => {
+                    const isActive = !!(activeSignal?.action && activeSignal.action !== 'HOLD');
+                    return (
+                      <div>
+                        {/* Bloco sinal ativo — sempre no DOM, nunca desmontado */}
+                        <div className={`space-y-3 overflow-hidden transition-all duration-500 ease-in-out ${isActive ? 'opacity-100 max-h-[500px]' : 'opacity-0 max-h-0 pointer-events-none'}`}>
+                          <div className="flex items-center justify-between">
+                            <span className="text-xl font-bold">{activeSignal?.symbol || '—'}</span>
+                            <div className="flex items-center gap-2">
+                              {activeSignal?.source === 'deriv_bot' && (
+                                <Badge variant="outline" className="text-xs border-primary/40 text-primary">Deriv Bot</Badge>
+                              )}
+                              <Badge className={activeSignal?.action === 'BUY' ? 'bg-green-500' : 'bg-red-500'}>
+                                {activeSignal?.action}
+                              </Badge>
+                            </div>
                           </div>
-                          <Progress value={status.latestAIConsensus} className="h-2" />
-                          <div className="flex justify-between text-xs text-muted-foreground">
-                            <span>0%</span>
-                            <span className={status.latestIsRecoveryMode ? 'text-orange-500 font-semibold' : 'text-yellow-500'}>
-                              {status.latestRequiredConsensus ?? 70}% mínimo{status.latestIsRecoveryMode ? ' (recovery)' : ''}
-                            </span>
-                            <span>100%</span>
+                          <div className="grid grid-cols-2 gap-2 text-sm">
+                            <div>
+                              <span className="text-muted-foreground">Confiança</span>
+                              <p className="font-medium text-primary">{(((activeSignal?.confidence) || 0) * 100).toFixed(1)}%</p>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">IAs Ativas</span>
+                              <p className="font-medium">{activeSignal?.aiSources?.length || 5}</p>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">Stop Loss</span>
+                              <p className="font-medium text-red-500">
+                                {(activeSignal?.stopLoss ?? 0) > 0 ? activeSignal!.stopLoss.toFixed(2) : (activeSignal?.stopLossPips ?? 0) > 0 ? `${activeSignal!.stopLossPips} pips` : 'IA dinâmico'}
+                              </p>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">Take Profit</span>
+                              <p className="font-medium text-green-500">
+                                {(activeSignal?.takeProfit ?? 0) > 0 ? activeSignal!.takeProfit.toFixed(2) : (activeSignal?.takeProfitPips ?? 0) > 0 ? `${activeSignal!.takeProfitPips} pips` : 'IA dinâmico'}
+                              </p>
+                            </div>
                           </div>
-                          {status.latestAIDirection === 'neutral' && (
-                            <p className="text-xs text-yellow-600 dark:text-yellow-400 bg-yellow-50 dark:bg-yellow-950/30 rounded px-2 py-1">
-                              ⚠️ IAs retornaram NEUTRO — sem direção clara, operação bloqueada
-                            </p>
+                          {activeSignal?.girassolDescription && (
+                            <GirassolStatusBadge bias={activeSignal.girassolBias} description={activeSignal.girassolDescription} />
                           )}
+                          <p className="text-xs text-muted-foreground border-t pt-2">{activeSignal?.reason}</p>
                         </div>
-                      )}
-                      <div className="grid grid-cols-2 gap-2 text-xs">
-                        <div className="bg-muted/30 rounded p-2">
-                          <p className="text-muted-foreground">Stop Loss</p>
-                          <p className="font-semibold text-blue-400">IA dinâmico (ATR)</p>
-                        </div>
-                        <div className="bg-muted/30 rounded p-2">
-                          <p className="text-muted-foreground">Take Profit</p>
-                          <p className="font-semibold text-blue-400">IA dinâmico (Fib)</p>
-                        </div>
-                        <div className="bg-muted/30 rounded p-2">
-                          <p className="text-muted-foreground">Última análise</p>
-                          <p className="font-semibold">{status?.latestAnalysisAt ? formatTime(status.latestAnalysisAt) : '—'}</p>
-                        </div>
-                        <div className="bg-muted/30 rounded p-2">
-                          <p className="text-muted-foreground">Perdas consec.</p>
-                          <p className={`font-semibold ${(status?.consecutiveLosses || 0) >= 2 ? 'text-red-500' : 'text-green-500'}`}>
-                            {status?.consecutiveLosses ?? 0}/3
-                          </p>
+
+                        {/* Bloco HOLD — sempre no DOM, nunca desmontado */}
+                        <div className={`space-y-3 overflow-hidden transition-all duration-500 ease-in-out ${!isActive ? 'opacity-100 max-h-[500px]' : 'opacity-0 max-h-0 pointer-events-none'}`}>
+                          <div className="flex items-center gap-2 p-2 rounded-md bg-yellow-500/10 border border-yellow-500/30">
+                            <Clock className="h-4 w-4 text-yellow-500 shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-semibold text-yellow-600 dark:text-yellow-400">IAs monitorando — aguardando consenso ≥70%</p>
+                              <p className="text-xs text-muted-foreground truncate">{activeSignal?.reason || 'Análise em progresso...'}</p>
+                            </div>
+                            <Badge variant="outline" className="shrink-0 text-yellow-500 border-yellow-500">HOLD</Badge>
+                          </div>
+                          {status?.latestAIConsensus !== undefined && (
+                            <div className="space-y-1.5">
+                              <div className="flex items-center justify-between text-xs">
+                                <span className="text-muted-foreground flex items-center gap-1">
+                                  <Brain className="h-3 w-3" />
+                                  Consenso real — {status.latestAnalysisSymbol || '—'}
+                                  {status.latestIsRecoveryMode && <span className="text-orange-500 font-semibold ml-1">🔴 Recovery</span>}
+                                </span>
+                                <span className={`font-bold transition-colors duration-500 ${
+                                  status.latestAIDirection === 'neutral' ? 'text-yellow-500'
+                                  : status.latestAIConsensus >= (status.latestRequiredConsensus ?? 70) ? 'text-green-500' : 'text-red-500'
+                                }`}>
+                                  {status.latestAIConsensus.toFixed(1)}%
+                                  {status.latestAIDirection && <span className="ml-1">{status.latestAIDirection === 'up' ? '↑' : status.latestAIDirection === 'down' ? '↓' : '—'}</span>}
+                                </span>
+                              </div>
+                              <Progress value={status.latestAIConsensus} className="h-2" />
+                              <div className="flex justify-between text-xs text-muted-foreground">
+                                <span>0%</span>
+                                <span className={status.latestIsRecoveryMode ? 'text-orange-500 font-semibold' : 'text-yellow-500'}>
+                                  {status.latestRequiredConsensus ?? 70}% mínimo{status.latestIsRecoveryMode ? ' (recovery)' : ''}
+                                </span>
+                                <span>100%</span>
+                              </div>
+                              {status.latestAIDirection === 'neutral' && (
+                                <p className="text-xs text-yellow-600 dark:text-yellow-400 bg-yellow-50 dark:bg-yellow-950/30 rounded px-2 py-1">
+                                  ⚠️ IAs retornaram NEUTRO — sem direção clara, operação bloqueada
+                                </p>
+                              )}
+                            </div>
+                          )}
+                          <div className="grid grid-cols-2 gap-2 text-xs">
+                            <div className="bg-muted/30 rounded p-2">
+                              <p className="text-muted-foreground">Stop Loss</p>
+                              <p className="font-semibold text-blue-400">IA dinâmico (ATR)</p>
+                            </div>
+                            <div className="bg-muted/30 rounded p-2">
+                              <p className="text-muted-foreground">Take Profit</p>
+                              <p className="font-semibold text-blue-400">IA dinâmico (Fib)</p>
+                            </div>
+                            <div className="bg-muted/30 rounded p-2">
+                              <p className="text-muted-foreground">Última análise</p>
+                              <p className="font-semibold">{status?.latestAnalysisAt ? formatTime(status.latestAnalysisAt) : '—'}</p>
+                            </div>
+                            <div className="bg-muted/30 rounded p-2">
+                              <p className="text-muted-foreground">Perdas consec.</p>
+                              <p className={`font-semibold transition-colors duration-500 ${(status?.consecutiveLosses || 0) >= 2 ? 'text-red-500' : 'text-green-500'}`}>
+                                {status?.consecutiveLosses ?? 0}/3
+                              </p>
+                            </div>
+                          </div>
+                          {!status?.connected && <p className="text-xs text-yellow-500 text-center">⚠️ Conecte o EA ao MT5 para receber sinais</p>}
                         </div>
                       </div>
-                      {!status?.connected && <p className="text-xs text-yellow-500 text-center">⚠️ Conecte o EA ao MT5 para receber sinais</p>}
-                    </div>
-                  )}
+                    );
+                  })()}
                 </CardContent>
               </Card>
             </div>
