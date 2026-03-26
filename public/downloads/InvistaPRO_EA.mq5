@@ -159,10 +159,11 @@ void FetchAssetProfile()
 {
    string url     = g_serverUrl + "/api/metatrader/asset-profile/" + g_symbol;
    string headers = "Accept: application/json\r\n";
-   char   result[];
+   uchar  data[];
+   uchar  result[];
    string responseHeaders;
 
-   int res = WebRequest("GET", url, headers, 5000, NULL, result, responseHeaders);
+   int res = WebRequest("GET", url, headers, 5000, data, result, responseHeaders);
    if (res != 200) return;
 
    string resp  = CharArrayToString(result);
@@ -928,7 +929,7 @@ void MonitorOpenPositions()
       if (posInfo.Magic() != MagicNumber) continue;
       if (posInfo.Symbol() != g_symbol)   continue;
 
-      long   ticket    = posInfo.Ticket();
+      ulong  ticket    = posInfo.Ticket();
       string posType   = posInfo.PositionType() == POSITION_TYPE_BUY ? "BUY" : "SELL";
       double openPrice = posInfo.PriceOpen();
       double curPrice  = posInfo.PriceCurrent();
@@ -1087,9 +1088,10 @@ void FetchDiscoveryUrl()
 {
    string url     = g_serverUrl + "/api/url";
    string headers = "Accept: application/json\r\n";
-   char   result[];
+   uchar  data[];
+   uchar  result[];
    string responseHeaders;
-   int res = WebRequest("GET", url, headers, 5000, NULL, result, responseHeaders);
+   int res = WebRequest("GET", url, headers, 5000, data, result, responseHeaders);
    if (res == 200 && ArraySize(result) > 0)
    {
       string body    = CharArrayToString(result);
@@ -1124,9 +1126,10 @@ bool TryReconnect()
    }
    Print("🔄 Reconexão ", g_failCount, "/", MaxReconnectTries, "...");
    string headers = "Accept: application/json\r\n";
-   char   result[];
+   uchar  data[];
+   uchar  result[];
    string responseHeaders;
-   int res = WebRequest("GET", g_discoverUrl, headers, 10000, NULL, result, responseHeaders);
+   int res = WebRequest("GET", g_discoverUrl, headers, 10000, data, result, responseHeaders);
    if (res == 200 && ArraySize(result) > 0)
    {
       string body   = CharArrayToString(result);
