@@ -756,6 +756,29 @@ router.post('/signal-with-indicators', async (req: Request, res: Response) => {
 
         indicatorNotes.push(`📍 SL/TP recalculado via indicadores reais (${sltp.source}): SL=${sltp.stopLoss.toFixed(5)} TP=${sltp.takeProfit.toFixed(5)}`);
         console.log(`[MT5-Indicators] 📍 ${sym} SL/TP: ${sltp.source} | SL=${sltp.stopLoss.toFixed(5)} (${sltp.slPips}pip) | TP=${sltp.takeProfit.toFixed(5)} (${sltp.tpPips}pip)`);
+
+        // ── TP por microestrutura (45% do swing range + âncora Fibonacci) ──────
+        // Só aplica quando o duplo padrão da bolinha_media foi confirmado,
+        // garantindo que a entrada é de qualidade e o alvo respeita a estrutura.
+        if (doublePatternDetected) {
+          const microCandles = metaTraderBridge.getMarketData(sym);
+          if (microCandles.length >= 10) {
+            const microTP = metaTraderBridge.calcMicrostructureTP(
+              microCandles,
+              finalAction as 'BUY' | 'SELL',
+              currentPrice,
+              fibLevels
+            );
+            if (microTP > 0) {
+              const pipUnit = sym.includes('JPY') ? 0.01 : 0.00001;
+              refinedTP     = microTP;
+              refinedTPPips = Math.round(Math.abs(microTP - currentPrice) / pipUnit);
+              slTpSource    = sltp.source + '+microstructure_tp';
+              indicatorNotes.push(`🎯 TP microestrutura (duplo padrão confirmado): 45% swing range${fibLevels && fibLevels.length > 0 ? ' + âncora Fibonacci' : ''} → ${microTP.toFixed(5)} (${refinedTPPips}pip)`);
+              console.log(`[MT5-Indicators] 🎯 ${sym}: TP microestrutura=${microTP.toFixed(5)} (${refinedTPPips}pip) | candles=${microCandles.length}`);
+            }
+          }
+        }
       }
     }
 
