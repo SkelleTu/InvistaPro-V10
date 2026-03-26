@@ -894,8 +894,8 @@ export default function MetaTraderPage() {
               </Card>
             )}
 
-            {/* Reset de Sessão — visível quando há Recovery ou perdas consecutivas */}
-            {(status?.latestIsRecoveryMode || (status?.consecutiveLosses ?? 0) > 0) && !aiAnalysis?.latest?.circuitBreakerActive && (
+            {/* Reset de Sessão — visível somente quando Recovery está ativo */}
+            {status?.latestIsRecoveryMode && !aiAnalysis?.latest?.circuitBreakerActive && (
               <Card className="border-orange-500/40 bg-orange-500/5" data-testid="card-recovery-reset">
                 <CardContent className="pt-3 pb-3">
                   <div className="flex items-center justify-between gap-3">
@@ -903,10 +903,10 @@ export default function MetaTraderPage() {
                       <AlertTriangle className="h-4 w-4 text-orange-500 shrink-0" />
                       <div>
                         <p className="text-sm font-semibold text-orange-500">
-                          {status?.latestIsRecoveryMode ? '🔴 Modo Recovery ativo' : `⚠️ ${status?.consecutiveLosses} perda(s) consecutiva(s)`}
+                          🔴 Modo Recovery ativo
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          Threshold elevado de dados de testes. Zere para novo contexto de análise.
+                          Threshold elevado após perdas consecutivas. Zere para novo contexto de análise.
                         </p>
                       </div>
                     </div>
@@ -2069,14 +2069,11 @@ export default function MetaTraderPage() {
                     {resetSessionMutation.isPending ? 'Zerando...' : 'Zerar Sessão'}
                   </Button>
                 </div>
-                {(status?.latestIsRecoveryMode || (status?.consecutiveLosses ?? 0) > 0) && (
+                {status?.latestIsRecoveryMode && (
                   <div className="mt-3 flex items-center gap-2 px-3 py-2 rounded-lg bg-orange-500/10 border border-orange-500/30">
                     <AlertTriangle className="h-3.5 w-3.5 text-orange-500 shrink-0" />
                     <p className="text-xs text-orange-500">
-                      {status?.latestIsRecoveryMode
-                        ? `🔴 Recovery ativo — threshold elevado para ${status?.latestRequiredConsensus ?? '?'}%`
-                        : `⚠️ ${status?.consecutiveLosses} perda(s) consecutiva(s) afetando thresholds`}
-                      {' '}— Recomendado zerar para novo contexto.
+                      🔴 Recovery ativo — threshold elevado para {status?.latestRequiredConsensus ?? '?'}% — Recomendado zerar para novo contexto.
                     </p>
                   </div>
                 )}
