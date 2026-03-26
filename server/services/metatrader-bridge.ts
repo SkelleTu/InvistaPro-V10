@@ -1144,6 +1144,129 @@ class MetaTraderBridge extends EventEmitter {
     timestamp: number;
   }> = new Map();
 
+  // ── Histórico de ativações da bolinha_media por símbolo ──
+  // Usado para detectar duplo topo / duplo fundo antes de abrir entrada.
+  // Cada entrada representa um pivô distinto detectado pelo indicador real no MT5.
+  private bolinhaMediaHistory: Map<string, Array<{
+    price: number;
+    direction: 'BUY' | 'SELL';
+    timestamp: number;
+  }>> = new Map();
+
+  /**
+   * Registra uma ativação da bolinha_media_pivot para um símbolo.
+   * Faz deduplicação: ignora se o mesmo pivô (preço ±0.1%, mesma direção)
+   * já foi registrado nos últimos 3 minutos.
+   * Retorna true se foi registrado como novo pivô distinto.
+   */
+  public recordBolinhaMedia(symbol: string, price: number, direction: 'BUY' | 'SELL'): boolean {
+    const hist = this.bolinhaMediaHistory.get(symbol) || [];
+    const now = Date.now();
+    const DEDUP_MS  = 3 * 60 * 1000; // 3 minutos
+    const DEDUP_PCT = 0.001;          // 0.1% de preço = mesmo pivô
+
+    const latest = hist[hist.length - 1];
+    if (latest && latest.direction === direction && now - latest.timestamp < DEDUP_MS) {
+      const priceDiff = Math.abs(latest.price - price) / (price || 1);
+      if (priceDiff < DEDUP_PCT) return false; // duplicado
+    }
+
+    hist.push({ price, direction, timestamp: now });
+    if (hist.length > 20) hist.splice(0, hist.length - 20);
+    this.bolinhaMediaHistory.set(symbol, hist);
+    return true;
+  }
+
+  /**
+   * Verifica se os registros de bolinha_media formam um Duplo Topo ou Duplo Fundo.
+   * Duplo Topo  = dois pivôs SELL em preços similares (≤0.5% de diferença) com ≥60s de separação.
+   * Duplo Fundo = dois pivôs BUY  em preços similares (≤0.5% de diferença) com ≥60s de separação.
+   * Janela de validade: últimos 30 minutos.
+   */
+  public checkBolinhaMediaDoublePattern(symbol: string, direction: 'BUY' | 'SELL'): {
+    detected: boolean;
+    patternType: 'double_top' | 'double_bottom' | null;
+    pivotPrice: number;
+    ageMs: number;
+  } {
+    const hist = this.bolinhaMediaHistory.get(symbol) || [];
+    const now  = Date.now();
+    const MAX_AGE_MS      = 30 * 60 * 1000; // 30 minutos
+    const PRICE_TOLERANCE = 0.005;           // ±0.5%
+    const MIN_SEP_MS      = 60_000;          // pivôs devem ter ≥60s de separação
+
+    const candidates = hist.filter(h => h.direction === direction && now - h.timestamp < MAX_AGE_MS);
+    if (candidates.length < 2) return { detected: false, patternType: null, pivotPrice: 0, ageMs: 0 };
+
+    // Pega o pivô mais recente e procura um pivô anterior em preço similar
+    const newest = candidates[candidates.length - 1];
+    const older  = candidates.slice(0, -1).reverse(); // mais recentes primeiro
+
+    for (const prev of older) {
+      const sep = newest.timestamp - prev.timestamp;
+      if (sep < MIN_SEP_MS) continue; // mesmo candle ou muito próximos
+      const priceDiff = Math.abs(prev.price - newest.price) / (newest.price || 1);
+      if (priceDiff <= PRICE_TOLERANCE) {
+        return {
+          detected:    true,
+          patternType: direction === 'SELL' ? 'double_top' : 'double_bottom',
+          pivotPrice:  (prev.price + newest.price) / 2,
+          ageMs:       sep,
+        };
+      }
+    }
+
+    return { detected: false, patternType: null, pivotPrice: 0, ageMs: 0 };
+  }
+
+  /**
+   * Calcula o TP baseado na microestrutura de mercado:
+   *  - Mede o range swing high/low dos últimos N candles (padrão 50)
+   *  - Alvo = entrada ± 45% desse range (ligeiramente abaixo da metade)
+   *  - Ancora no nível Fibonacci mais próximo dentro de ±15% do range calculado
+   * Retorna 0 se não há dados suficientes.
+   */
+  public calcMicrostructureTP(
+    candles: Array<{ high?: number; low?: number; close: number }>,
+    action: 'BUY' | 'SELL',
+    entryPrice: number,
+    fibLevels?: Array<{ level: string; price: number }>
+  ): number {
+    const lookback = Math.min(candles.length, 50);
+    const recent   = candles.slice(-lookback);
+
+    const swingHigh = Math.max(...recent.map(c => c.high ?? c.close));
+    const swingLow  = Math.min(...recent.map(c => c.low  ?? c.close));
+    const microRange = swingHigh - swingLow;
+
+    if (microRange <= 0 || entryPrice <= 0) return 0;
+
+    // Alvo bruto: 45% do range
+    const rawTP = action === 'BUY'
+      ? entryPrice + microRange * 0.45
+      : entryPrice - microRange * 0.45;
+
+    // Ancorar no Fibonacci mais próximo (dentro de 15% do range de tolerância)
+    if (fibLevels && fibLevels.length > 0) {
+      const tolerance = microRange * 0.15;
+      let bestFib: { price: number } | null = null;
+      let bestDist = Infinity;
+
+      for (const fib of fibLevels) {
+        const inDir = action === 'BUY' ? fib.price > entryPrice : fib.price < entryPrice;
+        if (!inDir) continue;
+        const dist = Math.abs(fib.price - rawTP);
+        if (dist < bestDist && dist <= tolerance) {
+          bestDist = dist;
+          bestFib  = fib;
+        }
+      }
+      if (bestFib) return bestFib.price;
+    }
+
+    return rawTP;
+  }
+
   /**
    * Chamado pela rota signal-with-indicators toda vez que o EA envia dados do Girassol.
    * Armazena o estado atual para uso em generateSignal (ajuste dinâmico de threshold de IA).

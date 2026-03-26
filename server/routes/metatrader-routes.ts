@@ -243,6 +243,20 @@ router.post('/signal-with-indicators', async (req: Request, res: Response) => {
           [...buySigs, ...sellSigs]
             .filter((s: any) => s.bar <= 4 && s.value !== 0)
             .forEach((s: any) => girassolRawBufferDiag.push({ buffer: lv.level_id * 2, bar: s.bar, value: s.value }));
+
+          // ── Registrar bolinha_media_pivot para detecção de duplo topo/fundo ──
+          if (lv.level_name === 'bolinha_media_pivot') {
+            const entryPrice = ask || bid || 0;
+            if (recentBuy && !recentSell && entryPrice > 0) {
+              const pivotPrice = recentBuy.value > 0 ? recentBuy.value : entryPrice;
+              const isNew = metaTraderBridge.recordBolinhaMedia(sym, pivotPrice, 'BUY');
+              if (isNew) console.log(`[MT5-Indicators] 🔵 ${sym}: bolinha_media BUY registrada @ ${pivotPrice.toFixed(5)} (barra ${recentBuy.bar})`);
+            } else if (recentSell && !recentBuy && entryPrice > 0) {
+              const pivotPrice = recentSell.value > 0 ? recentSell.value : entryPrice;
+              const isNew = metaTraderBridge.recordBolinhaMedia(sym, pivotPrice, 'SELL');
+              if (isNew) console.log(`[MT5-Indicators] 🔵 ${sym}: bolinha_media SELL registrada @ ${pivotPrice.toFixed(5)} (barra ${recentSell.bar})`);
+            }
+          }
         }
 
         // Determina viés por PRIORIDADE: Girassol extremo > Bolinha média > Bolinha pequena
@@ -405,6 +419,33 @@ router.post('/signal-with-indicators', async (req: Request, res: Response) => {
     // Registrar estado do Girassol no bridge para uso no próximo generateSignal
     if (girassol?.detected) {
       metaTraderBridge.setGirassolBias(sym, girassolBias, girassolConfluence);
+    }
+
+    // ── GATE: exigir Duplo Topo / Duplo Fundo na bolinha_media para entrada ────
+    // Entradas só são aprovadas quando o nível médio do Girassol (bolinha_media_pivot)
+    // confirma dois pivôs consecutivos na mesma direção e em preços similares.
+    // Isso elimina entradas prematuras baseadas em sinal único (sem estrutura confirmada).
+    let doublePatternDetected = false;
+    let doublePatternNote = '';
+
+    if (girassol?.detected && girassolBias !== 'NEUTRAL' && finalAction !== 'HOLD') {
+      const dp = metaTraderBridge.checkBolinhaMediaDoublePattern(sym, girassolBias as 'BUY' | 'SELL');
+      doublePatternDetected = dp.detected;
+
+      if (dp.detected) {
+        const patternLabel = dp.patternType === 'double_top' ? 'DUPLO TOPO' : 'DUPLO FUNDO';
+        const ageMin = Math.round(dp.ageMs / 60_000);
+        doublePatternNote = `🌻 ${patternLabel} confirmado @ ${dp.pivotPrice.toFixed(5)} (${ageMin}min entre pivôs) — entrada autorizada`;
+        console.log(`[MT5-Indicators] 🌻 ${sym}: ${patternLabel} bolinha_media confirmado — entrada liberada`);
+      } else {
+        // Ainda não há duplo padrão — bloquear e aguardar o segundo pivô
+        const biasLabel = girassolBias === 'SELL' ? 'SELL (aguardando duplo topo)' : 'BUY (aguardando duplo fundo)';
+        doublePatternNote = `⏳ bolinha_media ${biasLabel} — 1º pivô registrado, aguardando confirmação do 2º`;
+        console.log(`[MT5-Indicators] ⏳ ${sym}: bolinha_media ${girassolBias} — aguardando 2º pivô para duplo padrão`);
+        finalAction     = 'HOLD';
+        finalConfidence = 0;
+        finalReason     = `Aguardando duplo padrão: bolinha_media ${girassolBias} registrou 1º pivô — entrada somente quando 2º pivô em nível similar confirmar`;
+      }
     }
 
     // ── Calcular bônus do Fibonacci ──────────────────────────────────────
