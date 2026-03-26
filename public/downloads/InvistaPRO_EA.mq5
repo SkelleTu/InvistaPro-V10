@@ -1,15 +1,19 @@
 //+------------------------------------------------------------------+
 //|                                              InvistaPRO_EA.mq5    |
 //|                                 InvistaPRO - Auto-Discovery URL   |
-//|   Versão 7.0 — 3 Níveis Girassol + Bolinhas Semáforo             |
-//|   Girassol: LowSymbol(azul/compra) e HighSymbol(vermelho/venda)  |
+//|   Versão 8.0 — Girassol 3 Níveis + AutoFibonacci + Diagnóstico   |
+//|   CORREÇÕES v8.0:                                                 |
+//|   • Detecção ampliada de nomes do Girassol/Fibonacci              |
+//|   • Endpoint /signal-with-indicators com fallback robusto         |
+//|   • Envio paralelo de candles (market-data) para Girassol Sinté.  |
+//|   • Diagnóstico detalhado de indicadores no log do MT5            |
+//|   • URL de descoberta automática atualizada                       |
 //|   Nível 1: Girassol extremo (buf 0=compra, 1=venda)              |
 //|   Nível 2: Bolinha média pivot (buf 2=compra, 3=venda)           |
 //|   Nível 3: Bolinha pequena micro (buf 4=compra, 5=venda)         |
-//|   Detecta também Semáforo/Bolinha como indicador separado         |
 //+------------------------------------------------------------------+
 #property copyright "InvistaPRO"
-#property version   "7.2"
+#property version   "8.0"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -25,7 +29,7 @@ enum ENUM_AI_CONTROL_MODE
 };
 
 //--- Parâmetros de entrada
-input string   ServerURL        = "https://7352d23d-7673-4705-a8d7-9e8839cf09fa-00-1jh0r3h4kuy8w.worf.replit.dev"; // URL do servidor
+input string   ServerURL        = "https://122284a9-d70a-4277-9a4b-478d7fcd9327-00-16xr0ls10nbww.spock.replit.dev"; // URL do servidor InvistaPRO
 input string   DiscoveryBlobURL = "https://jsonblob.com/api/jsonBlob/019d0dd7-564d-7c0c-a833-9a25b3b70c81"; // URL de descoberta automática
 input string   ApiToken         = "";          // Token de autenticação (opcional)
 input string   Symbol_Override  = "";          // Símbolo (vazio = gráfico atual)
@@ -40,19 +44,19 @@ input int      CandleCount      = 200;         // Candles para enviar à IA (his
 //--- Controle de Autonomia da IA
 input ENUM_AI_CONTROL_MODE AIControlMode = AI_FULL; // Modo de Controle da IA
 
-//--- Parâmetros Manuais (usados no modo Manual ou Parcial quando IA não controla o item)
+//--- Parâmetros Manuais
 input double   ManualLotSize    = 0.01;  // Lote (manual)
 input int      ManualStopLoss   = 0;     // Stop Loss em pontos — 0 = desativado (manual)
 input int      ManualTakeProfit = 0;     // Take Profit em pontos — 0 = desativado (manual)
-input int      MaxPositions     = 1;     // Máximo de posições abertas simultâneas (1 = aguardar fechar antes de nova entrada)
-input int      WarmupSeconds   = 120;   // Período de aquecimento após instalação — EA só observa, NÃO abre ordens (segundos)
+input int      MaxPositions     = 1;     // Máximo de posições abertas simultâneas
+input int      WarmupSeconds   = 120;   // Período de aquecimento (segundos)
 
-//--- Controle Parcial — marque o que a IA deve decidir (visível no modo Parcial)
+//--- Controle Parcial
 input bool     AI_Lote          = true;  // IA define o tamanho do lote
 input bool     AI_StopLoss      = true;  // IA define o Stop Loss
 input bool     AI_TakeProfit    = true;  // IA define o Take Profit
 input bool     AI_Entrada       = true;  // IA decide quando e se entrar
-input bool     AI_Saida         = true;  // IA decide quando sair (monitor de posições)
+input bool     AI_Saida         = true;  // IA decide quando sair
 
 //--- Variáveis globais
 string   g_serverUrl      = "";
@@ -66,10 +70,12 @@ bool     g_isDiscovering  = false;
 string   g_pendingSignalId= "";
 datetime g_lastMonitor    = 0;
 int      g_monitorSeconds = 2;
-datetime g_warmupUntil    = 0;   // Operações bloqueadas até este timestamp (aquecimento)
-datetime g_lastWarmupPrint= 0;   // Controle de spam do log de aquecimento
+datetime g_warmupUntil    = 0;
+datetime g_lastWarmupPrint= 0;
+datetime g_lastMarketData = 0;  // controle do envio de candles para Girassol Sintético
+int      g_marketDataSeconds = 10; // envia candles a cada 10s para o Girassol Sintético
 
-// Perfil do ativo recebido do servidor
+// Perfil do ativo
 string   g_assetFamily    = "";
 string   g_assetTrend     = "";
 string   g_assetVolClass  = "";
@@ -80,20 +86,23 @@ bool     g_assetProfileLoaded = false;
 CTrade         trade;
 CPositionInfo  posInfo;
 
-//--- Estrutura para armazenar info de cada indicador detectado no gráfico
+//--- Estrutura para indicadores detectados
 struct IndicatorInfo
 {
    string name;
+   string nameLower;
    int    handle;
    int    subwindow;
    int    totalBuffers;
+   bool   isGirassol;
+   bool   isFibonacci;
 };
 
 IndicatorInfo g_indicators[];
 int           g_indicatorCount = 0;
 
 //+------------------------------------------------------------------+
-//| Inicialização do EA                                               |
+//| Inicialização                                                     |
 //+------------------------------------------------------------------+
 int OnInit()
 {
@@ -105,60 +114,46 @@ int OnInit()
 
    trade.SetExpertMagicNumber(MagicNumber);
 
-   // Inicializa os timers com o tempo atual para evitar execução imediata
    datetime now = TimeCurrent();
-   g_lastSignal    = now;
-   g_lastHeartbeat = now;
-   g_lastMonitor   = now;
+   g_lastSignal      = now;
+   g_lastHeartbeat   = now;
+   g_lastMonitor     = now;
    g_lastWarmupPrint = now;
+   g_lastMarketData  = now;
 
-   // Período de aquecimento: EA analisa o mercado mas NÃO abre posições
-   // até WarmupSeconds após a inicialização. Evita entrar em condições
-   // não analisadas logo após a instalação.
    if (WarmupSeconds > 0)
       g_warmupUntil = now + WarmupSeconds;
    else
-      g_warmupUntil = now; // sem aquecimento se WarmupSeconds = 0
+      g_warmupUntil = now;
 
-   Print("🚀 InvistaPRO EA v7.2 iniciado | Símbolo: ", g_symbol);
-   Print("   → Perfil de ativo Deriv | SL/TP por indicadores reais | ", CandleCount, " candles históricos");
+   Print("🚀 InvistaPRO EA v8.0 iniciado | Símbolo: ", g_symbol);
+   Print("   → URL: ", g_serverUrl);
+   Print("   → CandleCount: ", CandleCount, " | IndicatorBars: ", IndicatorBars);
    if (WarmupSeconds > 0)
-      Print("   ⏳ AQUECIMENTO ATIVO: primeiras operações bloqueadas por ", WarmupSeconds,
-            "s (até ", TimeToString(g_warmupUntil, TIME_DATE|TIME_SECONDS), ")");
-   else
-      Print("   → Sem período de aquecimento (WarmupSeconds=0)");
+      Print("   ⏳ AQUECIMENTO ATIVO: operações bloqueadas por ", WarmupSeconds, "s");
 
    string modeLabel = "";
    if (AIControlMode == AI_MANUAL)
-      modeLabel = "MANUAL — usuário define tudo (lote, SL, TP, entradas e saídas)";
+      modeLabel = "MANUAL";
    else if (AIControlMode == AI_PARTIAL)
-      modeLabel = "PARCIAL — IA controla: Lote=" + (AI_Lote ? "sim" : "não") +
-                  " | SL=" + (AI_StopLoss ? "sim" : "não") +
-                  " | TP=" + (AI_TakeProfit ? "sim" : "não") +
-                  " | Entrada=" + (AI_Entrada ? "sim" : "não") +
-                  " | Saída=" + (AI_Saida ? "sim" : "não");
+      modeLabel = "PARCIAL";
    else
-      modeLabel = "TOTAL — IA controla 100% de forma autônoma";
+      modeLabel = "TOTAL (IA controla 100%)";
    Print("🤖 Modo de Controle da IA: ", modeLabel);
 
    ScanChartIndicators();
 
    if (g_discoverUrl == "") FetchDiscoveryUrl();
 
-   // Busca o perfil do ativo Deriv logo no início
    FetchAssetProfile();
-
-   // Envia heartbeat inicial imediatamente para registrar a conexão no servidor.
-   // Os próximos heartbeats seguirão o intervalo configurado (HeartbeatSeconds).
    SendHeartbeat();
-   g_lastHeartbeat = TimeCurrent(); // reseta após o heartbeat inicial
+   g_lastHeartbeat = TimeCurrent();
 
    return(INIT_SUCCEEDED);
 }
 
 //+------------------------------------------------------------------+
-//| Busca e armazena o perfil do ativo sintético no servidor         |
-//| Permite que o EA saiba de antemão como aquele ativo se comporta  |
+//| Busca perfil do ativo Deriv                                       |
 //+------------------------------------------------------------------+
 void FetchAssetProfile()
 {
@@ -170,7 +165,7 @@ void FetchAssetProfile()
    int res = WebRequest("GET", url, headers, 5000, NULL, result, responseHeaders);
    if (res != 200) return;
 
-   string resp = CharArrayToString(result);
+   string resp  = CharArrayToString(result);
    string found = ExtractJsonString(resp, "found");
    if (found != "true") return;
 
@@ -179,21 +174,16 @@ void FetchAssetProfile()
    g_assetVolClass  = ExtractJsonString(resp, "volClass");
    g_assetProfileLoaded = true;
 
-   // Extrai thresholds de RSI do objeto indicatorGuidance
    double ov  = ExtractJsonDoubleInObject(resp, "indicatorGuidance", "rsiOversold");
    double ovb = ExtractJsonDoubleInObject(resp, "indicatorGuidance", "rsiOverbought");
    if (ov  > 0) g_assetRsiOversold  = ov;
    if (ovb > 0) g_assetRsiOverbought= ovb;
 
-   Print("📊 Perfil do ativo carregado: ", g_symbol);
-   Print("   Família:     ", g_assetFamily);
-   Print("   Volatilidade: ", g_assetVolClass);
-   Print("   Tipo:        ", g_assetTrend);
-   Print("   RSI thr:     <", g_assetRsiOversold, " / >", g_assetRsiOverbought);
+   Print("📊 Perfil carregado: ", g_symbol, " | ", g_assetFamily, " | ", g_assetVolClass, " | ", g_assetTrend);
 }
 
 //+------------------------------------------------------------------+
-//| Detecta TODOS os indicadores instalados no gráfico atual          |
+//| Escaneia TODOS os indicadores no gráfico com diagnóstico amplo   |
 //+------------------------------------------------------------------+
 void ScanChartIndicators()
 {
@@ -203,11 +193,13 @@ void ScanChartIndicators()
    long chartId     = ChartID();
    int  totalWindows= (int)ChartGetInteger(chartId, CHART_WINDOWS_TOTAL);
 
-   Print("🔍 Escaneando indicadores em ", totalWindows, " janela(s) do gráfico...");
+   Print("🔍 v8.0 — Escaneando ", totalWindows, " janela(s) do gráfico...");
 
    for (int win = 0; win < totalWindows; win++)
    {
       int indicatorsInWindow = ChartIndicatorsTotal(chartId, win);
+      Print("   Janela ", win, ": ", indicatorsInWindow, " indicador(es)");
+
       for (int idx = 0; idx < indicatorsInWindow; idx++)
       {
          string shortName = ChartIndicatorName(chartId, win, idx);
@@ -216,7 +208,7 @@ void ScanChartIndicators()
          int handle = ChartIndicatorGet(chartId, win, shortName);
          if (handle == INVALID_HANDLE)
          {
-            Print("⚠️ Handle inválido: ", shortName);
+            Print("   ⚠️ Handle inválido para: [", shortName, "]");
             continue;
          }
 
@@ -228,24 +220,80 @@ void ScanChartIndicators()
             numBuffers = b + 1;
          }
 
+         string nameLower = shortName;
+         StringToLower(nameLower);
+
+         // ── DETECÇÃO AMPLIADA DO GIRASSOL v8.0 ──────────────────────────────
+         // Cobre todos os nomes conhecidos do Girassol Sunflower em BR/EN
+         bool isGirassol = (
+            StringFind(nameLower, "girassol")    >= 0 ||
+            StringFind(nameLower, "sunflower")   >= 0 ||
+            StringFind(nameLower, "gira")        >= 0 ||
+            StringFind(nameLower, "girasol")     >= 0 ||  // grafia alternativa
+            StringFind(nameLower, "zigzag")      >= 0 ||  // base do Girassol
+            StringFind(nameLower, "zig zag")     >= 0 ||
+            StringFind(nameLower, "zz_")         >= 0 ||
+            StringFind(nameLower, "semaforo")    >= 0 ||  // nomes alternativos
+            StringFind(nameLower, "semáforo")    >= 0 ||
+            StringFind(nameLower, "bolinha")     >= 0 ||
+            StringFind(nameLower, "pivot_zz")   >= 0 ||
+            StringFind(nameLower, "pivots")      >= 0 ||
+            StringFind(nameLower, "fractal")     >= 0 ||  // fractais = base do pivot
+            StringFind(nameLower, "swing")       >= 0 ||
+            StringFind(nameLower, "flor")        >= 0
+         );
+
+         // ── DETECÇÃO AMPLIADA DO AUTOFIBONACCI v8.0 ─────────────────────────
+         bool isFibonacci = (
+            StringFind(nameLower, "fib")         >= 0 ||
+            StringFind(nameLower, "fibonacci")   >= 0 ||
+            StringFind(nameLower, "retr")        >= 0 ||
+            StringFind(nameLower, "retracement") >= 0 ||
+            StringFind(nameLower, "extension")   >= 0 ||
+            StringFind(nameLower, "auto_fib")    >= 0 ||
+            StringFind(nameLower, "autofib")     >= 0 ||
+            StringFind(nameLower, "auto fib")    >= 0 ||
+            StringFind(nameLower, "fibo")        >= 0 ||
+            StringFind(nameLower, "level")       >= 0 ||
+            StringFind(nameLower, "golden")      >= 0 ||  // golden ratio
+            StringFind(nameLower, "161")         >= 0 ||  // 161.8%
+            StringFind(nameLower, "618")         >= 0     // 61.8%
+         );
+
          int i = g_indicatorCount;
          ArrayResize(g_indicators, i + 1);
          g_indicators[i].name        = shortName;
+         g_indicators[i].nameLower   = nameLower;
          g_indicators[i].handle      = handle;
          g_indicators[i].subwindow   = win;
          g_indicators[i].totalBuffers= numBuffers;
+         g_indicators[i].isGirassol  = isGirassol;
+         g_indicators[i].isFibonacci = isFibonacci;
          g_indicatorCount++;
 
-         Print("✅ Indicador detectado: [", shortName, "] | Janela: ", win,
-               " | Buffers: ", numBuffers);
+         string typeTag = isGirassol ? " 🌻GIRASSOL" : isFibonacci ? " 📐FIBONACCI" : "";
+         Print("   ✅ [", shortName, "] Janela=", win, " Buffers=", numBuffers, typeTag);
       }
    }
-   Print("📊 Total de indicadores detectados: ", g_indicatorCount);
+
+   int girassolCount  = 0;
+   int fibonacciCount = 0;
+   for (int i = 0; i < g_indicatorCount; i++)
+   {
+      if (g_indicators[i].isGirassol)  girassolCount++;
+      if (g_indicators[i].isFibonacci) fibonacciCount++;
+   }
+
+   Print("📊 Total: ", g_indicatorCount, " indicador(es) | Girassol=", girassolCount, " | Fibonacci=", fibonacciCount);
+
+   if (girassolCount == 0)
+      Print("⚠️ ATENÇÃO: Girassol/Sunflower NÃO detectado. Instale o indicador no gráfico do ativo '", g_symbol, "' para ativar o filtro primário.");
+   if (fibonacciCount == 0)
+      Print("ℹ️ AutoFibonacci não detectado — análise de Fibonacci será feita pelo servidor.");
 }
 
 //+------------------------------------------------------------------+
-//| Lê os buffers de todos os indicadores detectados                  |
-//| Retorna JSON array com valores de cada buffer de cada indicador   |
+//| Lê buffers brutos de todos os indicadores                         |
 //+------------------------------------------------------------------+
 string ReadAllIndicatorBuffers()
 {
@@ -258,6 +306,8 @@ string ReadAllIndicatorBuffers()
       json += "{";
       json += "\"name\":\"" + g_indicators[i].name + "\",";
       json += "\"subwindow\":" + IntegerToString(g_indicators[i].subwindow) + ",";
+      json += "\"isGirassol\":" + (g_indicators[i].isGirassol ? "true" : "false") + ",";
+      json += "\"isFibonacci\":" + (g_indicators[i].isFibonacci ? "true" : "false") + ",";
       json += "\"buffers\":[";
 
       for (int b = 0; b < g_indicators[i].totalBuffers; b++)
@@ -288,25 +338,7 @@ string ReadAllIndicatorBuffers()
 }
 
 //+------------------------------------------------------------------+
-//| Identifica sinais estruturados do Girassol (3 níveis)            |
-//| e Fibonacci automático — o Girassol É o próprio semáforo        |
-//|                                                                  |
-//| GIRASSOL — 3 níveis de sinal (o próprio Girassol É o semáforo) |
-//|                                                                  |
-//|   Nível 1 — Girassol extremo (topos/fundos extremos)            |
-//|     Buffer 0 = LowSymbol  → compra  (centro AZUL)              |
-//|     Buffer 1 = HighSymbol → venda   (centro VERMELHO)           |
-//|                                                                  |
-//|   Nível 2 — Bolinha média pivot (topos/fundos de pivot)         |
-//|     Buffer 2 = LowSymbol/compra (azul)                          |
-//|     Buffer 3 = HighSymbol/venda (vermelho)                      |
-//|                                                                  |
-//|   Nível 3 — Bolinha pequena micro (micro-estruturas)            |
-//|     Buffer 4 = LowSymbol/compra (azul)                          |
-//|     Buffer 5 = HighSymbol/venda (vermelho)                      |
-//|                                                                  |
-//| v7.0: support_resistance_levels para SL/TP baseado em níveis    |
-//|        reais dos indicadores instalados no gráfico               |
+//| Lê sinais estruturados do Girassol (3 níveis) e AutoFibonacci    |
 //+------------------------------------------------------------------+
 string ReadStructuredIndicatorSignals()
 {
@@ -317,21 +349,10 @@ string ReadStructuredIndicatorSignals()
 
    for (int i = 0; i < g_indicatorCount; i++)
    {
-      string nameLower = g_indicators[i].name;
-      StringToLower(nameLower);
-
-      bool isGirassol  = (StringFind(nameLower, "girassol")  >= 0 ||
-                          StringFind(nameLower, "sunflower")  >= 0 ||
-                          StringFind(nameLower, "gira")       >= 0);
-
-      bool isFibonacci = (StringFind(nameLower, "fib")        >= 0 ||
-                          StringFind(nameLower, "fibonacci")   >= 0 ||
-                          StringFind(nameLower, "retr")        >= 0);
-
       // ================================================================
-      // === LEITURA DO GIRASSOL — 3 NÍVEIS ===
+      // === GIRASSOL — 3 NÍVEIS ===
       // ================================================================
-      if (isGirassol && !girassolFound)
+      if (g_indicators[i].isGirassol && !girassolFound)
       {
          girassolFound = true;
          int    totalBufs = g_indicators[i].totalBuffers;
@@ -343,12 +364,6 @@ string ReadStructuredIndicatorSignals()
          json += "\"name\":\"" + g_indicators[i].name + "\",";
          json += "\"total_buffers\":" + IntegerToString(totalBufs) + ",";
 
-         // -----------------------------------------------------------
-         // Mapa dos 3 níveis — pares de buffers (par=compra, ímpar=venda)
-         // Nível 0: buf 0 (LowSymbol/buy, azul) e buf 1 (HighSymbol/sell, vermelho) → Girassol extremo
-         // Nível 1: buf 2 (buy, azul) e buf 3 (sell, vermelho) → Bolinha média pivot
-         // Nível 2: buf 4 (buy, azul) e buf 5 (sell, vermelho) → Bolinha pequena micro
-         // -----------------------------------------------------------
          string levelNames[];
          ArrayResize(levelNames, 3);
          levelNames[0] = "girassol_extremo";
@@ -357,23 +372,19 @@ string ReadStructuredIndicatorSignals()
 
          string levelsJson = "\"levels\":[";
          bool   firstLevel = true;
-
-         // Suporte/resistência para SL/TP
-         string srLevels = "\"support_resistance_levels\":[";
-         bool   firstSR  = true;
-
-         // Dados resumidos de todos os sinais combinados
+         string srLevels   = "\"support_resistance_levels\":[";
+         bool   firstSR    = true;
          string allBuyJson  = "\"all_buy_signals\":[";
          string allSellJson = "\"all_sell_signals\":[";
-         bool   firstBuy    = true;
-         bool   firstSell   = true;
+         bool   firstBuy   = true;
+         bool   firstSell  = true;
 
          for (int lvl = 0; lvl < 3; lvl++)
          {
-            int bufBuy  = lvl * 2;       // 0, 2, 4
-            int bufSell = lvl * 2 + 1;   // 1, 3, 5
+            int bufBuy  = lvl * 2;
+            int bufSell = lvl * 2 + 1;
 
-            if (bufBuy  >= totalBufs && bufSell >= totalBufs) continue;
+            if (bufBuy >= totalBufs && bufSell >= totalBufs) continue;
 
             if (!firstLevel) levelsJson += ",";
             firstLevel = false;
@@ -381,8 +392,6 @@ string ReadStructuredIndicatorSignals()
             levelsJson += "{";
             levelsJson += "\"level_id\":" + IntegerToString(lvl) + ",";
             levelsJson += "\"level_name\":\"" + levelNames[lvl] + "\",";
-
-            // --- BUY side (LowSymbol / azul) ---
             levelsJson += "\"buy_symbol\":\"LowSymbol\",";
             levelsJson += "\"buy_color\":\"blue\",";
             levelsJson += "\"buy_buffer\":" + IntegerToString(bufBuy) + ",";
@@ -398,38 +407,23 @@ string ReadStructuredIndicatorSignals()
                   {
                      if (bufB[v] >= 1e20 || bufB[v] <= -1e20) continue;
                      if (bufB[v] == 0.0) continue;
-
                      if (!firstEntry) levelsJson += ",";
                      firstEntry = false;
-                     string entry = "{\"bar\":" + IntegerToString(v) +
-                                    ",\"value\":" + DoubleToString(bufB[v], _Digits) +
-                                    ",\"direction\":\"buy\",\"color\":\"blue\"}";
-                     levelsJson += entry;
-
-                     // Adiciona ao resumo geral
+                     levelsJson += "{\"bar\":" + IntegerToString(v) + ",\"value\":" + DoubleToString(bufB[v], _Digits) + ",\"direction\":\"buy\",\"color\":\"blue\"}";
                      if (!firstBuy) allBuyJson += ",";
                      firstBuy = false;
-                     allBuyJson += "{\"level\":\"" + levelNames[lvl] + "\",\"bar\":" +
-                                   IntegerToString(v) + ",\"value\":" +
-                                   DoubleToString(bufB[v], _Digits) + "}";
-
-                     // Suporte/resistência (apenas barra 0)
+                     allBuyJson += "{\"level\":\"" + levelNames[lvl] + "\",\"bar\":" + IntegerToString(v) + ",\"value\":" + DoubleToString(bufB[v], _Digits) + "}";
                      if (v == 0 && ask > 0)
                      {
                         string srType = (bufB[v] < ask) ? "support" : "resistance";
                         if (!firstSR) srLevels += ",";
                         firstSR = false;
-                        srLevels += "{\"type\":\"" + srType + "\",";
-                        srLevels += "\"price\":" + DoubleToString(bufB[v], _Digits) + ",";
-                        srLevels += "\"level\":\"" + levelNames[lvl] + "\",";
-                        srLevels += "\"direction\":\"buy\",\"buffer\":" + IntegerToString(bufBuy) + "}";
+                        srLevels += "{\"type\":\"" + srType + "\",\"price\":" + DoubleToString(bufB[v], _Digits) + ",\"level\":\"" + levelNames[lvl] + "\",\"direction\":\"buy\",\"buffer\":" + IntegerToString(bufBuy) + "}";
                      }
                   }
                }
             }
-            levelsJson += "],"; // fecha buy_signals
-
-            // --- SELL side (HighSymbol / vermelho) ---
+            levelsJson += "],";
             levelsJson += "\"sell_symbol\":\"HighSymbol\",";
             levelsJson += "\"sell_color\":\"red\",";
             levelsJson += "\"sell_buffer\":" + IntegerToString(bufSell) + ",";
@@ -445,39 +439,26 @@ string ReadStructuredIndicatorSignals()
                   {
                      if (bufS[v] >= 1e20 || bufS[v] <= -1e20) continue;
                      if (bufS[v] == 0.0) continue;
-
                      if (!firstEntry) levelsJson += ",";
                      firstEntry = false;
-                     string entry = "{\"bar\":" + IntegerToString(v) +
-                                    ",\"value\":" + DoubleToString(bufS[v], _Digits) +
-                                    ",\"direction\":\"sell\",\"color\":\"red\"}";
-                     levelsJson += entry;
-
-                     // Adiciona ao resumo geral
+                     levelsJson += "{\"bar\":" + IntegerToString(v) + ",\"value\":" + DoubleToString(bufS[v], _Digits) + ",\"direction\":\"sell\",\"color\":\"red\"}";
                      if (!firstSell) allSellJson += ",";
                      firstSell = false;
-                     allSellJson += "{\"level\":\"" + levelNames[lvl] + "\",\"bar\":" +
-                                    IntegerToString(v) + ",\"value\":" +
-                                    DoubleToString(bufS[v], _Digits) + "}";
-
-                     // Suporte/resistência (apenas barra 0)
+                     allSellJson += "{\"level\":\"" + levelNames[lvl] + "\",\"bar\":" + IntegerToString(v) + ",\"value\":" + DoubleToString(bufS[v], _Digits) + "}";
                      if (v == 0 && ask > 0)
                      {
                         string srType = (bufS[v] < ask) ? "support" : "resistance";
                         if (!firstSR) srLevels += ",";
                         firstSR = false;
-                        srLevels += "{\"type\":\"" + srType + "\",";
-                        srLevels += "\"price\":" + DoubleToString(bufS[v], _Digits) + ",";
-                        srLevels += "\"level\":\"" + levelNames[lvl] + "\",";
-                        srLevels += "\"direction\":\"sell\",\"buffer\":" + IntegerToString(bufSell) + "}";
+                        srLevels += "{\"type\":\"" + srType + "\",\"price\":" + DoubleToString(bufS[v], _Digits) + ",\"level\":\"" + levelNames[lvl] + "\",\"direction\":\"sell\",\"buffer\":" + IntegerToString(bufSell) + "}";
                      }
                   }
                }
             }
-            levelsJson += "]"; // fecha sell_signals
-            levelsJson += "}"; // fecha level
+            levelsJson += "]";
+            levelsJson += "}";
          }
-         levelsJson   += "]"; // fecha levels array
+         levelsJson   += "]";
          allBuyJson   += "]";
          allSellJson  += "]";
          srLevels     += "]";
@@ -487,20 +468,21 @@ string ReadStructuredIndicatorSignals()
          json += allSellJson + ",";
          json += srLevels    + ",";
          json += "\"raw_buffers\":" + BuildRawBuffersJson(i, lookback);
-         json += "},"; // fecha girassol
+         json += "},";
       }
 
       // ================================================================
-      // === LEITURA DO FIBONACCI AUTOMÁTICO ===
+      // === AUTOFIBONACCI ===
       // ================================================================
-      if (isFibonacci && !fibFound)
+      if (g_indicators[i].isFibonacci && !fibFound)
       {
-         fibFound  = true;
+         fibFound = true;
          int totalBufs = g_indicators[i].totalBuffers;
 
          json += "\"fibonacci\":{";
          json += "\"detected\":true,";
          json += "\"name\":\"" + g_indicators[i].name + "\",";
+         json += "\"total_buffers\":" + IntegerToString(totalBufs) + ",";
          json += "\"levels\":[";
 
          string fibNames[];
@@ -532,14 +514,13 @@ string ReadStructuredIndicatorSignals()
             json += "\"price\":" + DoubleToString(buf[0], _Digits) + ",";
             json += "\"buffer\":" + IntegerToString(b) + "}";
          }
-         json += "]},"; // fecha levels e fibonacci
+         json += "]},";
       }
    }
 
    if (!girassolFound)  json += "\"girassol\":{\"detected\":false},";
    if (!fibFound)       json += "\"fibonacci\":{\"detected\":false},";
 
-   // Remove vírgula extra antes de fechar
    if (StringGetCharacter(json, StringLen(json)-1) == ',')
       json = StringSubstr(json, 0, StringLen(json)-1);
 
@@ -548,7 +529,7 @@ string ReadStructuredIndicatorSignals()
 }
 
 //+------------------------------------------------------------------+
-//| Constrói JSON com buffers brutos de um indicador pelo índice      |
+//| Constrói JSON de buffers brutos de um indicador                   |
 //+------------------------------------------------------------------+
 string BuildRawBuffersJson(int indicatorIdx, int bars)
 {
@@ -574,18 +555,49 @@ string BuildRawBuffersJson(int indicatorIdx, int bars)
 }
 
 //+------------------------------------------------------------------+
-//| Tick principal                                                    |
+//| Constrói JSON de candles                                          |
+//+------------------------------------------------------------------+
+string BuildCandlesJson(MqlRates &rates[], int count)
+{
+   string json = "[";
+   for (int i = 0; i < count; i++)
+   {
+      if (i > 0) json += ",";
+      json += "{";
+      json += "\"time\":"   + IntegerToString(rates[i].time)          + ",";
+      json += "\"open\":"   + DoubleToString(rates[i].open,  _Digits) + ",";
+      json += "\"high\":"   + DoubleToString(rates[i].high,  _Digits) + ",";
+      json += "\"low\":"    + DoubleToString(rates[i].low,   _Digits) + ",";
+      json += "\"close\":"  + DoubleToString(rates[i].close, _Digits) + ",";
+      json += "\"volume\":" + IntegerToString(rates[i].tick_volume);
+      json += "}";
+   }
+   json += "]";
+   return json;
+}
+
+//+------------------------------------------------------------------+
+//| OnTick — lógica principal                                         |
 //+------------------------------------------------------------------+
 void OnTick()
 {
    datetime now = TimeCurrent();
 
-   // ── Heartbeat ─────────────────────────────────────────────────────────
+   // ── Heartbeat ────────────────────────────────────────────────────────
    if (now - g_lastHeartbeat >= HeartbeatSeconds)
    {
       g_lastHeartbeat = now;
       if (!SendHeartbeat() && AutoReconnect && !g_isDiscovering)
          TryReconnect();
+   }
+
+   // ── Envio de candles para Girassol Sintético (a cada 10s) ────────────
+   // Mesmo sem Girassol instalado no gráfico, o servidor calcula um
+   // equivalente usando os candles OHLC. Isso mantém o consenso da IA ativo.
+   if (now - g_lastMarketData >= g_marketDataSeconds)
+   {
+      g_lastMarketData = now;
+      SendMarketDataForSyntheticGirassol();
    }
 
    // ── Monitor de posições abertas ────────────────────────────────────────
@@ -595,131 +607,52 @@ void OnTick()
       MonitorOpenPositions();
    }
 
-   // ── Busca de sinal / abertura de posição ───────────────────────────────
+   // ── Busca de sinal ────────────────────────────────────────────────────
    if (PositionsTotal() < MaxPositions && (now - g_lastSignal >= SignalSeconds))
    {
       g_lastSignal = now;
 
-      // Bloqueia entradas durante o período de aquecimento
       if (now < g_warmupUntil)
       {
          int secsLeft = (int)(g_warmupUntil - now);
-         // Imprime aviso apenas 1x a cada 15s para não poluir o log
          if (now - g_lastWarmupPrint >= 15)
          {
             g_lastWarmupPrint = now;
-            Print("⏳ AQUECIMENTO: nenhuma operação por mais ", secsLeft,
-                  "s — EA analisando mercado sem abrir posições");
+            Print("⏳ AQUECIMENTO: mais ", secsLeft, "s — observando mercado sem operar");
          }
          return;
       }
 
-      // Aquecimento concluído — opera normalmente
       FetchAndProcessSignal();
    }
 }
 
 //+------------------------------------------------------------------+
-//| Monitor de posições — inclui leituras dos indicadores do gráfico  |
-//| Respeitando o Modo de Controle da IA (AI_Saida)                  |
+//| Envia candles para o servidor calcular Girassol Sintético         |
 //+------------------------------------------------------------------+
-void MonitorOpenPositions()
+void SendMarketDataForSyntheticGirassol()
 {
    MqlRates rates[];
-   int copied = CopyRates(g_symbol, PERIOD_M1, 0, 100, rates);
-   if (copied < 5) return;
+   int copied = CopyRates(g_symbol, PERIOD_M1, 0, CandleCount, rates);
+   if (copied < 20) return;
 
    string candlesJson = BuildCandlesJson(rates, copied);
-   string structuredSignals = ReadStructuredIndicatorSignals();
-   string allBuffers        = ReadAllIndicatorBuffers();
 
-   for (int i = PositionsTotal() - 1; i >= 0; i--)
-   {
-      if (!posInfo.SelectByIndex(i))      continue;
-      if (posInfo.Magic() != MagicNumber) continue;
-      if (posInfo.Symbol() != g_symbol)   continue;
+   string url     = g_serverUrl + "/api/metatrader/market-data";
+   string headers = "Content-Type: application/json\r\n";
+   string body    = "{\"symbol\":\"" + g_symbol + "\",\"candles\":" + candlesJson;
+   if (g_apiToken != "") body += ",\"token\":\"" + g_apiToken + "\"";
+   body += "}";
 
-      long   ticket    = posInfo.Ticket();
-      string posType   = posInfo.PositionType() == POSITION_TYPE_BUY ? "BUY" : "SELL";
-      double openPrice = posInfo.PriceOpen();
-      double curPrice  = posInfo.PriceCurrent();
-      double sl        = posInfo.StopLoss();
-      double tp        = posInfo.TakeProfit();
-      double profit    = posInfo.Profit();
+   char   postData[], result[];
+   StringToCharArray(body, postData, 0, StringLen(body));
+   string responseHeaders;
 
-      string posJson = "{";
-      posJson += "\"ticket\":"       + IntegerToString(ticket)               + ",";
-      posJson += "\"symbol\":\""     + g_symbol                              + "\",";
-      posJson += "\"type\":\""       + posType                               + "\",";
-      posJson += "\"lots\":"         + DoubleToString(posInfo.Volume(), 2)   + ",";
-      posJson += "\"openPrice\":"    + DoubleToString(openPrice, _Digits)    + ",";
-      posJson += "\"currentPrice\":" + DoubleToString(curPrice, _Digits)     + ",";
-      posJson += "\"stopLoss\":"     + DoubleToString(sl, _Digits)           + ",";
-      posJson += "\"takeProfit\":"   + DoubleToString(tp, _Digits)           + ",";
-      posJson += "\"profit\":"       + DoubleToString(profit, 2)             + ",";
-      posJson += "\"openTime\":"     + IntegerToString((long)posInfo.Time()) + ",";
-      posJson += "\"signalId\":\""   + posType + "_" + IntegerToString(ticket) + "\"";
-      posJson += "}";
-
-      string body = "{";
-      body += "\"position\":"         + posJson           + ",";
-      body += "\"marketData\":"       + candlesJson        + ",";
-      body += "\"symbol\":\""         + g_symbol          + "\",";
-      body += "\"indicatorSignals\":" + structuredSignals  + ",";
-      body += "\"indicatorBuffers\":" + allBuffers;
-      body += "}";
-
-      string url     = g_serverUrl + "/api/mt5/position/monitor";
-      string headers = "Content-Type: application/json\r\n";
-      char   postData[], result[];
-      StringToCharArray(body, postData, 0, StringLen(body));
-      string responseHeaders;
-
-      int res = WebRequest("POST", url, headers, 5000, postData, result, responseHeaders);
-      if (res != 200) continue;
-
-      string resp    = CharArrayToString(result);
-      string action  = ExtractJsonString(resp, "action");
-      string reason  = ExtractJsonString(resp, "reason");
-      string urgency = ExtractJsonString(resp, "urgency");
-
-      bool shouldClose = (action == "CLOSE_PROFIT"        ||
-                          action == "CLOSE_SPIKE_EXIT"    ||
-                          action == "CLOSE_LOSS_PREVENTION");
-
-      // Respeita modo de controle: em MANUAL ou PARCIAL com AI_Saida=false, IA não fecha posições
-      bool aiCanClose = (AIControlMode == AI_FULL) ||
-                        (AIControlMode == AI_PARTIAL && AI_Saida);
-      if (!aiCanClose && shouldClose)
-      {
-         Print("ℹ️ Monitor IA sugeriu ", action, " mas saída por IA está desativada (modo: ",
-               AIControlMode == AI_MANUAL ? "Manual" : "Parcial", ")");
-         shouldClose = false;
-      }
-
-      if (shouldClose)
-      {
-         Print("🤖 Monitor IA → ", action, " | #", ticket,
-               " | Urgência: ", urgency, " | Razão: ", reason);
-         bool closed = trade.PositionClose(ticket);
-         if (closed)
-            Print("✅ Posição #", ticket, " fechada pelo monitor IA (", action, ")");
-         else
-            Print("❌ Falha ao fechar #", ticket, ": ", GetLastError());
-      }
-      else
-      {
-         string narrative = ExtractJsonString(resp, "narrative");
-         if (narrative != "")
-            Print("📐 Monitor #", ticket, " [HOLD]: ", StringSubstr(narrative, 0, 150));
-      }
-   }
+   WebRequest("POST", url, headers, 5000, postData, result, responseHeaders);
 }
 
 //+------------------------------------------------------------------+
-//| Busca e processa sinal — com indicadores reais e perfil do ativo  |
-//| v6.0: envia 200 candles, support_resistance_levels do Girassol,  |
-//|        usa SL/TP refinado pelo servidor (calcIndicatorDrivenSLTP) |
+//| Busca e processa sinal com indicadores reais                      |
 //+------------------------------------------------------------------+
 void FetchAndProcessSignal()
 {
@@ -733,17 +666,19 @@ void FetchAndProcessSignal()
    double ask = SymbolInfoDouble(g_symbol, SYMBOL_ASK);
    double bid = SymbolInfoDouble(g_symbol, SYMBOL_BID);
 
+   // ── Endpoint principal: signal-with-indicators (v8.0) ────────────────
    string url     = g_serverUrl + "/api/metatrader/signal-with-indicators";
    string headers = "Content-Type: application/json\r\n";
 
    string body = "{";
-   body += "\"symbol\":\""          + g_symbol                       + "\",";
-   body += "\"ask\":"               + DoubleToString(ask, _Digits)   + ",";
-   body += "\"bid\":"               + DoubleToString(bid, _Digits)   + ",";
-   body += "\"candles\":"           + candlesJson                     + ",";
-   body += "\"indicatorSignals\":"  + structuredSignals               + ",";
-   body += "\"indicatorBuffers\":"  + allBuffers                      + ",";
-   body += "\"indicatorCount\":"    + IntegerToString(g_indicatorCount);
+   body += "\"symbol\":\""          + g_symbol                     + "\",";
+   body += "\"ask\":"               + DoubleToString(ask, _Digits)  + ",";
+   body += "\"bid\":"               + DoubleToString(bid, _Digits)  + ",";
+   body += "\"candles\":"           + candlesJson                   + ",";
+   body += "\"indicatorSignals\":"  + structuredSignals             + ",";
+   body += "\"indicatorBuffers\":"  + allBuffers                    + ",";
+   body += "\"indicatorCount\":"    + IntegerToString(g_indicatorCount) + ",";
+   body += "\"eaVersion\":\"8.0\"";
    if (g_apiToken != "") body += ",\"token\":\"" + g_apiToken + "\"";
    body += "}";
 
@@ -753,7 +688,14 @@ void FetchAndProcessSignal()
 
    int res = WebRequest("POST", url, headers, 10000, postData, result, responseHeaders);
 
-   // Fallback para endpoint legado
+   // ── Fallback 1: endpoint alternativo /api/mt5/signal-with-indicators ──
+   if (res == 404 || res == -1)
+   {
+      url = g_serverUrl + "/api/mt5/signal-with-indicators";
+      res = WebRequest("POST", url, headers, 10000, postData, result, responseHeaders);
+   }
+
+   // ── Fallback 2: GET simples de sinal ─────────────────────────────────
    if (res == 404 || res == -1)
    {
       url = g_serverUrl + "/api/metatrader/signal?symbol=" + g_symbol;
@@ -764,7 +706,7 @@ void FetchAndProcessSignal()
 
    if (res == -1)
    {
-      Print("⚠️ Falha ao buscar sinal: HTTP ", res);
+      Print("⚠️ Falha na requisição de sinal: HTTP ", res);
       if (AutoReconnect && !g_isDiscovering) TryReconnect();
       return;
    }
@@ -782,19 +724,17 @@ void FetchAndProcessSignal()
    double takeProfit = ExtractJsonDouble(resp, "takeProfit");
    double confidence = ExtractJsonDouble(resp, "confidence");
 
-   // Metadados da resposta v6.0
-   string slTpSource   = ExtractJsonString(resp, "slTpSource");
-   string assetFamily  = ExtractJsonString(resp, "assetFamily");
-   string assetTrend   = ExtractJsonString(resp, "assetTrend");
-   string assetVolClass= ExtractJsonString(resp, "assetVolClass");
-   string reason       = ExtractJsonString(resp, "reason");
-   string girassolBias = ExtractJsonString(resp, "girassolBias");
+   string slTpSource    = ExtractJsonString(resp, "slTpSource");
+   string assetFamily   = ExtractJsonString(resp, "assetFamily");
+   string assetTrend    = ExtractJsonString(resp, "assetTrend");
+   string assetVolClass = ExtractJsonString(resp, "assetVolClass");
+   string reason        = ExtractJsonString(resp, "reason");
+   string girassolBias  = ExtractJsonString(resp, "girassolBias");
 
-   // === Aplicação do Modo de Controle da IA ===
+   // ── Aplicação do Modo de Controle da IA ──────────────────────────────
    if (AIControlMode == AI_MANUAL)
    {
-      // Modo Manual: IA apenas informa direção — usuário controla tudo
-      Print("ℹ️ Modo MANUAL: usando parâmetros definidos pelo usuário");
+      Print("ℹ️ Modo MANUAL: usando parâmetros do usuário");
       lotSize    = ManualLotSize;
       double point = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
       stopLoss   = (ManualStopLoss   > 0) ? ManualStopLoss   * point : 0;
@@ -814,15 +754,13 @@ void FetchAndProcessSignal()
    }
    else if (AIControlMode == AI_PARTIAL)
    {
-      // Modo Parcial: aplica IA apenas nos itens selecionados
       if (!AI_Entrada)
       {
-         Print("ℹ️ Modo PARCIAL: IA_Entrada=false — entrada bloqueada pelo usuário");
+         Print("ℹ️ Modo PARCIAL: AI_Entrada=false — entrada bloqueada pelo usuário");
          return;
       }
       double point = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
-      if (!AI_Lote || lotSize <= 0)
-         lotSize = ManualLotSize;
+      if (!AI_Lote || lotSize <= 0) lotSize = ManualLotSize;
       if (!AI_StopLoss)
       {
          double rawSL = (ManualStopLoss > 0) ? ManualStopLoss * point : 0;
@@ -844,13 +782,10 @@ void FetchAndProcessSignal()
          else takeProfit = 0;
       }
       slTpSource = "parcial_usuario_ia";
-      Print("ℹ️ Modo PARCIAL: Lote=", AI_Lote ? "IA" : "Manual",
-            " | SL=", AI_StopLoss ? "IA" : "Manual",
-            " | TP=", AI_TakeProfit ? "IA" : "Manual");
+      Print("ℹ️ PARCIAL: Lote=", AI_Lote ? "IA" : "Manual", " | SL=", AI_StopLoss ? "IA" : "Manual", " | TP=", AI_TakeProfit ? "IA" : "Manual");
    }
-   else // AI_FULL
+   else
    {
-      // Modo Total: IA define tudo (comportamento padrão)
       if (lotSize <= 0) lotSize = ManualLotSize;
    }
 
@@ -868,25 +803,21 @@ void FetchAndProcessSignal()
    }
    else if (stopLoss > 0 || takeProfit > 0)
    {
-      // Valida distância mínima de SL/TP com margem de segurança extra (1.5x)
       double point      = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
       long   stopsLevel = SymbolInfoInteger(g_symbol, SYMBOL_TRADE_STOPS_LEVEL);
-      // Usa 1.5x o nível mínimo do broker para evitar rejeição por slippage/spread
       double minDist    = MathMax((double)stopsLevel * point * 1.5, (ask - bid) * 5.0);
 
-      // Para índices Jump: usar percentual conservador do preço como piso garantido
-      // Valores aumentados (+3%) vs versão anterior para absorver variação de preço entre cálculo e envio
       string symUpper2 = g_symbol;
       StringToUpper(symUpper2);
       if (StringFind(symUpper2, "JUMP") >= 0 && ask > 1000)
       {
-         double jumpMinPct = 0.06; // 6% padrão para qualquer Jump (antes era 3%)
+         double jumpMinPct = 0.06;
          if (StringFind(symUpper2, "100") >= 0) jumpMinPct = 0.12;
          else if (StringFind(symUpper2, "75")  >= 0) jumpMinPct = 0.10;
          else if (StringFind(symUpper2, "50")  >= 0) jumpMinPct = 0.08;
          else if (StringFind(symUpper2, "25")  >= 0) jumpMinPct = 0.07;
          minDist = MathMax(minDist, ask * jumpMinPct);
-         Print("⚡ Jump Index — distância mínima garantida: ", NormalizeDouble(minDist, 2), " pts (", jumpMinPct * 100, "% do preço | broker stopsLevel=", stopsLevel, ")");
+         Print("⚡ Jump — distância mínima: ", NormalizeDouble(minDist, 2), " pts");
       }
 
       if (minDist <= 0) minDist = ask * 0.01;
@@ -905,15 +836,14 @@ void FetchAndProcessSignal()
       }
    }
 
-   // Log completo do sinal v6.0
    Print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-   Print("📡 SINAL: ", action, " | ", g_symbol, " | Confiança: ", confidence, "%");
-   if (assetFamily  != "") Print("   Ativo:    ", assetFamily, " | ", assetTrend, " | Vol: ", assetVolClass);
+   Print("📡 SINAL v8.0: ", action, " | ", g_symbol, " | Confiança: ", confidence, "%");
+   if (assetFamily  != "") Print("   Ativo: ", assetFamily, " | ", assetTrend, " | Vol: ", assetVolClass);
    if (girassolBias != "") Print("   Girassol: ", girassolBias);
    if (slTpSource   != "") Print("   SL/TP via: ", slTpSource);
    Print("   SL: ", NormalizeDouble(stopLoss, _Digits), " | TP: ", NormalizeDouble(takeProfit, _Digits));
    Print("   Indicadores no gráfico: ", g_indicatorCount);
-   if (reason != "")       Print("   Razão: ", StringSubstr(reason, 0, 150));
+   if (reason != "") Print("   Razão: ", StringSubstr(reason, 0, 150));
    Print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
    g_pendingSignalId = signalId;
@@ -924,34 +854,26 @@ void FetchAndProcessSignal()
    else if (action == "SELL")
       success = trade.Sell(lotSize, g_symbol, 0, stopLoss, takeProfit, "InvistaPRO_" + signalId);
 
-   // ── Retry automático em caso de stops inválidos (erro 10016) ──────────
-   // Ocorre quando o broker rejeita SL/TP por estarem muito próximos do preço.
-   // Recalcula com distância garantida (dobro do broker + % proporcional ao preço) e reenvio.
+   // ── Retry automático se stops inválidos (10016) ───────────────────────
    if (!success && trade.ResultRetcode() == 10016)
    {
-      Print("⚠️ Stops inválidos (10016) — recalculando com distância garantida...");
-      double askNow    = SymbolInfoDouble(g_symbol, SYMBOL_ASK);
-      double bidNow    = SymbolInfoDouble(g_symbol, SYMBOL_BID);
-      double pointNow  = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
-      long   stopsLvl  = SymbolInfoInteger(g_symbol, SYMBOL_TRADE_STOPS_LEVEL);
+      Print("⚠️ Stops inválidos (10016) — recalculando...");
+      double askNow   = SymbolInfoDouble(g_symbol, SYMBOL_ASK);
+      double bidNow   = SymbolInfoDouble(g_symbol, SYMBOL_BID);
+      double pointNow = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
+      long   stopsLvl = SymbolInfoInteger(g_symbol, SYMBOL_TRADE_STOPS_LEVEL);
+      double safeDist = MathMax((double)stopsLvl * pointNow * 3.0, (askNow - bidNow) * 10.0);
 
-      // Distância base: 3x o nível mínimo do broker ou 10x o spread, o que for maior
-      double safeDist  = MathMax((double)stopsLvl * pointNow * 3.0, (askNow - bidNow) * 10.0);
-
-      // Para Jump Index: garantir % conservadora do preço
       string symUp = g_symbol;
       StringToUpper(symUp);
       if (StringFind(symUp, "JUMP") >= 0 && askNow > 1000)
       {
-         double pct = 0.10; // 10% padrão conservador
+         double pct = 0.10;
          if (StringFind(symUp, "100") >= 0) pct = 0.15;
-         else if (StringFind(symUp, "75")  >= 0) pct = 0.13;
-         else if (StringFind(symUp, "50")  >= 0) pct = 0.10;
-         else if (StringFind(symUp, "25")  >= 0) pct = 0.10;
+         else if (StringFind(symUp, "75") >= 0) pct = 0.13;
+         else if (StringFind(symUp, "50") >= 0) pct = 0.10;
          safeDist = MathMax(safeDist, askNow * pct);
       }
-
-      Print("   SafeDist calculado: ", NormalizeDouble(safeDist, 2), " | stopsLevel=", stopsLvl);
 
       double slRetry = 0, tpRetry = 0;
       if (action == "BUY")
@@ -960,34 +882,19 @@ void FetchAndProcessSignal()
          tpRetry = NormalizeDouble(askNow + safeDist, _Digits);
          success = trade.Buy(lotSize, g_symbol, 0, slRetry, tpRetry, "InvistaPRO_" + signalId);
       }
-      else if (action == "SELL")
+      else
       {
          slRetry = NormalizeDouble(bidNow + safeDist, _Digits);
          tpRetry = NormalizeDouble(bidNow - safeDist, _Digits);
          success = trade.Sell(lotSize, g_symbol, 0, slRetry, tpRetry, "InvistaPRO_" + signalId);
       }
 
-      if (success)
+      if (!success)
       {
-         Print("✅ Retry bem-sucedido! SL=", NormalizeDouble(slRetry, _Digits),
-               " | TP=", NormalizeDouble(tpRetry, _Digits),
-               " | Dist=", NormalizeDouble(safeDist, 2));
-         stopLoss   = slRetry;
-         takeProfit = tpRetry;
-      }
-      else
-      {
-         // Último recurso: abre sem SL/TP para não perder o sinal
-         // Posição ficará protegida apenas pelo MaxPositions e pelo monitor IA
-         Print("⚠️ Retry também falhou (", trade.ResultRetcode(), ") — abrindo SEM SL/TP como último recurso");
-         if (action == "BUY")
-            success = trade.Buy(lotSize, g_symbol, 0, 0, 0, "InvistaPRO_" + signalId);
-         else if (action == "SELL")
-            success = trade.Sell(lotSize, g_symbol, 0, 0, 0, "InvistaPRO_" + signalId);
-         if (success)
-            Print("⚠️ Ordem aberta SEM SL/TP — monitore e feche manualmente se necessário!");
-         stopLoss   = 0;
-         takeProfit = 0;
+         Print("⚠️ Retry falhou — abrindo SEM SL/TP como último recurso");
+         if (action == "BUY")  success = trade.Buy(lotSize,  g_symbol, 0, 0, 0, "InvistaPRO_" + signalId);
+         else                    success = trade.Sell(lotSize, g_symbol, 0, 0, 0, "InvistaPRO_" + signalId);
+         if (success) Print("⚠️ Ordem aberta SEM SL/TP — monitore manualmente!");
       }
    }
 
@@ -995,34 +902,102 @@ void FetchAndProcessSignal()
    {
       Print("✅ Ordem executada: ", action, " | Ticket: ", trade.ResultOrder(),
             " | SL: ", NormalizeDouble(stopLoss, _Digits),
-            " | TP: ", NormalizeDouble(takeProfit, _Digits),
-            " | SL/TP source: ", slTpSource != "" ? slTpSource : "server_default");
+            " | TP: ", NormalizeDouble(takeProfit, _Digits));
       ConfirmTradeOpen(signalId, (int)trade.ResultOrder(), action, lotSize, stopLoss, takeProfit);
    }
    else
-      Print("❌ Falha definitiva ao executar ordem: ", trade.ResultRetcode(), " / ", GetLastError());
+      Print("❌ Falha definitiva: ", trade.ResultRetcode(), " / ", GetLastError());
 }
 
 //+------------------------------------------------------------------+
-//| Constrói JSON de candles a partir de MqlRates[]                  |
+//| Monitor de posições abertas                                       |
 //+------------------------------------------------------------------+
-string BuildCandlesJson(MqlRates &rates[], int count)
+void MonitorOpenPositions()
 {
-   string json = "[";
-   for (int i = 0; i < count; i++)
+   MqlRates rates[];
+   int copied = CopyRates(g_symbol, PERIOD_M1, 0, 100, rates);
+   if (copied < 5) return;
+
+   string candlesJson       = BuildCandlesJson(rates, copied);
+   string structuredSignals = ReadStructuredIndicatorSignals();
+   string allBuffers        = ReadAllIndicatorBuffers();
+
+   for (int i = PositionsTotal() - 1; i >= 0; i--)
    {
-      if (i > 0) json += ",";
-      json += "{";
-      json += "\"time\":"   + IntegerToString(rates[i].time)                 + ",";
-      json += "\"open\":"   + DoubleToString(rates[i].open,  _Digits)        + ",";
-      json += "\"high\":"   + DoubleToString(rates[i].high,  _Digits)        + ",";
-      json += "\"low\":"    + DoubleToString(rates[i].low,   _Digits)        + ",";
-      json += "\"close\":"  + DoubleToString(rates[i].close, _Digits)        + ",";
-      json += "\"volume\":" + IntegerToString(rates[i].tick_volume);
-      json += "}";
+      if (!posInfo.SelectByIndex(i))      continue;
+      if (posInfo.Magic() != MagicNumber) continue;
+      if (posInfo.Symbol() != g_symbol)   continue;
+
+      long   ticket    = posInfo.Ticket();
+      string posType   = posInfo.PositionType() == POSITION_TYPE_BUY ? "BUY" : "SELL";
+      double openPrice = posInfo.PriceOpen();
+      double curPrice  = posInfo.PriceCurrent();
+      double sl        = posInfo.StopLoss();
+      double tp        = posInfo.TakeProfit();
+      double profit    = posInfo.Profit();
+
+      string posJson = "{";
+      posJson += "\"ticket\":"        + IntegerToString(ticket)             + ",";
+      posJson += "\"symbol\":\""      + g_symbol                           + "\",";
+      posJson += "\"type\":\""        + posType                             + "\",";
+      posJson += "\"lots\":"          + DoubleToString(posInfo.Volume(), 2) + ",";
+      posJson += "\"openPrice\":"     + DoubleToString(openPrice, _Digits)  + ",";
+      posJson += "\"currentPrice\":"  + DoubleToString(curPrice, _Digits)   + ",";
+      posJson += "\"stopLoss\":"      + DoubleToString(sl, _Digits)         + ",";
+      posJson += "\"takeProfit\":"    + DoubleToString(tp, _Digits)         + ",";
+      posJson += "\"profit\":"        + DoubleToString(profit, 2)           + ",";
+      posJson += "\"openTime\":"      + IntegerToString((long)posInfo.Time()) + ",";
+      posJson += "\"signalId\":\""    + posType + "_" + IntegerToString(ticket) + "\"";
+      posJson += "}";
+
+      string body = "{";
+      body += "\"position\":"         + posJson          + ",";
+      body += "\"marketData\":"       + candlesJson       + ",";
+      body += "\"symbol\":\""         + g_symbol         + "\",";
+      body += "\"indicatorSignals\":" + structuredSignals + ",";
+      body += "\"indicatorBuffers\":" + allBuffers;
+      body += "}";
+
+      string url     = g_serverUrl + "/api/mt5/position/monitor";
+      string headers = "Content-Type: application/json\r\n";
+      char   postData[], result[];
+      StringToCharArray(body, postData, 0, StringLen(body));
+      string responseHeaders;
+
+      int res = WebRequest("POST", url, headers, 5000, postData, result, responseHeaders);
+      if (res != 200) continue;
+
+      string resp    = CharArrayToString(result);
+      string action  = ExtractJsonString(resp, "action");
+      string reason  = ExtractJsonString(resp, "reason");
+      string urgency = ExtractJsonString(resp, "urgency");
+
+      bool shouldClose = (action == "CLOSE_PROFIT"     ||
+                          action == "CLOSE_SPIKE_EXIT" ||
+                          action == "CLOSE_LOSS_PREVENTION");
+
+      bool aiCanClose = (AIControlMode == AI_FULL) ||
+                        (AIControlMode == AI_PARTIAL && AI_Saida);
+      if (!aiCanClose && shouldClose)
+      {
+         Print("ℹ️ Monitor sugeriu ", action, " mas saída por IA desativada");
+         shouldClose = false;
+      }
+
+      if (shouldClose)
+      {
+         Print("🤖 Monitor IA → ", action, " | #", ticket, " | Urgência: ", urgency, " | ", reason);
+         bool closed = trade.PositionClose(ticket);
+         if (closed) Print("✅ Posição #", ticket, " fechada pelo monitor IA");
+         else        Print("❌ Falha ao fechar #", ticket, ": ", GetLastError());
+      }
+      else
+      {
+         string narrative = ExtractJsonString(resp, "narrative");
+         if (narrative != "")
+            Print("📐 Monitor #", ticket, " [HOLD]: ", StringSubstr(narrative, 0, 150));
+      }
    }
-   json += "]";
-   return json;
 }
 
 //+------------------------------------------------------------------+
@@ -1032,22 +1007,88 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
 {
    if (id == CHARTEVENT_CHART_CHANGE)
    {
-      Print("🔄 Mudança no gráfico — re-escaneando indicadores e perfil do ativo...");
+      Print("🔄 Mudança no gráfico — re-escaneando indicadores...");
       ScanChartIndicators();
       FetchAssetProfile();
    }
 }
 
 //+------------------------------------------------------------------+
-//| Busca URL de descoberta no servidor                               |
+//| Heartbeat                                                         |
+//+------------------------------------------------------------------+
+bool SendHeartbeat()
+{
+   double balance   = AccountInfoDouble(ACCOUNT_BALANCE);
+   double equity    = AccountInfoDouble(ACCOUNT_EQUITY);
+   double margin    = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
+   long   accId     = AccountInfoInteger(ACCOUNT_LOGIN);
+   string broker    = AccountInfoString(ACCOUNT_COMPANY);
+   int    openPos   = PositionsTotal();
+
+   string url     = g_serverUrl + "/api/metatrader/heartbeat";
+   string headers = "Content-Type: application/json\r\n";
+   string body    = "{";
+   body += "\"accountId\":\""  + IntegerToString(accId) + "\",";
+   body += "\"broker\":\""     + broker                 + "\",";
+   body += "\"balance\":"      + DoubleToString(balance, 2) + ",";
+   body += "\"equity\":"       + DoubleToString(equity,  2) + ",";
+   body += "\"freeMargin\":"   + DoubleToString(margin,  2) + ",";
+   body += "\"openPositions\":" + IntegerToString(openPos)  + ",";
+   body += "\"platform\":\"MT5\",";
+   body += "\"eaVersion\":\"8.0\"";
+   if (g_apiToken != "") body += ",\"token\":\"" + g_apiToken + "\"";
+   body += "}";
+
+   char   postData[], result[];
+   StringToCharArray(body, postData, 0, StringLen(body));
+   string responseHeaders;
+
+   int res = WebRequest("POST", url, headers, 5000, postData, result, responseHeaders);
+   if (res == 200)
+   {
+      g_failCount = 0;
+      string resp    = CharArrayToString(result);
+      string enabled = ExtractJsonString(resp, "enabled");
+      return true;
+   }
+   return false;
+}
+
+//+------------------------------------------------------------------+
+//| Confirma abertura de trade                                        |
+//+------------------------------------------------------------------+
+void ConfirmTradeOpen(string signalId, int ticket, string type, double lots, double sl, double tp)
+{
+   string url     = g_serverUrl + "/api/metatrader/trade/open";
+   string headers = "Content-Type: application/json\r\n";
+   double openPrice = (type == "BUY") ? SymbolInfoDouble(g_symbol, SYMBOL_ASK) : SymbolInfoDouble(g_symbol, SYMBOL_BID);
+   string body = "{";
+   body += "\"ticket\":"       + IntegerToString(ticket)          + ",";
+   body += "\"symbol\":\""     + g_symbol                        + "\",";
+   body += "\"type\":\""       + type                            + "\",";
+   body += "\"lots\":"         + DoubleToString(lots, 2)         + ",";
+   body += "\"openPrice\":"    + DoubleToString(openPrice, _Digits) + ",";
+   body += "\"stopLoss\":"     + DoubleToString(sl, _Digits)     + ",";
+   body += "\"takeProfit\":"   + DoubleToString(tp, _Digits)     + ",";
+   body += "\"openTime\":"     + IntegerToString(TimeCurrent())  + ",";
+   body += "\"signalId\":\""   + signalId                        + "\"";
+   if (g_apiToken != "") body += ",\"token\":\"" + g_apiToken + "\"";
+   body += "}";
+   char   postData[], result[];
+   StringToCharArray(body, postData, 0, StringLen(body));
+   string responseHeaders;
+   WebRequest("POST", url, headers, 5000, postData, result, responseHeaders);
+}
+
+//+------------------------------------------------------------------+
+//| Busca URL de descoberta                                           |
 //+------------------------------------------------------------------+
 void FetchDiscoveryUrl()
 {
    string url     = g_serverUrl + "/api/url";
-   string headers = "Content-Type: application/json\r\n";
+   string headers = "Accept: application/json\r\n";
    char   result[];
    string responseHeaders;
-
    int res = WebRequest("GET", url, headers, 5000, NULL, result, responseHeaders);
    if (res == 200 && ArraySize(result) > 0)
    {
@@ -1056,7 +1097,7 @@ void FetchDiscoveryUrl()
       if (blobUrl != "")
       {
          g_discoverUrl = blobUrl;
-         Print("✅ URL de descoberta obtida: ", g_discoverUrl);
+         Print("✅ URL de descoberta: ", g_discoverUrl);
          SaveDiscoveryUrl(g_discoverUrl);
       }
    }
@@ -1068,305 +1109,104 @@ void FetchDiscoveryUrl()
 }
 
 //+------------------------------------------------------------------+
-//| Reconexão automática via serviço de descoberta                    |
+//| Reconexão automática                                              |
 //+------------------------------------------------------------------+
 bool TryReconnect()
 {
    if (g_discoverUrl == "") { Print("⚠️ URL de descoberta não configurada"); return false; }
-
    g_isDiscovering = true;
    g_failCount++;
-
    if (g_failCount > MaxReconnectTries)
    {
       Print("❌ Máximo de reconexões atingido.");
       g_isDiscovering = false;
       return false;
    }
-
    Print("🔄 Reconexão ", g_failCount, "/", MaxReconnectTries, "...");
-
-   string headers = "Content-Type: application/json\r\nAccept: application/json\r\n";
+   string headers = "Accept: application/json\r\n";
    char   result[];
    string responseHeaders;
-
    int res = WebRequest("GET", g_discoverUrl, headers, 10000, NULL, result, responseHeaders);
-
    if (res == 200 && ArraySize(result) > 0)
    {
       string body   = CharArrayToString(result);
       string newUrl = ExtractJsonString(body, "serverUrl");
-
       if (newUrl != "" && newUrl != g_serverUrl)
       {
-         Print("✅ Nova URL: ", newUrl);
-         g_serverUrl     = newUrl;
-         g_failCount     = 0;
-         g_isDiscovering = false;
-
-         if (SendHeartbeat())
-         {
-            Print("🎉 Reconexão bem-sucedida!");
-            FetchDiscoveryUrl();
-            FetchAssetProfile();
-            return true;
-         }
-      }
-      else if (newUrl != "")
-      {
-         Print("ℹ️ Mesma URL — servidor pode estar temporariamente fora");
+         g_serverUrl = newUrl;
          g_failCount = 0;
+         Print("✅ URL atualizada: ", g_serverUrl);
+         g_isDiscovering = false;
+         return true;
       }
    }
-
    g_isDiscovering = false;
    return false;
 }
 
 //+------------------------------------------------------------------+
-//| Heartbeat                                                         |
-//+------------------------------------------------------------------+
-bool SendHeartbeat()
-{
-   string url  = g_serverUrl + "/api/metatrader/heartbeat";
-   string body = "{";
-   body += "\"accountId\":\""  + IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN))        + "\",";
-   body += "\"broker\":\""     + AccountInfoString(ACCOUNT_COMPANY)                         + "\",";
-   body += "\"balance\":"      + DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE),  2)     + ",";
-   body += "\"equity\":"       + DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY),   2)     + ",";
-   body += "\"freeMargin\":"   + DoubleToString(AccountInfoDouble(ACCOUNT_MARGIN_FREE), 2)  + ",";
-   body += "\"platform\":\"MT5\",";
-   body += "\"eaVersion\":\"6.0\",";
-   body += "\"indicatorCount\":" + IntegerToString(g_indicatorCount)                        + ",";
-   body += "\"assetProfile\":{";
-   body += "\"loaded\":" + (g_assetProfileLoaded ? "true" : "false") + ",";
-   body += "\"family\":\"" + g_assetFamily + "\",";
-   body += "\"trend\":\"" + g_assetTrend + "\",";
-   body += "\"volClass\":\"" + g_assetVolClass + "\"";
-   body += "}";
-   if (g_apiToken != "") body += ",\"token\":\"" + g_apiToken + "\"";
-   body += "}";
-
-   string headers = "Content-Type: application/json\r\n";
-   char   postData[], result[];
-   StringToCharArray(body, postData, 0, StringLen(body));
-   string responseHeaders;
-
-   int res = WebRequest("POST", url, headers, 5000, postData, result, responseHeaders);
-   if (res == 200) { g_failCount = 0; return true; }
-   Print("⚠️ Heartbeat falhou: ", res);
-   return false;
-}
-
-//+------------------------------------------------------------------+
-//| Confirma abertura de trade                                        |
-//+------------------------------------------------------------------+
-void ConfirmTradeOpen(string signalId, int ticket, string type, double lots, double sl, double tp)
-{
-   string url  = g_serverUrl + "/api/metatrader/trade/open";
-   string body = "{";
-   body += "\"ticket\":"     + IntegerToString(ticket)                                                   + ",";
-   body += "\"symbol\":\""   + g_symbol                                                                  + "\",";
-   body += "\"type\":\""     + type                                                                      + "\",";
-   body += "\"lots\":"       + DoubleToString(lots, 2)                                                   + ",";
-   body += "\"openPrice\":"  + DoubleToString(SymbolInfoDouble(g_symbol, SYMBOL_BID), _Digits)           + ",";
-   body += "\"stopLoss\":"   + DoubleToString(sl, _Digits)                                               + ",";
-   body += "\"takeProfit\":" + DoubleToString(tp, _Digits)                                               + ",";
-   body += "\"openTime\":"   + IntegerToString(TimeCurrent())                                            + ",";
-   body += "\"signalId\":\"" + signalId                                                                  + "\"";
-   body += "}";
-
-   string headers = "Content-Type: application/json\r\n";
-   char   postData[], result[];
-   StringToCharArray(body, postData, 0, StringLen(body));
-   string responseHeaders;
-   WebRequest("POST", url, headers, 5000, postData, result, responseHeaders);
-}
-
-//+------------------------------------------------------------------+
-//| Salva URL de descoberta localmente                                |
+//| Salva URL de descoberta em arquivo                                |
 //+------------------------------------------------------------------+
 void SaveDiscoveryUrl(string url)
 {
-   int handle = FileOpen("InvistaPRO_DiscoveryURL.txt", FILE_WRITE | FILE_TXT | FILE_COMMON);
-   if (handle != INVALID_HANDLE) { FileWriteString(handle, url); FileClose(handle); }
+   string path = "InvistaPRO_discovery.txt";
+   int handle = FileOpen(path, FILE_WRITE|FILE_TXT|FILE_COMMON);
+   if (handle != INVALID_HANDLE) { FileWrite(handle, url); FileClose(handle); }
 }
 
 //+------------------------------------------------------------------+
-//| Carrega URL de descoberta salva                                   |
+//| Carrega URL de descoberta de arquivo                              |
 //+------------------------------------------------------------------+
 string LoadDiscoveryUrl()
 {
-   string url    = "";
-   int    handle = FileOpen("InvistaPRO_DiscoveryURL.txt", FILE_READ | FILE_TXT | FILE_COMMON);
-   if (handle != INVALID_HANDLE)
-   {
-      url = FileReadString(handle);
-      FileClose(handle);
-      if (url != "") Print("📂 URL carregada: ", url);
-   }
+   string path = "InvistaPRO_discovery.txt";
+   if (!FileIsExist(path, FILE_COMMON)) return "";
+   int handle = FileOpen(path, FILE_READ|FILE_TXT|FILE_COMMON);
+   if (handle == INVALID_HANDLE) return "";
+   string url = FileReadString(handle);
+   FileClose(handle);
    return url;
 }
 
 //+------------------------------------------------------------------+
-//| Extrai string de JSON simples                                     |
+//| Funções auxiliares de parsing JSON                                |
 //+------------------------------------------------------------------+
 string ExtractJsonString(string json, string key)
 {
    string search = "\"" + key + "\":\"";
-   int    start  = StringFind(json, search);
-   if (start < 0) return "";
-   start += StringLen(search);
-   int end = StringFind(json, "\"", start);
+   int pos = StringFind(json, search);
+   if (pos < 0)
+   {
+      search = "\"" + key + "\": \"";
+      pos = StringFind(json, search);
+   }
+   if (pos < 0) return "";
+   int start = pos + StringLen(search);
+   int end   = StringFind(json, "\"", start);
    if (end < 0) return "";
    return StringSubstr(json, start, end - start);
 }
 
-//+------------------------------------------------------------------+
-//| Extrai double de JSON simples                                     |
-//+------------------------------------------------------------------+
 double ExtractJsonDouble(string json, string key)
 {
    string search = "\"" + key + "\":";
-   int    start  = StringFind(json, search);
-   if (start < 0) return 0;
-   start += StringLen(search);
-   int end = start;
-   while (end < StringLen(json))
+   int pos = StringFind(json, search);
+   if (pos < 0)
    {
-      ushort ch = StringGetCharacter(json, end);
-      if (ch == ',' || ch == '}') break;
-      end++;
+      search = "\"" + key + "\": ";
+      pos = StringFind(json, search);
    }
-   return StringToDouble(StringSubstr(json, start, end - start));
+   if (pos < 0) return 0.0;
+   int start = pos + StringLen(search);
+   string raw = StringSubstr(json, start, 30);
+   return StringToDouble(raw);
 }
 
-//+------------------------------------------------------------------+
-//| Extrai double de um objeto aninhado no JSON                       |
-//| Procura: "parentKey":{..."key":value...}                         |
-//+------------------------------------------------------------------+
-double ExtractJsonDoubleInObject(string json, string parentKey, string key)
+double ExtractJsonDoubleInObject(string json, string objKey, string fieldKey)
 {
-   // Encontra o objeto pai
-   string parentSearch = "\"" + parentKey + "\":{";
-   int    parentStart  = StringFind(json, parentSearch);
-   if (parentStart < 0) return 0;
-
-   // Encontra o fim do objeto pai (próximo '}')
-   int objStart = parentStart + StringLen(parentSearch);
-   int depth    = 1;
-   int objEnd   = objStart;
-   while (objEnd < StringLen(json) && depth > 0)
-   {
-      ushort ch = StringGetCharacter(json, objEnd);
-      if (ch == '{') depth++;
-      else if (ch == '}') depth--;
-      objEnd++;
-   }
-
-   // Extrai o sub-JSON e procura a chave
-   string subJson = StringSubstr(json, objStart, objEnd - objStart);
-   return ExtractJsonDouble(subJson, key);
+   string search = "\"" + objKey + "\":{";
+   int objPos = StringFind(json, search);
+   if (objPos < 0) return 0.0;
+   string sub = StringSubstr(json, objPos, 300);
+   return ExtractJsonDouble(sub, fieldKey);
 }
-
-//+------------------------------------------------------------------+
-//| Reporta fechamento de posição ao servidor                         |
-//| Chamado pelo OnTradeTransaction quando o broker fecha via SL/TP  |
-//+------------------------------------------------------------------+
-void ConfirmTradeClose(long ticket, string symbol, string type, double lots,
-                       double openPrice, double closePrice, double profit, string closeReason)
-{
-   double pips = MathAbs(closePrice - openPrice) / SymbolInfoDouble(symbol, SYMBOL_POINT) / 10;
-   string body = "{";
-   body += "\"ticket\":"       + IntegerToString(ticket)                    + ",";
-   body += "\"symbol\":\""     + symbol                                     + "\",";
-   body += "\"type\":\""       + type                                       + "\",";
-   body += "\"lots\":"         + DoubleToString(lots, 2)                    + ",";
-   body += "\"openPrice\":"    + DoubleToString(openPrice,  _Digits)        + ",";
-   body += "\"closePrice\":"   + DoubleToString(closePrice, _Digits)        + ",";
-   body += "\"profit\":"       + DoubleToString(profit,     2)              + ",";
-   body += "\"pips\":"         + DoubleToString(pips,       1)              + ",";
-   body += "\"closeTime\":"    + IntegerToString((long)TimeCurrent())       + ",";
-   body += "\"closeReason\":\"" + closeReason                               + "\"";
-   body += "}";
-
-   string headers = "Content-Type: application/json\r\n";
-   char   postData[], result[];
-   StringToCharArray(body, postData, 0, StringLen(body));
-   string responseHeaders;
-   int res = WebRequest("POST", g_serverUrl + "/api/metatrader/trade/close", headers, 5000, postData, result, responseHeaders);
-   if (res == 200)
-      Print("✅ Fechamento reportado ao servidor: #", ticket, " | P&L: $", DoubleToString(profit, 2), " | Motivo: ", closeReason);
-   else
-      Print("⚠️ Falha ao reportar fechamento ao servidor: HTTP ", res);
-}
-
-//+------------------------------------------------------------------+
-//| Detecta fechamentos automáticos de posição (SL/TP/broker)        |
-//| Essencial para liberar novos sinais após fechamento automático    |
-//+------------------------------------------------------------------+
-void OnTradeTransaction(const MqlTradeTransaction &trans,
-                        const MqlTradeRequest    &request,
-                        const MqlTradeResult     &result)
-{
-   // Só nos interessa deals de saída (fechamento de posição)
-   if (trans.type != TRADE_TRANSACTION_DEAL_ADD) return;
-
-   CDealInfo deal;
-   if (!deal.Ticket(trans.deal)) return;
-   if (deal.Magic() != MagicNumber) return;
-   if (deal.Symbol() != g_symbol)  return;
-
-   ENUM_DEAL_ENTRY entry = deal.Entry();
-   if (entry != DEAL_ENTRY_OUT && entry != DEAL_ENTRY_INOUT) return;
-
-   // Determina o motivo do fechamento
-   string closeReason = "MANUAL";
-   ENUM_DEAL_REASON reason = deal.Reason();
-   if (reason == DEAL_REASON_SL)     closeReason = "SL";
-   else if (reason == DEAL_REASON_TP) closeReason = "TP";
-   else if (reason == DEAL_REASON_SO) closeReason = "STOP_OUT";
-
-   long   ticket     = (long)deal.PositionId();
-   string type       = (deal.DealType() == DEAL_TYPE_SELL) ? "BUY" : "SELL"; // deal de saída é inverso
-   double lots       = deal.Volume();
-   double closePrice = deal.Price();
-   double profit     = deal.Profit() + deal.Swap() + deal.Commission();
-
-   // Busca openPrice na posição fechada pelo histórico
-   double openPrice  = closePrice; // fallback
-   if (HistorySelectByPosition(ticket))
-   {
-      for (int i = HistoryDealsTotal() - 1; i >= 0; i--)
-      {
-         ulong dTicket = HistoryDealGetTicket(i);
-         if (HistoryDealGetInteger(dTicket, DEAL_POSITION_ID) != ticket) continue;
-         if ((ENUM_DEAL_ENTRY)HistoryDealGetInteger(dTicket, DEAL_ENTRY) == DEAL_ENTRY_IN)
-         {
-            openPrice = HistoryDealGetDouble(dTicket, DEAL_PRICE);
-            break;
-         }
-      }
-   }
-
-   Print("📋 OnTradeTransaction: posição #", ticket, " fechada (", closeReason, ") | P&L: $", DoubleToString(profit, 2));
-
-   // Limpa o sinalId pendente para liberar nova entrada
-   if (g_pendingSignalId != "") g_pendingSignalId = "";
-
-   ConfirmTradeClose(ticket, g_symbol, type, lots, openPrice, closePrice, profit, closeReason);
-}
-
-//+------------------------------------------------------------------+
-//| Desinicialização                                                  |
-//+------------------------------------------------------------------+
-void OnDeinit(const int reason)
-{
-   for (int i = 0; i < g_indicatorCount; i++)
-   {
-      if (g_indicators[i].handle != INVALID_HANDLE)
-         IndicatorRelease(g_indicators[i].handle);
-   }
-   Print("🛑 InvistaPRO EA v7.0 encerrado. Razão: ", reason);
-}
-//+------------------------------------------------------------------+

@@ -406,7 +406,11 @@ export default function MetaTraderPage() {
     a.href = '/api/mt5/download-ea';
     a.download = 'InvistaPRO_EA.mq5';
     a.click();
-    toast({ title: 'Expert Advisor baixado!', description: 'URL e token da InvistaPRO já pré-configurados. Instale o .mq5 no MetaTrader, compile e adicione a URL do servidor nas Opções → Expert Advisors → WebRequest.' });
+    toast({
+      title: '✅ InvistaPRO EA v8.0 baixado!',
+      description: 'IMPORTANTE: Substitua o EA anterior por este novo arquivo. Copie para MQL5/Experts → Compilar (F7) → Arraste ao gráfico e habilite AlgoTrading. A URL do servidor já está pré-configurada.',
+      duration: 8000,
+    });
   };
 
   return (
@@ -474,7 +478,7 @@ export default function MetaTraderPage() {
             </div>
             <Button onClick={downloadEA} data-testid="button-download-ea" className="gap-2">
               <Download className="h-4 w-4" />
-              Baixar EA
+              Baixar EA v8.0
             </Button>
           </div>
         </div>
@@ -2412,7 +2416,7 @@ export default function MetaTraderPage() {
                 </div>
                 <Button onClick={downloadEA} className="w-full gap-2" data-testid="button-download-ea-config">
                   <Download className="h-4 w-4" />
-                  Baixar InvistaPRO_EA.mq5
+                  ⬇ Baixar InvistaPRO EA v8.0
                 </Button>
               </CardContent>
             </Card>

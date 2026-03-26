@@ -4,6 +4,8 @@
  */
 
 import { Router, Request, Response } from 'express';
+import path from 'path';
+import fs from 'fs';
 import { metaTraderBridge, MT5Position, MT5TradeResult } from '../services/metatrader-bridge';
 import {
   analyzeCrashBoomSpike,
@@ -13,6 +15,7 @@ import {
   ExternalGirassolPivot,
 } from '../services/crash-boom-spike-engine';
 import { brazilNewsService } from '../services/brazil-news-service';
+import { computeSyntheticGirassol } from '../services/synthetic-girassol';
 
 
 const router = Router();
@@ -835,6 +838,25 @@ router.post('/market-data', (req: Request, res: Response) => {
       return res.status(400).json({ error: 'symbol e candles são obrigatórios' });
     }
     metaTraderBridge.addMarketData(symbol, candles);
+
+    // ── Girassol Sintético: processa candles recebidos do EA antigo ──────────
+    // Quando o EA não envia buffers do Girassol (versão antiga), calculamos
+    // um sinal equivalente via ZigZag server-side e injetamos no cache.
+    const existingGirassol = metaTraderBridge.getGirassolBias(symbol);
+    const existingIsStale = !existingGirassol; // sem dados = calcular sintético
+
+    if (existingIsStale && candles.length >= 20) {
+      setImmediate(() => {
+        try {
+          const result = computeSyntheticGirassol(candles);
+          if (result.bias !== 'NEUTRAL' || result.adx >= 20) {
+            metaTraderBridge.setGirassolBias(symbol, result.bias, result.levelCount);
+            console.log(`[MT5Bridge] 🌻 Girassol Sintético ${symbol}: ${result.bias} (${result.levelCount}/3 níveis) | ADX=${result.adx.toFixed(1)} | ${result.description}`);
+          }
+        } catch (_e) {}
+      });
+    }
+
     res.json({ ok: true, received: candles.length, symbol });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -947,18 +969,31 @@ router.get('/config', (_req: Request, res: Response) => {
 
 /**
  * GET /api/mt5/download-ea
- * Gera e retorna o EA (.mq5) com ServerURL e ApiToken pré-preenchidos.
+ * Serve o EA v8.0 com ServerURL pré-preenchida (lê arquivo do disco).
  */
 router.get('/download-ea', (req: Request, res: Response) => {
   try {
-    const config = metaTraderBridge.getConfig();
     const replitDomain = process.env.REPLIT_DEV_DOMAIN;
     const serverUrl = replitDomain
       ? `https://${replitDomain}`
       : `${req.protocol}://${req.get('host')}`;
-    const token = config.apiToken || '';
 
-    const content = generateEAContent(serverUrl, token, config);
+    // Lê o EA v8.0 do arquivo estático e substitui a URL do servidor
+    const eaPath = path.join(process.cwd(), 'public', 'downloads', 'InvistaPRO_EA.mq5');
+    let content: string;
+    try {
+      content = fs.readFileSync(eaPath, 'utf-8');
+      // Injeta URL atual do servidor no parâmetro ServerURL
+      content = content.replace(
+        /input string   ServerURL        = ".*?";/,
+        `input string   ServerURL        = "${serverUrl}"; // URL do servidor InvistaPRO`
+      );
+    } catch (_e) {
+      // Fallback: usa a função legada se o arquivo não for encontrado
+      const config = metaTraderBridge.getConfig();
+      const token = config.apiToken || '';
+      content = generateEAContent(serverUrl, token, config);
+    }
 
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="InvistaPRO_EA.mq5"');

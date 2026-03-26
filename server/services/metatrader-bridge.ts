@@ -2502,6 +2502,20 @@ class MetaTraderBridge extends EventEmitter {
         return null;
       }
 
+      // ── Girassol Sintético: fallback automático quando EA não envia buffers ──
+      // Se não há dados do Girassol MT5 (EA antigo ou sem indicador), calculamos
+      // um equivalente via ZigZag + ADX + Supertrend usando os candles em cache.
+      if (!this.getGirassolBias(symbol) && marketData.length >= 20) {
+        try {
+          const { computeSyntheticGirassol } = await import('./synthetic-girassol');
+          const synth = computeSyntheticGirassol(marketData);
+          if (synth.bias !== 'NEUTRAL' || synth.adx >= 20) {
+            this.setGirassolBias(symbol, synth.bias, synth.levelCount);
+            console.log(`[MT5Bridge] 🌻⚙️ Girassol Sintético (auto) ${symbol}: ${synth.bias} (${synth.levelCount}/3) | ADX=${synth.adx.toFixed(1)} (${synth.trendStrength}) | Supertrend=${synth.supertrend}`);
+          }
+        } catch (_e) {}
+      }
+
       // ── Integrar Girassol como modulador dinâmico do limiar de consenso da IA ──
       // O Girassol é o GATILHO PRIMÁRIO de entrada. Sua presença e confluência
       // determinam quanto do consenso da IA é necessário para validar a operação:
