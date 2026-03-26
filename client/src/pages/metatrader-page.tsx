@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, keepPreviousData } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useLocation } from "wouter";
@@ -236,7 +236,8 @@ export default function MetaTraderPage() {
 
   const { data: status, isLoading: statusLoading } = useQuery<MT5Status>({
     queryKey: ['/api/mt5/status'],
-    refetchInterval: 2000
+    refetchInterval: 2000,
+    placeholderData: keepPreviousData,
   });
 
   const { data: config, isLoading: configLoading } = useQuery<MT5Config>({
@@ -257,11 +258,13 @@ export default function MetaTraderPage() {
   const { data: activeSignal, isLoading: signalLoading } = useQuery<any>({
     queryKey: ['/api/mt5/signal'],
     refetchInterval: 3000,
+    placeholderData: keepPreviousData,
   });
 
   const { data: aiAnalysis } = useQuery<AIAnalysisResponse>({
     queryKey: ['/api/mt5/ai-analysis'],
-    refetchInterval: 2000
+    refetchInterval: 2000,
+    placeholderData: keepPreviousData,
   });
 
   const { data: spikeDashboard } = useQuery<any>({
@@ -667,9 +670,9 @@ export default function MetaTraderPage() {
                     <div className={`w-2 h-2 rounded-full ml-auto ${activeSignal?.action && activeSignal.action !== 'HOLD' ? 'bg-green-500 animate-breathe' : 'bg-yellow-500'}`} />
                   </CardTitle>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="transition-all duration-300">
                   {activeSignal && activeSignal.action && activeSignal.action !== 'HOLD' ? (
-                    <div className="space-y-3">
+                    <div className="space-y-3 animate-fadeIn">
                       <div className="flex items-center justify-between">
                         <span className="text-xl font-bold">{activeSignal.symbol || '—'}</span>
                         <div className="flex items-center gap-2">
@@ -709,7 +712,7 @@ export default function MetaTraderPage() {
                       <p className="text-xs text-muted-foreground border-t pt-2">{activeSignal?.reason}</p>
                     </div>
                   ) : (
-                    <div className="space-y-3">
+                    <div className="space-y-3 animate-fadeIn">
                       {/* Status HOLD — mostra o que a IA está fazendo agora */}
                       <div className="flex items-center gap-2 p-2 rounded-md bg-yellow-500/10 border border-yellow-500/30">
                         <Clock className="h-4 w-4 text-yellow-500 shrink-0" />
