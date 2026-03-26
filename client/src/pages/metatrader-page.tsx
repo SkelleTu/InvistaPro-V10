@@ -493,9 +493,9 @@ export default function MetaTraderPage() {
             <CardContent className="pt-4 pb-3">
               <div className="flex items-center justify-between">
                 <span className="text-xs text-muted-foreground">IA ao Vivo</span>
-                <Brain className={`h-4 w-4 ${status?.latestAIConsensus !== undefined ? 'text-primary animate-pulse' : 'text-muted-foreground'}`} />
+                <Brain className={`h-4 w-4 ${status?.latestAIConsensus !== undefined ? 'text-primary' : 'text-muted-foreground'}`} />
               </div>
-              <p className={`text-xl font-bold mt-1 ${
+              <p className={`text-xl font-bold mt-1 transition-colors duration-500 ${
                 status?.latestAIConsensus !== undefined
                   ? status.latestAIConsensus >= 70 ? 'text-green-500' : 'text-yellow-500'
                   : 'text-muted-foreground'
@@ -664,7 +664,7 @@ export default function MetaTraderPage() {
                   <CardTitle className="flex items-center gap-2 text-base">
                     <Zap className="h-5 w-5 text-yellow-500" />
                     Sinal Ativo das IAs
-                    <div className={`w-2 h-2 rounded-full ml-auto ${activeSignal?.action && activeSignal.action !== 'HOLD' ? 'bg-green-500 animate-pulse' : 'bg-yellow-500 animate-pulse'}`} />
+                    <div className={`w-2 h-2 rounded-full ml-auto ${activeSignal?.action && activeSignal.action !== 'HOLD' ? 'bg-green-500 animate-pulse' : 'bg-yellow-500'}`} />
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -931,7 +931,7 @@ export default function MetaTraderPage() {
               <Card data-testid="card-live-consensus">
                 <CardContent className="pt-4">
                   <p className="text-xs text-muted-foreground">Consenso Real das IAs</p>
-                  <p className={`text-2xl font-bold ${
+                  <p className={`text-2xl font-bold transition-colors duration-500 ${
                     status?.latestAIConsensus === undefined ? 'text-muted-foreground'
                     : status.latestAIDirection === 'neutral' ? 'text-yellow-500'
                     : status.latestAIConsensus >= (status.latestRequiredConsensus ?? 70) ? 'text-green-500' : 'text-red-500'
@@ -944,12 +944,12 @@ export default function MetaTraderPage() {
                   </p>
                 </CardContent>
               </Card>
-              <Card data-testid="card-min-consensus" className={status?.latestIsRecoveryMode ? 'border-orange-500/50 bg-orange-500/5' : ''}>
+              <Card data-testid="card-min-consensus" className={`transition-colors duration-500 ${status?.latestIsRecoveryMode ? 'border-orange-500/50 bg-orange-500/5' : ''}`}>
                 <CardContent className="pt-4">
                   <p className="text-xs text-muted-foreground">
                     {status?.latestIsRecoveryMode ? '🔴 Mínimo (Recovery)' : 'Mínimo Exigido'}
                   </p>
-                  <p className={`text-2xl font-bold ${status?.latestIsRecoveryMode ? 'text-orange-500' : 'text-primary'}`}>
+                  <p className={`text-2xl font-bold transition-colors duration-500 ${status?.latestIsRecoveryMode ? 'text-orange-500' : 'text-primary'}`}>
                     {status?.latestRequiredConsensus !== undefined ? `${status.latestRequiredConsensus}%` : '70%'}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">
@@ -1098,7 +1098,7 @@ export default function MetaTraderPage() {
               <Card className="border-primary/30" data-testid="card-ai-vote-board">
                 <CardHeader className="pb-2 pt-3">
                   <CardTitle className="flex items-center gap-2 text-sm">
-                    <Brain className="h-4 w-4 text-primary animate-pulse" />
+                    <Brain className="h-4 w-4 text-primary" />
                     Quadro de Votos — {aiAnalysis.latest.modelResults.length} IAs Analisando Agora
                     <span className="text-xs text-muted-foreground ml-1">· {aiAnalysis.latest.symbol}</span>
                     <Badge variant="outline" className="text-xs gap-1 ml-auto">
@@ -1202,7 +1202,7 @@ export default function MetaTraderPage() {
               <Card className="border-primary/30 bg-primary/5" data-testid="card-live-ai-activity">
                 <CardHeader className="pb-2 pt-3">
                   <CardTitle className="flex items-center gap-2 text-sm">
-                    <Brain className="h-4 w-4 text-primary animate-pulse" />
+                    <Brain className="h-4 w-4 text-primary" />
                     Atividade das IAs em Tempo Real
                     <Badge variant="outline" className="text-xs gap-1 ml-auto">
                       <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
