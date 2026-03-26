@@ -6,6 +6,7 @@ import { HybridOrchestrator } from './hybrid-orchestrator';
 import { QuantumNeuralSystem, QuantumNeuralConfig } from './quantum-neural-system';
 import { dynamicThresholdTracker } from './dynamic-threshold-tracker';
 import { realStatsTracker } from './real-stats-tracker';
+import { classifyAsset, getGateThreshold } from '../utils/asset-classifier';
 
 // Shared helper function for digit extraction preserving trailing zeros
 function extractLastDigit(tickData: DerivTickData): number {
@@ -296,21 +297,27 @@ export class HuggingFaceAIService {
     // 🔥 SISTEMA DE RECUPERAÇÃO - Verificar se precisa de cooperação intensificada
     // Usa realStatsTracker (in-memory) em vez de Turso (bloqueado por limitação de plano)
     let isRecoveryMode = false;
-    let recoveryThreshold = 0.65; // threshold padrão conservador
+    // threshold base calibrado pelo tipo de ativo (sintético, forex, B3, etc.)
+    const assetProfile = classifyAsset(symbol);
+    let recoveryThreshold = assetProfile.gateThreshold / 100;
 
     try {
       isRecoveryMode = realStatsTracker.isPostLossMode();
       if (isRecoveryMode) {
         const reqs = realStatsTracker.getRecoveryRequirements();
-        // minConsensus já está em % (ex: 85, 90, 95) — converter para ratio 0-1
+        // minConsensus já está em % (ex: 62, 68, 75) — converter para ratio 0-1
         recoveryThreshold = reqs.minConsensus / 100;
         console.log('🔥 MODO RECUPERAÇÃO DETECTADO (in-memory) - Cooperação IA intensificada!');
-        console.log(`📊 Threshold elevado para: ${reqs.minConsensus}% (${reqs.consecutiveLosses} perda(s) consecutiva(s))`);
+        console.log(`📊 Threshold elevado para: ${reqs.minConsensus}% [${assetProfile.categoryLabel}] (${reqs.consecutiveLosses} perda(s) consecutiva(s))`);
         console.log(`💰 Saldo alvo para sair do recovery: $${reqs.balanceToRecover.toFixed(2)}`);
         console.log('🧠 IAs ajustando estratégia para máxima precisão — stake conservador ativo');
       }
     } catch (error) {
       console.log(`⚠️ Erro ao verificar modo recuperação (in-memory): ${error}`);
+    }
+
+    if (!isRecoveryMode) {
+      console.log(`🎯 [THRESHOLD] ${symbol} [${assetProfile.categoryLabel}] — gate base: ${assetProfile.gateThreshold}% (${assetProfile.description})`);
     }
     
     console.log(`🌌 Iniciando ANÁLISE HÍBRIDA SUPREMA com ${this.activeModels.length} modelos coordenados`);

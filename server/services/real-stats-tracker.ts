@@ -7,9 +7,9 @@
  * CAMADA 1 - ANTI-REPETIÇÃO:
  *   O mesmo ativo é bloqueado por 5 min após perda — tempo real para o mercado mudar.
  *
- * CAMADA 2 - CONSENSO ESCALADO POR STREAK:
+ * CAMADA 2 - CONSENSO ESCALADO POR STREAK (ADAPTATIVO POR TIPO DE ATIVO):
  *   A cada perda consecutiva o sistema exige consenso progressivamente maior.
- *   Evita entrar em mercado ruim com sinal fraco.
+ *   O threshold base é calibrado por tipo de ativo (sintético, forex, B3, etc.).
  *
  * CAMADA 3 - CIRCUIT BREAKER COM PAUSA REAL:
  *   Pausas significativas (2-15 min) por streak de perdas.
@@ -19,15 +19,9 @@
  *   Ativo bloqueado por 5 minutos após causar perda.
  */
 
-const RECOVERY_ASSET_BLOCK_MS = 5 * 60 * 1000; // 5 minutos — ativo perdedor precisa de pausa real
+import { getRecoveryThreshold } from '../utils/asset-classifier';
 
-// Consenso mínimo por nível de perdas consecutivas
-// Escala progressiva: após perdas consecutivas, exige sinal muito mais forte
-const RECOVERY_CONSENSUS_BY_STREAK: Record<number, number> = {
-  1: 72,  // 1 perda consecutiva → 72% (mesmo threshold do gate principal)
-  2: 78,  // 2 perdas consecutivas → 78% (sinal forte exigido)
-  3: 85,  // 3+ perdas consecutivas → 85% (sinal excepcional — mercado claramente contra)
-};
+const RECOVERY_ASSET_BLOCK_MS = 5 * 60 * 1000; // 5 minutos — ativo perdedor precisa de pausa real
 
 // Pausas reais por perdas consecutivas para proteção de banca
 // Cada pausa dá tempo para as condições de mercado mudarem
@@ -88,11 +82,18 @@ class RealStatsTracker {
     return this.wonTrades + this.lostTrades;
   }
 
-  /** Consenso mínimo exigido com base na streak de perdas consecutivas */
+  /** Consenso mínimo exigido com base na streak de perdas e no tipo do ativo bloqueado.
+   *  Se em recovery mas streak = 0 (já ganhou 1 vez), retorna o gate base do ativo.
+   *  Se fora de recovery (sem perdas), retorna 0 (sem restrição extra). */
   get recoveryMinConsensus(): number {
-    if (this.consecutiveLosses <= 0) return 0;
-    const level = Math.min(this.consecutiveLosses, 3);
-    return RECOVERY_CONSENSUS_BY_STREAK[level] ?? 95;
+    if (this.consecutiveLosses <= 0) {
+      // Em recovery mas sem streak ativo → apenas gate base do ativo
+      if (this.postLossMode && this.blockedAsset) {
+        return getRecoveryThreshold(this.blockedAsset, 1);
+      }
+      return 0;
+    }
+    return getRecoveryThreshold(this.blockedAsset, this.consecutiveLosses);
   }
 
   /**

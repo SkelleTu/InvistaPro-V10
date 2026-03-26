@@ -15,6 +15,7 @@ import { persistentLearningEngine } from './persistent-learning-engine';
 import { supremeAnalyzer, SupremeAnalysis } from './supreme-market-analyzer';
 import { analyzeCrashBoomSpike } from './crash-boom-spike-engine';
 import { setSignal } from './signal-store';
+import { classifyAsset, getGateThreshold } from '../utils/asset-classifier';
 
 function derivToMT5Name(derivSymbol: string): string | null {
   const map: Record<string, string> = {
@@ -1321,15 +1322,17 @@ export class AutoTradingScheduler {
       }
 
       // ══════════════════════════════════════════════════════════════════════════
-      // 🔒 GATE DE QUALIDADE MÁXIMA — SOMENTE ENTRA QUANDO VAI GANHAR
-      // Threshold elevado de 72% mínimo global — edge obrigatório acima do break-even
-      // para QUALQUER modalidade. Meta: 0 loss por sinal fraco.
+      // 🔒 GATE DE QUALIDADE ADAPTATIVO — threshold calibrado por tipo de ativo
+      // Sintéticos aleatórios (R_*, 1HZ*): 62% | Crash/Boom/Jump: 64%
+      // Forex: 67% | B3 Brasil: 72%
+      // Edge obrigatório acima do break-even para QUALQUER modalidade.
       // Referências de break-even: ACCU ~40-50%, CALL/PUT ~54%, TOUCH ~60-70%
       // ══════════════════════════════════════════════════════════════════════════
-      const MIN_DIRECTIONAL_CONSENSUS = 72; // 72% mínimo global — conservador e cirúrgico
+      const assetProfile = classifyAsset(selectedSymbol);
+      const MIN_DIRECTIONAL_CONSENSUS = getGateThreshold(selectedSymbol);
       if (aiDirectionalConsensus < MIN_DIRECTIONAL_CONSENSUS) {
-        console.log(`⛔ [${operationId}] SINAL FRACO BLOQUEADO: ${aiDirectionalDecision?.toUpperCase()} ${selectedSymbol} | consenso=${aiDirectionalConsensus.toFixed(1)}% < ${MIN_DIRECTIONAL_CONSENSUS}% mínimo — aguardando sinal mais forte.`);
-        return { success: false, error: `Consenso ${aiDirectionalConsensus.toFixed(1)}% insuficiente (mín ${MIN_DIRECTIONAL_CONSENSUS}%) — entrada bloqueada para proteção do capital.` };
+        console.log(`⛔ [${operationId}] SINAL FRACO BLOQUEADO: ${aiDirectionalDecision?.toUpperCase()} ${selectedSymbol} [${assetProfile.categoryLabel}] | consenso=${aiDirectionalConsensus.toFixed(1)}% < ${MIN_DIRECTIONAL_CONSENSUS}% mínimo — aguardando sinal mais forte.`);
+        return { success: false, error: `Consenso ${aiDirectionalConsensus.toFixed(1)}% insuficiente (mín ${MIN_DIRECTIONAL_CONSENSUS}% para ${assetProfile.categoryLabel}) — entrada bloqueada para proteção do capital.` };
       }
 
       // 🧠 VERIFICAÇÃO MULTI-SISTEMA: Quantum + Microscopic devem corroborar direção
