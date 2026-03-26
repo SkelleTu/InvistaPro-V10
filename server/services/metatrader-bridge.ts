@@ -220,7 +220,6 @@ export interface MT5Status {
   lastEquity?: number;
   latestAIConsensus?: number;
   latestRequiredConsensus?: number;
-  latestIsRecoveryMode?: boolean;
   latestAIDirection?: 'up' | 'down' | 'neutral';
   latestAnalysisSymbol?: string;
   latestAnalysisAt?: number;
@@ -328,8 +327,7 @@ export interface AIAnalysisEntry {
   status: 'processing' | 'approved' | 'rejected' | 'waiting' | 'blocked';
   // HuggingFace AI
   aiConsensus?: number;
-  requiredConsensus?: number;   // threshold exigido (pode ser elevado em modo recovery)
-  isRecoveryMode?: boolean;
+  requiredConsensus?: number;
   aiDirection?: 'up' | 'down' | 'neutral';
   aiReasoning?: string;
   modelResults?: AIModelResult[];
@@ -1424,10 +1422,10 @@ class MetaTraderBridge extends EventEmitter {
    * RESET DE SESSÃO — Zera o estado operacional de testes sem apagar dados de aprendizado.
    *
    * O que é ZERADO (estado de sessão):
-   *   • consecutiveLosses → 0 (remove thresholds elevados por "Recovery")
+   *   • consecutiveLosses → 0 (remove thresholds elevados)
    *   • circuitBreakerUntil → 0 (remove bloqueio de circuit breaker)
    *   • analysisLog em memória → limpo (logs de análise da sessão atual)
-   *   • RealStatsTracker recovery state → resetado (remove modo pós-perda e ativo bloqueado)
+   *   • RealStatsTracker → resetado (remove modo pós-perda e ativo bloqueado)
    *
    * O que NÃO é alterado (dados permanentes):
    *   • totalSignalsGenerated, totalTradesExecuted (contadores cumulativos)
@@ -1454,11 +1452,11 @@ class MetaTraderBridge extends EventEmitter {
     // 3. Persistir estado resetado no SQLite
     this.saveBridgeState();
 
-    // 4. Resetar RealStatsTracker (modo recovery, ativo bloqueado, CB do tracker)
+    // 4. Resetar RealStatsTracker (ativo bloqueado, CB do tracker)
     try {
       const { realStatsTracker } = await import('./real-stats-tracker');
       realStatsTracker.resetSessionState();
-      cleared.push('modo recovery (RealStatsTracker)');
+      cleared.push('estado pós-perda (RealStatsTracker)');
     } catch {
       // fallback silencioso
     }
@@ -1661,7 +1659,6 @@ class MetaTraderBridge extends EventEmitter {
       lastEquity: this.currentEquity || undefined,
       latestAIConsensus: latestAnalysis?.aiConsensus,
       latestRequiredConsensus: latestAnalysis?.requiredConsensus,
-      latestIsRecoveryMode: latestAnalysis?.isRecoveryMode,
       latestAIDirection: latestAnalysis?.aiDirection,
       latestAnalysisSymbol: latestAnalysis?.symbol,
       latestAnalysisAt: latestAnalysis?.timestamp,
@@ -2470,7 +2467,6 @@ class MetaTraderBridge extends EventEmitter {
         }
 
         const requiredMin = consensus.requiredConsensus ?? this.MIN_AI_CONSENSUS;
-        const inRecovery = consensus.isRecoveryMode ?? false;
         const meetThreshold = aiConsensus >= requiredMin && aiDirection !== 'neutral';
 
         this.logAnalysis({
@@ -2481,19 +2477,18 @@ class MetaTraderBridge extends EventEmitter {
           status: meetThreshold ? 'processing' : 'rejected',
           aiConsensus,
           requiredConsensus: requiredMin,
-          isRecoveryMode: inRecovery,
           aiDirection,
           aiReasoning,
           modelResults,
           participatingModels,
           decisionReason: aiDirection === 'neutral'
-            ? `Mercado NEUTRO — IAs não identificaram direção clara (${participatingModels} modelos) | Consenso real: ${aiConsensus.toFixed(1)}%${inRecovery ? ` | Recovery exige: ${requiredMin}%` : ''}`
+            ? `Mercado NEUTRO — IAs não identificaram direção clara (${participatingModels} modelos) | Consenso real: ${aiConsensus.toFixed(1)}%`
             : aiConsensus < requiredMin
-              ? `Consenso insuficiente: ${aiConsensus.toFixed(1)}% < ${requiredMin}% exigido${inRecovery ? ' (modo recovery)' : ''}`
+              ? `Consenso insuficiente: ${aiConsensus.toFixed(1)}% < ${requiredMin}% exigido`
               : `Consenso aprovado: ${aiConsensus.toFixed(1)}% ≥ ${requiredMin}% → ${aiDirection.toUpperCase()} | ${participatingModels} modelos`
         });
 
-        console.log(`[MT5Bridge] 🧠 IA: ${aiDirection.toUpperCase()} | Consenso real: ${aiConsensus.toFixed(1)}% | Exigido: ${requiredMin}%${inRecovery ? ' (RECOVERY)' : ''} | ${symbol}`);
+        console.log(`[MT5Bridge] 🧠 IA: ${aiDirection.toUpperCase()} | Consenso real: ${aiConsensus.toFixed(1)}% | Exigido: ${requiredMin}% | ${symbol}`);
       } catch (aiErr) {
         this.logAnalysis({
           id: `${entryId}_hf_err`,

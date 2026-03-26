@@ -732,7 +732,6 @@ export default function MetaTraderPage() {
                                 <span className="text-muted-foreground flex items-center gap-1">
                                   <Brain className="h-3 w-3" />
                                   Consenso real — {status.latestAnalysisSymbol || '—'}
-                                  {status.latestIsRecoveryMode && <span className="text-orange-500 font-semibold ml-1">🔴 Recovery</span>}
                                 </span>
                                 <span className={`font-bold transition-colors duration-500 ${
                                   status.latestAIDirection === 'neutral' ? 'text-yellow-500'
@@ -745,8 +744,8 @@ export default function MetaTraderPage() {
                               <Progress value={status.latestAIConsensus} className="h-2" />
                               <div className="flex justify-between text-xs text-muted-foreground">
                                 <span>0%</span>
-                                <span className={status.latestIsRecoveryMode ? 'text-orange-500 font-semibold' : 'text-yellow-500'}>
-                                  {status.latestRequiredConsensus ?? 70}% mínimo{status.latestIsRecoveryMode ? ' (recovery)' : ''}
+                                <span className="text-yellow-500">
+                                  {status.latestRequiredConsensus ?? 70}% mínimo
                                 </span>
                                 <span>100%</span>
                               </div>
@@ -902,38 +901,6 @@ export default function MetaTraderPage() {
               </Card>
             )}
 
-            {/* Reset de Sessão — visível somente quando Recovery está ativo */}
-            {status?.latestIsRecoveryMode && !aiAnalysis?.latest?.circuitBreakerActive && (
-              <Card className="border-orange-500/40 bg-orange-500/5" data-testid="card-recovery-reset">
-                <CardContent className="pt-3 pb-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2">
-                      <AlertTriangle className="h-4 w-4 text-orange-500 shrink-0" />
-                      <div>
-                        <p className="text-sm font-semibold text-orange-500">
-                          🔴 Modo Recovery ativo
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          Threshold elevado após perdas consecutivas. Zere para novo contexto de análise.
-                        </p>
-                      </div>
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="border-orange-500/50 text-orange-500 hover:bg-orange-500/10 shrink-0"
-                      onClick={() => resetSessionMutation.mutate()}
-                      disabled={resetSessionMutation.isPending}
-                      data-testid="button-reset-session-recovery"
-                    >
-                      <RefreshCw className={`h-3.5 w-3.5 mr-1 ${resetSessionMutation.isPending ? 'animate-spin' : ''}`} />
-                      {resetSessionMutation.isPending ? 'Zerando...' : 'Zerar Sessão de Testes'}
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
             {/* Status bar: consenso ao vivo */}
             <div className="grid grid-cols-4 gap-3">
               <Card data-testid="card-live-consensus">
@@ -952,16 +919,14 @@ export default function MetaTraderPage() {
                   </p>
                 </CardContent>
               </Card>
-              <Card data-testid="card-min-consensus" className={`transition-colors duration-500 ${status?.latestIsRecoveryMode ? 'border-orange-500/50 bg-orange-500/5' : ''}`}>
+              <Card data-testid="card-min-consensus">
                 <CardContent className="pt-4">
-                  <p className="text-xs text-muted-foreground">
-                    {status?.latestIsRecoveryMode ? '🔴 Mínimo (Recovery)' : 'Mínimo Exigido'}
-                  </p>
-                  <p className={`text-2xl font-bold transition-colors duration-500 ${status?.latestIsRecoveryMode ? 'text-orange-500' : 'text-primary'}`}>
+                  <p className="text-xs text-muted-foreground">Mínimo Exigido</p>
+                  <p className="text-2xl font-bold text-primary">
                     {status?.latestRequiredConsensus !== undefined ? `${status.latestRequiredConsensus}%` : '70%'}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    {status?.latestIsRecoveryMode ? 'Elevado por perdas consecutivas' : 'Limiar de segurança'}
+                    Limiar de segurança
                   </p>
                 </CardContent>
               </Card>
@@ -1188,7 +1153,7 @@ export default function MetaTraderPage() {
                       <p className={`font-black text-lg ${aiAnalysis.latest.aiConsensus >= (aiAnalysis.latest.requiredConsensus ?? 70) ? 'text-green-400' : 'text-red-400'}`}>
                         {aiAnalysis.latest.aiConsensus?.toFixed(1)}%
                       </p>
-                      <p className="text-muted-foreground">mín: {aiAnalysis.latest.requiredConsensus ?? 70}%{aiAnalysis.latest.isRecoveryMode ? ' 🔴' : ''}</p>
+                      <p className="text-muted-foreground">mín: {aiAnalysis.latest.requiredConsensus ?? 70}%</p>
                     </div>
                   </div>
 
@@ -1248,7 +1213,7 @@ export default function MetaTraderPage() {
                       </p>
                       <p className="text-muted-foreground">
                         {status.latestAIConsensus !== undefined
-                          ? `${status.latestAIConsensus.toFixed(0)}% / ${status.latestRequiredConsensus ?? 70}% mínimo${status.latestIsRecoveryMode ? ' 🔴' : ''}`
+                          ? `${status.latestAIConsensus.toFixed(0)}% / ${status.latestRequiredConsensus ?? 70}% mínimo`
                           : 'analisando...'}
                       </p>
                     </div>
@@ -2057,7 +2022,7 @@ export default function MetaTraderPage() {
                 <div className="flex items-start justify-between gap-4">
                   <div className="space-y-1 text-xs text-muted-foreground flex-1">
                     <p className="font-medium text-foreground text-sm">O que é zerado:</p>
-                    <p>• Perdas consecutivas → 0 (remove modo Recovery e thresholds elevados)</p>
+                    <p>• Perdas consecutivas → 0 (remove thresholds elevados)</p>
                     <p>• Circuit Breaker → desativado</p>
                     <p>• Modo pós-perda e ativo bloqueado</p>
                     <p>• Log de análise em memória da sessão atual</p>
@@ -2077,14 +2042,6 @@ export default function MetaTraderPage() {
                     {resetSessionMutation.isPending ? 'Zerando...' : 'Zerar Sessão'}
                   </Button>
                 </div>
-                {status?.latestIsRecoveryMode && (
-                  <div className="mt-3 flex items-center gap-2 px-3 py-2 rounded-lg bg-orange-500/10 border border-orange-500/30">
-                    <AlertTriangle className="h-3.5 w-3.5 text-orange-500 shrink-0" />
-                    <p className="text-xs text-orange-500">
-                      🔴 Recovery ativo — threshold elevado para {status?.latestRequiredConsensus ?? '?'}% — Recomendado zerar para novo contexto.
-                    </p>
-                  </div>
-                )}
               </CardContent>
             </Card>
 
