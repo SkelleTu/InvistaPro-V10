@@ -2455,6 +2455,107 @@ class MetaTraderBridge extends EventEmitter {
           const rsiOversold   = profile?.rsiOversold   ?? 25;
           const rsiOverbought = profile?.rsiOverbought  ?? 75;
 
+          // ── GATE MACRO-ESTRUTURA: Crash — bloquear BUY enquanto descida ativa ──────
+          // Observação: em Crash, o mercado cai em spikes e sobe gradualmente.
+          // Se os últimos N candles ainda mostram queda contínua (spike em curso),
+          // a entrada BUY deve aguardar a confirmação de fundo (reversão real).
+          // Também verificar se o preço está se aproximando de um fundo macro anterior
+          // sem ter formado fundo duplo — nesse caso a IA deve esperar o teste + bounce.
+          if (naturalAction === 'BUY' && marketData.length >= 8) {
+            // GATE A: Momentum descendente ativo — últimos 5 candles em queda contínua
+            const last5 = marketData.slice(-5).map((d: any) => d.close as number);
+            const dropPct = (last5[0] - last5[last5.length - 1]) / (last5[0] || 1);
+            const allDeclining = last5.every((c: number, i: number) => i === 0 || c <= last5[i - 1]);
+            if (allDeclining && dropPct > 0.0003) {
+              this.logAnalysis({
+                id: `${entryId}_active_descent`,
+                timestamp: Date.now(), symbol, phase: 'decision', status: 'rejected',
+                consecutiveLosses: this.consecutiveLosses,
+                decisionReason: `🔴 GATE MACRO: Crash em queda ativa — ${(dropPct * 100).toFixed(3)}% nos últimos 5 candles — aguardando confirmação de fundo antes de BUY`
+              });
+              console.log(`[MT5Bridge] 🔴 ${symbol}: GATE MACRO — queda ativa (${(dropPct * 100).toFixed(3)}% em 5 barras) — BUY bloqueado até bounce confirmado`);
+              return null;
+            }
+
+            // GATE B: Fundo macro anterior não testado — mercado ainda convergindo para ele
+            // Procura o fundo mais baixo nos últimos 80 barras (excluindo últimos 3)
+            const lookback = marketData.slice(-80, -3);
+            if (lookback.length >= 10) {
+              const previousMacroLow = Math.min(...lookback.map((d: any) => d.low as number));
+              const currentClose = marketData[marketData.length - 1].close as number;
+              const distToLow = (currentClose - previousMacroLow) / (previousMacroLow || 1);
+
+              // Se o preço atual está dentro de 0.5% ACIMA do fundo anterior e ainda descendo
+              if (distToLow >= 0 && distToLow < 0.005 && dropPct > 0.0001) {
+                this.logAnalysis({
+                  id: `${entryId}_approaching_macro_low`,
+                  timestamp: Date.now(), symbol, phase: 'decision', status: 'rejected',
+                  consecutiveLosses: this.consecutiveLosses,
+                  decisionReason: `⏳ GATE MACRO: Preço a ${(distToLow * 100).toFixed(3)}% do fundo macro @ ${previousMacroLow.toFixed(5)} — aguardando teste + bounce (Fundo Duplo) para confirmar reversão antes de BUY`
+                });
+                console.log(`[MT5Bridge] ⏳ ${symbol}: GATE MACRO — preço a ${(distToLow * 100).toFixed(3)}% do fundo macro ${previousMacroLow.toFixed(5)} sem bounce — BUY bloqueado`);
+                return null;
+              }
+
+              // Se o preço já atingiu/ultrapassou o fundo anterior mas ainda não bounced
+              // (a última barra fecha ABAIXO do fundo anterior → spike ainda ocorrendo)
+              if (currentClose < previousMacroLow) {
+                this.logAnalysis({
+                  id: `${entryId}_below_macro_low`,
+                  timestamp: Date.now(), symbol, phase: 'decision', status: 'rejected',
+                  consecutiveLosses: this.consecutiveLosses,
+                  decisionReason: `🔴 GATE MACRO: Preço (${currentClose.toFixed(5)}) abaixo do fundo macro @ ${previousMacroLow.toFixed(5)} — spike ativo — aguardar fechamento acima do fundo para confirmar Fundo Duplo`
+                });
+                console.log(`[MT5Bridge] 🔴 ${symbol}: GATE MACRO — preço ${currentClose.toFixed(5)} abaixo do fundo macro ${previousMacroLow.toFixed(5)} — spike em curso — BUY bloqueado`);
+                return null;
+              }
+            }
+          }
+
+          // ── GATE MACRO-ESTRUTURA: Boom — bloquear SELL enquanto subida ativa ──────
+          if (naturalAction === 'SELL' && marketData.length >= 8) {
+            const last5 = marketData.slice(-5).map((d: any) => d.close as number);
+            const risePct = (last5[last5.length - 1] - last5[0]) / (last5[0] || 1);
+            const allRising = last5.every((c: number, i: number) => i === 0 || c >= last5[i - 1]);
+            if (allRising && risePct > 0.0003) {
+              this.logAnalysis({
+                id: `${entryId}_active_rise`,
+                timestamp: Date.now(), symbol, phase: 'decision', status: 'rejected',
+                consecutiveLosses: this.consecutiveLosses,
+                decisionReason: `🔴 GATE MACRO: Boom em alta ativa — ${(risePct * 100).toFixed(3)}% nos últimos 5 candles — aguardando confirmação de topo antes de SELL`
+              });
+              console.log(`[MT5Bridge] 🔴 ${symbol}: GATE MACRO — alta ativa (${(risePct * 100).toFixed(3)}% em 5 barras) — SELL bloqueado até topo confirmado`);
+              return null;
+            }
+
+            const lookback = marketData.slice(-80, -3);
+            if (lookback.length >= 10) {
+              const previousMacroHigh = Math.max(...lookback.map((d: any) => d.high as number));
+              const currentClose = marketData[marketData.length - 1].close as number;
+              const distToHigh = (previousMacroHigh - currentClose) / (previousMacroHigh || 1);
+              if (distToHigh >= 0 && distToHigh < 0.005 && risePct > 0.0001) {
+                this.logAnalysis({
+                  id: `${entryId}_approaching_macro_high`,
+                  timestamp: Date.now(), symbol, phase: 'decision', status: 'rejected',
+                  consecutiveLosses: this.consecutiveLosses,
+                  decisionReason: `⏳ GATE MACRO: Preço a ${(distToHigh * 100).toFixed(3)}% do topo macro @ ${previousMacroHigh.toFixed(5)} — aguardando teste + rejeição (Topo Duplo) antes de SELL`
+                });
+                console.log(`[MT5Bridge] ⏳ ${symbol}: GATE MACRO — preço a ${(distToHigh * 100).toFixed(3)}% do topo macro ${previousMacroHigh.toFixed(5)} sem rejeição — SELL bloqueado`);
+                return null;
+              }
+              if (currentClose > previousMacroHigh) {
+                this.logAnalysis({
+                  id: `${entryId}_above_macro_high`,
+                  timestamp: Date.now(), symbol, phase: 'decision', status: 'rejected',
+                  consecutiveLosses: this.consecutiveLosses,
+                  decisionReason: `🔴 GATE MACRO: Preço (${currentClose.toFixed(5)}) acima do topo macro @ ${previousMacroHigh.toFixed(5)} — spike ativo — aguardar fechamento abaixo do topo para confirmar Topo Duplo`
+                });
+                console.log(`[MT5Bridge] 🔴 ${symbol}: GATE MACRO — preço ${currentClose.toFixed(5)} acima do topo macro ${previousMacroHigh.toFixed(5)} — spike em curso — SELL bloqueado`);
+                return null;
+              }
+            }
+          }
+
           // Verificar se indicadores técnicos confirmam a entrada na direção natural
           let continuityScore = 0;
           const reasonParts: string[] = [];
