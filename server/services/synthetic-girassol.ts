@@ -11,6 +11,16 @@
  *  Nível 3 — Bolinha Micro      : últimas 8 barras — mínimo/máximo local
  *
  * Saída: bias (BUY | SELL | NEUTRAL) + levelCount (0-3) + descrição
+ *
+ * LÓGICA DE CLASSIFICAÇÃO DE TRADE (aplicada em conjunto com o bridge):
+ *  - macroTrend  : tendência maior (lookback 100 barras) — poder direcional do mercado
+ *  - tradeMode   : 'trend' | 'pullback' | 'extreme_reversal'
+ *      trend            = sinal segue a tendência macro → TP/SL padrão
+ *      pullback         = sinal contra a tendência macro → TP/SL MENORES (scalp/pullback)
+ *      extreme_reversal = Girassol Extremo em zona Fibonacci 50%/61.8% na direção macro
+ *                         → TP MAIOR (reversão explosiva esperada)
+ *  - fibKeyZone  : preço tocando 50% ou 61.8% de retração — zona de reversão de alta prob.
+ *  - pullbackDepth: profundidade do pullback em % da onda macro (0=início, 1=100% retração)
  */
 
 export interface SyntheticGirassolResult {
@@ -26,6 +36,12 @@ export interface SyntheticGirassolResult {
   adx: number;
   trendStrength: 'strong' | 'moderate' | 'weak';
   supertrend: 'BUY' | 'SELL' | 'NEUTRAL';
+  // ── Classificação de trade (novos campos) ──
+  macroTrend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
+  tradeMode: 'trend' | 'pullback' | 'extreme_reversal';
+  fibKeyZone: boolean;
+  pullbackDepth: number;  // 0.0 – 1.0 (0.5 = 50% retração, 0.618 = 61.8%)
+  extremoAtFib: boolean;  // Girassol Extremo (nível 1) disparado em 50%/61.8%
 }
 
 interface Candle {
@@ -101,7 +117,6 @@ function detectZigZagPivots(
     }
   }
 
-  // Converte de índice antigo → bar relativo ao candle mais recente (bar 0)
   return pivots
     .map(p => ({ ...p, bar: p.bar }))
     .sort((a, b) => a.bar - b.bar);
@@ -192,21 +207,114 @@ function calculateSupertrend(
 }
 
 /**
+ * Calcula EMA simples
+ */
+function calcEMA(prices: number[], period: number): number {
+  if (prices.length < period) return prices[prices.length - 1] || 0;
+  const k = 2 / (period + 1);
+  let ema = prices.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  for (let i = period; i < prices.length; i++) {
+    ema = prices[i] * k + ema * (1 - k);
+  }
+  return ema;
+}
+
+/**
+ * Detecta tendência macro usando EMA20, EMA50, EMA100 em lookback de 100 barras.
+ * Retorna: BULLISH | BEARISH | SIDEWAYS
+ */
+function detectMacroTrend(candles: Candle[]): 'BULLISH' | 'BEARISH' | 'SIDEWAYS' {
+  if (candles.length < 20) return 'SIDEWAYS';
+
+  // Candles chegam com índice 0 = mais recente; inverter para EMA crescer da esquerda
+  const prices = [...candles].reverse().map(c => c.close);
+
+  const ema20  = calcEMA(prices, 20);
+  const ema50  = calcEMA(prices, Math.min(50, prices.length));
+  const ema100 = calcEMA(prices, Math.min(100, prices.length));
+
+  const currentPrice = prices[prices.length - 1];
+
+  // Tendência de alta: EMA20 > EMA50 > EMA100 e preço acima de todas
+  if (ema20 > ema50 && ema50 > ema100 && currentPrice > ema20) return 'BULLISH';
+  // Tendência de baixa: EMA20 < EMA50 < EMA100 e preço abaixo de todas
+  if (ema20 < ema50 && ema50 < ema100 && currentPrice < ema20) return 'BEARISH';
+  // Semi-tendência de alta: EMA20 > EMA50 mesmo sem o EMA100
+  if (ema20 > ema50 && currentPrice > ema50) return 'BULLISH';
+  if (ema20 < ema50 && currentPrice < ema50) return 'BEARISH';
+
+  return 'SIDEWAYS';
+}
+
+/**
+ * Calcula a profundidade do pullback atual:
+ * - Identifica o swing mais recente oposto à tendência macro
+ * - Calcula quanto do range macro foi retrocedido (0.0 = 0%, 0.5 = 50%, 0.618 = 61.8%)
+ * Retorna { depth, fibKeyZone }
+ */
+function calcPullbackDepth(
+  candles: Candle[],
+  macroTrend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS'
+): { depth: number; fibKeyZone: boolean } {
+  if (macroTrend === 'SIDEWAYS' || candles.length < 20) {
+    return { depth: 0, fibKeyZone: false };
+  }
+
+  // Pega lookback de 100 barras para calcular o range macro
+  const lookback = candles.slice(0, Math.min(100, candles.length));
+  const highestHigh = Math.max(...lookback.map(c => c.high));
+  const lowestLow   = Math.min(...lookback.map(c => c.low));
+  const macroRange  = highestHigh - lowestLow;
+
+  if (macroRange <= 0) return { depth: 0, fibKeyZone: false };
+
+  const currentPrice = candles[0].close;
+
+  let depth = 0;
+  if (macroTrend === 'BULLISH') {
+    // Em alta: pullback = descida a partir do topo macro
+    // depth = quanto o preço caiu em relação ao topo como % do range
+    depth = (highestHigh - currentPrice) / macroRange;
+  } else {
+    // Em baixa: pullback = subida a partir do fundo macro
+    depth = (currentPrice - lowestLow) / macroRange;
+  }
+
+  depth = Math.max(0, Math.min(1, depth));
+
+  // Fibonacci key zones: 50% e 61.8% ±3%
+  const fibKeyZone = (
+    (depth >= 0.47 && depth <= 0.53) || // 50% ±3%
+    (depth >= 0.59 && depth <= 0.65)    // 61.8% ±3%
+  );
+
+  return { depth, fibKeyZone };
+}
+
+/**
  * Analisa candles e retorna sinal sintético do Girassol em 3 níveis.
  * Substitui o Girassol MT5 quando não há dados do EA.
+ *
+ * AGORA INCLUI: classificação de modo de trade (trend/pullback/extreme_reversal),
+ * tendência macro, zona Fibonacci-chave e profundidade do pullback.
  */
 export function computeSyntheticGirassol(rawCandles: any[]): SyntheticGirassolResult {
-  if (!rawCandles || rawCandles.length < 10) {
-    return {
-      bias: 'NEUTRAL',
-      levelCount: 0,
-      description: 'Dados insuficientes para análise sintética',
-      levels: [],
-      adx: 0,
-      trendStrength: 'weak',
-      supertrend: 'NEUTRAL'
-    };
-  }
+  const defaultResult: SyntheticGirassolResult = {
+    bias: 'NEUTRAL',
+    levelCount: 0,
+    description: 'Dados insuficientes para análise sintética',
+    levels: [],
+    adx: 0,
+    trendStrength: 'weak',
+    supertrend: 'NEUTRAL',
+    macroTrend: 'SIDEWAYS',
+    tradeMode: 'trend',
+    fibKeyZone: false,
+    pullbackDepth: 0,
+    extremoAtFib: false,
+  };
+
+  if (!rawCandles || rawCandles.length < 10) return defaultResult;
 
   const candles: Candle[] = rawCandles.slice(0, 200).map((c: any) => ({
     open: Number(c.open) || 0,
@@ -216,17 +324,7 @@ export function computeSyntheticGirassol(rawCandles: any[]): SyntheticGirassolRe
     time: c.time
   })).filter(c => c.close > 0);
 
-  if (candles.length < 10) {
-    return {
-      bias: 'NEUTRAL',
-      levelCount: 0,
-      description: 'Candles inválidos',
-      levels: [],
-      adx: 0,
-      trendStrength: 'weak',
-      supertrend: 'NEUTRAL'
-    };
-  }
+  if (candles.length < 10) return { ...defaultResult, description: 'Candles inválidos' };
 
   const currentPrice = candles[0].close;
 
@@ -284,9 +382,7 @@ export function computeSyntheticGirassol(rawCandles: any[]): SyntheticGirassolRe
   let levelCount = 0;
   let description = '';
 
-  // Se ADX forte e supertrend confirma, aumenta a confiança
   const supertrendBoost = supertrend !== 'NEUTRAL' ? 0.5 : 0;
-
   const buyScore  = buyLevels.length + (supertrend === 'BUY' ? supertrendBoost : 0);
   const sellScore = sellLevels.length + (supertrend === 'SELL' ? supertrendBoost : 0);
 
@@ -306,5 +402,61 @@ export function computeSyntheticGirassol(rawCandles: any[]): SyntheticGirassolRe
     description = `Sintético: NEUTRO — níveis em conflito (${buyLevels.length} BUY vs ${sellLevels.length} SELL) | ADX=${adx.toFixed(1)} (${trendStrength})`;
   }
 
-  return { bias, levelCount, description, levels, adx, trendStrength, supertrend };
+  // ── Tendência Macro (poder direcional do mercado) ──
+  const macroTrend = detectMacroTrend(candles);
+
+  // ── Profundidade do pullback e zona Fibonacci-chave ──
+  const { depth: pullbackDepth, fibKeyZone } = calcPullbackDepth(candles, macroTrend);
+
+  // ── Classificação do modo de trade ──
+  // Girassol Extremo (nível 1) disparado em zona Fibonacci-chave = reversão de alta qualidade
+  const extremoFired = level1.signal !== 'NEUTRAL' && level1.bar <= 15;
+  const extremoAtFib = extremoFired && fibKeyZone;
+
+  let tradeMode: 'trend' | 'pullback' | 'extreme_reversal' = 'trend';
+
+  if (bias === 'NEUTRAL' || macroTrend === 'SIDEWAYS') {
+    tradeMode = 'trend';
+  } else {
+    const biasBullish = bias === 'BUY';
+    const macroBullish = macroTrend === 'BULLISH';
+
+    if (biasBullish === macroBullish) {
+      // Sinal na direção da tendência macro
+      if (extremoAtFib) {
+        // Girassol Extremo bateu no Fibonacci 50%/61.8% e voltou na direção do trend → MELHOR SETUP
+        tradeMode = 'extreme_reversal';
+      } else {
+        tradeMode = 'trend';
+      }
+    } else {
+      // Sinal CONTRA a tendência macro = pullback
+      // (ex: Girassol diz SELL enquanto mercado é BULLISH → scalp de pullback)
+      tradeMode = 'pullback';
+    }
+  }
+
+  // Enriquecer descrição com classificação
+  const modeLabel = tradeMode === 'extreme_reversal'
+    ? '🚀 REVERSÃO EXTREMA (Girassol Extremo em Fib 50%/61.8%)'
+    : tradeMode === 'pullback'
+      ? `⬇ PULLBACK (contra tendência ${macroTrend} — alvo/stop MENOR)`
+      : `→ TENDÊNCIA (favor ${macroTrend})`;
+
+  description += ` | ${modeLabel} | Macro: ${macroTrend} | PullbackDepth: ${(pullbackDepth * 100).toFixed(0)}%${fibKeyZone ? ' ⭐ ZONA FIBO-CHAVE' : ''}`;
+
+  return {
+    bias,
+    levelCount,
+    description,
+    levels,
+    adx,
+    trendStrength,
+    supertrend,
+    macroTrend,
+    tradeMode,
+    fibKeyZone,
+    pullbackDepth,
+    extremoAtFib,
+  };
 }

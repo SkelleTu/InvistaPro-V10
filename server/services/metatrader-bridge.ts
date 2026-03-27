@@ -1142,6 +1142,12 @@ class MetaTraderBridge extends EventEmitter {
     bias: 'BUY' | 'SELL' | 'NEUTRAL';
     levelCount: number;      // quantos dos 3 níveis estão ativos na mesma direção
     timestamp: number;
+    // Campos de classificação de trade (preenchidos pelo sintético ou EA)
+    macroTrend?: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
+    tradeMode?: 'trend' | 'pullback' | 'extreme_reversal';
+    fibKeyZone?: boolean;
+    pullbackDepth?: number;
+    extremoAtFib?: boolean;
   }> = new Map();
 
   // ── Histórico de ativações da bolinha_media por símbolo ──
@@ -1225,17 +1231,22 @@ class MetaTraderBridge extends EventEmitter {
   }
 
   /**
-   * Calcula o TP baseado na microestrutura de mercado:
-   *  - Mede o range swing high/low dos últimos N candles (padrão 50)
-   *  - Alvo = entrada ± 45% desse range (ligeiramente abaixo da metade)
-   *  - Ancora no nível Fibonacci mais próximo dentro de ±15% do range calculado
+   * Calcula o TP baseado na microestrutura de mercado.
+   *
+   * LÓGICA DE ALVO POR MODO DE TRADE:
+   *  - extreme_reversal : 60% do range (reversão explosiva esperada — maior alvo)
+   *  - trend            : 45% do range (padrão — segue a tendência)
+   *  - pullback         : 25% do range (alvo MENOR — movimento correto limitado)
+   *
+   * Ancora no nível Fibonacci mais próximo dentro de ±15% do range calculado.
    * Retorna 0 se não há dados suficientes.
    */
   public calcMicrostructureTP(
     candles: Array<{ high?: number; low?: number; close: number }>,
     action: 'BUY' | 'SELL',
     entryPrice: number,
-    fibLevels?: Array<{ level: string; price: number }>
+    fibLevels?: Array<{ level: string; price: number }>,
+    tradeMode?: 'trend' | 'pullback' | 'extreme_reversal'
   ): number {
     const lookback = Math.min(candles.length, 50);
     const recent   = candles.slice(-lookback);
@@ -1246,10 +1257,14 @@ class MetaTraderBridge extends EventEmitter {
 
     if (microRange <= 0 || entryPrice <= 0) return 0;
 
-    // Alvo bruto: 45% do range
+    // Percentual do range usado como alvo, conforme classificação do trade
+    const rangePct = tradeMode === 'extreme_reversal' ? 0.60
+                   : tradeMode === 'pullback'         ? 0.25
+                   :                                   0.45; // trend ou padrão
+
     const rawTP = action === 'BUY'
-      ? entryPrice + microRange * 0.45
-      : entryPrice - microRange * 0.45;
+      ? entryPrice + microRange * rangePct
+      : entryPrice - microRange * rangePct;
 
     // Ancorar no Fibonacci mais próximo (dentro de 15% do range de tolerância)
     if (fibLevels && fibLevels.length > 0) {
@@ -1276,19 +1291,53 @@ class MetaTraderBridge extends EventEmitter {
    * Chamado pela rota signal-with-indicators toda vez que o EA envia dados do Girassol.
    * Armazena o estado atual para uso em generateSignal (ajuste dinâmico de threshold de IA).
    */
-  public setGirassolBias(symbol: string, bias: 'BUY' | 'SELL' | 'NEUTRAL', levelCount: number): void {
-    this.girassolStateCache.set(symbol, { bias, levelCount, timestamp: Date.now() });
+  public setGirassolBias(
+    symbol: string,
+    bias: 'BUY' | 'SELL' | 'NEUTRAL',
+    levelCount: number,
+    extra?: {
+      macroTrend?: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
+      tradeMode?: 'trend' | 'pullback' | 'extreme_reversal';
+      fibKeyZone?: boolean;
+      pullbackDepth?: number;
+      extremoAtFib?: boolean;
+    }
+  ): void {
+    this.girassolStateCache.set(symbol, {
+      bias, levelCount, timestamp: Date.now(),
+      macroTrend: extra?.macroTrend,
+      tradeMode: extra?.tradeMode,
+      fibKeyZone: extra?.fibKeyZone,
+      pullbackDepth: extra?.pullbackDepth,
+      extremoAtFib: extra?.extremoAtFib,
+    });
   }
 
   /**
-   * Retorna o estado do Girassol armazenado para um símbolo, se fresco (< 90 segundos).
+   * Retorna o estado completo do Girassol armazenado para um símbolo, se fresco (< 90 segundos).
    * Retorna null se não há dados ou estão expirados.
    */
-  public getGirassolBias(symbol: string): { bias: 'BUY' | 'SELL' | 'NEUTRAL'; levelCount: number } | null {
+  public getGirassolBias(symbol: string): {
+    bias: 'BUY' | 'SELL' | 'NEUTRAL';
+    levelCount: number;
+    macroTrend?: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
+    tradeMode?: 'trend' | 'pullback' | 'extreme_reversal';
+    fibKeyZone?: boolean;
+    pullbackDepth?: number;
+    extremoAtFib?: boolean;
+  } | null {
     const state = this.girassolStateCache.get(symbol);
     if (!state) return null;
     if (Date.now() - state.timestamp > 90_000) return null; // expirado
-    return { bias: state.bias, levelCount: state.levelCount };
+    return {
+      bias: state.bias,
+      levelCount: state.levelCount,
+      macroTrend: state.macroTrend,
+      tradeMode: state.tradeMode,
+      fibKeyZone: state.fibKeyZone,
+      pullbackDepth: state.pullbackDepth,
+      extremoAtFib: state.extremoAtFib,
+    };
   }
 
   constructor() {
@@ -2734,13 +2783,23 @@ class MetaTraderBridge extends EventEmitter {
       // ── Girassol Sintético: fallback automático quando EA não envia buffers ──
       // Se não há dados do Girassol MT5 (EA antigo ou sem indicador), calculamos
       // um equivalente via ZigZag + ADX + Supertrend usando os candles em cache.
+      // Agora também calcula: macroTrend, tradeMode, fibKeyZone, pullbackDepth, extremoAtFib.
       if (!this.getGirassolBias(symbol) && marketData.length >= 20) {
         try {
           const { computeSyntheticGirassol } = await import('./synthetic-girassol');
           const synth = computeSyntheticGirassol(marketData);
           if (synth.bias !== 'NEUTRAL' || synth.adx >= 20) {
-            this.setGirassolBias(symbol, synth.bias, synth.levelCount);
-            console.log(`[MT5Bridge] 🌻⚙️ Girassol Sintético (auto) ${symbol}: ${synth.bias} (${synth.levelCount}/3) | ADX=${synth.adx.toFixed(1)} (${synth.trendStrength}) | Supertrend=${synth.supertrend}`);
+            this.setGirassolBias(symbol, synth.bias, synth.levelCount, {
+              macroTrend: synth.macroTrend,
+              tradeMode: synth.tradeMode,
+              fibKeyZone: synth.fibKeyZone,
+              pullbackDepth: synth.pullbackDepth,
+              extremoAtFib: synth.extremoAtFib,
+            });
+            const modeTag = synth.tradeMode === 'extreme_reversal' ? '🚀 REVERSÃO EXTREMA'
+                          : synth.tradeMode === 'pullback'         ? '⬇ PULLBACK'
+                          :                                          '→ TREND';
+            console.log(`[MT5Bridge] 🌻⚙️ Girassol Sintético (auto) ${symbol}: ${synth.bias} (${synth.levelCount}/3) | ${modeTag} | Macro: ${synth.macroTrend} | ADX=${synth.adx.toFixed(1)} (${synth.trendStrength}) | Supertrend=${synth.supertrend}${synth.fibKeyZone ? ' ⭐ ZONA FIBO-CHAVE' : ''}${synth.extremoAtFib ? ' 🎯 EXTREMO@FIB!' : ''}`);
           }
         } catch (_e) {}
       }
@@ -2930,6 +2989,61 @@ class MetaTraderBridge extends EventEmitter {
         aiReasoning = `${aiReasoning} | 🌻 Direção Girassol ${girassolLive.bias} (${girassolLive.levelCount}/3 níveis) — IA neutra em ticks, Girassol dita direção`;
       }
 
+      // ══════════════════════════════════════════════════════════════════
+      // CLASSIFICAÇÃO DE TRADE (Pullback / Trend / Extreme Reversal)
+      //
+      // Detecta o "poder direcional do mercado" (tendência macro) e classifica
+      // o sinal atual em uma das três categorias:
+      //
+      //  extreme_reversal: Girassol Extremo (nível 1) disparou em zona Fibonacci
+      //    50%/61.8% na direção do trend macro → setup de mais alta qualidade.
+      //    → Consenso IA reduzido adicionalmente (mercado VAI voltar com força)
+      //    → TP maior (reversão explosiva esperada)
+      //    → Boost extra de consenso +15%
+      //
+      //  trend: Sinal segue a tendência macro → comportamento padrão
+      //
+      //  pullback: Sinal CONTRA a tendência macro → scalp/correção
+      //    → Consenso IA AUMENTADO (+10% de cautela) — move secundário é incerto
+      //    → TP menor, SL menor
+      //    → NUNCA operar pullback profundo além de 70% (risco de reversão total)
+      // ══════════════════════════════════════════════════════════════════
+      const tradeMode = girassolLive?.tradeMode ?? 'trend';
+      const macroTrend = girassolLive?.macroTrend ?? 'SIDEWAYS';
+      const pullbackDepth = girassolLive?.pullbackDepth ?? 0;
+
+      if (tradeMode === 'extreme_reversal' && girassolLive?.extremoAtFib) {
+        // Melhor setup possível: Girassol Extremo no Fibonacci + direção macro
+        const prevConsensus = aiConsensus;
+        aiConsensus = Math.min(97, aiConsensus + 15);
+        effectiveMinConsensus = Math.max(30, effectiveMinConsensus - 10); // facilita ainda mais
+        aiReasoning = `${aiReasoning} | 🚀 REVERSÃO EXTREMA: Girassol Extremo em Fib 50%/61.8% confirma retomada da tendência ${macroTrend} — consenso ${prevConsensus.toFixed(1)}% → ${aiConsensus.toFixed(1)}%`;
+        console.log(`[MT5Bridge] 🚀 ${symbol}: REVERSÃO EXTREMA — Girassol Extremo em zona Fib-chave | Macro: ${macroTrend} | Consenso +15%: ${prevConsensus.toFixed(1)}% → ${aiConsensus.toFixed(1)}% | Threshold: ${effectiveMinConsensus}%`);
+      } else if (tradeMode === 'pullback') {
+        // Operação de pullback: move contra o trend macro → mais cautela
+        if (pullbackDepth > 0.70) {
+          // Pullback >70% do range macro = reversão total, não pullback → BLOQUEAR
+          this.logAnalysis({
+            id: `${entryId}_pullback_deep`,
+            timestamp: Date.now(),
+            symbol,
+            phase: 'decision',
+            status: 'rejected',
+            consecutiveLosses: this.consecutiveLosses,
+            decisionReason: `🚫 PULLBACK PROFUNDO (${(pullbackDepth * 100).toFixed(0)}% > 70%) — profundidade excessiva, risco de reversão total. Aguardar confirmação de novo trend.`
+          });
+          console.log(`[MT5Bridge] 🚫 ${symbol}: Pullback bloqueado — profundidade ${(pullbackDepth * 100).toFixed(0)}% > 70% (reversão total provável)`);
+          return null;
+        }
+        // Pullback dentro do limite: aumentar threshold de consenso (+10% de cautela)
+        const prevThreshold = effectiveMinConsensus;
+        effectiveMinConsensus = Math.min(this.MIN_AI_CONSENSUS, effectiveMinConsensus + 10);
+        aiReasoning = `${aiReasoning} | ⬇ PULLBACK ${(pullbackDepth * 100).toFixed(0)}% contra tendência ${macroTrend} — alvo/stop menores, threshold +10% cautela`;
+        console.log(`[MT5Bridge] ⬇ ${symbol}: PULLBACK ${(pullbackDepth * 100).toFixed(0)}% | Macro: ${macroTrend} | Threshold cautela: ${prevThreshold}% → ${effectiveMinConsensus}%`);
+      } else if (tradeMode === 'trend' && macroTrend !== 'SIDEWAYS') {
+        aiReasoning = `${aiReasoning} | → TREND ${macroTrend}: sinal na direção do poder direcional do mercado`;
+      }
+
       // Verificar se passa o threshold após possível override do neutro
       if (aiConsensus < effectiveMinConsensus || aiDirection === 'neutral') {
         // ── FALLBACK: tentar sinal do bot Deriv (mesmo ativo, análise recente) ──
@@ -3098,6 +3212,35 @@ class MetaTraderBridge extends EventEmitter {
         ? [{ open: 1.0, high: 1.001, low: 0.999, close: 1.0, volume: 0, time: Math.floor(Date.now() / 1000) }]
         : marketData;
       const signal = this.fuseSignals(symbol, signals, marketDataForFuse, aiReasoning, finalConfidence);
+
+      // ── Ajuste de TP/SL por modo de trade (pullback / trend / extreme_reversal) ──
+      // Após fuseSignals() calcular o TP/SL padrão, aplica escala adicional
+      // baseada na classificação do trade para garantir alvos racionais.
+      if (signal.action !== 'HOLD' && !aiOnlyMode) {
+        const entryPx  = signal.entryPrice ?? marketData[marketData.length - 1]?.close;
+        const slDist   = Math.abs(signal.stopLoss - entryPx);
+        const tpDist   = Math.abs(signal.takeProfit - entryPx);
+        const isBuy    = signal.action === 'BUY';
+
+        if (tradeMode === 'pullback' && slDist > 0 && tpDist > 0) {
+          // Pullback: comprimir TP para 50% do padrão, SL para 60%
+          const newSlDist = slDist * 0.60;
+          const newTpDist = tpDist * 0.50;
+          signal.stopLoss    = isBuy ? entryPx - newSlDist : entryPx + newSlDist;
+          signal.takeProfit  = isBuy ? entryPx + newTpDist : entryPx - newTpDist;
+          signal.stopLossPips   = Math.round(newSlDist / this.getPipSize(symbol, entryPx));
+          signal.takeProfitPips = Math.round(newTpDist / this.getPipSize(symbol, entryPx));
+          signal.reason = `[PULLBACK ${(pullbackDepth * 100).toFixed(0)}% vs ${macroTrend}] ${signal.reason}`;
+          console.log(`[MT5Bridge] ⬇ ${symbol}: TP/SL PULLBACK comprimidos — SL×0.60, TP×0.50 | Profundidade: ${(pullbackDepth * 100).toFixed(0)}% | Macro: ${macroTrend}`);
+        } else if (tradeMode === 'extreme_reversal' && slDist > 0 && tpDist > 0) {
+          // Reversão extrema: expandir TP para 130% do padrão (maior alvo esperado)
+          const newTpDist = tpDist * 1.30;
+          signal.takeProfit  = isBuy ? entryPx + newTpDist : entryPx - newTpDist;
+          signal.takeProfitPips = Math.round(newTpDist / this.getPipSize(symbol, entryPx));
+          signal.reason = `[REVERSÃO EXTREMA Fib ${macroTrend}] ${signal.reason}`;
+          console.log(`[MT5Bridge] 🚀 ${symbol}: TP EXPANDIDO para REVERSÃO EXTREMA — TP×1.30 | Macro: ${macroTrend} | Extremo@Fib: ${girassolLive?.extremoAtFib}`);
+        }
+      }
 
       // Build full narrative for the decision entry
       const fullNarrative = this.buildFullNarrative(
@@ -4359,6 +4502,57 @@ class MetaTraderBridge extends EventEmitter {
       if (spike.imminencePercent >= 60) {
         base.narrative += `⚠️ Spike ${spike.direction?.toUpperCase()} ${spike.imminencePercent}% iminente. `;
         base.urgency = 'high';
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // PRIORIDADE 6.5 — GIRASSOL COMO SINAL DE SAÍDA (espelha entrada)
+    // A mesma lógica técnica e movimentacional usada para ENTRAR
+    // é aplicada para SAIR. O Girassol indica reversão do movimento
+    // corrente → assim como gerou a entrada, agora gera a saída.
+    //
+    //  PULLBACK (posição contra o trend macro):
+    //    → Se Girassol agora mostra retomada do trend macro (sinal oposto
+    //      à posição), o pullback acabou → fechar com lucro disponível
+    //
+    //  TREND (posição a favor do trend macro):
+    //    → Girassol Extremo (nível 1) oposto ao trade em zona de
+    //      resistência/suporte → estrutura de reversão → fechar
+    //
+    //  EXTREME_REVERSAL:
+    //    → Aguardar mais tempo (movimento explosivo esperado)
+    //    → Só sai quando Girassol Extremo oposto aparece E preço
+    //      está acima de 70% do range esperado
+    // ══════════════════════════════════════════════════════════════════
+    if (!this.isSpikeIndex(symbol)) {
+      const girassolForExit = this.getGirassolBias(symbol);
+      if (girassolForExit && girassolForExit.bias !== 'NEUTRAL' && profit > 0) {
+        const positionDir = position.type; // BUY ou SELL
+        const girassolOppositeToPosition =
+          (positionDir === 'BUY'  && girassolForExit.bias === 'SELL') ||
+          (positionDir === 'SELL' && girassolForExit.bias === 'BUY');
+
+        if (girassolOppositeToPosition) {
+          const exitTradeMode = girassolForExit.tradeMode ?? 'trend';
+          const isExtreme = girassolForExit.levelCount >= 1 && girassolForExit.fibKeyZone;
+
+          // Para trades de pullback: sair imediatamente quando Girassol retoma o trend macro
+          // (o pullback completou — o trend principal está retomando)
+          if (exitTradeMode === 'trend' || exitTradeMode === 'extreme_reversal') {
+            const minProfitForExit = profit > 0.01; // qualquer lucro positivo
+            if (minProfitForExit) {
+              const urgencyLevel: 'high' | 'critical' = isExtreme ? 'critical' : 'high';
+              console.log(`[MONITOR] 🌻 SAÍDA GIRASSOL #${position.ticket}: ${positionDir} vs Girassol ${girassolForExit.bias} (${girassolForExit.levelCount}/3) | Lucro: +$${profit.toFixed(2)} | ${isExtreme ? '⭐ Extremo@Fib' : ''}`);
+              return {
+                ...base,
+                action: 'CLOSE_PROFIT',
+                urgency: urgencyLevel,
+                reason: `🌻 Girassol ${girassolForExit.bias} (${girassolForExit.levelCount}/3) indica fim do movimento ${positionDir} | +$${profit.toFixed(2)}${isExtreme ? ' ⭐ Reversão em Fib' : ''}`,
+                narrative: `A mesma lógica do Girassol que gerou a entrada agora indica saída. Posição ${positionDir} #${position.ticket} aberta há ${ageMinutes.toFixed(1)}min. Girassol mostra ${girassolForExit.bias} (${girassolForExit.levelCount}/3 níveis${isExtreme ? ', extremo em zona Fib-chave' : ''}). Lucro: +$${profit.toFixed(2)}. MAE: $${ctx.maxAdverseExcursion.toFixed(2)} | MFE: +$${ctx.maxFavorableExcursion.toFixed(2)}.`
+              };
+            }
+          }
+        }
       }
     }
 
