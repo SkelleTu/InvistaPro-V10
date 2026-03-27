@@ -1354,6 +1354,69 @@ export default function TradingSystemPage() {
     return () => { cdbDisconnect(); };
   }, [cdbDisconnect]);
 
+  // replicate_market_logic — simulação de geração de ticks e ordens
+  const [cdbSimActive, setCdbSimActive] = useState(false);
+  const [cdbSimSymbol, setCdbSimSymbol] = useState("R_100");
+  const [cdbSimTick, setCdbSimTick] = useState<{ symbol: string; ask: number; bid: number } | null>(null);
+  const [cdbSimOrders, setCdbSimOrders] = useState<{ order_id: number; symbol: string; amount: number; price: number; type: string }[]>([]);
+  const [cdbSimCount, setCdbSimCount] = useState(0);
+  const cdbSimRef = useRef<NodeJS.Timeout | null>(null);
+  const cdbSimSymbolRef = useRef("R_100");
+  useEffect(() => { cdbSimSymbolRef.current = cdbSimSymbol; }, [cdbSimSymbol]);
+
+  // generate_tick_data — lógica matemática exata do código original
+  const generateTickData = useCallback((symbol: string) => {
+    const basePrice = 100.0;
+    const volatility = 0.01;
+    const trend = 0.005;
+    return {
+      symbol,
+      ask: basePrice + (volatility * Math.random()) + trend,
+      bid: basePrice - (volatility * Math.random()) - trend,
+    };
+  }, []);
+
+  // generate_order_data — 10 ordens aleatórias (buy/sell)
+  const generateOrderData = useCallback(() => {
+    const orders = [];
+    for (let i = 0; i < 10; i++) {
+      orders.push({
+        order_id: i,
+        symbol: cdbSimSymbolRef.current,
+        amount: Math.floor(Math.random() * 10) + 1,
+        price: 100.0 + (Math.random() * 0.1),
+        type: Math.random() > 0.5 ? "buy" : "sell",
+      });
+    }
+    return orders;
+  }, []);
+
+  const startReplicateMarketLogic = useCallback(() => {
+    if (cdbSimRef.current) clearInterval(cdbSimRef.current);
+    setCdbSimActive(true);
+    setCdbSimCount(0);
+    cdbAddLog("system", `🔄 replicate_market_logic iniciado — símbolo: ${cdbSimSymbolRef.current}  intervalo: 1s`);
+    cdbSimRef.current = setInterval(() => {
+      const tick = generateTickData(cdbSimSymbolRef.current);
+      const orders = generateOrderData();
+      setCdbSimTick(tick);
+      setCdbSimOrders(orders);
+      setCdbSimCount(prev => prev + 1);
+      cdbAddLog("info", `🎲 generate_tick_data → ${tick.symbol}  ask=${tick.ask.toFixed(5)}  bid=${tick.bid.toFixed(5)}`);
+    }, 1000);
+  }, [generateTickData, generateOrderData, cdbAddLog]);
+
+  const stopReplicateMarketLogic = useCallback(() => {
+    if (cdbSimRef.current) clearInterval(cdbSimRef.current);
+    cdbSimRef.current = null;
+    setCdbSimActive(false);
+    cdbAddLog("system", "⏹ replicate_market_logic parado");
+  }, [cdbAddLog]);
+
+  useEffect(() => {
+    return () => { if (cdbSimRef.current) clearInterval(cdbSimRef.current); };
+  }, []);
+
   const { data: keepAliveStatus } = useQuery<any>({
     queryKey: ["/api/status"],
     refetchInterval: 3000,
