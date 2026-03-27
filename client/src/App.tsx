@@ -110,7 +110,6 @@ function Router() {
             <Route path="/trading" component={TradingSystemPage} />
             <Route path="/metatrader" component={MetaTraderPage} />
             <Route path="/metatrader5" component={MetaTrader5Page} />
-            <AiAssistant />
           </>
         );
       })()}
@@ -120,13 +119,25 @@ function Router() {
   );
 }
 
+function AppContent() {
+  const { isAuthenticated, isApproved, isPhoneVerified, isLoading } = useAuth();
+  const showAiAssistant = !isLoading && isAuthenticated && isApproved && isPhoneVerified;
+
+  return (
+    <>
+      <Router />
+      {showAiAssistant && <AiAssistant />}
+    </>
+  );
+}
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
         <TooltipProvider>
           <Toaster />
-          <Router />
+          <AppContent />
         </TooltipProvider>
       </ThemeProvider>
     </QueryClientProvider>
