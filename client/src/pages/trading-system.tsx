@@ -81,6 +81,9 @@ import {
   PlugZap,
   ScrollText,
   CircleDot,
+  KeyRound,
+  ShieldCheck,
+  History,
 } from "lucide-react";
 import { Link } from "wouter";
 import { Input } from "@/components/ui/input";
@@ -1104,34 +1107,77 @@ export default function TradingSystemPage() {
   const [lastKnownExternalPing, setLastKnownExternalPing] = useState<string | null>(null);
   const [lastKnownPullPing, setLastKnownPullPing] = useState<string | null>(null);
 
-  // CDB — Coleta de Dados Base
+  // CDB — Coleta de Dados Base (Renda Variável)
   const [cdbConnected, setCdbConnected] = useState(false);
   const [cdbConnecting, setCdbConnecting] = useState(false);
   const [cdbSymbol, setCdbSymbol] = useState("R_100");
-  const [cdbLogs, setCdbLogs] = useState<{ time: string; type: "info" | "tick" | "error" | "system"; msg: string }[]>([]);
+  const [cdbApiToken, setCdbApiToken] = useState("");
+  const [cdbLogs, setCdbLogs] = useState<{ time: string; type: "info" | "tick" | "error" | "system" | "order"; msg: string }[]>([]);
   const [cdbTickCount, setCdbTickCount] = useState(0);
-  const [cdbLastTick, setCdbLastTick] = useState<{ bid: number; ask: number; quote: number; epoch: number } | null>(null);
+  const [cdbLastTick, setCdbLastTick] = useState<{ bid: number; ask: number; quote: number; epoch: number; symbol: string } | null>(null);
   const [cdbPingMs, setCdbPingMs] = useState<number | null>(null);
   const [cdbBytesReceived, setCdbBytesReceived] = useState(0);
+  // Auto-order (process_data)
+  const [cdbOrderEnabled, setCdbOrderEnabled] = useState(false);
+  const [cdbOrderAmount, setCdbOrderAmount] = useState(1);
+  const [cdbOrderThreshold, setCdbOrderThreshold] = useState(1.01);
+  const [cdbOrderCount, setCdbOrderCount] = useState(0);
+  const [cdbOrders, setCdbOrders] = useState<{ time: string; symbol: string; price: number; amount: number }[]>([]);
+  // Historical data (get_historical_data)
+  const [cdbHistSymbol, setCdbHistSymbol] = useState("R_100");
+  const [cdbHistStart, setCdbHistStart] = useState("2024-01-01T00:00:00Z");
+  const [cdbHistEnd, setCdbHistEnd] = useState("2024-01-02T00:00:00Z");
+  const [cdbHistLoading, setCdbHistLoading] = useState(false);
+  const [cdbHistResult, setCdbHistResult] = useState<{ prices: number[]; times: number[] } | null>(null);
+  const [cdbHistError, setCdbHistError] = useState<string | null>(null);
+  // Monitor (monitor_data)
+  const [cdbMonitorActive, setCdbMonitorActive] = useState(false);
+  const [cdbMonitorTick, setCdbMonitorTick] = useState(0);
+
   const cdbWsRef = useRef<WebSocket | null>(null);
   const cdbPingRef = useRef<NodeJS.Timeout | null>(null);
+  const cdbMonitorRef = useRef<NodeJS.Timeout | null>(null);
   const cdbPingSentAt = useRef<number>(0);
-  const cdbLogsRef = useRef<{ time: string; type: "info" | "tick" | "error" | "system"; msg: string }[]>([]);
+  const cdbLogsRef = useRef<{ time: string; type: "info" | "tick" | "error" | "system" | "order"; msg: string }[]>([]);
+  const cdbOrderEnabledRef = useRef(false);
+  const cdbOrderAmountRef = useRef(1);
+  const cdbOrderThresholdRef = useRef(1.01);
+  const cdbSymbolRef = useRef("R_100");
 
-  const cdbAddLog = useCallback((type: "info" | "tick" | "error" | "system", msg: string) => {
+  const cdbAddLog = useCallback((type: "info" | "tick" | "error" | "system" | "order", msg: string) => {
     const entry = { time: new Date().toLocaleTimeString("pt-BR", { hour12: false }), type, msg };
-    cdbLogsRef.current = [entry, ...cdbLogsRef.current].slice(0, 300);
+    cdbLogsRef.current = [entry, ...cdbLogsRef.current].slice(0, 500);
     setCdbLogs([...cdbLogsRef.current]);
   }, []);
 
+  // process_data — coloca ordem se ask > threshold
+  const cdbProcessData = useCallback((tick: { bid: number; ask: number; quote: number; epoch: number; symbol: string }, ws: WebSocket) => {
+    if (!cdbOrderEnabledRef.current) return;
+    if (tick.ask > cdbOrderThresholdRef.current) {
+      const order = {
+        t: "place_order",
+        args: { symbol: tick.symbol, amount: cdbOrderAmountRef.current, price: tick.ask, type: "buy" }
+      };
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(order));
+        const entry = { time: new Date().toLocaleTimeString("pt-BR", { hour12: false }), symbol: tick.symbol, price: tick.ask, amount: cdbOrderAmountRef.current };
+        setCdbOrders(prev => [entry, ...prev].slice(0, 50));
+        setCdbOrderCount(prev => prev + 1);
+        cdbAddLog("order", `📤 Ordem BUY enviada → ${tick.symbol}  ask=${tick.ask}  amount=${cdbOrderAmountRef.current}`);
+      }
+    }
+  }, [cdbAddLog]);
+
   const cdbDisconnect = useCallback(() => {
     if (cdbPingRef.current) clearInterval(cdbPingRef.current);
+    if (cdbMonitorRef.current) clearInterval(cdbMonitorRef.current);
     if (cdbWsRef.current) {
       cdbWsRef.current.close();
       cdbWsRef.current = null;
     }
     setCdbConnected(false);
     setCdbConnecting(false);
+    setCdbMonitorActive(false);
   }, []);
 
   const cdbConnect = useCallback(() => {
@@ -1140,62 +1186,169 @@ export default function TradingSystemPage() {
     setCdbTickCount(0);
     setCdbBytesReceived(0);
     setCdbLastTick(null);
+    setCdbOrderCount(0);
+    setCdbOrders([]);
+    setCdbMonitorTick(0);
+    cdbSymbolRef.current = cdbSymbol;
     cdbAddLog("system", `Iniciando conexão WebSocket → wss://ws.binaryws.com/websockets/v3`);
     const ws = new WebSocket("wss://ws.binaryws.com/websockets/v3");
     cdbWsRef.current = ws;
 
+    // on_open
     ws.onopen = () => {
       setCdbConnecting(false);
       setCdbConnected(true);
-      cdbAddLog("info", "✅ WebSocket conectado — endpoint: ws.binaryws.com/websockets/v3");
-      cdbAddLog("system", `Assinando feed de ticks → símbolo: ${cdbSymbol}`);
-      ws.send(JSON.stringify({ ticks: cdbSymbol, subscribe: 1 }));
-      // keep-alive ping a cada 25s
+      cdbAddLog("info", "✅ Conexão aberta — endpoint: wss://ws.binaryws.com/websockets/v3");
+
+      // Autenticação (Authorize)
+      if (cdbApiToken.trim()) {
+        cdbAddLog("system", `🔑 Autenticando com API token...`);
+        ws.send(JSON.stringify({ authorize: cdbApiToken.trim() }));
+      } else {
+        cdbAddLog("system", `⚠️ Sem API token — operando em modo público (só ticks)`);
+        // Subscrever ticks imediatamente
+        cdbAddLog("system", `📡 Assinando feed de ticks → símbolo: ${cdbSymbol}`);
+        ws.send(JSON.stringify({ ticks: cdbSymbol, subscribe: 1 }));
+      }
+
+      // keep_alive — ping a cada 20s
       cdbPingRef.current = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) {
           cdbPingSentAt.current = Date.now();
           ws.send(JSON.stringify({ ping: 1 }));
         }
-      }, 25000);
+      }, 20000);
+
+      // monitor_data — verificação a cada 5s
+      setCdbMonitorActive(true);
+      cdbMonitorRef.current = setInterval(() => {
+        setCdbMonitorTick(prev => prev + 1);
+        cdbAddLog("system", `🔍 Monitorando dados...`);
+      }, 5000);
     };
 
+    // on_message
     ws.onmessage = (evt) => {
       const bytes = new Blob([evt.data]).size;
       setCdbBytesReceived(prev => prev + bytes);
       try {
         const d = JSON.parse(evt.data);
+
+        if (d.msg_type === "authorize") {
+          if (d.error) {
+            cdbAddLog("error", `❌ Falha na autenticação: ${d.error.message}`);
+          } else {
+            cdbAddLog("info", `✅ Autenticado — conta: ${d.authorize?.loginid ?? "—"}  saldo: ${d.authorize?.balance ?? "—"} ${d.authorize?.currency ?? ""}`);
+            // Subscrever ticks após auth
+            cdbAddLog("system", `📡 Assinando feed de ticks → símbolo: ${cdbSymbolRef.current}`);
+            ws.send(JSON.stringify({ ticks: cdbSymbolRef.current, subscribe: 1 }));
+          }
+          return;
+        }
+
         if (d.msg_type === "pong") {
           const ms = Date.now() - cdbPingSentAt.current;
           setCdbPingMs(ms);
           cdbAddLog("system", `🏓 Pong recebido — latência: ${ms}ms`);
           return;
         }
+
         if (d.msg_type === "tick" && d.tick) {
           const t = d.tick;
+          const tick = { bid: t.bid, ask: t.ask, quote: t.quote, epoch: t.epoch, symbol: t.symbol };
           setCdbTickCount(prev => prev + 1);
-          setCdbLastTick({ bid: t.bid, ask: t.ask, quote: t.quote, epoch: t.epoch });
+          setCdbLastTick(tick);
           cdbAddLog("tick", `📊 ${t.symbol}  quote=${t.quote}  bid=${t.bid}  ask=${t.ask}  epoch=${t.epoch}  [+${bytes}B]`);
-        } else if (d.msg_type === "history") {
-          cdbAddLog("info", `📦 Dados históricos recebidos — ${d.history?.prices?.length ?? 0} candles`);
-        } else {
-          cdbAddLog("info", `📨 msg_type=${d.msg_type || "unknown"}  ${JSON.stringify(d).slice(0, 120)}`);
+          // process_data
+          cdbProcessData(tick, ws);
+          return;
         }
+
+        if (d.msg_type === "history") {
+          cdbAddLog("info", `📦 Dados históricos — ${d.history?.prices?.length ?? 0} preços recebidos`);
+          return;
+        }
+
+        if (d.msg_type === "place_order" || d.msg_type === "buy") {
+          if (d.error) {
+            cdbAddLog("error", `❌ Ordem rejeitada: ${d.error.message}`);
+          } else {
+            cdbAddLog("order", `✅ Ordem confirmada → id=${d.buy?.transaction_id ?? d.buy?.buy_price ?? "—"}`);
+          }
+          return;
+        }
+
+        cdbAddLog("info", `📨 msg_type=${d.msg_type || "unknown"}  ${JSON.stringify(d).slice(0, 120)}`);
       } catch {
         cdbAddLog("error", `⚠️ Dados brutos: ${String(evt.data).slice(0, 120)}`);
       }
     };
 
+    // on_error
     ws.onerror = () => {
       cdbAddLog("error", "❌ Erro na conexão WebSocket");
     };
 
+    // on_close
     ws.onclose = (ev) => {
       setCdbConnected(false);
       setCdbConnecting(false);
+      setCdbMonitorActive(false);
       if (cdbPingRef.current) clearInterval(cdbPingRef.current);
+      if (cdbMonitorRef.current) clearInterval(cdbMonitorRef.current);
       cdbAddLog("system", `🔌 Conexão encerrada — código: ${ev.code}  razão: ${ev.reason || "nenhuma"}`);
     };
-  }, [cdbSymbol, cdbAddLog, cdbDisconnect]);
+  }, [cdbSymbol, cdbApiToken, cdbAddLog, cdbDisconnect, cdbProcessData]);
+
+  // get_historical_data
+  const cdbFetchHistorical = useCallback(async () => {
+    setCdbHistLoading(true);
+    setCdbHistResult(null);
+    setCdbHistError(null);
+    cdbAddLog("system", `📅 Buscando dados históricos → ${cdbHistSymbol}  ${cdbHistStart} → ${cdbHistEnd}`);
+    try {
+      const startEpoch = Math.floor(new Date(cdbHistStart).getTime() / 1000);
+      const endEpoch = Math.floor(new Date(cdbHistEnd).getTime() / 1000);
+      const ws = new WebSocket("wss://ws.binaryws.com/websockets/v3");
+      ws.onopen = () => {
+        ws.send(JSON.stringify({
+          ticks_history: cdbHistSymbol,
+          start: startEpoch,
+          end: endEpoch,
+          style: "ticks",
+          count: 500
+        }));
+      };
+      ws.onmessage = (evt) => {
+        try {
+          const d = JSON.parse(evt.data);
+          if (d.msg_type === "history" && d.history) {
+            setCdbHistResult({ prices: d.history.prices ?? [], times: d.history.times ?? [] });
+            cdbAddLog("info", `✅ Histórico recebido — ${d.history.prices?.length ?? 0} ticks  símbolo: ${cdbHistSymbol}`);
+          } else if (d.error) {
+            setCdbHistError(d.error.message);
+            cdbAddLog("error", `❌ Erro histórico: ${d.error.message}`);
+          }
+        } catch { /* ignore */ }
+        ws.close();
+        setCdbHistLoading(false);
+      };
+      ws.onerror = () => {
+        setCdbHistError("Falha na conexão WebSocket para dados históricos");
+        cdbAddLog("error", "❌ Erro WebSocket ao buscar histórico");
+        setCdbHistLoading(false);
+      };
+      ws.onclose = () => { setCdbHistLoading(false); };
+    } catch (err) {
+      setCdbHistError(String(err));
+      setCdbHistLoading(false);
+    }
+  }, [cdbHistSymbol, cdbHistStart, cdbHistEnd, cdbAddLog]);
+
+  // sync refs for callbacks
+  useEffect(() => { cdbOrderEnabledRef.current = cdbOrderEnabled; }, [cdbOrderEnabled]);
+  useEffect(() => { cdbOrderAmountRef.current = cdbOrderAmount; }, [cdbOrderAmount]);
+  useEffect(() => { cdbOrderThresholdRef.current = cdbOrderThreshold; }, [cdbOrderThreshold]);
 
   useEffect(() => {
     return () => { cdbDisconnect(); };
@@ -5139,55 +5292,43 @@ export default function TradingSystemPage() {
           </TabsContent>
 
           {/* ===== CDB — Coleta de Dados Base ===== */}
-          <TabsContent value="cdb" className="space-y-6">
+          <TabsContent value="cdb" className="space-y-5">
 
-            {/* Header */}
-            <div className="flex items-center justify-between p-4 border-2 border-emerald-500/30 bg-emerald-500/5 rounded-lg">
+            {/* Header — status + connect */}
+            <div className="flex flex-wrap items-center justify-between gap-3 p-4 border-2 border-emerald-500/30 bg-emerald-500/5 rounded-lg">
               <div className="flex items-center gap-3">
                 <Database className="h-6 w-6 text-emerald-500" />
                 <div>
                   <p className="font-bold">CDB — Coleta de Dados Base</p>
-                  <p className="text-sm text-muted-foreground">Feed direto de ticks e dados de mercado via WebSocket · Deriv / Binary.com</p>
+                  <p className="text-sm text-muted-foreground">WebSocket · Deriv / Binary.com · Autenticação · Ordens · Histórico · Monitor</p>
                 </div>
               </div>
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 flex-wrap">
+                {/* Monitor badge */}
+                {cdbMonitorActive && (
+                  <Badge variant="outline" className="border-blue-500 text-blue-500 gap-1" data-testid="badge-cdb-monitor">
+                    <Activity className="h-3 w-3 animate-pulse" />
+                    Monitor #{cdbMonitorTick}
+                  </Badge>
+                )}
                 <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border ${
-                  cdbConnected
-                    ? 'border-emerald-500 bg-emerald-500/10'
-                    : cdbConnecting
-                    ? 'border-yellow-500 bg-yellow-500/10'
-                    : 'border-gray-400 bg-gray-400/10'
+                  cdbConnected ? 'border-emerald-500 bg-emerald-500/10'
+                  : cdbConnecting ? 'border-yellow-500 bg-yellow-500/10'
+                  : 'border-gray-400 bg-gray-400/10'
                 }`}>
-                  {cdbConnected
-                    ? <PlugZap className="h-4 w-4 text-emerald-500 animate-pulse" />
-                    : cdbConnecting
-                    ? <Loader2 className="h-4 w-4 text-yellow-500 animate-spin" />
+                  {cdbConnected ? <PlugZap className="h-4 w-4 text-emerald-500 animate-pulse" />
+                    : cdbConnecting ? <Loader2 className="h-4 w-4 text-yellow-500 animate-spin" />
                     : <Plug className="h-4 w-4 text-gray-400" />}
-                  <span className={`text-sm font-medium ${
-                    cdbConnected ? 'text-emerald-500' : cdbConnecting ? 'text-yellow-500' : 'text-gray-400'
-                  }`}>
+                  <span className={`text-sm font-medium ${cdbConnected ? 'text-emerald-500' : cdbConnecting ? 'text-yellow-500' : 'text-gray-400'}`}>
                     {cdbConnected ? 'Conectado' : cdbConnecting ? 'Conectando…' : 'Desconectado'}
                   </span>
                 </div>
                 {cdbConnected ? (
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    onClick={cdbDisconnect}
-                    className="gap-2"
-                    data-testid="button-cdb-disconnect"
-                  >
-                    <WifiOff className="h-4 w-4" />
-                    Desconectar
+                  <Button variant="destructive" size="sm" onClick={cdbDisconnect} className="gap-2" data-testid="button-cdb-disconnect">
+                    <WifiOff className="h-4 w-4" />Desconectar
                   </Button>
                 ) : (
-                  <Button
-                    size="sm"
-                    onClick={cdbConnect}
-                    disabled={cdbConnecting}
-                    className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white"
-                    data-testid="button-cdb-connect"
-                  >
+                  <Button size="sm" onClick={cdbConnect} disabled={cdbConnecting} className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white" data-testid="button-cdb-connect">
                     {cdbConnecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlugZap className="h-4 w-4" />}
                     {cdbConnecting ? 'Conectando…' : 'Iniciar Coleta'}
                   </Button>
@@ -5195,10 +5336,10 @@ export default function TradingSystemPage() {
               </div>
             </div>
 
-            {/* Configuração + Detalhes de conexão */}
+            {/* Row 1: Configuração + Autenticação + Endpoint */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
 
-              {/* Configuração do símbolo */}
+              {/* Configuração */}
               <Card className="border-emerald-500/20">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-sm flex items-center gap-2">
@@ -5206,8 +5347,8 @@ export default function TradingSystemPage() {
                     Configuração
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-2">
+                <CardContent className="space-y-3">
+                  <div className="space-y-1.5">
                     <Label className="text-xs text-muted-foreground">Símbolo / Ativo</Label>
                     <select
                       value={cdbSymbol}
@@ -5239,13 +5380,52 @@ export default function TradingSystemPage() {
                       </optgroup>
                     </select>
                   </div>
-                  <div className="text-xs space-y-1 text-muted-foreground border rounded-md p-3 bg-muted/30">
-                    <p className="font-medium text-foreground mb-1">Detalhes do Endpoint</p>
-                    <p><span className="text-emerald-500 font-mono">HOST</span> ws.binaryws.com</p>
-                    <p><span className="text-emerald-500 font-mono">PROTOCOLO</span> WSS / TLS</p>
-                    <p><span className="text-emerald-500 font-mono">PORTA</span> 443</p>
-                    <p><span className="text-emerald-500 font-mono">PATH</span> /websockets/v3</p>
-                    <p><span className="text-emerald-500 font-mono">KEEP-ALIVE</span> Ping/25s</p>
+                  <div className="text-xs space-y-1 text-muted-foreground border rounded-md p-2.5 bg-muted/30">
+                    <p className="font-medium text-foreground mb-1">Endpoint</p>
+                    <p><span className="text-emerald-500 font-mono text-[10px]">HOST</span> ws.binaryws.com</p>
+                    <p><span className="text-emerald-500 font-mono text-[10px]">PROTOCOLO</span> WSS / TLS</p>
+                    <p><span className="text-emerald-500 font-mono text-[10px]">PORTA</span> 443 · PATH /websockets/v3</p>
+                    <p><span className="text-emerald-500 font-mono text-[10px]">KEEP-ALIVE</span> Ping a cada 20s</p>
+                    <p><span className="text-emerald-500 font-mono text-[10px]">MONITOR</span> Verificação a cada 5s</p>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Autenticação (on_open → Authorize) */}
+              <Card className="border-emerald-500/20">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm flex items-center gap-2">
+                    <KeyRound className="h-4 w-4 text-emerald-500" />
+                    Autenticação
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">API Token (opcional)</Label>
+                    <input
+                      type="password"
+                      value={cdbApiToken}
+                      onChange={e => setCdbApiToken(e.target.value)}
+                      disabled={cdbConnected || cdbConnecting}
+                      placeholder="Cole seu token aqui..."
+                      className="w-full text-sm border rounded-md px-3 py-2 bg-background focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50 font-mono"
+                      data-testid="input-cdb-api-token"
+                    />
+                    <p className="text-[10px] text-muted-foreground">Necessário para colocar ordens. Sem token, só ticks públicos.</p>
+                  </div>
+                  <div className={`text-xs rounded-md p-2.5 border flex items-center gap-2 ${
+                    cdbConnected && cdbApiToken.trim()
+                      ? 'border-emerald-500/40 bg-emerald-500/5 text-emerald-600'
+                      : cdbConnected
+                      ? 'border-yellow-500/40 bg-yellow-500/5 text-yellow-600'
+                      : 'border-muted bg-muted/20 text-muted-foreground'
+                  }`}>
+                    {cdbConnected && cdbApiToken.trim()
+                      ? <><ShieldCheck className="h-3.5 w-3.5 shrink-0" /> Autorização enviada ao servidor</>
+                      : cdbConnected
+                      ? <><Info className="h-3.5 w-3.5 shrink-0" /> Modo público — sem autenticação</>
+                      : <><Info className="h-3.5 w-3.5 shrink-0" /> Aguardando conexão</>
+                    }
                   </div>
                 </CardContent>
               </Card>
@@ -5258,34 +5438,44 @@ export default function TradingSystemPage() {
                     Métricas em Tempo Real
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="border rounded-md p-3 bg-muted/30 text-center">
-                      <p className="text-xs text-muted-foreground mb-1">Ticks Coletados</p>
-                      <p className="text-2xl font-bold text-emerald-500 tabular-nums" data-testid="text-cdb-tick-count">{cdbTickCount.toLocaleString()}</p>
+                <CardContent>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="border rounded-md p-2.5 bg-muted/30 text-center">
+                      <p className="text-[10px] text-muted-foreground mb-0.5">Ticks</p>
+                      <p className="text-xl font-bold text-emerald-500 tabular-nums" data-testid="text-cdb-tick-count">{cdbTickCount.toLocaleString()}</p>
                     </div>
-                    <div className="border rounded-md p-3 bg-muted/30 text-center">
-                      <p className="text-xs text-muted-foreground mb-1">Latência</p>
-                      <p className="text-2xl font-bold tabular-nums" data-testid="text-cdb-ping">
-                        {cdbPingMs !== null ? <span className={cdbPingMs < 100 ? 'text-emerald-500' : cdbPingMs < 300 ? 'text-yellow-500' : 'text-red-500'}>{cdbPingMs}ms</span> : <span className="text-muted-foreground text-sm">—</span>}
+                    <div className="border rounded-md p-2.5 bg-muted/30 text-center">
+                      <p className="text-[10px] text-muted-foreground mb-0.5">Latência</p>
+                      <p className="text-xl font-bold tabular-nums" data-testid="text-cdb-ping">
+                        {cdbPingMs !== null
+                          ? <span className={cdbPingMs < 100 ? 'text-emerald-500' : cdbPingMs < 300 ? 'text-yellow-500' : 'text-red-500'}>{cdbPingMs}ms</span>
+                          : <span className="text-muted-foreground text-sm">—</span>}
                       </p>
                     </div>
-                    <div className="border rounded-md p-3 bg-muted/30 text-center col-span-2">
-                      <p className="text-xs text-muted-foreground mb-1">Dados Recebidos</p>
-                      <p className="text-lg font-bold text-blue-500 tabular-nums" data-testid="text-cdb-bytes">
-                        {cdbBytesReceived < 1024 ? `${cdbBytesReceived} B` : cdbBytesReceived < 1048576 ? `${(cdbBytesReceived / 1024).toFixed(1)} KB` : `${(cdbBytesReceived / 1048576).toFixed(2)} MB`}
+                    <div className="border rounded-md p-2.5 bg-muted/30 text-center">
+                      <p className="text-[10px] text-muted-foreground mb-0.5">Dados</p>
+                      <p className="text-sm font-bold text-blue-500 tabular-nums" data-testid="text-cdb-bytes">
+                        {cdbBytesReceived < 1024 ? `${cdbBytesReceived}B` : cdbBytesReceived < 1048576 ? `${(cdbBytesReceived / 1024).toFixed(1)}KB` : `${(cdbBytesReceived / 1048576).toFixed(2)}MB`}
                       </p>
+                    </div>
+                    <div className="border rounded-md p-2.5 bg-muted/30 text-center">
+                      <p className="text-[10px] text-muted-foreground mb-0.5">Ordens</p>
+                      <p className="text-xl font-bold text-orange-500 tabular-nums" data-testid="text-cdb-order-count">{cdbOrderCount}</p>
                     </div>
                   </div>
                 </CardContent>
               </Card>
+            </div>
 
-              {/* Último tick recebido */}
+            {/* Row 2: Último Tick + process_data (Auto-Order) */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+              {/* Último Tick */}
               <Card className="border-emerald-500/20">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-sm flex items-center gap-2">
                     <CircleDot className="h-4 w-4 text-emerald-500" />
-                    Último Tick
+                    Último Tick Recebido
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -5301,28 +5491,213 @@ export default function TradingSystemPage() {
                       </div>
                       <div className="flex justify-between items-center text-sm">
                         <span className="text-muted-foreground">Ask</span>
-                        <span className="font-mono text-orange-500" data-testid="text-cdb-ask">{cdbLastTick.ask}</span>
+                        <span className={`font-mono font-semibold ${cdbOrderEnabled && cdbLastTick.ask > cdbOrderThreshold ? 'text-orange-400' : 'text-orange-500'}`} data-testid="text-cdb-ask">
+                          {cdbLastTick.ask}
+                          {cdbOrderEnabled && cdbLastTick.ask > cdbOrderThreshold && (
+                            <Badge className="ml-2 text-[9px] bg-orange-500/20 text-orange-400 border border-orange-500/40">ACIMA DO THRESHOLD</Badge>
+                          )}
+                        </span>
                       </div>
                       <div className="flex justify-between items-center text-sm">
                         <span className="text-muted-foreground">Epoch</span>
                         <span className="font-mono text-xs text-muted-foreground" data-testid="text-cdb-epoch">{cdbLastTick.epoch}</span>
                       </div>
                       <div className="flex justify-between items-center text-sm">
-                        <span className="text-muted-foreground">Ativo</span>
-                        <Badge variant="outline" className="border-emerald-500 text-emerald-500 font-mono text-xs">{cdbSymbol}</Badge>
+                        <span className="text-muted-foreground">Símbolo</span>
+                        <Badge variant="outline" className="border-emerald-500 text-emerald-500 font-mono text-xs">{cdbLastTick.symbol}</Badge>
                       </div>
                     </div>
                   ) : (
-                    <div className="flex flex-col items-center justify-center h-24 gap-2 text-muted-foreground">
+                    <div className="flex flex-col items-center justify-center h-28 gap-2 text-muted-foreground">
                       <Database className="h-8 w-8 opacity-30" />
                       <p className="text-xs">Aguardando ticks…</p>
                     </div>
                   )}
                 </CardContent>
               </Card>
+
+              {/* process_data — Auto-Order */}
+              <Card className="border-orange-500/20">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm flex items-center gap-2">
+                    <ArrowUpRight className="h-4 w-4 text-orange-500" />
+                    Processamento de Dados · Auto-Ordem
+                    <Badge variant="outline" className={`ml-auto text-xs ${cdbOrderEnabled ? 'border-orange-500 text-orange-500' : 'border-muted text-muted-foreground'}`}>
+                      {cdbOrderEnabled ? 'ATIVO' : 'INATIVO'}
+                    </Badge>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <p className="text-xs text-muted-foreground">Quando <span className="font-mono text-foreground">ask</span> superar o threshold, uma ordem BUY é enviada automaticamente (requer API token).</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs text-muted-foreground">Threshold (ask &gt;)</Label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={cdbOrderThreshold}
+                        onChange={e => setCdbOrderThreshold(Number(e.target.value))}
+                        className="w-full text-sm border rounded-md px-3 py-2 bg-background focus:outline-none focus:ring-2 focus:ring-orange-500 font-mono"
+                        data-testid="input-cdb-order-threshold"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs text-muted-foreground">Valor (amount)</Label>
+                      <input
+                        type="number"
+                        step="1"
+                        min="1"
+                        value={cdbOrderAmount}
+                        onChange={e => setCdbOrderAmount(Number(e.target.value))}
+                        className="w-full text-sm border rounded-md px-3 py-2 bg-background focus:outline-none focus:ring-2 focus:ring-orange-500 font-mono"
+                        data-testid="input-cdb-order-amount"
+                      />
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant={cdbOrderEnabled ? "destructive" : "default"}
+                    className={`w-full gap-2 ${!cdbOrderEnabled ? 'bg-orange-600 hover:bg-orange-700 text-white' : ''}`}
+                    onClick={() => setCdbOrderEnabled(v => !v)}
+                    data-testid="button-cdb-toggle-order"
+                  >
+                    {cdbOrderEnabled ? <><XCircle className="h-4 w-4" />Desativar Auto-Ordem</> : <><PlugZap className="h-4 w-4" />Ativar Auto-Ordem</>}
+                  </Button>
+                  {/* Últimas ordens */}
+                  {cdbOrders.length > 0 && (
+                    <div className="border rounded-md overflow-hidden">
+                      <p className="text-[10px] text-muted-foreground px-2 py-1 bg-muted/30 border-b font-medium">Últimas ordens enviadas</p>
+                      <div className="max-h-24 overflow-y-auto">
+                        {cdbOrders.slice(0, 5).map((o, i) => (
+                          <div key={i} className="flex justify-between items-center px-2 py-1 text-xs border-b last:border-0" data-testid={`row-cdb-order-${i}`}>
+                            <span className="text-muted-foreground font-mono">{o.time}</span>
+                            <Badge variant="outline" className="text-[9px] border-orange-500/40 text-orange-500">{o.symbol}</Badge>
+                            <span className="font-mono text-orange-400">ask={o.price}</span>
+                            <span className="font-mono text-foreground">amt={o.amount}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
             </div>
 
-            {/* Viewer de Logs */}
+            {/* Row 3: get_historical_data */}
+            <Card className="border-blue-500/20">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <History className="h-4 w-4 text-blue-500" />
+                  Dados Históricos
+                  {cdbHistResult && (
+                    <Badge variant="outline" className="ml-auto text-xs border-blue-500/40 text-blue-500">{cdbHistResult.prices.length} ticks</Badge>
+                  )}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">Símbolo</Label>
+                    <select
+                      value={cdbHistSymbol}
+                      onChange={e => setCdbHistSymbol(e.target.value)}
+                      className="w-full text-sm border rounded-md px-3 py-2 bg-background focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      data-testid="select-cdb-hist-symbol"
+                    >
+                      <option value="R_10">V10</option>
+                      <option value="R_25">V25</option>
+                      <option value="R_50">V50</option>
+                      <option value="R_75">V75</option>
+                      <option value="R_100">V100</option>
+                      <option value="1HZ10V">V10(1s)</option>
+                      <option value="1HZ100V">V100(1s)</option>
+                      <option value="CRASH1000">Crash 1000</option>
+                      <option value="BOOM1000">Boom 1000</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">Início (UTC)</Label>
+                    <input
+                      type="text"
+                      value={cdbHistStart}
+                      onChange={e => setCdbHistStart(e.target.value)}
+                      placeholder="2024-01-01T00:00:00Z"
+                      className="w-full text-sm border rounded-md px-3 py-2 bg-background focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                      data-testid="input-cdb-hist-start"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">Fim (UTC)</Label>
+                    <input
+                      type="text"
+                      value={cdbHistEnd}
+                      onChange={e => setCdbHistEnd(e.target.value)}
+                      placeholder="2024-01-02T00:00:00Z"
+                      className="w-full text-sm border rounded-md px-3 py-2 bg-background focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                      data-testid="input-cdb-hist-end"
+                    />
+                  </div>
+                  <Button
+                    size="sm"
+                    onClick={cdbFetchHistorical}
+                    disabled={cdbHistLoading}
+                    className="gap-2 bg-blue-600 hover:bg-blue-700 text-white"
+                    data-testid="button-cdb-fetch-hist"
+                  >
+                    {cdbHistLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                    {cdbHistLoading ? 'Buscando…' : 'Buscar'}
+                  </Button>
+                </div>
+                {cdbHistError && (
+                  <div className="text-xs text-red-500 flex items-center gap-2 border border-red-500/30 bg-red-500/5 rounded-md p-2.5" data-testid="text-cdb-hist-error">
+                    <XCircle className="h-3.5 w-3.5 shrink-0" />{cdbHistError}
+                  </div>
+                )}
+                {cdbHistResult && (
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-3 gap-2 text-center">
+                      <div className="border rounded-md p-2 bg-muted/30">
+                        <p className="text-[10px] text-muted-foreground">Total de Ticks</p>
+                        <p className="font-bold text-blue-500 tabular-nums" data-testid="text-cdb-hist-count">{cdbHistResult.prices.length}</p>
+                      </div>
+                      <div className="border rounded-md p-2 bg-muted/30">
+                        <p className="text-[10px] text-muted-foreground">Mínimo</p>
+                        <p className="font-bold font-mono text-sm" data-testid="text-cdb-hist-min">{Math.min(...cdbHistResult.prices).toFixed(4)}</p>
+                      </div>
+                      <div className="border rounded-md p-2 bg-muted/30">
+                        <p className="text-[10px] text-muted-foreground">Máximo</p>
+                        <p className="font-bold font-mono text-sm" data-testid="text-cdb-hist-max">{Math.max(...cdbHistResult.prices).toFixed(4)}</p>
+                      </div>
+                    </div>
+                    <div className="border rounded-md overflow-hidden">
+                      <p className="text-[10px] text-muted-foreground px-2 py-1 bg-muted/30 border-b font-medium">Amostra — primeiros 10 ticks</p>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="border-b bg-muted/20">
+                              <th className="text-left px-2 py-1 text-muted-foreground font-medium">#</th>
+                              <th className="text-left px-2 py-1 text-muted-foreground font-medium">Epoch</th>
+                              <th className="text-right px-2 py-1 text-muted-foreground font-medium">Preço</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {cdbHistResult.prices.slice(0, 10).map((p, i) => (
+                              <tr key={i} className="border-b last:border-0" data-testid={`row-cdb-hist-${i}`}>
+                                <td className="px-2 py-1 text-muted-foreground">{i + 1}</td>
+                                <td className="px-2 py-1 font-mono text-muted-foreground">{cdbHistResult.times[i] ?? '—'}</td>
+                                <td className="px-2 py-1 font-mono text-right text-blue-500">{p}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Log de Coleta */}
             <Card className="border-emerald-500/20">
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
@@ -5338,8 +5713,7 @@ export default function TradingSystemPage() {
                     className="gap-1 text-xs text-muted-foreground hover:text-destructive"
                     data-testid="button-cdb-clear-logs"
                   >
-                    <Trash2 className="h-3 w-3" />
-                    Limpar
+                    <Trash2 className="h-3 w-3" />Limpar
                   </Button>
                 </div>
               </CardHeader>
@@ -5356,6 +5730,7 @@ export default function TradingSystemPage() {
                         entry.type === "error" ? "text-red-400"
                         : entry.type === "system" ? "text-yellow-400"
                         : entry.type === "tick" ? "text-green-400"
+                        : entry.type === "order" ? "text-orange-400"
                         : "text-cyan-400"
                       }`}>
                         <span className="opacity-50 shrink-0">[{entry.time}]</span>
@@ -5373,9 +5748,11 @@ export default function TradingSystemPage() {
                 <div className="flex gap-3 items-start">
                   <Info className="h-4 w-4 text-emerald-500 mt-0.5 shrink-0" />
                   <div className="text-xs text-muted-foreground space-y-1">
-                    <p><strong className="text-foreground">Protocolo:</strong> WebSocket Secure (WSS) via endpoint público da Deriv — <span className="font-mono">wss://ws.binaryws.com/websockets/v3</span></p>
-                    <p><strong className="text-foreground">Assinatura:</strong> Feed de ticks em tempo real por símbolo com keep-alive automático (ping a cada 25s).</p>
-                    <p><strong className="text-foreground">Capacidade:</strong> Coleta contínua de bid, ask, quote e epoch de cada tick do ativo selecionado, sem limite de sessão enquanto a conexão estiver ativa.</p>
+                    <p><strong className="text-foreground">on_open:</strong> Envia autorização (API token) e assina feed de ticks do símbolo selecionado.</p>
+                    <p><strong className="text-foreground">on_message / process_data:</strong> Processa cada tick recebido e envia ordem BUY quando ask &gt; threshold (se auto-ordem ativa).</p>
+                    <p><strong className="text-foreground">keep_alive:</strong> Ping automático a cada 20s para manter a conexão ativa.</p>
+                    <p><strong className="text-foreground">monitor_data:</strong> Verificação contínua a cada 5s reportada no log e no contador de monitor.</p>
+                    <p><strong className="text-foreground">get_historical_data:</strong> Busca ticks históricos do símbolo via WebSocket (ticks_history) com intervalo configurável.</p>
                   </div>
                 </div>
               </CardContent>
