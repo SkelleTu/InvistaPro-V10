@@ -568,22 +568,53 @@ export class AutoTradingScheduler {
       console.log('🔥 [INIT] Iniciando descoberta dinâmica de DIGITDIFF...');
       const digitdiffSymbols = await tempDerivAPI.getDigitDiffSupportedSymbols(activeSymbols);
       console.log(`🔥 [INIT] Ativos com suporte DIGITDIFF descobertos: ${digitdiffSymbols.length}`);
+
+      // ══════════════════════════════════════════════════════════════════
+      // CRASH/BOOM — sempre adicionar à coleta, independente de DigitDiff
+      //
+      // Crash e Boom NÃO suportam DigitDiff, portanto nunca são descobertos
+      // pelo loop acima. Porém são ativos fundamentais do InvestaPro:
+      //  - Crash: tendência de ALTA com spikes de queda periódicos
+      //  - Boom:  tendência de BAIXA com spikes de alta periódicos
+      //
+      // Extraímos os símbolos reais da lista da Deriv API para garantir
+      // compatibilidade com qualquer formato de nome (CRASH1000 / CRASH_1000).
+      // ══════════════════════════════════════════════════════════════════
+      const CRASH_BOOM_KEYWORDS = ['CRASH', 'BOOM'];
+      const crashBoomFromApi = activeSymbols
+        .map((s: any) => (typeof s === 'string' ? s : s.symbol))
+        .filter((sym: string) => CRASH_BOOM_KEYWORDS.some(kw => sym.toUpperCase().includes(kw)));
+
+      // Fallback caso a API não retorne nenhum Crash/Boom (ex: conta demo limitada)
+      // Inclui variantes com e sem underscore (Deriv usa ambos dependendo do ambiente)
+      const CRASH_BOOM_FALLBACK = [
+        'CRASH300',  'CRASH_300',
+        'CRASH500',  'CRASH_500',
+        'CRASH1000', 'CRASH_1000',
+        'BOOM300',   'BOOM_300',
+        'BOOM500',   'BOOM_500',
+        'BOOM1000',  'BOOM_1000',
+      ];
+      const crashBoomSymbols = crashBoomFromApi.length > 0 ? crashBoomFromApi : CRASH_BOOM_FALLBACK;
+      console.log(`⚡ [INIT] Crash/Boom adicionados à coleta: ${crashBoomSymbols.join(', ')}`);
       
       // Desconectar a conexão temporária
       console.log('📊 [INIT] Desconectando da Deriv API...');
       await tempDerivAPI.disconnect();
       console.log('✅ [INIT] Desconectado');
       
-      // Se nenhum símbolo foi descoberto dinamicamente, usar fallback (compatibilidade)
-      const symbolsToUse = digitdiffSymbols.length > 0 ? digitdiffSymbols : 
-        ['R_10', 'R_25', 'R_50', 'R_75', 'R_100']; // Fallback - sempre suportados
+      // Unir DigitDiff + Crash/Boom (sem duplicatas)
+      const baseSymbols = digitdiffSymbols.length > 0
+        ? digitdiffSymbols
+        : ['R_10', 'R_25', 'R_50', 'R_75', 'R_100']; // Fallback - sempre suportados
+      const symbolsToUse = [...new Set([...baseSymbols, ...crashBoomSymbols])];
       
-      console.log(`🎯 [INIT] Usando ${symbolsToUse.length} símbolos para coleta`);
+      console.log(`🎯 [INIT] Usando ${symbolsToUse.length} símbolos para coleta (DigitDiff + Crash/Boom)`);
       console.log(`🎯 [INIT] Símbolos: ${symbolsToUse.join(', ')}`);
       
       await marketDataCollector.startCollection(symbolsToUse);
       
-      console.log('✅ [INIT] Coleta de dados iniciada para todos os ativos DIGITDIFF descobertos');
+      console.log('✅ [INIT] Coleta de dados iniciada para DIGITDIFF + CRASH/BOOM');
       console.log('📊 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       
       // Ticks processados silenciosamente - análise contínua sem log flood
