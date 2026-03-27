@@ -1219,6 +1219,11 @@ class MetaTraderBridge extends EventEmitter {
     return { detected: false, patternType: null, pivotPrice: 0, ageMs: 0 };
   }
 
+  /** Retorna quantos pivôs da bolinha_media foram registrados para o símbolo. */
+  public getBolinhaMediaHistoryLength(symbol: string): number {
+    return (this.bolinhaMediaHistory.get(symbol) || []).length;
+  }
+
   /**
    * Calcula o TP baseado na microestrutura de mercado:
    *  - Mede o range swing high/low dos últimos N candles (padrão 50)
@@ -2900,6 +2905,80 @@ class MetaTraderBridge extends EventEmitter {
 
       if (!aiOnlyMode && !technicalAgrees && aiConsensus < 80) {
         return null;
+      }
+
+      // ══════════════════════════════════════════════════════════════════
+      // GATES FINAIS DE QUALIDADE — bloqueiam sinal antes de armazenar
+      // ══════════════════════════════════════════════════════════════════
+
+      // GATE 1: Girassol obrigatório
+      // Se o sistema está configurado para exigir Girassol E não há dados reais
+      // (nem real MT5 nem sintético com ADX suficiente), bloquear por segurança.
+      if (this.config.requireGirassolConfirmation && !girassolLive) {
+        this.logAnalysis({
+          id: `${entryId}_girassol_req`,
+          timestamp: Date.now(),
+          symbol,
+          phase: 'decision',
+          status: 'rejected',
+          decisionReason: `🚫 Girassol obrigatório (config) mas sem dados do indicador — instale o Girassol no gráfico MT5 ou envie buffers via signal-with-indicators`
+        });
+        console.log(`[MT5Bridge] 🚫 ${symbol}: Girassol obrigatório mas sem dados — sinal BUY/SELL bloqueado`);
+        return null;
+      }
+
+      // GATE 2: Duplo Topo / Duplo Fundo na bolinha_media
+      // Aplica quando o EA enviou buffers reais da bolinha_media via signal-with-indicators.
+      // Se há histórico mas o 2º pivô ainda não formou, aguardar.
+      const pendingDir = aiDirection === 'up' ? 'BUY' as const : 'SELL' as const;
+      const bolinhaHist = this.bolinhaMediaHistory.get(symbol) || [];
+      if (bolinhaHist.length > 0) {
+        const dp = this.checkBolinhaMediaDoublePattern(symbol, pendingDir);
+        if (!dp.detected) {
+          this.logAnalysis({
+            id: `${entryId}_double_pattern`,
+            timestamp: Date.now(),
+            symbol,
+            phase: 'decision',
+            status: 'rejected',
+            decisionReason: `⏳ Duplo padrão incompleto: bolinha_media ${pendingDir} registrou 1º pivô — aguardando 2º pivô em nível similar para confirmar ${pendingDir === 'BUY' ? 'Duplo Fundo' : 'Duplo Topo'}`
+          });
+          console.log(`[MT5Bridge] ⏳ ${symbol}: GATE duplo padrão (bridge) — bolinha_media ${pendingDir} aguarda 2º pivô (${bolinhaHist.length} registros no histórico)`);
+          return null;
+        }
+        const label = dp.patternType === 'double_top' ? 'DUPLO TOPO' : 'DUPLO FUNDO';
+        console.log(`[MT5Bridge] 🌻 ${symbol}: ${label} confirmado @ ${dp.pivotPrice.toFixed(5)} — sinal ${pendingDir} liberado no bridge`);
+      }
+
+      // GATE 3: Fibonacci regional — se preço está em zona oposta ao sinal, bloquear
+      // Usa o mesmo Auto-Fibonacci calculado acima para evitar entrar contra S/R chave.
+      if (!aiOnlyMode && marketData.length >= 10) {
+        try {
+          const currentPrice = marketData[marketData.length - 1]?.close;
+          if (currentPrice) {
+            const fibCheck = this.calcMultiLayerFibonacci(marketData, currentPrice);
+            if (fibCheck && fibCheck.confluenceScore >= 50) {
+              // Zona Fibonacci forte contra a direção do sinal → bloquear
+              const fibZoneContraSignal =
+                (pendingDir === 'BUY'  && fibCheck.zoneType === 'resistance') ||
+                (pendingDir === 'SELL' && fibCheck.zoneType === 'support');
+              if (fibZoneContraSignal) {
+                this.logAnalysis({
+                  id: `${entryId}_fib_gate`,
+                  timestamp: Date.now(),
+                  symbol,
+                  phase: 'decision',
+                  status: 'rejected',
+                  decisionReason: `📐 Fibonacci BLOQUEIA ${pendingDir}: preço em zona de ${fibCheck.zoneType.toUpperCase()} (confluência ${fibCheck.confluenceScore}) — entrada contra S/R chave vetada`
+                });
+                console.log(`[MT5Bridge] 📐 ${symbol}: Fibonacci ${fibCheck.zoneType.toUpperCase()} (score ${fibCheck.confluenceScore}) VETA ${pendingDir} — preço contra zona chave`);
+                return null;
+              }
+            }
+          }
+        } catch {
+          // Fibonacci indisponível — segue sem gate Fibonacci
+        }
       }
 
       // Decisão final

@@ -108,6 +108,38 @@ router.get('/signal', (req: Request, res: Response) => {
           timestamp: Date.now()
         });
       }
+    } else {
+      // Sem dados do Girassol E ele é obrigatório → bloquear
+      const requireGirassol = metaTraderBridge.getConfig().requireGirassolConfirmation;
+      if (requireGirassol) {
+        console.log(`[MT5-Signal] 🚫 ${resolvedSymbol}: Girassol obrigatório mas sem dados — sinal bloqueado no polling`);
+        return res.json({
+          action: 'HOLD',
+          reason: 'Girassol obrigatório mas sem dados do indicador — instale o Girassol no gráfico MT5',
+          confidence: 0,
+          timestamp: Date.now()
+        });
+      }
+    }
+
+    // ── Gate: Duplo Padrão da bolinha_media ──────────────────────────────────
+    // Mesmo no polling simples, verificar se o duplo topo/fundo está confirmado
+    // antes de entregar o sinal em cache. Isso evita que generateSignal() em background
+    // armazene sinais que depois saem por esta rota sem a validação completa.
+    {
+      const signalDir = signal.action as 'BUY' | 'SELL';
+      const dp = metaTraderBridge.checkBolinhaMediaDoublePattern(resolvedSymbol, signalDir);
+      const bolinhaHistLen = metaTraderBridge.getBolinhaMediaHistoryLength(resolvedSymbol);
+      // Só aplica o gate quando há histórico da bolinha_media (EA enviando buffers reais)
+      if (bolinhaHistLen > 0 && !dp.detected) {
+        console.log(`[MT5-Signal] ⏳ ${resolvedSymbol}: duplo padrão pendente — sinal ${signalDir} retido no polling`);
+        return res.json({
+          action: 'HOLD',
+          reason: `Aguardando duplo padrão: bolinha_media ${signalDir} registrou 1º pivô — entrada somente com 2º pivô confirmado`,
+          confidence: 0,
+          timestamp: Date.now()
+        });
+      }
     }
 
     res.json({
