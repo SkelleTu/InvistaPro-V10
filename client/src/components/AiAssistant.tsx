@@ -220,7 +220,7 @@ export default function AiAssistant() {
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="Pergunte sobre trades, saldo, robô..."
-                className="resize-none min-h-[40px] max-h-[100px] text-sm rounded-xl border-border/60 focus-visible:ring-violet-500/50 bg-muted/40"
+                className="resize-none min-h-[40px] max-h-[100px] text-sm rounded-xl border-border/60 focus-visible:ring-violet-500/50 bg-white text-black dark:bg-muted/40 dark:text-foreground placeholder:text-gray-400"
                 rows={1}
                 data-testid="ai-input"
               />
