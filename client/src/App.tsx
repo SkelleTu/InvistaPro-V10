@@ -28,6 +28,7 @@ import KeepAliveSetup from "@/pages/KeepAliveSetup";
 
 import { useAuth } from "@/hooks/useAuth";
 import { ThemeProvider } from "@/contexts/ThemeContext";
+import AiAssistant from "@/components/AiAssistant";
 
 const PUBLIC_PATHS = [
   "/", "/auth", "/reset-password",
@@ -109,6 +110,7 @@ function Router() {
             <Route path="/trading" component={TradingSystemPage} />
             <Route path="/metatrader" component={MetaTraderPage} />
             <Route path="/metatrader5" component={MetaTrader5Page} />
+            <AiAssistant />
           </>
         );
       })()}

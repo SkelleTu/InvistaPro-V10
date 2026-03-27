@@ -3981,6 +3981,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json(result);
   });
 
+  // ========== AI ASSISTANT ROUTES ==========
+  const { processAiAssistantMessage } = await import('./services/ai-assistant.js');
+
+  app.post('/api/ai-assistant/chat', isAuthenticated, async (req: any, res: any) => {
+    try {
+      const userId = String(req.user?.id);
+      const { message, history = [] } = req.body;
+
+      if (!message || typeof message !== 'string') {
+        return res.status(400).json({ error: 'Message is required' });
+      }
+
+      const response = await processAiAssistantMessage(userId, message, history);
+      res.json(response);
+    } catch (err: any) {
+      console.error('[AI Assistant] Error:', err);
+      res.status(500).json({ error: 'Erro ao processar mensagem', details: err.message });
+    }
+  });
+  // ========== END AI ASSISTANT ROUTES ==========
+
   const httpServer = createServer(app);
   return httpServer;
 }
