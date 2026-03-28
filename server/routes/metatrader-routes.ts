@@ -16,6 +16,7 @@ import {
 } from '../services/crash-boom-spike-engine';
 import { brazilNewsService } from '../services/brazil-news-service';
 import { computeSyntheticGirassol } from '../services/synthetic-girassol';
+import { consensusCache } from '../services/consensus-cache';
 
 
 const router = Router();
@@ -1722,7 +1723,47 @@ router.get('/ai-analysis', (_req: Request, res: Response) => {
   try {
     const bridgeLog = metaTraderBridge.getAnalysisLog();
     const bridgeLatest = metaTraderBridge.getLatestAnalysis();
-    res.json({ log: bridgeLog, latest: bridgeLatest, total: bridgeLog.length });
+
+    // Fallback: quando o MT5 EA não está conectado, usar o cache do auto-trading-scheduler
+    const cacheLatest = consensusCache.getLatest();
+    const cacheAll = consensusCache.getLatestPerSymbol();
+
+    // Enriquecer com dados do cache quando o bridge não tem análises recentes (EA offline)
+    const hasBridgeData = bridgeLatest !== null && (bridgeLatest as any).aiConsensus > 0;
+    const effectiveLatest = hasBridgeData ? bridgeLatest : (cacheLatest ? {
+      id: `cache_${cacheLatest.timestamp}`,
+      timestamp: cacheLatest.timestamp,
+      symbol: cacheLatest.symbol,
+      phase: 'auto_trading',
+      status: cacheLatest.aiConsensus >= cacheLatest.requiredConsensus ? 'approved' : 'hold',
+      aiConsensus: cacheLatest.aiConsensus,
+      requiredConsensus: cacheLatest.requiredConsensus,
+      aiDirection: cacheLatest.aiDirection,
+      aiReasoning: cacheLatest.reasoning,
+      participatingModels: cacheLatest.participatingModels,
+      decisionReason: `[Deriv] ${cacheLatest.aiDirection.toUpperCase()} ${cacheLatest.symbol} — ${cacheLatest.aiConsensus.toFixed(1)}% / ${cacheLatest.requiredConsensus}% exigido`,
+      source: cacheLatest.source,
+    } : null);
+
+    // Log extra: uma entrada por ativo analisado recentemente pelo scheduler
+    const extraLog = cacheAll.map(e => ({
+      id: `cache_${e.symbol}_${e.timestamp}`,
+      timestamp: e.timestamp,
+      symbol: e.symbol,
+      phase: 'auto_trading',
+      status: e.aiConsensus >= e.requiredConsensus ? 'approved' : 'hold',
+      aiConsensus: e.aiConsensus,
+      requiredConsensus: e.requiredConsensus,
+      aiDirection: e.aiDirection,
+      aiReasoning: e.reasoning,
+      participatingModels: e.participatingModels,
+      decisionReason: `[Deriv] ${e.aiDirection.toUpperCase()} ${e.symbol} — ${e.aiConsensus.toFixed(1)}% / ${e.requiredConsensus}% exigido`,
+      source: e.source,
+    }));
+
+    const mergedLog = hasBridgeData ? bridgeLog : [...extraLog, ...bridgeLog];
+
+    res.json({ log: mergedLog, latest: effectiveLatest, total: mergedLog.length });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

@@ -13,6 +13,7 @@ import { DerivTickData } from './deriv-api';
 import { storage } from '../storage';
 import { getSignal } from './signal-store';
 import { sqlite } from '../db';
+import { consensusCache } from './consensus-cache';
 
 export interface MT5Signal {
   id: string;
@@ -1824,6 +1825,14 @@ class MetaTraderBridge extends EventEmitter {
       ? Math.ceil((this.circuitBreakerUntil - now2) / 60000)
       : 0;
 
+    // Fallback ao cache do auto-trading-scheduler quando EA não está enviando dados
+    const cacheEntry = latestAnalysis ? null : consensusCache.getLatest();
+    const latestAIConsensus = latestAnalysis?.aiConsensus ?? cacheEntry?.aiConsensus;
+    const latestRequiredConsensus = latestAnalysis?.requiredConsensus ?? cacheEntry?.requiredConsensus;
+    const latestAIDirection = latestAnalysis?.aiDirection ?? cacheEntry?.aiDirection;
+    const latestAnalysisSymbol = latestAnalysis?.symbol ?? cacheEntry?.symbol;
+    const latestAnalysisAt = latestAnalysis?.timestamp ?? cacheEntry?.timestamp;
+
     return {
       ...this.status,
       connected,
@@ -1834,11 +1843,11 @@ class MetaTraderBridge extends EventEmitter {
       cachedSymbols: this.getCachedSymbols(),
       lastBalance: this.currentBalance || undefined,
       lastEquity: this.currentEquity || undefined,
-      latestAIConsensus: latestAnalysis?.aiConsensus,
-      latestRequiredConsensus: latestAnalysis?.requiredConsensus,
-      latestAIDirection: latestAnalysis?.aiDirection,
-      latestAnalysisSymbol: latestAnalysis?.symbol,
-      latestAnalysisAt: latestAnalysis?.timestamp,
+      latestAIConsensus,
+      latestRequiredConsensus,
+      latestAIDirection,
+      latestAnalysisSymbol,
+      latestAnalysisAt,
       consecutiveLosses: this.consecutiveLosses,
       circuitBreakerActive: this.circuitBreakerUntil > now2,
       circuitBreakerRemainingMin: circuitBreakerRem,

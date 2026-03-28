@@ -16,6 +16,7 @@ import { supremeAnalyzer, SupremeAnalysis } from './supreme-market-analyzer';
 import { analyzeCrashBoomSpike } from './crash-boom-spike-engine';
 import { setSignal } from './signal-store';
 import { classifyAsset, getGateThreshold } from '../utils/asset-classifier';
+import { consensusCache } from './consensus-cache';
 
 function derivToMT5Name(derivSymbol: string): string | null {
   const map: Record<string, string> = {
@@ -1686,6 +1687,18 @@ export class AutoTradingScheduler {
         selectedSymbol,
         aiConsensus.finalDecision
       );
+
+      // 📡 PUBLICAR CONSENSO NO CACHE COMPARTILHADO (lido pela aba Sinais & IAs do MT5)
+      consensusCache.publish({
+        symbol: selectedSymbol,
+        aiConsensus: aiConsensus.consensusStrength,
+        aiDirection: aiConsensus.finalDecision as 'up' | 'down' | 'neutral',
+        requiredConsensus: aiConsensus.requiredConsensus ?? 70,
+        participatingModels: aiConsensus.participatingModels ?? 0,
+        reasoning: aiConsensus.reasoning ?? '',
+        timestamp: Date.now(),
+        source: 'auto_trading',
+      });
 
       // 📝 GRAVAR LOGS DAS IAs COOPERATIVAS NO BANCO DE DADOS (para exibição em tempo real)
       if (aiConsensus.analyses && aiConsensus.analyses.length > 0) {
