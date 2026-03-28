@@ -2446,7 +2446,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/trading/frenetico-9tokens/burst', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
     if (!req.user?.id) return res.status(401).json({ message: 'Não autenticado' });
     const userId = req.user.id;
-    const { amount = 0.35, duration = 1 } = req.body;
+    const { amount = 0.35, duration = 1, stakeMode = 'kelly' } = req.body;
+
+    const validModes = ['uniform', 'kelly', 'aggressive'];
+    const mode = validModes.includes(stakeMode) ? stakeMode : 'kelly';
 
     const allTokens = await dbStorage.getAllDerivTokens(userId);
     if (allTokens.length === 0) {
@@ -2460,8 +2463,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }));
 
     const operationId = `MANUAL_BURST_${Date.now()}`;
-    const result = await executeFrenetic9TokensBurst(userId, slots, amount, duration, operationId);
+    const result = await executeFrenetic9TokensBurst(userId, slots, amount, duration, operationId, mode as any);
     res.json(result);
+  }));
+
+  // GET /api/trading/frenetico-9tokens/history — histórico de rajadas
+  app.get('/api/trading/frenetico-9tokens/history', isAuthenticated, asyncErrorHandler(async (req: any, res: any) => {
+    if (!req.user?.id) return res.status(401).json({ message: 'Não autenticado' });
+    const { burstHistory } = await import('./services/frenetico-9tokens');
+    const history = burstHistory.get(req.user.id) ?? [];
+    res.json({ history: history.slice(-20).reverse() });
+  }));
+
+  // GET /api/trading/frenetico-9tokens/preview — pré-visualiza stakes sem disparar
+  app.get('/api/trading/frenetico-9tokens/preview', isAuthenticated, asyncErrorHandler(async (req: any, res: any) => {
+    const { amount = '0.35', stakeMode = 'kelly' } = req.query as any;
+    const { computeSmartStakes, computeBurstStats, selectBestAsset } = await import('./services/frenetico-9tokens');
+    const { digitFrequencyAnalyzer } = await import('./services/digit-frequency-analyzer');
+
+    const baseAmount = parseFloat(amount) || 0.35;
+    const validModes = ['uniform', 'kelly', 'aggressive'];
+    const mode = validModes.includes(stakeMode) ? stakeMode : 'kelly';
+
+    const targetSymbol = selectBestAsset();
+    const analysis = digitFrequencyAnalyzer.analyzeSymbolMultiWindow(targetSymbol);
+
+    const digitHeats = Array.from({ length: 10 }, (_, d) => {
+      const freq = analysis?.digits.find((x: any) => x.digit === d)?.frequency ?? 0.10;
+      const label = freq >= 0.13 ? 'hot' : freq <= 0.07 ? 'cold' : 'neutral';
+      const ratio = freq / 0.10;
+      return {
+        digit: d, frequency: freq, label,
+        recommendedStakeMultiplier: parseFloat(ratio.toFixed(2)),
+      };
+    });
+
+    const stakeDistribution = computeSmartStakes(digitHeats as any, baseAmount, mode as any);
+    const burstStats = computeBurstStats(digitHeats as any, stakeDistribution);
+
+    res.json({ targetSymbol, digitHeats, stakeDistribution, burstStats, stakeMode: mode });
   }));
 
   // =========================== TRADE CONFIGURATION ===========================
