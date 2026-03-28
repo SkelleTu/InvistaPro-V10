@@ -267,6 +267,32 @@ export class TursoStorage implements IStorage {
       .where(eq(derivTokens.userId, userId));
   }
 
+  async getAllDerivTokens(userId: string): Promise<DerivToken[]> {
+    const tokens = await getDb()
+      .select()
+      .from(derivTokens)
+      .where(and(eq(derivTokens.userId, userId), eq(derivTokens.isActive, true)));
+    return tokens.map(t => ({ ...t, token: EncryptionService.decrypt(t.token) }));
+  }
+
+  async upsertDerivTokenBySlot(userId: string, slotIndex: number, token: string, accountType: string): Promise<DerivToken> {
+    const db = getDb();
+    await db.update(derivTokens)
+      .set({ isActive: false, updatedAt: new Date().toISOString() })
+      .where(and(eq(derivTokens.userId, userId), eq(derivTokens.slotIndex, slotIndex)));
+    const [newToken] = await db.insert(derivTokens)
+      .values({ userId, token: EncryptionService.encrypt(token), accountType, isActive: true, slotIndex })
+      .returning();
+    return { ...newToken, token: EncryptionService.decrypt(newToken.token) };
+  }
+
+  async deleteDerivTokenBySlot(userId: string, slotIndex: number): Promise<void> {
+    await getDb()
+      .update(derivTokens)
+      .set({ isActive: false, updatedAt: new Date().toISOString() })
+      .where(and(eq(derivTokens.userId, userId), eq(derivTokens.slotIndex, slotIndex)));
+  }
+
   async createTradeConfig(configData: InsertTradeConfiguration): Promise<TradeConfiguration> {
     const db = getDb();
     await db

@@ -162,7 +162,7 @@ export interface IStorage {
   deactivateDerivToken(userId: string): Promise<void>;
   // Frenético 9-Tokens: gerenciamento de múltiplos slots de token
   getAllDerivTokens(userId: string): Promise<DerivToken[]>;
-  upsertDerivTokenBySlot(userId: string, slotIndex: number, token: string, accountType: string): DerivToken;
+  upsertDerivTokenBySlot(userId: string, slotIndex: number, token: string, accountType: string): Promise<DerivToken>;
   deleteDerivTokenBySlot(userId: string, slotIndex: number): Promise<void>;
   
   // Trade configuration operations
@@ -523,7 +523,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Frenético 9-Tokens: insere ou atualiza o token de um slot específico (0-8)
-  upsertDerivTokenBySlot(userId: string, slotIndex: number, token: string, accountType: string): DerivToken {
+  async upsertDerivTokenBySlot(userId: string, slotIndex: number, token: string, accountType: string): Promise<DerivToken> {
     return db.transaction((tx: any) => {
       // Desativa o slot anterior se existir
       tx.update(derivTokens)

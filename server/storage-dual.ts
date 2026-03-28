@@ -237,6 +237,17 @@ export class DualStorage implements IStorage {
   async updateDerivToken(uid: string, token: string, accountType: string) { return this.write(() => this.turso!.updateDerivToken(uid, token, accountType), () => this.sqlite.updateDerivToken(uid, token, accountType), 'updateDerivToken'); }
   async deactivateDerivToken(uid: string)                                  { return this.write(() => this.turso!.deactivateDerivToken(uid), () => this.sqlite.deactivateDerivToken(uid), 'deactivateDerivToken'); }
 
+  // ─── Frenético 9-Tokens ───────────────────────────────────────────────────
+  async getAllDerivTokens(uid: string) {
+    return this.localRead(() => this.turso!.getAllDerivTokens(uid), () => this.sqlite.getAllDerivTokens(uid), 'getAllDerivTokens');
+  }
+  async upsertDerivTokenBySlot(uid: string, slotIndex: number, token: string, accountType: string) {
+    return this.sqlite.upsertDerivTokenBySlot(uid, slotIndex, token, accountType);
+  }
+  async deleteDerivTokenBySlot(uid: string, slotIndex: number) {
+    return this.write(() => this.turso!.deleteDerivTokenBySlot(uid, slotIndex), () => this.sqlite.deleteDerivTokenBySlot(uid, slotIndex), 'deleteDerivTokenBySlot');
+  }
+
   // ─── Configurações de Trade ───────────────────────────────────────────────
 
   async createTradeConfig(c: InsertTradeConfiguration) { return this.write(() => this.turso!.createTradeConfig(c), () => this.sqlite.createTradeConfig(c), 'createTradeConfig'); }

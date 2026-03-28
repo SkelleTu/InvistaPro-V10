@@ -2383,7 +2383,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try { const balData = await testApi.getBalance(); balance = balData?.balance ?? null; } catch {}
       await testApi.disconnect();
 
-      const savedToken = dbStorage.upsertDerivTokenBySlot(userId, slotIndex, token.trim(), accountType);
+      const savedToken = await dbStorage.upsertDerivTokenBySlot(userId, slotIndex, token.trim(), accountType);
 
       console.log(`✅ [FRENÉTICO-9T] Slot ${slotIndex} configurado para usuário ${userId} | saldo: $${balance}`);
       res.json({
