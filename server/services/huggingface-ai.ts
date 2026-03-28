@@ -418,6 +418,55 @@ export class HuggingFaceAIService {
       let finalConsensus = Math.round(Math.min(95, Math.max(0, boostedConsensus)));
 
       // ═══════════════════════════════════════════════════════════════════
+      // BOOST ESTRUTURAL PARA CRASH/BOOM (Índices Spike da Deriv)
+      // ═══════════════════════════════════════════════════════════════════
+      // Os modelos de IA são treinados em mercados tradicionais onde RSI < 30
+      // = oversold = sinal de compra. Para Crash: RSI < 30 é o estado NORMAL.
+      // Isso faz os modelos votarem "neutral" quando na verdade o drift DOWN
+      // é certo (98%+ do tempo) para Crash.
+      //
+      // Correção: quando o momentum multi-escala confirma o drift natural,
+      // aplicamos um boost de consenso para a direção correta.
+      // ═══════════════════════════════════════════════════════════════════
+      const symUpperBoost = symbol.toUpperCase();
+      const isCrashBoost = symUpperBoost.includes('CRASH');
+      const isBoomBoost  = symUpperBoost.includes('BOOM');
+      if (isCrashBoost || isBoomBoost) {
+        const naturalDirBoost: 'down' | 'up' = isCrashBoost ? 'down' : 'up';
+        const tpBoost = tickData.map(t => t.quote);
+        const nBoost = tpBoost.length;
+        const m5b  = nBoost > 5  ? (tpBoost[nBoost-1] - tpBoost[nBoost-6])  / tpBoost[nBoost-6]  * 100 : 0;
+        const m20b = nBoost > 20 ? (tpBoost[nBoost-1] - tpBoost[nBoost-21]) / tpBoost[nBoost-21] * 100 : 0;
+        const m50b = nBoost > 50 ? (tpBoost[nBoost-1] - tpBoost[nBoost-51]) / tpBoost[nBoost-51] * 100 : 0;
+
+        // Drift confirmado: pelo menos 2 de 3 escalas de momentum alinhadas
+        const driftDown = (m5b < 0 ? 1 : 0) + (m20b < 0 ? 1 : 0) + (m50b < 0 ? 1 : 0);
+        const driftUp   = (m5b > 0 ? 1 : 0) + (m20b > 0 ? 1 : 0) + (m50b > 0 ? 1 : 0);
+        const driftConfirmed = isCrashBoost ? driftDown >= 2 : driftUp >= 2;
+
+        if (driftConfirmed) {
+          // Drift natural confirmado — corrigir a direção e boostar o consenso
+          // O boost é proporcional: drift fraco (2/3) = +12pts, drift forte (3/3) = +22pts
+          const boostPts = (isCrashBoost ? driftDown : driftUp) === 3 ? 22 : 12;
+          const finalDirMut = finalDir;
+          if (finalDirMut === 'neutral' || finalDirMut !== naturalDirBoost) {
+            // IA estava confusa (neutral ou na direção errada) — corrigir para drift natural
+            finalConsensus = Math.min(88, Math.max(finalConsensus, 50) + boostPts);
+            console.log(`🎯 [SPIKE DRIFT BOOST] ${symbol}: drift ${naturalDirBoost.toUpperCase()} confirmado (${isCrashBoost?driftDown:driftUp}/3 escalas) | Consenso: ${finalConsensus - boostPts}% → ${finalConsensus}% | Direção corrigida: ${naturalDirBoost}`);
+          } else if (finalDirMut === naturalDirBoost) {
+            // IA já estava correta — apenas amplificar o consenso
+            finalConsensus = Math.min(88, finalConsensus + boostPts);
+            console.log(`✅ [SPIKE DRIFT BOOST] ${symbol}: IA correta + drift confirmado (${isCrashBoost?driftDown:driftUp}/3 escalas) | Consenso amplificado: ${finalConsensus - boostPts}% → ${finalConsensus}%`);
+          }
+          // Forçar a direção final para o drift natural quando drift está confirmado
+          // (sobrescreve qualquer resultado neutral ou contrário da IA)
+          (hybridResult as any)._driftOverride = naturalDirBoost;
+        } else {
+          console.log(`⚡ [SPIKE DRIFT] ${symbol}: drift ${naturalDirBoost} NÃO confirmado (${isCrashBoost?driftDown:driftUp}/3 escalas) — possível spike iminente`);
+        }
+      }
+
+      // ═══════════════════════════════════════════════════════════════════
       // INJEÇÃO DE CONTEXTO EXTERNO: Noticiário BR + Girassol como votante
       // ═══════════════════════════════════════════════════════════════════
       // Os modelos de IA recebem apenas ticks de preço — sem contexto macro.
@@ -488,6 +537,16 @@ export class HuggingFaceAIService {
 
           console.log(`🌻🇧🇷 [EXTERNAL VOTER] Peso: ${externalVoterWeight} | Consenso antes: ${finalConsensus}% → depois: ${newConsensus}% | Dir IA: ${finalDir} | Dir externa: ${extDir}`);
           finalConsensus = newConsensus;
+        }
+      }
+
+      // ── Aplicar direção de drift para Crash/Boom (se drift foi confirmado pelo boost acima) ──
+      // O boost de consenso já foi calculado; agora garantimos que a direção também está correta
+      if ((isCrashBoost || isBoomBoost) && (hybridResult as any)._driftOverride) {
+        const driftDir = (hybridResult as any)._driftOverride as 'up' | 'down';
+        if (contextInjectedDir === 'neutral' || contextInjectedDir !== driftDir) {
+          contextInjectedDir = driftDir;
+          console.log(`🔀 [SPIKE DRIFT DIR] ${symbol}: direção corrigida para ${driftDir.toUpperCase()} (drift natural confirmado)`);
         }
       }
 
@@ -894,6 +953,18 @@ export class HuggingFaceAIService {
     const n = tickData.length;
     if (n < 20) return `Insufficient data for ${symbol} — only ${n} ticks available.`;
 
+    // ── Detectar ativo Spike-Index (Crash/Boom) ──────────────────────────────
+    // Esses ativos têm comportamento inverso aos mercados tradicionais:
+    // CRASH: deriva naturalmente para BAIXO; spikes são movimentos BRUSCOS para CIMA
+    // BOOM:  deriva naturalmente para CIMA;  spikes são movimentos BRUSCOS para BAIXO
+    // RSI < 30 e Z-score negativo são NORMAIS para Crash — NÃO indicam reversão.
+    const symUp = symbol.toUpperCase();
+    const isCrashIndex = symUp.includes('CRASH');
+    const isBoomIndex  = symUp.includes('BOOM');
+    const isSpikeIndex = isCrashIndex || isBoomIndex;
+    // Direção natural de drift: Crash → down, Boom → up
+    const naturalDrift: 'down' | 'up' | null = isCrashIndex ? 'down' : isBoomIndex ? 'up' : null;
+
     const prices = tickData.map(t => t.quote);
     const lastDigits = tickData.map(extractLastDigit);
     const current = prices[n - 1];
@@ -942,12 +1013,26 @@ export class HuggingFaceAIService {
     const rsi7 = this.computeRSI(prices, 7);
     const rsi14 = this.computeRSI(prices, 14);
     const rsi28 = this.computeRSI(prices, 28);
-    const rsiLabel = (rsi: number) => rsi > 70 ? 'overbought' : rsi < 30 ? 'oversold' : rsi > 55 ? 'bullish' : rsi < 45 ? 'bearish' : 'neutral';
+    // Para Crash/Boom: RSI "oversold" é o estado NORMAL do drift; não sinaliza reversão
+    const rsiLabel = isSpikeIndex
+      ? (rsi: number) => rsi > 70
+          ? (isCrashIndex ? 'spike-peak territory (Crash spike just fired, drift resumes DOWN)' : 'spike-peak (Boom natural upward momentum)')
+          : rsi < 30
+          ? (isCrashIndex ? 'normal drift zone (Crash Index naturally stays low — NOT a buy signal)' : 'normal drift zone (Boom naturally stays low pre-spike)')
+          : rsi > 55 ? 'elevated momentum' : rsi < 45 ? 'compressed (Crash drift normal)' : 'neutral'
+      : (rsi: number) => rsi > 70 ? 'overbought' : rsi < 30 ? 'oversold' : rsi > 55 ? 'bullish' : rsi < 45 ? 'bearish' : 'neutral';
 
     // ── Bollinger Bands ──
     const bbPos = this.computeBollingerPosition(prices);
     const bbWidth = this.computeBollingerWidth(prices);
-    const bbPosLabel = bbPos > 0.8 ? 'near upper band (overbought zone)' : bbPos < 0.2 ? 'near lower band (oversold zone)' : bbPos > 0.5 ? 'upper half (bullish lean)' : 'lower half (bearish lean)';
+    // Para Crash: estar na banda inferior é o estado NORMAL do drift, não oversold
+    const bbPosLabel = isSpikeIndex
+      ? bbPos > 0.8
+        ? (isCrashIndex ? 'upper band — spike just occurred, Crash drift will resume DOWN' : 'upper band — Boom natural upward momentum')
+        : bbPos < 0.2
+        ? (isCrashIndex ? 'lower band — NORMAL Crash drift position (bearish continuation expected)' : 'lower band — Boom pre-spike compression zone')
+        : bbPos > 0.5 ? 'upper half (spike recovery zone)' : 'lower half (normal drift territory)'
+      : bbPos > 0.8 ? 'near upper band (overbought zone)' : bbPos < 0.2 ? 'near lower band (oversold zone)' : bbPos > 0.5 ? 'upper half (bullish lean)' : 'lower half (bearish lean)';
 
     // ── MACD ──
     const macd = this.computeMACD(prices);
@@ -995,23 +1080,41 @@ export class HuggingFaceAIService {
 
     // ── Build the final ultra-rich prompt ──
     const trend = (m20 ?? 0) > 0.01 ? 'bullish' : (m20 ?? 0) < -0.01 ? 'bearish' : 'sideways';
-    const overallSentiment = (
-      (rsi14 > 55 ? 1 : rsi14 < 45 ? -1 : 0) +
-      (bbPos > 0.55 ? 1 : bbPos < 0.45 ? -1 : 0) +
-      (macd.histogram > 0 ? 1 : -1) +
-      ((m10 ?? 0) > 0 ? 1 : -1) +
-      (hurst > 0.55 ? ((m5 ?? 0) > 0 ? 1 : -1) : 0) +
-      (zScore < -1 ? 1 : zScore > 1 ? -1 : 0)
-    );
+    const overallSentiment = isSpikeIndex
+      ? (
+          // Para Crash/Boom: Z-score e RSI abaixo da média são NORMAIS — não penalizam nem ajudam
+          (macd.histogram > 0 ? 1 : -1) +
+          ((m10 ?? 0) > 0 ? 1 : -1) +
+          ((m20 ?? 0) > 0 ? 1 : -1) +
+          ((m50 ?? 0) > 0 ? 1 : -1) +
+          (hurst > 0.55 ? ((m5 ?? 0) > 0 ? 1 : -1) : 0) +
+          // Volatilidade em expansão pode indicar spike iminente
+          (volRatio > 1.4 ? (isCrashIndex ? 1 : -1) : 0)
+        )
+      : (
+          (rsi14 > 55 ? 1 : rsi14 < 45 ? -1 : 0) +
+          (bbPos > 0.55 ? 1 : bbPos < 0.45 ? -1 : 0) +
+          (macd.histogram > 0 ? 1 : -1) +
+          ((m10 ?? 0) > 0 ? 1 : -1) +
+          (hurst > 0.55 ? ((m5 ?? 0) > 0 ? 1 : -1) : 0) +
+          (zScore < -1 ? 1 : zScore > 1 ? -1 : 0)
+        );
     const overallLabel = overallSentiment >= 3 ? 'strongly positive financial outlook' :
                          overallSentiment >= 1 ? 'moderately positive financial indicators' :
                          overallSentiment <= -3 ? 'strongly negative financial outlook' :
                          overallSentiment <= -1 ? 'moderately negative financial indicators' :
                          'neutral mixed financial signals';
 
-    return `Quantitative market analysis for synthetic index ${symbol} — microscopic tick data (${n} ticks, high-frequency):
+    // ── Preamble especializado para Crash/Boom ──────────────────────────────
+    const spikeIndexPreamble = isSpikeIndex ? (
+      isCrashIndex
+        ? `⚠️ SPIKE INDEX — CRASH: This is a Deriv synthetic Crash index. NATURAL BEHAVIOR = continuous downward drift with periodic sharp UP spikes (every ~${symUp.includes('300') ? '300' : symUp.includes('500') ? '500' : symUp.includes('600') ? '600' : symUp.includes('900') ? '900' : '1000'} ticks). RSI < 30 and negative Z-score are STRUCTURALLY NORMAL (NOT oversold signals). The bearish drift IS the expected state. A DOWN prediction = CORRECT (drift continues). An UP prediction = spike imminent (counter-trend burst). Do NOT interpret low RSI as a buy opportunity.\n\n`
+        : `⚠️ SPIKE INDEX — BOOM: This is a Deriv synthetic Boom index. NATURAL BEHAVIOR = continuous upward drift with periodic sharp DOWN spikes. RSI > 70 and positive Z-score are STRUCTURALLY NORMAL. The bullish drift IS the expected state. An UP prediction = CORRECT (drift continues). A DOWN prediction = spike imminent (counter-trend burst).\n\n`
+    ) : '';
 
-EXECUTIVE SUMMARY: ${overallLabel}. Market is in ${trend} trend with ${momentumAlignment}.
+    return `${spikeIndexPreamble}Quantitative market analysis for synthetic index ${symbol} — microscopic tick data (${n} ticks, high-frequency):
+
+EXECUTIVE SUMMARY: ${overallLabel}. Market is in ${trend} trend with ${momentumAlignment}.${isSpikeIndex ? ` [${isCrashIndex ? 'CRASH INDEX: natural drift = DOWN' : 'BOOM INDEX: natural drift = UP'} — standard reversal signals do NOT apply]` : ''}
 
 MOMENTUM MATRIX (multi-scale price change):
 • 1-tick: ${m1 !== null ? m1.toFixed(5)+'%' : 'n/a'} | 5-tick: ${m5 !== null ? m5.toFixed(5)+'%' : 'n/a'} | 10-tick: ${m10 !== null ? m10.toFixed(5)+'%' : 'n/a'} | 20-tick: ${m20 !== null ? m20.toFixed(5)+'%' : 'n/a'}
@@ -1030,15 +1133,27 @@ Sample Entropy=${entropy.toFixed(3)} — ${entropy > 0.8 ? 'HIGH entropy (unpred
 
 OSCILLATORS:
 RSI-7=${rsi7.toFixed(1)} (${rsiLabel(rsi7)}) | RSI-14=${rsi14.toFixed(1)} (${rsiLabel(rsi14)}) | RSI-28=${rsi28.toFixed(1)} (${rsiLabel(rsi28)})
-${rsi14 > 70 ? 'Overbought territory — negative financial risk elevated' : rsi14 < 30 ? 'Oversold territory — positive reversal opportunity' : 'Neutral RSI — direction unclear from oscillators alone'}
+${isSpikeIndex
+  ? (rsi14 > 70
+      ? (isCrashIndex ? 'RSI elevated — Crash spike recently fired, downward drift resumes' : 'RSI elevated — Boom natural upward momentum confirmed')
+      : rsi14 < 30
+      ? (isCrashIndex ? 'RSI low — NORMAL Crash Index state (structural bearish drift, NOT a reversal signal)' : 'RSI low — Boom pre-spike compression (downward drift normal)')
+      : 'RSI neutral — transitional zone for spike index')
+  : (rsi14 > 70 ? 'Overbought territory — negative financial risk elevated' : rsi14 < 30 ? 'Oversold territory — positive reversal opportunity' : 'Neutral RSI — direction unclear from oscillators alone')}
 
 BOLLINGER BANDS: Position=${(bbPos*100).toFixed(1)}% — ${bbPosLabel} | Width=${bbWidth.toFixed(3)}%
-${bbWidth < 0.1 ? 'EXTREME SQUEEZE — explosive move imminent, direction critical' : bbWidth > 0.5 ? 'Wide bands — high volatility environment' : 'Normal band width'}
+${bbWidth < 0.1 ? (isSpikeIndex ? 'SQUEEZE — spike may be imminent (compression before explosive move)' : 'EXTREME SQUEEZE — explosive move imminent, direction critical') : bbWidth > 0.5 ? 'Wide bands — high volatility environment' : 'Normal band width'}
 
 MACD: Value=${macd.value.toFixed(7)} | Signal=${macd.signal.toFixed(7)} | Histogram=${macd.histogram.toFixed(7)} → ${macdLabel}
 
-Z-SCORE: ${zScore.toFixed(3)}σ from 200-tick mean → ${zLabel}
-${Math.abs(zScore) > 1.5 ? (zScore > 0 ? 'Significantly above mean — negative reversion pressure' : 'Significantly below mean — positive recovery potential') : 'Near equilibrium — no strong mean reversion pressure'}
+Z-SCORE: ${zScore.toFixed(3)}σ from 200-tick mean → ${isSpikeIndex ? (zScore < -1 ? (isCrashIndex ? 'below mean — NORMAL Crash drift (bearish continuation, not reversal)' : 'below mean — Boom pre-spike compression') : zScore > 1 ? (isCrashIndex ? 'above mean — Crash spike occurred (return to downward drift expected)' : 'above mean — Boom natural drift momentum') : 'near mean — equilibrium') : zLabel}
+${isSpikeIndex
+  ? (Math.abs(zScore) > 1.5
+      ? (zScore > 0
+          ? (isCrashIndex ? 'Crash spike territory — drift resumption DOWN expected' : 'Boom natural upward extension — continuation expected')
+          : (isCrashIndex ? 'Normal Crash bearish drift — bearish continuation, NOT recovery' : 'Boom pre-spike compression — spike DOWN may be imminent'))
+      : 'Transitional zone for spike index')
+  : (Math.abs(zScore) > 1.5 ? (zScore > 0 ? 'Significantly above mean — negative reversion pressure' : 'Significantly below mean — positive recovery potential') : 'Near equilibrium — no strong mean reversion pressure')}
 
 SUPPORT/RESISTANCE: ${srLabel}
 200-tick range: ${min200.toFixed(5)}–${max200.toFixed(5)} | ${(distFromLow).toFixed(1)}% above support | ${(distFromHigh).toFixed(1)}% below resistance
@@ -1064,9 +1179,14 @@ COMPOSITE SIGNAL SCORE: ${overallSentiment > 0 ? '+' : ''}${overallSentiment}/6 
     const n = tickData.length;
     if (n < 20) return `Insufficient market data for ${symbol}.`;
 
+    // ── Detecção de Spike Index (Crash/Boom) ────────────────────────────────
+    const symUpC = symbol.toUpperCase();
+    const isCrashC = symUpC.includes('CRASH');
+    const isBoomC  = symUpC.includes('BOOM');
+    const isSpikeC = isCrashC || isBoomC;
+
     const prices = tickData.map(t => t.quote);
     const lastDigits = tickData.map(extractLastDigit);
-    const current = prices[n - 1];
 
     const returns: number[] = [];
     for (let i = 1; i < prices.length; i++) returns.push((prices[i] - prices[i-1]) / prices[i-1]);
@@ -1092,30 +1212,56 @@ COMPOSITE SIGNAL SCORE: ${overallSentiment > 0 ? '+' : ''}${overallSentiment}/6 
     const volRegime = volRatio > 1.4 ? 'expanding' : volRatio < 0.6 ? 'contracting' : 'stable';
     const hurstLabel = hurst > 0.6 ? 'trending' : hurst < 0.4 ? 'mean-reverting' : 'random';
 
-    const overallScore = (
-      (rsi14 > 55 ? 1 : rsi14 < 45 ? -1 : 0) +
-      (bbPos > 0.55 ? 1 : bbPos < 0.45 ? -1 : 0) +
-      (macd.histogram > 0 ? 1 : -1) +
-      (m20 > 0 ? 1 : -1) +
-      (posReturns > 12 ? 1 : posReturns < 8 ? -1 : 0) +
-      (zScore < -1 ? 1 : zScore > 1 ? -1 : 0)
-    );
+    // Para Crash/Boom: Z-score e RSI abaixo da média são estruturalmente normais (não penalizar)
+    const overallScore = isSpikeC
+      ? (
+          (macd.histogram > 0 ? 1 : -1) +
+          (m20 > 0 ? 1 : -1) +
+          (m50 > 0 ? 1 : -1) +
+          (posReturns > 12 ? 1 : posReturns < 8 ? -1 : 0)
+        )
+      : (
+          (rsi14 > 55 ? 1 : rsi14 < 45 ? -1 : 0) +
+          (bbPos > 0.55 ? 1 : bbPos < 0.45 ? -1 : 0) +
+          (macd.histogram > 0 ? 1 : -1) +
+          (m20 > 0 ? 1 : -1) +
+          (posReturns > 12 ? 1 : posReturns < 8 ? -1 : 0) +
+          (zScore < -1 ? 1 : zScore > 1 ? -1 : 0)
+        );
     const sentiment = overallScore >= 3 ? 'strongly positive' :
                       overallScore >= 1 ? 'moderately positive' :
                       overallScore <= -3 ? 'strongly negative' :
                       overallScore <= -1 ? 'moderately negative' : 'neutral';
 
-    return `Market analysis ${symbol}: ${sentiment} financial outlook. ` +
+    // Preamble para Spike Index
+    const compactPreamble = isSpikeC
+      ? (isCrashC
+          ? `CRASH INDEX (Deriv synthetic): Natural behavior = bearish drift + periodic UP spikes. Low RSI and negative Z-score are NORMAL, NOT buy signals. DOWN = drift continuation (correct prediction). `
+          : `BOOM INDEX (Deriv synthetic): Natural behavior = bullish drift + periodic DOWN spikes. High RSI and positive Z-score are NORMAL. UP = drift continuation (correct prediction). `)
+      : '';
+
+    // Rótulos corrigidos para RSI e Z-score em Crash/Boom
+    const rsiLabel = isSpikeC
+      ? (rsi14 > 70 ? (isCrashC ? 'spike-peak (drift resumes DOWN)' : 'normal Boom momentum') : rsi14 < 30 ? (isCrashC ? 'normal Crash drift (bearish)' : 'pre-spike compression') : 'neutral')
+      : (rsi14 > 70 ? 'overbought' : rsi14 < 30 ? 'oversold' : rsi14 > 55 ? 'bullish' : rsi14 < 45 ? 'bearish' : 'neutral');
+    const zLabel = isSpikeC
+      ? (zScore < -1 ? (isCrashC ? 'normal bearish drift (NOT recovery)' : 'Boom pre-spike zone') : zScore > 1 ? (isCrashC ? 'post-spike (drift resumes DOWN)' : 'normal Boom upward momentum') : 'near equilibrium')
+      : (Math.abs(zScore) > 1.5 ? (zScore > 0 ? 'overextended up, negative reversion pressure' : 'overextended down, positive recovery potential') : 'near equilibrium');
+    const bbLabel = isSpikeC
+      ? (bbPos > 0.7 ? (isCrashC ? 'upper band (post-spike, drift DOWN resumes)' : 'upper band (normal Boom momentum)') : bbPos < 0.3 ? (isCrashC ? 'lower band (normal Crash drift, bearish)' : 'lower band (Boom pre-spike compression)') : 'mid-band')
+      : (bbPos > 0.7 ? 'near upper band' : bbPos < 0.3 ? 'near lower band' : 'mid-band');
+
+    return `${compactPreamble}Market analysis ${symbol}: ${sentiment} financial outlook. ` +
       `${trend} trend (5-tick: ${m5 > 0 ? '+' : ''}${m5.toFixed(4)}%, 20-tick: ${m20 > 0 ? '+' : ''}${m20.toFixed(4)}%, 50-tick: ${m50 > 0 ? '+' : ''}${m50.toFixed(4)}%). ` +
-      `RSI-14=${rsi14.toFixed(1)} (${rsi14 > 70 ? 'overbought' : rsi14 < 30 ? 'oversold' : rsi14 > 55 ? 'bullish' : rsi14 < 45 ? 'bearish' : 'neutral'}). ` +
-      `Bollinger position ${(bbPos*100).toFixed(0)}% (${bbPos > 0.7 ? 'near upper band' : bbPos < 0.3 ? 'near lower band' : 'mid-band'}). ` +
+      `RSI-14=${rsi14.toFixed(1)} (${rsiLabel}). ` +
+      `Bollinger position ${(bbPos*100).toFixed(0)}% (${bbLabel}). ` +
       `MACD histogram ${macd.histogram > 0 ? 'positive (bullish divergence)' : 'negative (bearish divergence)'}. ` +
       `Volatility ${volRegime} (ratio ${volRatio.toFixed(2)}). ` +
       `Fractal structure: ${hurstLabel} (H=${hurst.toFixed(2)}). ` +
-      `Z-score ${zScore.toFixed(2)}σ (${Math.abs(zScore) > 1.5 ? (zScore > 0 ? 'overextended up, negative reversion pressure' : 'overextended down, positive recovery potential') : 'near equilibrium'}). ` +
+      `Z-score ${zScore.toFixed(2)}σ (${zLabel}). ` +
       `Trend continuity: ${posReturns}/20 ticks positive. ` +
       `Digit distribution: χ²=${chi2.toFixed(1)} (${chi2 > 16.9 ? 'biased distribution detected' : 'normal distribution'}). ` +
-      `Composite signal score: ${overallScore > 0 ? '+' : ''}${overallScore}/6 → ${sentiment} financial indicators.`;
+      `Composite signal score: ${overallScore > 0 ? '+' : ''}${overallScore}/4 → ${sentiment} financial indicators.`;
   }
 
   private createModelSpecificPrompt(model: AIModel, marketSummary: string, tickData: DerivTickData[]): string {
