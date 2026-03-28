@@ -1820,18 +1820,21 @@ class MetaTraderBridge extends EventEmitter {
     }
 
     const now2 = Date.now();
-    const latestAnalysis = this.analysisLog.find(e => e.aiConsensus !== undefined && e.aiConsensus > 0) || null;
+    const latestAnalysisWithConsensus = this.analysisLog.find(e => e.aiConsensus !== undefined && e.aiConsensus > 0) || null;
+    const mostRecentEntry = this.analysisLog[0] || null;
     const circuitBreakerRem = this.circuitBreakerUntil > now2
       ? Math.ceil((this.circuitBreakerUntil - now2) / 60000)
       : 0;
 
     // Fallback ao cache do auto-trading-scheduler quando EA não está enviando dados
-    const cacheEntry = latestAnalysis ? null : consensusCache.getLatest();
-    const latestAIConsensus = latestAnalysis?.aiConsensus ?? cacheEntry?.aiConsensus;
-    const latestRequiredConsensus = latestAnalysis?.requiredConsensus ?? cacheEntry?.requiredConsensus;
-    const latestAIDirection = latestAnalysis?.aiDirection ?? cacheEntry?.aiDirection;
-    const latestAnalysisSymbol = latestAnalysis?.symbol ?? cacheEntry?.symbol;
-    const latestAnalysisAt = latestAnalysis?.timestamp ?? cacheEntry?.timestamp;
+    const cacheEntry = latestAnalysisWithConsensus ? null : consensusCache.getLatest();
+    const latestAIConsensus = latestAnalysisWithConsensus?.aiConsensus ?? cacheEntry?.aiConsensus;
+    const latestRequiredConsensus = latestAnalysisWithConsensus?.requiredConsensus ?? cacheEntry?.requiredConsensus;
+    const latestAIDirection = latestAnalysisWithConsensus?.aiDirection ?? cacheEntry?.aiDirection;
+    // Símbolo: sempre prioriza a entrada mais recente do log (mostra o ativo real do EA)
+    // Fallback ao consenso cache apenas se não há nenhuma entrada no log
+    const latestAnalysisSymbol = mostRecentEntry?.symbol ?? latestAnalysisWithConsensus?.symbol ?? cacheEntry?.symbol;
+    const latestAnalysisAt = latestAnalysisWithConsensus?.timestamp ?? mostRecentEntry?.timestamp ?? cacheEntry?.timestamp;
 
     return {
       ...this.status,
@@ -2419,6 +2422,34 @@ class MetaTraderBridge extends EventEmitter {
         const sym = symbol.toUpperCase();
         const isCrash = sym.includes('CRASH');
         const earlySpike = this.detectSpikePattern(marketData, symbol);
+
+        // ── ANÁLISE IA EM BACKGROUND: Crash/Boom sempre recebe consenso ──────────
+        // Garante que o painel sempre exiba o símbolo e o consenso corretos,
+        // mesmo quando gates macro ou zona de perigo bloqueiam o trade.
+        const tickDataForConsensus: DerivTickData[] = marketData.slice(-30).map((candle: any, i: number) => ({
+          symbol,
+          quote: candle.close,
+          epoch: candle.time ? Math.floor(candle.time) : Math.floor(Date.now() / 1000) - (30 - i) * 60,
+        }));
+        const consensusEntryId = `${entryId}_spike_bg_consensus`;
+        Promise.resolve().then(async () => {
+          try {
+            const consensus = await huggingFaceAI.analyzeMarketData(tickDataForConsensus, symbol);
+            this.logAnalysis({
+              id: consensusEntryId,
+              timestamp: Date.now(),
+              symbol,
+              phase: 'huggingface',
+              status: consensus.consensusStrength >= 70 && consensus.finalDecision !== 'neutral' ? 'processing' : 'rejected',
+              aiConsensus: consensus.consensusStrength,
+              requiredConsensus: consensus.requiredConsensus ?? 70,
+              aiDirection: consensus.finalDecision as 'up' | 'down' | 'neutral',
+              aiReasoning: consensus.reasoning,
+              participatingModels: consensus.participatingModels || 0,
+              decisionReason: `[Background] Consenso IA ${symbol}: ${consensus.consensusStrength.toFixed(1)}% → ${String(consensus.finalDecision).toUpperCase()}`
+            });
+          } catch { /* silencioso — falha não impede o sinal */ }
+        });
 
         // ── CAMINHO 1: SPIKE COM CERTEZA ABSOLUTA (confiança ≥85%) ──
         // Threshold elevado: só opera spike quando IA tem CERTEZA ABSOLUTA.
