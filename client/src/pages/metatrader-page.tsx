@@ -289,12 +289,12 @@ export default function MetaTraderPage() {
     setSecondsAgo(0);
   }, [status, positions, trades, aiAnalysis]);
 
-  // Atualizar valores estáveis de IA — só atualiza quando chega valor real, nunca apaga
+  // Atualizar valores estáveis de IA — só atualiza quando chega valor real (>0), nunca apaga com zero
   useEffect(() => {
-    if (status?.latestAIConsensus !== undefined) setStableAIConsensus(status.latestAIConsensus);
+    if (status?.latestAIConsensus !== undefined && status.latestAIConsensus > 0) setStableAIConsensus(status.latestAIConsensus);
     if (status?.latestAIDirection !== undefined) setStableAIDirection(status.latestAIDirection);
     if (status?.latestAnalysisSymbol !== undefined) setStableAnalysisSymbol(status.latestAnalysisSymbol);
-    if (status?.latestRequiredConsensus !== undefined) setStableRequiredConsensus(status.latestRequiredConsensus);
+    if (status?.latestRequiredConsensus !== undefined && status.latestRequiredConsensus > 0) setStableRequiredConsensus(status.latestRequiredConsensus);
   }, [status?.latestAIConsensus, status?.latestAIDirection, status?.latestAnalysisSymbol, status?.latestRequiredConsensus]);
 
   // Contador de segundos desde última atualização
