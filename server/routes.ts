@@ -3306,22 +3306,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
       _balanceFetching.add(userId);
       try {
         const b = await fetchBalanceWithSingleton(tokenData.token, tokenData.accountType);
-        const entry = {
-          balance: b?.balance || 0,
-          currency: b?.currency || 'USD',
-          loginid: b?.loginid || 'N/A',
-          fetchedAt: Date.now()
-        };
-        _balanceCache.set(userId, entry);
         _balanceFetching.delete(userId);
 
-        res.json({
-          balance: entry.balance,
-          currency: entry.currency,
-          loginid: entry.loginid,
-          connected: !!b,
-          lastUpdate: new Date(entry.fetchedAt).toISOString()
-        });
+        if (b) {
+          // Só cacheia quando a busca foi bem-sucedida — evita travar 0 por 90s
+          const entry = {
+            balance: b.balance,
+            currency: b.currency,
+            loginid: b.loginid,
+            fetchedAt: Date.now()
+          };
+          _balanceCache.set(userId, entry);
+          res.json({
+            balance: entry.balance,
+            currency: entry.currency,
+            loginid: entry.loginid,
+            connected: true,
+            lastUpdate: new Date(entry.fetchedAt).toISOString()
+          });
+        } else {
+          // Fetch falhou — retornar stale se disponível, sem atualizar o cache com 0
+          const stale = _balanceCache.get(userId);
+          res.json({
+            balance: stale?.balance || 0,
+            currency: stale?.currency || 'USD',
+            loginid: stale?.loginid || 'N/A',
+            connected: false,
+            lastUpdate: stale ? new Date(stale.fetchedAt).toISOString() : new Date().toISOString(),
+            error: 'Aguardando conexão Deriv...'
+          });
+        }
       } catch (apiError) {
         _balanceFetching.delete(userId);
         console.error('❌ Erro de API Deriv (live-balance):', apiError);

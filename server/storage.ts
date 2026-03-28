@@ -52,7 +52,7 @@ import {
   type UpdatePauseConfiguration,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, and, isNotNull, sql, lt } from "drizzle-orm";
+import { eq, desc, and, isNotNull, isNull, sql, lt } from "drizzle-orm";
 import { createHash, randomBytes, createCipheriv, createDecipheriv } from "crypto";
 
 // Encryption utilities for sensitive data
@@ -453,11 +453,32 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getUserDerivToken(userId: string): Promise<DerivToken | undefined> {
-    const [token] = await db
+    // Primeiro: buscar token principal com slotIndex IS NULL (novo formato)
+    let [token] = await db
       .select()
       .from(derivTokens)
-      .where(and(eq(derivTokens.userId, userId), eq(derivTokens.isActive, true)));
+      .where(and(eq(derivTokens.userId, userId), eq(derivTokens.isActive, true), isNull(derivTokens.slotIndex)));
     
+    // Retrocompatibilidade: se não encontrar token null, migrar o mais antigo ativo para slotIndex=null
+    // (ocorre quando o token foi salvo antes da separação slot/principal)
+    if (!token) {
+      const legacyTokens = await db
+        .select()
+        .from(derivTokens)
+        .where(and(eq(derivTokens.userId, userId), eq(derivTokens.isActive, true)))
+        .orderBy(derivTokens.createdAt);
+      
+      const legacy = legacyTokens[0];
+      if (legacy) {
+        // Migrar: atualizar slotIndex para null para marcar como token principal
+        await db.update(derivTokens)
+          .set({ slotIndex: null } as any)
+          .where(eq(derivTokens.id, legacy.id));
+        token = { ...legacy, slotIndex: null };
+        console.log(`🔄 [MIGRATION] Token principal do userId=${userId} migrado para slotIndex=null`);
+      }
+    }
+
     if (!token) return undefined;
     
     // Decrypt token before returning
@@ -470,17 +491,17 @@ export class DatabaseStorage implements IStorage {
   async updateDerivToken(userId: string, token: string, accountType: string): Promise<DerivToken> {
     // CORREÇÃO: Remover async da função de transação - better-sqlite3 não suporta async em transactions
     return db.transaction((tx) => {
-      // Deactivate all existing tokens first (método síncrono)
+      // Desativar apenas o token PRINCIPAL (slotIndex IS NULL) — não tocar nos slots do Frenético
       tx
         .update(derivTokens)
         .set({
           isActive: false,
           updatedAt: new Date().toISOString(),
         })
-        .where(eq(derivTokens.userId, userId))
+        .where(and(eq(derivTokens.userId, userId), isNull(derivTokens.slotIndex)))
         .run();
       
-      // Create new active token with encryption (método síncrono)
+      // Inserir novo token principal com slotIndex = null (distingue dos slots 0-9 do Frenético)
       const [newToken] = tx
         .insert(derivTokens)
         .values({
@@ -488,7 +509,8 @@ export class DatabaseStorage implements IStorage {
           token: EncryptionService.encrypt(token),
           accountType,
           isActive: true,
-        })
+          slotIndex: null,
+        } as any)
         .returning()
         .all();
       
@@ -501,13 +523,14 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deactivateDerivToken(userId: string): Promise<void> {
+    // Desativar apenas o token PRINCIPAL (slotIndex IS NULL) — preservar slots do Frenético
     await db
       .update(derivTokens)
       .set({
         isActive: false,
         updatedAt: new Date().toISOString(),
       })
-      .where(eq(derivTokens.userId, userId));
+      .where(and(eq(derivTokens.userId, userId), isNull(derivTokens.slotIndex)));
   }
 
   // Frenético 10-Tokens: retorna TODOS os tokens ativos do usuário (um por slot)

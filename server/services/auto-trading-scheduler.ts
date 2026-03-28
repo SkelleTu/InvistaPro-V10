@@ -2381,6 +2381,12 @@ export class AutoTradingScheduler {
                 return c;
               }).catch(err => {
                 console.warn(`⚠️ [MULTI-DÍGITO #${idx+1}/${BURST_SIZE}] Dígito ${digit} falhou: ${err?.message ?? err}`);
+                // Se a conta não tem saldo, atualizar cache imediatamente e pausar loop por 30s
+                if (err?.code === 'InsufficientBalance' || err?.message?.includes('insufficient')) {
+                  console.error(`🛑 [MULTI-DÍGITO] Saldo insuficiente detectado — zerando cache e pausando 30s`);
+                  this.cachedBalance = { value: 0, currency: 'USD', loginid: this.cachedBalance?.loginid ?? 'N/A', fetchedAt: Date.now() };
+                  this.loopSleepUntil = Date.now() + 30_000;
+                }
                 return null;
               })
             );
