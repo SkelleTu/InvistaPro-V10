@@ -39,7 +39,7 @@ import {
 } from "@shared/schema";
 import { and } from "drizzle-orm";
 import { derivAPI, DerivAPIService } from './services/deriv-api';
-import { executeFrenetic9TokensBurst, getSlotBalances, closeAllSlotConnections, selectAssetsForSlots } from './services/frenetico-9tokens';
+import { executeFrenetic9TokensBurst, getSlotBalances, closeAllSlotConnections, selectBestAsset } from './services/frenetico-9tokens';
 import { huggingFaceAI } from './services/huggingface-ai';
 import { autoTradingScheduler } from './services/auto-trading-scheduler';
 import { realStatsTracker } from './services/real-stats-tracker';
@@ -2423,12 +2423,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         accountType: t.accountType as 'demo' | 'real',
       }));
       const balances = await getSlotBalances(userId, slots);
-      const assets = selectAssetsForSlots(slots.length);
+      const sharedAsset = selectBestAsset();
       res.json({
-        balances: balances.map((b, i) => ({
-          ...b,
-          assignedAsset: assets[i] ?? null,
-        })),
+        sharedAsset,
+        balances: balances.map(b => ({ ...b })),
       });
     } catch (err: any) {
       res.status(500).json({ message: err.message });

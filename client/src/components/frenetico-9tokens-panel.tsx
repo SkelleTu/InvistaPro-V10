@@ -23,8 +23,12 @@ interface SlotInfo {
 interface SlotBalance {
   slotIndex: number;
   balance: number | null;
-  assignedAsset: string | null;
   error?: string;
+}
+
+interface BalancesResponse {
+  sharedAsset: string | null;
+  balances: SlotBalance[];
 }
 
 const SLOT_LABELS = [
@@ -52,7 +56,7 @@ export default function Frenetico9TokensPanel() {
     refetchInterval: 10000,
   });
 
-  const { data: balancesData, refetch: refetchBalances } = useQuery<{ balances: SlotBalance[] }>({
+  const { data: balancesData, refetch: refetchBalances } = useQuery<BalancesResponse>({
     queryKey: ["/api/trading/deriv-tokens/slots/balances"],
     refetchInterval: 30000,
     enabled: (slotsData?.totalConfigured ?? 0) > 0,
@@ -125,6 +129,7 @@ export default function Frenetico9TokensPanel() {
   const configuredSlots = slotsData?.slots ?? [];
   const getSlotInfo = (idx: number) => configuredSlots.find(s => s.slotIndex === idx);
   const getSlotBalance = (idx: number) => balancesData?.balances?.find(b => b.slotIndex === idx);
+  const sharedAsset = balancesData?.sharedAsset ?? null;
 
   const totalConfigured = slotsData?.totalConfigured ?? 0;
   const totalBalance = balancesData?.balances
@@ -161,11 +166,18 @@ export default function Frenetico9TokensPanel() {
 
         {totalConfigured > 0 && (
           <div className="mt-3 p-3 rounded-lg bg-violet-500/5 border border-violet-500/20 text-xs text-muted-foreground space-y-1">
-            <div className="flex items-center gap-2 text-violet-300 font-medium">
-              <TrendingUp className="w-3.5 h-3.5" />
-              Como funciona agora
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-violet-300 font-medium">
+                <TrendingUp className="w-3.5 h-3.5" />
+                Ativo único compartilhado por todos os slots
+              </div>
+              {sharedAsset && (
+                <span className="font-mono font-bold text-violet-400 text-sm tracking-wide">
+                  📊 {sharedAsset}
+                </span>
+              )}
             </div>
-            <p>A IA seleciona <strong>1 único ativo</strong> e o <strong>dígito mais quente</strong> naquele momento. Todos os {totalConfigured} slots disparam no <strong>mesmo ativo, mesmo dígito e mesmo tick</strong> simultaneamente — cada um com sua própria conta, sem concorrência de saldo.</p>
+            <p>A IA seleciona <strong>1 único ativo</strong> e o <strong>dígito mais quente</strong> no momento do disparo. Todos os {totalConfigured} slots abrem contrato <strong>no mesmo ativo, mesmo dígito e mesmo tick</strong> — cada um com sua conta separada, sem concorrência de saldo.</p>
           </div>
         )}
       </CardHeader>
@@ -208,11 +220,6 @@ export default function Frenetico9TokensPanel() {
                       <div className="text-[10px] text-muted-foreground">
                         {slot.accountType === 'demo' ? '🧪 Demo' : '💰 Real'}
                       </div>
-                      {balance?.assignedAsset && (
-                        <div className="text-[10px] text-violet-400 font-medium">
-                          📊 {balance.assignedAsset}
-                        </div>
-                      )}
                       {balance?.balance != null && (
                         <div className="text-[10px] text-green-400 font-medium">
                           ${balance.balance.toFixed(2)}
