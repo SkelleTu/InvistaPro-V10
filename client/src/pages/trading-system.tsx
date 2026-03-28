@@ -2733,57 +2733,96 @@ export default function TradingSystemPage() {
                                   </div>
                                 )}
 
-                                {/* ── Modo Frenético (somente DIGITMATCH ativo) ── */}
-                                {modality.id === 'digit_matches' && isEnabled && (
-                                  <div className="mt-2 pt-2 border-t border-border">
-                                    <div className="rounded-md bg-orange-50 dark:bg-orange-950/30 border border-orange-300 dark:border-orange-700 p-2.5">
-                                      <div className="flex items-center justify-between gap-2 mb-1.5">
-                                        <p className="text-[11px] font-bold text-orange-700 dark:text-orange-300 flex items-center gap-1">
-                                          <Zap className="h-3.5 w-3.5" />
-                                          Modo Frenético
-                                        </p>
-                                        <button
-                                          type="button"
-                                          data-testid="toggle-digit-match-frenetico"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            const isOn = modalityFrequency['digit_matches'] === 'frenetico';
-                                            const next = { ...modalityFrequency };
-                                            if (isOn) {
-                                              delete next['digit_matches'];
-                                            } else {
-                                              next['digit_matches'] = 'frenetico';
-                                            }
-                                            setModalityFrequency(next);
-                                            saveModalityFrequency(next);
-                                            toast({
-                                              title: isOn ? '⚡ Frenético desativado' : '⚡🔥 Modo Frenético ATIVADO!',
-                                              description: isOn
-                                                ? 'Digit Matches voltou ao modo padrão (1 operação por ciclo).'
-                                                : 'Sistema dispara 4 DIGITMATCH simultâneos nos dígitos mais quentes a cada ciclo!',
-                                              duration: 3500,
-                                            });
-                                          }}
-                                          className={`px-3 py-1 rounded-full text-[11px] font-bold transition-all border shadow-sm ${
-                                            modalityFrequency['digit_matches'] === 'frenetico'
-                                              ? 'bg-orange-500 text-white border-orange-500 animate-pulse'
-                                              : 'bg-white dark:bg-gray-800 text-orange-600 dark:text-orange-400 border-orange-300 dark:border-orange-600 hover:bg-orange-50 dark:hover:bg-orange-950/50'
-                                          }`}
-                                        >
-                                          {modalityFrequency['digit_matches'] === 'frenetico' ? '⚡ ATIVO' : 'Ativar'}
-                                        </button>
-                                      </div>
-                                      <p className="text-[10px] text-orange-600 dark:text-orange-400 leading-relaxed">
-                                        Dispara <strong>4 contratos simultâneos</strong> nos dígitos mais frequentes (IA analisa histórico de ticks). Cobertura de 40% dos dígitos possíveis por ciclo — maximiza acertos em sequências de matches.
-                                      </p>
-                                      {modalityFrequency['digit_matches'] === 'frenetico' && (
-                                        <div className="mt-1.5 p-1.5 bg-orange-100 dark:bg-orange-900/40 rounded text-[10px] text-orange-700 dark:text-orange-300 font-medium">
-                                          🔥 ATIVO: A cada ciclo, 4 trades DIGITMATCH são abertos em paralelo nos dígitos mais quentes do ativo. Sem atrasos entre disparos.
+                                {/* ── Cobertura Multi-Dígito (somente DIGITMATCH ativo) ── */}
+                                {modality.id === 'digit_matches' && isEnabled && (() => {
+                                  const rawVal = modalityFrequency['digit_matches'];
+                                  const currentCount = rawVal === 'frenetico' ? 4 : (parseInt(rawVal ?? '1') || 1);
+                                  const coverage = Math.round((currentCount / 10) * 100);
+                                  return (
+                                    <div className="mt-2 pt-2 border-t border-border">
+                                      <div className="rounded-md bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-300 dark:border-indigo-700 p-2.5">
+                                        <div className="flex items-center justify-between gap-2 mb-2">
+                                          <p className="text-[11px] font-bold text-indigo-700 dark:text-indigo-300 flex items-center gap-1">
+                                            <Zap className="h-3.5 w-3.5" />
+                                            Dígitos Simultâneos
+                                          </p>
+                                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                                            currentCount === 1
+                                              ? 'bg-white dark:bg-gray-800 text-muted-foreground border-border'
+                                              : currentCount <= 3
+                                              ? 'bg-indigo-500 text-white border-indigo-500'
+                                              : currentCount <= 6
+                                              ? 'bg-orange-500 text-white border-orange-500'
+                                              : 'bg-red-500 text-white border-red-500 animate-pulse'
+                                          }`}>
+                                            {currentCount === 1 ? 'Padrão' : `${currentCount} dígitos · ${coverage}% cobertura`}
+                                          </span>
                                         </div>
-                                      )}
+                                        <p className="text-[10px] text-indigo-600 dark:text-indigo-400 leading-relaxed mb-2">
+                                          A IA seleciona os <strong>N dígitos mais quentes</strong> e dispara N contratos DIGITMATCH em paralelo, sem delay. Quanto mais dígitos, maior a cobertura — com 9 dígitos, a vitória em ao menos um é quase garantida.
+                                        </p>
+                                        <div className="flex flex-wrap gap-1">
+                                          {[1,2,3,4,5,6,7,8,9].map((count) => {
+                                            const isSelected = currentCount === count;
+                                            return (
+                                              <button
+                                                key={count}
+                                                type="button"
+                                                data-testid={`digit-match-count-${count}`}
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  const next = { ...modalityFrequency };
+                                                  if (count === 1) {
+                                                    delete next['digit_matches'];
+                                                  } else {
+                                                    next['digit_matches'] = count.toString();
+                                                  }
+                                                  setModalityFrequency(next);
+                                                  saveModalityFrequency(next);
+                                                  toast({
+                                                    title: count === 1
+                                                      ? 'Modo padrão ativado'
+                                                      : `${count} dígitos simultâneos ativados`,
+                                                    description: count === 1
+                                                      ? 'Digit Matches opera 1 contrato por ciclo (IA escolhe o melhor dígito).'
+                                                      : `Sistema dispara ${count} DIGITMATCH em paralelo · ${Math.round((count/10)*100)}% de cobertura por ciclo.`,
+                                                    duration: 2500,
+                                                  });
+                                                }}
+                                                className={`px-2.5 py-1 rounded-full text-[11px] font-bold transition-all border ${
+                                                  isSelected
+                                                    ? count === 1
+                                                      ? 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600'
+                                                      : count <= 3
+                                                      ? 'bg-indigo-500 text-white border-indigo-500 shadow-sm'
+                                                      : count <= 6
+                                                      ? 'bg-orange-500 text-white border-orange-500 shadow-sm'
+                                                      : 'bg-red-500 text-white border-red-500 shadow-sm'
+                                                    : 'bg-white dark:bg-gray-800 text-muted-foreground border-border hover:border-indigo-400 dark:hover:border-indigo-500'
+                                                }`}
+                                              >
+                                                {count === 1 ? '1×' : `${count}×`}
+                                              </button>
+                                            );
+                                          })}
+                                        </div>
+                                        {currentCount > 1 && (
+                                          <div className={`mt-1.5 p-1.5 rounded text-[10px] font-medium ${
+                                            currentCount <= 3
+                                              ? 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300'
+                                              : currentCount <= 6
+                                              ? 'bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300'
+                                              : 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300'
+                                          }`}>
+                                            {currentCount <= 3 && `⚡ ${currentCount} contratos simultâneos · IA escolhe os ${currentCount} dígitos mais quentes · Stake total: ×${currentCount}`}
+                                            {currentCount > 3 && currentCount <= 6 && `🔥 ${currentCount} contratos em rajada · ${coverage}% de cobertura · Stake total: ×${currentCount}`}
+                                            {currentCount > 6 && `💥 ${currentCount} dígitos · ${coverage}% de cobertura — vitória garantida em 9/10 resultados possíveis · Stake total: ×${currentCount}`}
+                                          </div>
+                                        )}
+                                      </div>
                                     </div>
-                                  </div>
-                                )}
+                                  );
+                                })()}
 
                                 {/* ── Taxas de Crescimento (somente ACCU) — sempre visível ── */}
                                 {modality.id === 'accumulator' && (

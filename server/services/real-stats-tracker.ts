@@ -73,6 +73,14 @@ class RealStatsTracker {
   private processedContracts: Map<string, number> = new Map(); // contractId → timestamp
   private readonly PROCESSED_CONTRACT_TTL_MS = 10 * 60 * 1000; // 10 minutos
 
+  // 🤖 CONTEXTO DE MERCADO — alimentado pela IA a cada ciclo de análise
+  private marketQuality: number = 100;         // 0-100: qualidade geral do mercado
+  private aiConsensus: number = 100;           // 0-100: nível de consenso das IAs
+  private marketContextUpdatedAt: number = 0;  // timestamp da última atualização
+  // Histórico de qualidade para detectar degradação sustentada
+  private marketQualityHistory: number[] = [];
+  private readonly QUALITY_HISTORY_SIZE = 5;   // Últimas 5 leituras (~2 min em ciclos normais)
+
   get winRate(): number {
     const total = this.wonTrades + this.lostTrades;
     return total > 0 ? (this.wonTrades / total) * 100 : 0;
@@ -113,6 +121,109 @@ class RealStatsTracker {
   configureCircuitBreaker(lossThreshold: number, pauseMinutes: number): void {
     this.cbUserLossThreshold = Math.max(1, Math.round(lossThreshold));
     this.cbUserPauseMs = Math.max(30_000, pauseMinutes * 60_000); // mínimo 30s
+  }
+
+  /**
+   * 🤖 CIRCUIT BREAKER INTELIGENTE — Atualiza o contexto de mercado.
+   * Chamado pelo scheduler a cada ciclo de análise.
+   * Permite que a IA decida pausar ANTES de ocorrerem perdas quando o mercado está ruim.
+   */
+  updateMarketContext(quality: number, consensus: number): void {
+    this.marketQuality = Math.max(0, Math.min(100, quality));
+    this.aiConsensus = Math.max(0, Math.min(100, consensus));
+    this.marketContextUpdatedAt = Date.now();
+
+    // Manter histórico de qualidade (rolling window)
+    this.marketQualityHistory.push(this.marketQuality);
+    if (this.marketQualityHistory.length > this.QUALITY_HISTORY_SIZE) {
+      this.marketQualityHistory.shift();
+    }
+  }
+
+  /**
+   * 🤖 CIRCUIT BREAKER PROATIVO — A IA verifica se deve pausar por condições de mercado.
+   * Retorna { shouldPause, pauseMs, reason } se o mercado está ruim o suficiente para pausar.
+   * Não requer perdas prévias — age de forma PREVENTIVA.
+   *
+   * Critérios de ativação:
+   * 1. Qualidade de mercado consistentemente baixa (≤ 25%) por múltiplas leituras
+   * 2. Consenso de IA muito baixo (≤ 30%) — IAs discordando muito
+   * 3. Combinação de qualidade fraca + consenso fraco (cada um ≤ 40%)
+   */
+  checkProactiveBreaker(): { shouldPause: boolean; pauseMs: number; reason: string } {
+    const now = Date.now();
+    const noResult = { shouldPause: false, pauseMs: 0, reason: '' };
+
+    // Contexto desatualizado (mais de 3 min) — não agir por falta de dados
+    if (now - this.marketContextUpdatedAt > 3 * 60 * 1000) return noResult;
+
+    // Já tem circuit breaker ativo — não sobrescrever
+    if (this.isCircuitBreakerActive()) return noResult;
+
+    const histLen = this.marketQualityHistory.length;
+    const avgQuality = histLen > 0
+      ? this.marketQualityHistory.reduce((a, b) => a + b, 0) / histLen
+      : this.marketQuality;
+
+    // Critério 1: Qualidade muito ruim e sustentada (≥3 leituras consecutivas ruins)
+    if (histLen >= 3 && avgQuality <= 25) {
+      const pauseMs = 45 * 1000; // 45 segundos — dar tempo ao mercado respirar
+      const reason = `Mercado com qualidade muito baixa sustentada (média ${avgQuality.toFixed(0)}% nas últimas ${histLen} leituras)`;
+      console.log(`🤖 [CB PROATIVO] ${reason} → PAUSA PREVENTIVA de ${pauseMs/1000}s`);
+      this.circuitBreakerUntil = now + pauseMs;
+      this.triggerPersist();
+      return { shouldPause: true, pauseMs, reason };
+    }
+
+    // Critério 2: Consenso de IA muito baixo (IAs discordando fortemente)
+    if (this.aiConsensus <= 30 && histLen >= 2) {
+      const pauseMs = 30 * 1000; // 30 segundos
+      const reason = `Consenso de IAs muito baixo (${this.aiConsensus.toFixed(0)}%) — aguardar convergência`;
+      console.log(`🤖 [CB PROATIVO] ${reason} → PAUSA PREVENTIVA de ${pauseMs/1000}s`);
+      this.circuitBreakerUntil = now + pauseMs;
+      this.triggerPersist();
+      return { shouldPause: true, pauseMs, reason };
+    }
+
+    // Critério 3: Dupla fraqueza — qualidade + consenso ambos fracos
+    if (avgQuality <= 40 && this.aiConsensus <= 40 && histLen >= 2) {
+      const pauseMs = 20 * 1000; // 20 segundos — pausa curta de avaliação
+      const reason = `Dupla fraqueza: qualidade=${avgQuality.toFixed(0)}% + consenso=${this.aiConsensus.toFixed(0)}%`;
+      console.log(`🤖 [CB PROATIVO] ${reason} → PAUSA BREVE de ${pauseMs/1000}s`);
+      this.circuitBreakerUntil = now + pauseMs;
+      this.triggerPersist();
+      return { shouldPause: true, pauseMs, reason };
+    }
+
+    return noResult;
+  }
+
+  /**
+   * 🤖 CIRCUIT BREAKER ADAPTATIVO — Ajusta a duração da pausa pós-perda com base no contexto.
+   * Mercado ruim = pausa mais longa. Mercado bom = pausa mais curta.
+   * Retorna o multiplicador a aplicar sobre a pausa padrão (0.5 – 2.0×).
+   */
+  private getMarketContextMultiplier(): number {
+    // Contexto desatualizado — não ajustar
+    if (Date.now() - this.marketContextUpdatedAt > 5 * 60 * 1000) return 1.0;
+
+    const histLen = this.marketQualityHistory.length;
+    const avgQuality = histLen > 0
+      ? this.marketQualityHistory.reduce((a, b) => a + b, 0) / histLen
+      : this.marketQuality;
+
+    // Mercado muito ruim → pausa 2× mais longa
+    if (avgQuality <= 20) return 2.0;
+    // Mercado ruim → pausa 1.5× mais longa
+    if (avgQuality <= 40) return 1.5;
+    // Mercado fraco → pausa 1.2× mais longa
+    if (avgQuality <= 60) return 1.2;
+    // Mercado bom → pausa 0.8× (mais curta — recuperação mais rápida)
+    if (avgQuality >= 80 && this.aiConsensus >= 70) return 0.8;
+    // Mercado excelente → pausa 0.5× (mínimo 30s mesmo assim)
+    if (avgQuality >= 90 && this.aiConsensus >= 85) return 0.5;
+
+    return 1.0; // Neutro
   }
 
   /**
@@ -391,21 +502,26 @@ class RealStatsTracker {
 
     // 🛡️ CAMADA 3 - Ativar Circuit Breaker
     // Se usuário configurou threshold+pausa, usa config customizada; senão usa padrão escalonado
+    // 🤖 ADAPTAÇÃO POR MERCADO: multiplicador ajusta a pausa com base na qualidade atual
+    const marketMultiplier = this.getMarketContextMultiplier();
     let breakerPauseMs: number;
     if (this.cbUserLossThreshold !== null && this.cbUserPauseMs !== null) {
       // Config do usuário: ativa quando atingir o threshold configurado
-      breakerPauseMs = this.consecutiveLosses >= this.cbUserLossThreshold ? this.cbUserPauseMs : 0;
+      const basePause = this.consecutiveLosses >= this.cbUserLossThreshold ? this.cbUserPauseMs : 0;
+      breakerPauseMs = Math.round(basePause * marketMultiplier);
     } else {
-      // Padrão escalonado: 1 perda=90s, 2=5min, 3+=15min
+      // Padrão escalonado: 1 perda=2min, 2=5min, 3+=15min + ajuste de mercado
       const streakLevel = Math.min(this.consecutiveLosses, 3);
-      breakerPauseMs = CIRCUIT_BREAKER_PAUSE_MS[streakLevel] ?? 0;
+      const basePause = CIRCUIT_BREAKER_PAUSE_MS[streakLevel] ?? 0;
+      breakerPauseMs = Math.round(basePause * marketMultiplier);
     }
     if (breakerPauseMs > 0) {
       this.circuitBreakerUntil = Date.now() + breakerPauseMs;
       const pauseMin = Math.round(breakerPauseMs / 60000);
       const pauseSec = Math.round(breakerPauseMs / 1000);
       const display = pauseMin >= 1 ? `${pauseMin} minuto(s)` : `${pauseSec} segundos`;
-      console.log(`🔴 [CIRCUIT BREAKER] ${this.consecutiveLosses} perdas consecutivas → PAUSA OBRIGATÓRIA de ${display}`);
+      const contextNote = marketMultiplier !== 1.0 ? ` (×${marketMultiplier.toFixed(1)} por qualidade de mercado ${this.marketQuality.toFixed(0)}%)` : '';
+      console.log(`🔴 [CIRCUIT BREAKER] ${this.consecutiveLosses} perdas consecutivas → PAUSA OBRIGATÓRIA de ${display}${contextNote}`);
       console.log(`   → Próximo trade permitido após: ${new Date(this.circuitBreakerUntil).toLocaleTimeString()}`);
     }
 

@@ -1245,6 +1245,19 @@ export class AutoTradingScheduler {
         console.log(`🔴 [${operationId}] CIRCUIT BREAKER ignorado — desabilitado pelo usuário`);
       }
 
+      // 🤖 CIRCUIT BREAKER PROATIVO — IA verifica condições de mercado sem precisar de perdas
+      if (userEnableCircuitBreaker && !realStatsTracker.isCircuitBreakerActive()) {
+        const proactive = realStatsTracker.checkProactiveBreaker();
+        if (proactive.shouldPause) {
+          this.loopSleepUntil = Date.now() + Math.min(proactive.pauseMs, 90_000);
+          console.log(`🤖 [${operationId}] CIRCUIT BREAKER PROATIVO: ${proactive.reason} → aguardando ${Math.round(proactive.pauseMs/1000)}s`);
+          return {
+            success: false,
+            error: `Circuit Breaker proativo: ${proactive.reason}`,
+          };
+        }
+      }
+
       // 💰 PROTEÇÃO DE SALDO MÍNIMO: Parar quando saldo está crítico
       // Saldo < $2.00 = modo crítico, evitar qualquer nova operação para preservar capital
       const currentBalance = this.cachedBalance?.value ?? 0;
@@ -1746,19 +1759,21 @@ export class AutoTradingScheduler {
       const digitEdgePositive = digitQuality.edge > 0;
       const digitSignalGood = digitConfidenceOk && digitEdgePositive;
 
-      // ⚡ MODO FRENÉTICO DIGIT MATCHES: verificar se está ativo (para relaxar gate de sinal)
-      let isDigitMatchFrenetico = false;
+      // ⚡ MODO MULTI-DÍGITO DIGIT MATCHES: verificar quantos dígitos simultâneos estão configurados
+      let digitMatchBurstCount = 1;
       try {
         if (preActiveModalities.includes('digit_matches')) {
           const freqObj = JSON.parse((config as any).modalityFrequency || '{}');
-          isDigitMatchFrenetico = freqObj['digit_matches'] === 'frenetico';
+          const rawFreq = freqObj['digit_matches'];
+          digitMatchBurstCount = rawFreq === 'frenetico' ? 4 : Math.min(9, Math.max(1, parseInt(rawFreq ?? '1') || 1));
         }
       } catch {}
+      const isDigitMatchFrenetico = digitMatchBurstCount > 1; // backward compat
 
       if (hasDigitModalities) {
-        console.log(`🧠 [${operationId}] ANÁLISE DÍGITOS: conf=${digitQuality.confidence.toFixed(0)}% | edge=+${digitQuality.edge.toFixed(1)}% | barreira=${digitQuality.barrier} | sinal=${digitSignalGood ? '✅ BOM' : '⚠️ AGUARDANDO'}${isDigitMatchFrenetico ? ' | FRENÉTICO: gate relaxado' : ''}`);
+        console.log(`🧠 [${operationId}] ANÁLISE DÍGITOS: conf=${digitQuality.confidence.toFixed(0)}% | edge=+${digitQuality.edge.toFixed(1)}% | barreira=${digitQuality.barrier} | sinal=${digitSignalGood ? '✅ BOM' : '⚠️ AGUARDANDO'}${isDigitMatchFrenetico ? ` | MULTI-DÍGITO: ${digitMatchBurstCount}× gate relaxado` : ''}`);
         // 🛑 SE O ANALISADOR DE DÍGITOS NÃO TEM DADOS SUFICIENTES, AGUARDAR
-        // ⚡ EXCEÇÃO: DIGITMATCH FRENÉTICO usa análise de frequência própria — ignora edge gate do DIGITDIFF
+        // ⚡ EXCEÇÃO: DIGITMATCH MULTI-DÍGITO usa análise de frequência própria — ignora edge gate do DIGITDIFF
         if (!digitSignalGood && !isDigitMatchFrenetico) {
           console.log(`⏸️ [${operationId}] Aguardando dados de dígitos: conf=${digitQuality.confidence.toFixed(0)}% (mín 50%) | edge=${digitQuality.edge.toFixed(1)}% (mín >0%)`);
           return { success: false, error: `Analisador de dígitos aguardando mais dados: confiança ${digitQuality.confidence.toFixed(0)}%` };
@@ -2254,14 +2269,22 @@ export class AutoTradingScheduler {
           'digit_over':        58,  'digit_under':       58,
         };
         const modalityMinConsensus = MODALITY_CONSENSUS_MAP[selectedModality] ?? 65;
-        // ⚡ MODO FRENÉTICO: consenso direcional irrelevante — estratégia é puramente baseada em frequência de dígitos
-        const isFraneticoGate = selectedModality === 'digit_matches' && modalityFrequency['digit_matches'] === 'frenetico';
-        const effectiveMinConsensus = isFraneticoGate ? 40 : modalityMinConsensus;
+        // ⚡ MODO MULTI-DÍGITO: gate de consenso relaxado — estratégia baseia-se em frequência de dígitos + cobertura
+        const rawMatchFreqGate = modalityFrequency['digit_matches'];
+        const burstCountGate = selectedModality === 'digit_matches'
+          ? (rawMatchFreqGate === 'frenetico' ? 4 : Math.min(9, Math.max(1, parseInt(rawMatchFreqGate ?? '1') || 1)))
+          : 1;
+        const isMultiDigitGate = selectedModality === 'digit_matches' && burstCountGate > 1;
+        // Quanto mais dígitos, menor o consenso mínimo exigido (cobertura compensa)
+        const multiDigitConsensusBonus = isMultiDigitGate ? Math.min(15, (burstCountGate - 1) * 2) : 0;
+        const effectiveMinConsensus = isMultiDigitGate
+          ? Math.max(35, modalityMinConsensus - multiDigitConsensusBonus)
+          : modalityMinConsensus;
         if (aiDirectionalConsensus < effectiveMinConsensus) {
-          console.log(`⛔ [${operationId}] GATE MODALIDADE: ${selectedModality} exige consenso ≥${effectiveMinConsensus}%${isFraneticoGate ? ' (frenético)' : ''} | atual=${aiDirectionalConsensus.toFixed(1)}% — EV negativo para esta modalidade. Aguardando sinal mais forte.`);
-          return { success: false, error: `${selectedModality}: consenso ${aiDirectionalConsensus.toFixed(1)}% < mínimo ${effectiveMinConsensus}%${isFraneticoGate ? ' (frenético)' : ''} (break-even calibrado). Aguardando.` };
+          console.log(`⛔ [${operationId}] GATE MODALIDADE: ${selectedModality} exige consenso ≥${effectiveMinConsensus}%${isMultiDigitGate ? ` (multi-dígito ${burstCountGate}×)` : ''} | atual=${aiDirectionalConsensus.toFixed(1)}% — EV negativo para esta modalidade. Aguardando sinal mais forte.`);
+          return { success: false, error: `${selectedModality}: consenso ${aiDirectionalConsensus.toFixed(1)}% < mínimo ${effectiveMinConsensus}%${isMultiDigitGate ? ` (multi-dígito ${burstCountGate}×)` : ''} (break-even calibrado). Aguardando.` };
         }
-        console.log(`✅ [${operationId}] GATE MODALIDADE: ${selectedModality} mín=${effectiveMinConsensus}%${isFraneticoGate ? ' (frenético)' : ''} | atual=${aiDirectionalConsensus.toFixed(1)}% — EV positivo confirmado.`);
+        console.log(`✅ [${operationId}] GATE MODALIDADE: ${selectedModality} mín=${effectiveMinConsensus}%${isMultiDigitGate ? ` (multi-dígito ${burstCountGate}× · bônus -${multiDigitConsensusBonus}%)` : ''} | atual=${aiDirectionalConsensus.toFixed(1)}% — EV positivo confirmado.`);
 
         // ─── EXECUÇÃO POR MODALIDADE ─────────────────────────────────────
         let contract: any = null;
@@ -2310,18 +2333,25 @@ export class AutoTradingScheduler {
                 ? Math.max(1, Math.min(rawDigitTicks, 10)) // ⚙️ Fixo
                 : tradeParams.duration;
 
-          // ⚡ MODO FRENÉTICO: disparo em rajada de múltiplos DIGITMATCH simultâneos
-          const isFraneticoMode = contractType === 'DIGITMATCH' && modalityFrequency['digit_matches'] === 'frenetico';
-          if (isFraneticoMode) {
+          // ⚡ MODO MULTI-DÍGITO: disparo em rajada de múltiplos DIGITMATCH simultâneos
+          // Suporta 2-9 dígitos (configurável pelo usuário nas configurações do Digit Matches)
+          // Backward-compat: 'frenetico' = 4 dígitos
+          const rawMatchFreq = modalityFrequency['digit_matches'];
+          const multiDigitCount = contractType === 'DIGITMATCH'
+            ? (rawMatchFreq === 'frenetico' ? 4 : Math.min(9, Math.max(1, parseInt(rawMatchFreq ?? '1') || 1)))
+            : 1;
+          const isBurstMode = contractType === 'DIGITMATCH' && multiDigitCount > 1;
+          if (isBurstMode) {
             // Obtém os N dígitos mais quentes com score composto (frequência + tendência)
-            const BURST_SIZE = 4; // 4 contratos paralelos = 40% de cobertura (4 dígitos distintos)
+            const BURST_SIZE = multiDigitCount;
             const hottestDigits = digitFrequencyAnalyzer.getHottestDigitsForMatches(selectedSymbol, BURST_SIZE);
+            const coverage = Math.round((BURST_SIZE / 10) * 100);
             // Log com resumo completo das tendências
             const summary = digitFrequencyAnalyzer.getSummary(selectedSymbol);
-            console.log(`⚡🔥 [${operationId}] MODO FRENÉTICO DIGITMATCH | ${selectedSymbol} | Dígitos alvo: [${hottestDigits.join(',')}] | ${BURST_SIZE} contratos | stake×${BURST_SIZE}: $${(tradeParams.amount * BURST_SIZE).toFixed(2)}`);
-            console.log(`📊 [FRENÉTICO STATS] ${summary}`);
+            console.log(`⚡🔥 [${operationId}] DIGITMATCH MULTI-DÍGITO | ${selectedSymbol} | Dígitos alvo: [${hottestDigits.join(',')}] | ${BURST_SIZE} contratos (${coverage}% cobertura) | stake×${BURST_SIZE}: $${(tradeParams.amount * BURST_SIZE).toFixed(2)}`);
+            console.log(`📊 [MULTI-DÍGITO STATS] ${summary}`);
 
-            // Dispara todos os contratos em paralelo sem esperar cada um
+            // Dispara todos os contratos em paralelo sem esperar cada um (zero delay entre disparos)
             const burstPromises = hottestDigits.map((digit, idx) =>
               derivAPI.buyGenericDigitContract({
                 contract_type: 'DIGITMATCH',
@@ -2331,10 +2361,10 @@ export class AutoTradingScheduler {
                 barrier: digit.toString(),
                 currency: 'USD',
               }).then(c => {
-                console.log(`⚡ [FRENÉTICO #${idx+1}] Dígito ${digit} → contrato ${c?.contract_id ?? 'N/A'} aberto`);
+                console.log(`⚡ [MULTI-DÍGITO #${idx+1}/${BURST_SIZE}] Dígito ${digit} → contrato ${c?.contract_id ?? 'N/A'} aberto`);
                 return c;
               }).catch(err => {
-                console.warn(`⚠️ [FRENÉTICO #${idx+1}] Dígito ${digit} falhou: ${err?.message ?? err}`);
+                console.warn(`⚠️ [MULTI-DÍGITO #${idx+1}/${BURST_SIZE}] Dígito ${digit} falhou: ${err?.message ?? err}`);
                 return null;
               })
             );
@@ -2344,8 +2374,8 @@ export class AutoTradingScheduler {
             const firstOk = burstResults
               .filter(r => r.status === 'fulfilled' && r.value != null)
               .map(r => (r as PromiseFulfilledResult<any>).value)[0] ?? null;
-            const wonCount = burstResults.filter(r => r.status === 'fulfilled' && r.value != null).length;
-            console.log(`⚡🔥 [FRENÉTICO] Rajada concluída: ${wonCount}/${BURST_SIZE} contratos abertos | Representante: ${firstOk?.contract_id ?? 'nenhum'}`);
+            const openedCount = burstResults.filter(r => r.status === 'fulfilled' && r.value != null).length;
+            console.log(`⚡🔥 [MULTI-DÍGITO] Rajada concluída: ${openedCount}/${BURST_SIZE} contratos abertos | Representante: ${firstOk?.contract_id ?? 'nenhum'}`);
             contract = firstOk;
           } else {
             contract = await derivAPI.buyGenericDigitContract({
@@ -3563,6 +3593,13 @@ export class AutoTradingScheduler {
         ? Math.round(((top5.length - poorAssets) / top5.length) * 100)
         : 100;
       this.lastScanMarketQuality = scanQuality;
+
+      // 🤖 ALIMENTAR CONTEXTO DE MERCADO NO CIRCUIT BREAKER INTELIGENTE
+      // Usa o consenso médio do top5 como proxy do consenso geral das IAs
+      const avgTop5Consensus = top5.length > 0
+        ? top5.reduce((sum, r) => sum + (r?.consensus ?? 0), 0) / top5.length
+        : 50;
+      realStatsTracker.updateMarketContext(scanQuality, avgTop5Consensus);
 
       // 🚫 PAUSA POR MERCADO RUIM — lógica de pausa, recuperação parcial e plena
       const now = Date.now();
