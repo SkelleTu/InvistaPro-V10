@@ -2366,8 +2366,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!req.user?.id) return res.status(401).json({ message: 'Não autenticado' });
     const userId = req.user.id;
     const slotIndex = parseInt(req.params.slotIndex);
-    if (isNaN(slotIndex) || slotIndex < 0 || slotIndex > 8) {
-      return res.status(400).json({ message: 'Slot inválido. Use 0-8.' });
+    if (isNaN(slotIndex) || slotIndex < 0 || slotIndex > 9) {
+      return res.status(400).json({ message: 'Slot inválido. Use 0-9.' });
     }
     const { token, accountType = 'demo' } = req.body;
     if (!token?.trim()) return res.status(400).json({ message: 'Token é obrigatório' });
@@ -2403,8 +2403,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!req.user?.id) return res.status(401).json({ message: 'Não autenticado' });
     const userId = req.user.id;
     const slotIndex = parseInt(req.params.slotIndex);
-    if (isNaN(slotIndex) || slotIndex < 0 || slotIndex > 8) {
-      return res.status(400).json({ message: 'Slot inválido. Use 0-8.' });
+    if (isNaN(slotIndex) || slotIndex < 0 || slotIndex > 9) {
+      return res.status(400).json({ message: 'Slot inválido. Use 0-9.' });
     }
     await dbStorage.deleteDerivTokenBySlot(userId, slotIndex);
     await closeAllSlotConnections(userId);

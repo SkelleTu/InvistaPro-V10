@@ -28,15 +28,16 @@ interface SlotBalance {
 }
 
 const SLOT_LABELS = [
-  "Slot 1", "Slot 2", "Slot 3",
-  "Slot 4", "Slot 5", "Slot 6",
-  "Slot 7", "Slot 8", "Slot 9",
+  "Slot 1 (dígito 0)", "Slot 2 (dígito 1)", "Slot 3 (dígito 2)",
+  "Slot 4 (dígito 3)", "Slot 5 (dígito 4)", "Slot 6 (dígito 5)",
+  "Slot 7 (dígito 6)", "Slot 8 (dígito 7)", "Slot 9 (dígito 8)", "Slot 10 (dígito 9)",
 ];
 
 const SLOT_COLORS = [
   "border-violet-500/40", "border-blue-500/40", "border-cyan-500/40",
   "border-green-500/40", "border-yellow-500/40", "border-orange-500/40",
   "border-red-500/40", "border-pink-500/40", "border-purple-500/40",
+  "border-rose-500/40",
 ];
 
 export default function Frenetico9TokensPanel() {
@@ -140,15 +141,15 @@ export default function Frenetico9TokensPanel() {
               <Zap className="w-5 h-5 text-violet-400" />
             </div>
             <div>
-              <CardTitle className="text-lg">Frenético 9-Tokens</CardTitle>
+              <CardTitle className="text-lg">Frenético 10-Tokens</CardTitle>
               <CardDescription>
-                9 contas independentes · 1 dígito quente por conta · disparo simultâneo
+                10 contas independentes · 1 dígito quente por conta · disparo simultâneo
               </CardDescription>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <Badge variant={totalConfigured > 0 ? "default" : "secondary"} className="text-xs">
-              {totalConfigured}/9 slots
+              {totalConfigured}/10 slots
             </Badge>
             {totalConfigured > 0 && (
               <Badge variant="outline" className="text-xs text-green-400 border-green-500/30">
@@ -171,9 +172,9 @@ export default function Frenetico9TokensPanel() {
       </CardHeader>
 
       <CardContent className="space-y-4">
-        {/* Grid 3x3 dos slots */}
-        <div className="grid grid-cols-3 gap-3">
-          {Array.from({ length: 9 }, (_, i) => {
+        {/* Grid 2x5 dos slots */}
+        <div className="grid grid-cols-2 gap-3">
+          {Array.from({ length: 10 }, (_, i) => {
             const slot = getSlotInfo(i);
             const balance = getSlotBalance(i);
             const isConfiguring = activeSlotInput === i;
