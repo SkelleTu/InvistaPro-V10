@@ -1099,11 +1099,23 @@ export class HuggingFaceAIService {
           (hurst > 0.55 ? ((m5 ?? 0) > 0 ? 1 : -1) : 0) +
           (zScore < -1 ? 1 : zScore > 1 ? -1 : 0)
         );
-    const overallLabel = overallSentiment >= 3 ? 'strongly positive financial outlook' :
-                         overallSentiment >= 1 ? 'moderately positive financial indicators' :
-                         overallSentiment <= -3 ? 'strongly negative financial outlook' :
-                         overallSentiment <= -1 ? 'moderately negative financial indicators' :
-                         'neutral mixed financial signals';
+    const overallLabel = isSpikeIndex
+      ? (isCrashIndex
+          ? (overallSentiment <= -3 ? 'strong downward momentum — NORMAL Crash drift state (bearish continuation expected)'
+            : overallSentiment <= -1 ? 'moderate downward pressure — Crash drift continuation likely'
+            : overallSentiment >= 3  ? 'strong counter-trend bullish pressure — Crash spike may be imminent (momentary UP before drift resumes)'
+            : overallSentiment >= 1  ? 'mild counter-trend UP pressure — monitor for spike imminence on Crash'
+            : 'neutral drift state — Crash index in equilibrium zone')
+          : (overallSentiment >= 3  ? 'strong upward momentum — NORMAL Boom drift state (bullish continuation expected)'
+            : overallSentiment >= 1  ? 'moderate upward pressure — Boom drift continuation likely'
+            : overallSentiment <= -3 ? 'strong counter-trend bearish pressure — Boom spike may be imminent (momentary DOWN before drift resumes)'
+            : overallSentiment <= -1 ? 'mild counter-trend DOWN pressure — monitor for spike imminence on Boom'
+            : 'neutral drift state — Boom index in equilibrium zone'))
+      : (overallSentiment >= 3 ? 'strongly positive financial outlook' :
+         overallSentiment >= 1 ? 'moderately positive financial indicators' :
+         overallSentiment <= -3 ? 'strongly negative financial outlook' :
+         overallSentiment <= -1 ? 'moderately negative financial indicators' :
+         'neutral mixed financial signals');
 
     // ── Preamble especializado para Crash/Boom ──────────────────────────────
     const spikeIndexPreamble = isSpikeIndex ? (
@@ -1228,10 +1240,20 @@ COMPOSITE SIGNAL SCORE: ${overallSentiment > 0 ? '+' : ''}${overallSentiment}/6 
           (posReturns > 12 ? 1 : posReturns < 8 ? -1 : 0) +
           (zScore < -1 ? 1 : zScore > 1 ? -1 : 0)
         );
-    const sentiment = overallScore >= 3 ? 'strongly positive' :
-                      overallScore >= 1 ? 'moderately positive' :
-                      overallScore <= -3 ? 'strongly negative' :
-                      overallScore <= -1 ? 'moderately negative' : 'neutral';
+    const sentiment = isSpikeC
+      ? (isCrashC
+          ? (overallScore <= -3 ? 'strong Crash bearish drift' :
+             overallScore <= -1 ? 'moderate Crash bearish drift' :
+             overallScore >= 3  ? 'Crash spike counter-trend (UP pressure)' :
+             overallScore >= 1  ? 'mild Crash spike pressure' : 'Crash neutral drift')
+          : (overallScore >= 3  ? 'strong Boom bullish drift' :
+             overallScore >= 1  ? 'moderate Boom bullish drift' :
+             overallScore <= -3 ? 'Boom spike counter-trend (DOWN pressure)' :
+             overallScore <= -1 ? 'mild Boom spike pressure' : 'Boom neutral drift'))
+      : (overallScore >= 3 ? 'strongly positive' :
+         overallScore >= 1 ? 'moderately positive' :
+         overallScore <= -3 ? 'strongly negative' :
+         overallScore <= -1 ? 'moderately negative' : 'neutral');
 
     // Preamble para Spike Index
     const compactPreamble = isSpikeC

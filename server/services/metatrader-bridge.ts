@@ -2435,14 +2435,15 @@ class MetaTraderBridge extends EventEmitter {
         Promise.resolve().then(async () => {
           try {
             const consensus = await huggingFaceAI.analyzeMarketData(tickDataForConsensus, symbol);
+            const bgRequired = consensus.requiredConsensus ?? (sym.includes('CRASH') || sym.includes('BOOM') ? 50 : 70);
             this.logAnalysis({
               id: consensusEntryId,
               timestamp: Date.now(),
               symbol,
               phase: 'huggingface',
-              status: consensus.consensusStrength >= 70 && consensus.finalDecision !== 'neutral' ? 'processing' : 'rejected',
+              status: consensus.consensusStrength >= bgRequired && consensus.finalDecision !== 'neutral' ? 'processing' : 'rejected',
               aiConsensus: consensus.consensusStrength,
-              requiredConsensus: consensus.requiredConsensus ?? 70,
+              requiredConsensus: bgRequired,
               aiDirection: consensus.finalDecision as 'up' | 'down' | 'neutral',
               aiReasoning: consensus.reasoning,
               participatingModels: consensus.participatingModels || 0,
@@ -2851,9 +2852,11 @@ class MetaTraderBridge extends EventEmitter {
       //   • 2 níveis confluentes → threshold reduz para 45%
       //   • 1 nível ativo       → threshold reduz para 55%
       //   • Girassol NEUTRO     → bloquear (aguardar Girassol antes de operar)
-      //   • Sem dados Girassol  → threshold normal 70% (fallback)
+      //   • Sem dados Girassol  → threshold base do ativo (Crash/Boom=50%, outros=70%)
       const girassolLive = this.getGirassolBias(symbol);
-      let effectiveMinConsensus = this.MIN_AI_CONSENSUS; // 70% padrão
+      const _symUpper = symbol.toUpperCase();
+      const _isSpikeAsset = _symUpper.includes('CRASH') || _symUpper.includes('BOOM');
+      let effectiveMinConsensus = _isSpikeAsset ? 50 : this.MIN_AI_CONSENSUS;
 
       if (girassolLive) {
         if (girassolLive.bias === 'NEUTRAL') {
