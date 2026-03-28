@@ -160,6 +160,10 @@ export interface IStorage {
   getUserDerivToken(userId: string): Promise<DerivToken | undefined>;
   updateDerivToken(userId: string, token: string, accountType: string): Promise<DerivToken>;
   deactivateDerivToken(userId: string): Promise<void>;
+  // Frenético 9-Tokens: gerenciamento de múltiplos slots de token
+  getAllDerivTokens(userId: string): Promise<DerivToken[]>;
+  upsertDerivTokenBySlot(userId: string, slotIndex: number, token: string, accountType: string): DerivToken;
+  deleteDerivTokenBySlot(userId: string, slotIndex: number): Promise<void>;
   
   // Trade configuration operations
   createTradeConfig(config: InsertTradeConfiguration): Promise<TradeConfiguration>;
@@ -505,7 +509,51 @@ export class DatabaseStorage implements IStorage {
       })
       .where(eq(derivTokens.userId, userId));
   }
-  
+
+  // Frenético 9-Tokens: retorna TODOS os tokens ativos do usuário (um por slot)
+  async getAllDerivTokens(userId: string): Promise<DerivToken[]> {
+    const tokens = await db
+      .select()
+      .from(derivTokens)
+      .where(and(eq(derivTokens.userId, userId), eq(derivTokens.isActive, true)));
+    return tokens.map(t => ({
+      ...t,
+      token: EncryptionService.decrypt(t.token),
+    }));
+  }
+
+  // Frenético 9-Tokens: insere ou atualiza o token de um slot específico (0-8)
+  upsertDerivTokenBySlot(userId: string, slotIndex: number, token: string, accountType: string): DerivToken {
+    return db.transaction((tx: any) => {
+      // Desativa o slot anterior se existir
+      tx.update(derivTokens)
+        .set({ isActive: false, updatedAt: new Date().toISOString() })
+        .where(and(eq(derivTokens.userId, userId), eq(derivTokens.slotIndex, slotIndex)))
+        .run();
+
+      const newToken = tx.insert(derivTokens)
+        .values({
+          userId,
+          token: EncryptionService.encrypt(token),
+          accountType,
+          isActive: true,
+          slotIndex,
+        })
+        .returning()
+        .get();
+
+      return { ...newToken, token: EncryptionService.decrypt(newToken.token) };
+    });
+  }
+
+  // Frenético 9-Tokens: remove o token de um slot específico
+  async deleteDerivTokenBySlot(userId: string, slotIndex: number): Promise<void> {
+    await db
+      .update(derivTokens)
+      .set({ isActive: false, updatedAt: new Date().toISOString() })
+      .where(and(eq(derivTokens.userId, userId), eq(derivTokens.slotIndex, slotIndex)));
+  }
+
   // Trade configuration operations
   async createTradeConfig(configData: InsertTradeConfiguration): Promise<TradeConfiguration> {
     // Use atomic transaction to ensure single active config per user

@@ -39,6 +39,7 @@ import {
 } from "@shared/schema";
 import { and } from "drizzle-orm";
 import { derivAPI, DerivAPIService } from './services/deriv-api';
+import { executeFrenetic9TokensBurst, getSlotBalances, closeAllSlotConnections, selectAssetsForSlots } from './services/frenetico-9tokens';
 import { huggingFaceAI } from './services/huggingface-ai';
 import { autoTradingScheduler } from './services/auto-trading-scheduler';
 import { realStatsTracker } from './services/real-stats-tracker';
@@ -2338,6 +2339,122 @@ export async function registerRoutes(app: Express): Promise<Server> {
         operationId
       });
     }
+  }));
+
+  // =========================== FRENÉTICO 9-TOKENS ===========================
+
+  // GET /api/trading/deriv-tokens/slots — lista todos os tokens por slot
+  app.get('/api/trading/deriv-tokens/slots', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+    if (!req.user?.id) return res.status(401).json({ message: 'Não autenticado' });
+    const userId = req.user.id;
+    try {
+      const tokens = await dbStorage.getAllDerivTokens(userId);
+      const slots = tokens.map(t => ({
+        slotIndex: t.slotIndex ?? 0,
+        accountType: t.accountType,
+        maskedToken: t.token.substring(0, 8) + '****',
+        isActive: t.isActive,
+      }));
+      res.json({ slots, totalConfigured: slots.length });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  }));
+
+  // POST /api/trading/deriv-tokens/slot/:slotIndex — configura token para um slot
+  app.post('/api/trading/deriv-tokens/slot/:slotIndex', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+    if (!req.user?.id) return res.status(401).json({ message: 'Não autenticado' });
+    const userId = req.user.id;
+    const slotIndex = parseInt(req.params.slotIndex);
+    if (isNaN(slotIndex) || slotIndex < 0 || slotIndex > 8) {
+      return res.status(400).json({ message: 'Slot inválido. Use 0-8.' });
+    }
+    const { token, accountType = 'demo' } = req.body;
+    if (!token?.trim()) return res.status(400).json({ message: 'Token é obrigatório' });
+    if (!['demo', 'real'].includes(accountType)) return res.status(400).json({ message: 'accountType deve ser "demo" ou "real"' });
+
+    try {
+      // Valida o token conectando à Deriv
+      const testApi = new DerivAPIService();
+      const connected = await testApi.connect(token.trim(), accountType, `SLOT_VALIDATE_${slotIndex}`);
+      if (!connected) return res.status(400).json({ message: `Slot ${slotIndex}: não foi possível conectar com este token` });
+
+      let balance: number | null = null;
+      try { const balData = await testApi.getBalance(); balance = balData?.balance ?? null; } catch {}
+      await testApi.disconnect();
+
+      const savedToken = dbStorage.upsertDerivTokenBySlot(userId, slotIndex, token.trim(), accountType);
+
+      console.log(`✅ [FRENÉTICO-9T] Slot ${slotIndex} configurado para usuário ${userId} | saldo: $${balance}`);
+      res.json({
+        message: `Slot ${slotIndex} configurado com sucesso`,
+        slotIndex,
+        accountType,
+        balance,
+        maskedToken: token.trim().substring(0, 8) + '****',
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  }));
+
+  // DELETE /api/trading/deriv-tokens/slot/:slotIndex — remove token de um slot
+  app.delete('/api/trading/deriv-tokens/slot/:slotIndex', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+    if (!req.user?.id) return res.status(401).json({ message: 'Não autenticado' });
+    const userId = req.user.id;
+    const slotIndex = parseInt(req.params.slotIndex);
+    if (isNaN(slotIndex) || slotIndex < 0 || slotIndex > 8) {
+      return res.status(400).json({ message: 'Slot inválido. Use 0-8.' });
+    }
+    await dbStorage.deleteDerivTokenBySlot(userId, slotIndex);
+    await closeAllSlotConnections(userId);
+    res.json({ message: `Slot ${slotIndex} removido`, slotIndex });
+  }));
+
+  // GET /api/trading/deriv-tokens/slots/balances — saldo de todos os slots
+  app.get('/api/trading/deriv-tokens/slots/balances', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+    if (!req.user?.id) return res.status(401).json({ message: 'Não autenticado' });
+    const userId = req.user.id;
+    try {
+      const allTokens = await dbStorage.getAllDerivTokens(userId);
+      const slots = allTokens.map(t => ({
+        slotIndex: t.slotIndex ?? 0,
+        token: t.token,
+        accountType: t.accountType as 'demo' | 'real',
+      }));
+      const balances = await getSlotBalances(userId, slots);
+      const assets = selectAssetsForSlots(slots.length);
+      res.json({
+        balances: balances.map((b, i) => ({
+          ...b,
+          assignedAsset: assets[i] ?? null,
+        })),
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  }));
+
+  // POST /api/trading/frenetico-9tokens/burst — dispara uma rajada manual de teste
+  app.post('/api/trading/frenetico-9tokens/burst', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+    if (!req.user?.id) return res.status(401).json({ message: 'Não autenticado' });
+    const userId = req.user.id;
+    const { amount = 0.35, duration = 1 } = req.body;
+
+    const allTokens = await dbStorage.getAllDerivTokens(userId);
+    if (allTokens.length === 0) {
+      return res.status(400).json({ message: 'Nenhum token de slot configurado. Configure ao menos 1 slot.' });
+    }
+
+    const slots = allTokens.map(t => ({
+      slotIndex: t.slotIndex ?? 0,
+      token: t.token,
+      accountType: t.accountType as 'demo' | 'real',
+    }));
+
+    const operationId = `MANUAL_BURST_${Date.now()}`;
+    const result = await executeFrenetic9TokensBurst(userId, slots, amount, duration, operationId);
+    res.json(result);
   }));
 
   // =========================== TRADE CONFIGURATION ===========================

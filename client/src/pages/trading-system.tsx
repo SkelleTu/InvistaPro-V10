@@ -13,6 +13,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import Header from "@/components/dashboard/header";
 import DerivTokenSettings from "@/components/deriv-token-settings";
+import Frenetico9TokensPanel from "@/components/frenetico-9tokens-panel";
 import LearningDashboard from "@/components/learning-dashboard";
 import TradingConfigPanel from "@/components/trading-config-panel";
 import { 
@@ -2280,6 +2281,9 @@ export default function TradingSystemPage() {
               <DerivTokenSettings />
               <TradingConfigPanel />
             </div>
+
+            {/* Frenético 9-Tokens */}
+            <Frenetico9TokensPanel />
 
             {/* Modalidades de Trade */}
             <Card className="border-blue-200 dark:border-blue-900">
