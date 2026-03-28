@@ -1781,7 +1781,7 @@ export class AutoTradingScheduler {
         if (preActiveModalities.includes('digit_matches')) {
           const freqObj = JSON.parse((config as any).modalityFrequency || '{}');
           const rawFreq = freqObj['digit_matches'];
-          digitMatchBurstCount = rawFreq === 'frenetico' ? 4 : Math.min(9, Math.max(1, parseInt(rawFreq ?? '1') || 1));
+          digitMatchBurstCount = rawFreq === 'frenetico' ? 9 : Math.min(9, Math.max(1, parseInt(rawFreq ?? '9') || 9));
         }
       } catch {}
       const isDigitMatchFrenetico = digitMatchBurstCount > 1; // backward compat
@@ -2288,13 +2288,14 @@ export class AutoTradingScheduler {
         // ⚡ MODO MULTI-DÍGITO: gate de consenso relaxado — estratégia baseia-se em frequência de dígitos + cobertura
         const rawMatchFreqGate = modalityFrequency['digit_matches'];
         const burstCountGate = selectedModality === 'digit_matches'
-          ? (rawMatchFreqGate === 'frenetico' ? 4 : Math.min(9, Math.max(1, parseInt(rawMatchFreqGate ?? '1') || 1)))
+          ? (rawMatchFreqGate === 'frenetico' ? 9 : Math.min(9, Math.max(1, parseInt(rawMatchFreqGate ?? '9') || 9)))
           : 1;
         const isMultiDigitGate = selectedModality === 'digit_matches' && burstCountGate > 1;
         // Quanto mais dígitos, menor o consenso mínimo exigido (cobertura compensa)
-        const multiDigitConsensusBonus = isMultiDigitGate ? Math.min(15, (burstCountGate - 1) * 2) : 0;
+        // Com 9 dígitos (90% cobertura), consenso mínimo é 0 — assertividade máxima absoluta
+        const multiDigitConsensusBonus = isMultiDigitGate ? Math.min(modalityMinConsensus, (burstCountGate - 1) * 7) : 0;
         const effectiveMinConsensus = isMultiDigitGate
-          ? Math.max(35, modalityMinConsensus - multiDigitConsensusBonus)
+          ? Math.max(0, modalityMinConsensus - multiDigitConsensusBonus)
           : modalityMinConsensus;
         if (aiDirectionalConsensus < effectiveMinConsensus) {
           console.log(`⛔ [${operationId}] GATE MODALIDADE: ${selectedModality} exige consenso ≥${effectiveMinConsensus}%${isMultiDigitGate ? ` (multi-dígito ${burstCountGate}×)` : ''} | atual=${aiDirectionalConsensus.toFixed(1)}% — EV negativo para esta modalidade. Aguardando sinal mais forte.`);
@@ -2354,7 +2355,7 @@ export class AutoTradingScheduler {
           // Backward-compat: 'frenetico' = 4 dígitos
           const rawMatchFreq = modalityFrequency['digit_matches'];
           const multiDigitCount = contractType === 'DIGITMATCH'
-            ? (rawMatchFreq === 'frenetico' ? 4 : Math.min(9, Math.max(1, parseInt(rawMatchFreq ?? '1') || 1)))
+            ? (rawMatchFreq === 'frenetico' ? 9 : Math.min(9, Math.max(1, parseInt(rawMatchFreq ?? '9') || 9)))
             : 1;
           const isBurstMode = contractType === 'DIGITMATCH' && multiDigitCount > 1;
           if (isBurstMode) {
