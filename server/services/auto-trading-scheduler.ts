@@ -2288,13 +2288,12 @@ export class AutoTradingScheduler {
             barrier = smartBarrier.barrier;
             console.log(`🎯 [DIGITUNDER] ${selectedSymbol}: barreira inteligente=${barrier} | winRate≈${smartBarrier.winRateEst}% | ${smartBarrier.reason}`);
           }
-          // 🎯 DIGITMATCH padrão: usar dígito MAIS QUENTE (maior frequência) como barreira
+          // 🎯 DIGITMATCH padrão: usar dígito MAIS QUENTE com análise multi-janela + tendência
           if (contractType === 'DIGITMATCH') {
-            const hottestSingle = digitFrequencyAnalyzer.getHottestDigitsForMatches(selectedSymbol, 1);
-            if (hottestSingle.length > 0) {
-              barrier = hottestSingle[0].toString();
-              console.log(`🎯 [DIGITMATCH] ${selectedSymbol}: barreira mais quente=${barrier} (dígito mais frequente)`);
-            }
+            const matchBarrier = digitFrequencyAnalyzer.getBestBarrierForMatches(selectedSymbol);
+            barrier = matchBarrier.barrier;
+            const trendLabel = matchBarrier.trendDiff > 1 ? '↑↑ esquentando' : matchBarrier.trendDiff < -1 ? '↓ esfriando' : '→ estável';
+            console.log(`🎯 [DIGITMATCH] ${selectedSymbol}: barreira=${barrier} | score=+${matchBarrier.score.toFixed(1)}% | tendência=${trendLabel} | conf=${matchBarrier.confidence.toFixed(0)}%`);
           }
           if (!needsBarrier) barrier = undefined;
 
@@ -2310,10 +2309,13 @@ export class AutoTradingScheduler {
           // ⚡ MODO FRENÉTICO: disparo em rajada de múltiplos DIGITMATCH simultâneos
           const isFraneticoMode = contractType === 'DIGITMATCH' && modalityFrequency['digit_matches'] === 'frenetico';
           if (isFraneticoMode) {
-            // Obtém os N dígitos mais quentes (maior frequência) para maximizar chance de acerto
+            // Obtém os N dígitos mais quentes com score composto (frequência + tendência)
             const BURST_SIZE = 4; // 4 contratos paralelos = 40% de cobertura (4 dígitos distintos)
             const hottestDigits = digitFrequencyAnalyzer.getHottestDigitsForMatches(selectedSymbol, BURST_SIZE);
-            console.log(`⚡🔥 [${operationId}] MODO FRENÉTICO DIGITMATCH | ${selectedSymbol} | Dígitos alvo: [${hottestDigits.join(',')}] | ${BURST_SIZE} contratos simultâneos | stake×${BURST_SIZE}: $${(tradeParams.amount * BURST_SIZE).toFixed(2)}`);
+            // Log com resumo completo das tendências
+            const summary = digitFrequencyAnalyzer.getSummary(selectedSymbol);
+            console.log(`⚡🔥 [${operationId}] MODO FRENÉTICO DIGITMATCH | ${selectedSymbol} | Dígitos alvo: [${hottestDigits.join(',')}] | ${BURST_SIZE} contratos | stake×${BURST_SIZE}: $${(tradeParams.amount * BURST_SIZE).toFixed(2)}`);
+            console.log(`📊 [FRENÉTICO STATS] ${summary}`);
 
             // Dispara todos os contratos em paralelo sem esperar cada um
             const burstPromises = hottestDigits.map((digit, idx) =>
