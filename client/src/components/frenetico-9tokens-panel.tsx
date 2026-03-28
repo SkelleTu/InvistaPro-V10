@@ -28,9 +28,8 @@ interface SlotBalance {
 }
 
 const SLOT_LABELS = [
-  "Slot 1 (dígito 0)", "Slot 2 (dígito 1)", "Slot 3 (dígito 2)",
-  "Slot 4 (dígito 3)", "Slot 5 (dígito 4)", "Slot 6 (dígito 5)",
-  "Slot 7 (dígito 6)", "Slot 8 (dígito 7)", "Slot 9 (dígito 8)", "Slot 10 (dígito 9)",
+  "Slot 1", "Slot 2", "Slot 3", "Slot 4", "Slot 5",
+  "Slot 6", "Slot 7", "Slot 8", "Slot 9", "Slot 10",
 ];
 
 const SLOT_COLORS = [
@@ -115,7 +114,7 @@ export default function Frenetico9TokensPanel() {
     onSuccess: (data) => {
       toast({
         title: `⚡ Rajada disparada! ${data.openedContracts}/${data.totalSlots} contratos`,
-        description: `Duração: ${data.burstDurationMs}ms | Edge estimado: ${(data.estimatedEdge * 100).toFixed(1)}%`,
+        description: `${data.targetSymbol} · dígito ${data.targetDigit} (${(data.targetDigitFrequency * 100).toFixed(1)}%) · ${data.burstDurationMs}ms`,
       });
     },
     onError: (err: any) => {
@@ -143,7 +142,7 @@ export default function Frenetico9TokensPanel() {
             <div>
               <CardTitle className="text-lg">Frenético 10-Tokens</CardTitle>
               <CardDescription>
-                10 contas independentes · 1 dígito quente por conta · disparo simultâneo
+                10 contas · mesmo ativo · mesmo dígito · disparo simultâneo no mesmo tick
               </CardDescription>
             </div>
           </div>
@@ -166,7 +165,7 @@ export default function Frenetico9TokensPanel() {
               <TrendingUp className="w-3.5 h-3.5" />
               Como funciona agora
             </div>
-            <p>Cada slot usa seu próprio token (conta Deriv separada). A IA identifica o dígito mais quente de cada ativo. Todos os {totalConfigured} contratos disparam simultaneamente — sem concorrência de saldo.</p>
+            <p>A IA seleciona <strong>1 único ativo</strong> e o <strong>dígito mais quente</strong> naquele momento. Todos os {totalConfigured} slots disparam no <strong>mesmo ativo, mesmo dígito e mesmo tick</strong> simultaneamente — cada um com sua própria conta, sem concorrência de saldo.</p>
           </div>
         )}
       </CardHeader>
@@ -346,7 +345,7 @@ export default function Frenetico9TokensPanel() {
           <div className="text-center py-4 text-muted-foreground text-sm">
             <AlertCircle className="w-8 h-8 mx-auto mb-2 opacity-40" />
             <p>Configure ao menos 1 slot para começar.</p>
-            <p className="text-xs mt-1">Cada slot = 1 token Deriv = 1 conta separada = sem concorrência de saldo.</p>
+            <p className="text-xs mt-1">Todos os slots disparam no mesmo ativo e dígito — cada um com sua conta separada, sem concorrência de saldo.</p>
           </div>
         )}
       </CardContent>

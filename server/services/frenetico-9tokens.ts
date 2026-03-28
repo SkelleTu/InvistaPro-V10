@@ -1,17 +1,16 @@
 /**
  * FRENÉTICO 10-TOKENS — Orquestrador de disparos paralelos por slot
  *
- * Estratégia:
- *  - Até 10 tokens Deriv, cada um em seu próprio slot (0-9)
- *  - Cada slot monitora um ativo diferente
- *  - Para cada ativo, a IA identifica o ÚNICO dígito mais quente
- *  - Todos os 10 contratos disparam SIMULTANEAMENTE (Promise.allSettled)
- *  - Sem gargalo, sem delay entre operações, sem concorrência de saldo
+ * Estratégia correta:
+ *  - A IA seleciona O MELHOR ativo e O DÍGITO mais quente naquele momento
+ *  - TODOS os 10 slots disparam NO MESMO ativo, NO MESMO dígito, NO MESMO tick
+ *  - Cada slot usa sua própria conta Deriv (sem concorrência de saldo)
+ *  - Disparo 100% simultâneo via Promise.allSettled
  *
- * Vantagem matemática:
- *  - Dígito quente: frequência ~14-17% (acima dos 10% neutros)
- *  - Com payout 8.5x: EV = 0.15 × 8.5 − 0.85 = +$0.425 por dólar apostado
- *  - Multiplicado por 10 slots simultâneos em 10 ativos independentes
+ * Vantagem:
+ *  - 10 contas apostam juntas no mesmo sinal — sem limitar saldo de uma única conta
+ *  - Dígito quente: frequência ~14-17% → EV positivo com payout 8.5x
+ *  - Lucro multiplicado por 10 sem nenhuma exposição adicional por conta
  */
 
 import { DerivAPIService } from './deriv-api';
@@ -27,7 +26,7 @@ export interface SlotResult {
   slotIndex: number;
   symbol: string;
   digit: number;
-  digitFrequency: number;  // % real do dígito (ex: 0.16 = 16%)
+  digitFrequency: number;
   contractId: string | null;
   status: 'success' | 'failed' | 'insufficient_balance';
   profit?: number;
@@ -41,7 +40,10 @@ export interface BurstResult {
   failedContracts: number;
   results: SlotResult[];
   burstDurationMs: number;
-  estimatedEdge: number; // EV médio da rajada
+  estimatedEdge: number;
+  targetSymbol: string;
+  targetDigit: number;
+  targetDigitFrequency: number;
 }
 
 // Pool de conexões ativas por userId → slotIndex
@@ -62,7 +64,6 @@ async function getOrCreateConnection(
 
   let api = userPool.get(slot.slotIndex);
 
-  // Verifica se a conexão existente está saudável
   if (api) {
     try {
       if (api.getIsConnected()) {
@@ -74,7 +75,6 @@ async function getOrCreateConnection(
     userPool.delete(slot.slotIndex);
   }
 
-  // Cria nova instância e conecta
   api = new DerivAPIService();
   const connected = await api.connect(slot.token, slot.accountType, `${operationId}_SLOT${slot.slotIndex}`);
   if (!connected) {
@@ -85,34 +85,45 @@ async function getOrCreateConnection(
 }
 
 /**
- * Seleciona os melhores ativos para os slots disponíveis
- * Prioriza ativos com maior edge estatístico de dígitos
+ * Seleciona o MELHOR ativo único com maior edge estatístico de dígitos.
+ * Todos os slots usam este mesmo ativo.
  */
-export function selectAssetsForSlots(slotCount: number): string[] {
+export function selectBestAsset(): string {
   const CANDIDATE_ASSETS = [
     'R_10', 'R_25', 'R_50', 'R_75', 'R_100',
     'JD10', 'JD25', 'JD50', 'JD75', 'JD100',
     'RDBULL', 'RDBEAR',
   ];
 
-  // Ordena pelos ativos com mais edge nos dígitos (mais dados = mais confiança)
   const scored = CANDIDATE_ASSETS.map(symbol => ({
     symbol,
     edge: digitFrequencyAnalyzer.getDigitEdgeScore(symbol),
   })).sort((a, b) => b.edge - a.edge);
 
-  // Retorna os melhores, garantindo diversificação
-  return scored.slice(0, slotCount).map(s => s.symbol);
+  return scored[0].symbol;
 }
 
 /**
- * Executa uma RAJADA FRENÉTICA com até 10 tokens simultâneos
+ * @deprecated Use selectBestAsset() — mantido para compatibilidade com rota de balances
+ */
+export function selectAssetsForSlots(slotCount: number): string[] {
+  const best = selectBestAsset();
+  return Array(slotCount).fill(best);
+}
+
+/**
+ * Executa uma RAJADA FRENÉTICA com até 10 tokens simultâneos.
  *
- * @param userId   - ID do usuário
- * @param slots    - Array de tokens configurados (slotIndex 0-9)
- * @param amount   - Valor por contrato (em USD)
- * @param duration - Duração em ticks (1-10)
- * @param operationId - ID da operação para logs
+ * TODOS os slots operam:
+ *  - O MESMO ativo (melhor edge estatístico)
+ *  - O MESMO dígito (mais quente no momento)
+ *  - NO MESMO TICK — disparo 100% simultâneo
+ *
+ * @param userId      - ID do usuário
+ * @param slots       - Array de tokens configurados (slotIndex 0-9)
+ * @param amount      - Valor por contrato em USD
+ * @param duration    - Duração em ticks (1-10)
+ * @param operationId - ID único da operação para logs
  */
 export async function executeFrenetic9TokensBurst(
   userId: string,
@@ -127,43 +138,40 @@ export async function executeFrenetic9TokensBurst(
     throw new Error('Nenhum slot de token configurado para o modo Frenético 10-Tokens');
   }
 
-  // Seleciona os melhores ativos (um por slot)
-  const assets = selectAssetsForSlots(slots.length);
-  console.log(`⚡🔥 [FRENÉTICO-10T] Iniciando rajada | ${slots.length} slots | Ativos: [${assets.join(',')}]`);
+  // ── 1. SELEÇÃO ÚNICA: melhor ativo + dígito mais quente ──────────────────
+  const targetSymbol = selectBestAsset();
+  const [targetDigit] = digitFrequencyAnalyzer.getHottestDigitsForMatches(targetSymbol, 1);
+  const analysis = digitFrequencyAnalyzer.analyzeSymbolMultiWindow(targetSymbol);
+  const digitData = analysis?.digits.find(d => d.digit === targetDigit);
+  const targetDigitFreq = digitData?.frequency ?? 0.10;
 
-  // Prepara os disparos simultâneos — um por slot
-  const slotPromises = slots.map(async (slot, idx): Promise<SlotResult> => {
-    const symbol = assets[idx] ?? assets[0];
+  console.log(
+    `⚡🔥 [FRENÉTICO-10T] Rajada iniciada | ${slots.length} slots | ` +
+    `Alvo: ${targetSymbol} dígito ${targetDigit} (${(targetDigitFreq * 100).toFixed(1)}%)`
+  );
+
+  // ── 2. DISPARO SIMULTÂNEO — todos os slots, mesmo ativo, mesmo dígito ────
+  const slotPromises = slots.map(async (slot): Promise<SlotResult> => {
     const slotOpId = `${operationId}_S${slot.slotIndex}`;
 
     try {
-      // Obtém/reutiliza conexão para este slot
       const api = await getOrCreateConnection(userId, slot, slotOpId);
 
-      // Identifica o dígito mais quente para este ativo via IA de frequência
-      const [hottestDigit] = digitFrequencyAnalyzer.getHottestDigitsForMatches(symbol, 1);
-      const analysis = digitFrequencyAnalyzer.analyzeSymbolMultiWindow(symbol);
-      const digitData = analysis?.digits.find(d => d.digit === hottestDigit);
-      const digitFreq = digitData?.frequency ?? 0.10;
-
-      console.log(`🎯 [FRENÉTICO-10T S${slot.slotIndex}] ${symbol} → dígito ${hottestDigit} (freq ${(digitFreq * 100).toFixed(1)}%)`);
-
-      // Dispara o contrato
       const contract = await api.buyGenericDigitContract({
         contract_type: 'DIGITMATCH',
-        symbol,
+        symbol: targetSymbol,
         duration,
         amount,
-        barrier: hottestDigit.toString(),
+        barrier: targetDigit.toString(),
         currency: 'USD',
       });
 
       if (!contract?.contract_id) {
         return {
           slotIndex: slot.slotIndex,
-          symbol,
-          digit: hottestDigit,
-          digitFrequency: digitFreq,
+          symbol: targetSymbol,
+          digit: targetDigit,
+          digitFrequency: targetDigitFreq,
           contractId: null,
           status: 'failed',
           errorMessage: 'Contrato não retornou ID',
@@ -171,13 +179,16 @@ export async function executeFrenetic9TokensBurst(
         };
       }
 
-      console.log(`✅ [FRENÉTICO-10T S${slot.slotIndex}] Contrato ${contract.contract_id} aberto | ${symbol} dígito ${hottestDigit}`);
+      console.log(
+        `✅ [FRENÉTICO-10T S${slot.slotIndex}] Contrato ${contract.contract_id} | ` +
+        `${targetSymbol} dígito ${targetDigit}`
+      );
 
       return {
         slotIndex: slot.slotIndex,
-        symbol,
-        digit: hottestDigit,
-        digitFrequency: digitFreq,
+        symbol: targetSymbol,
+        digit: targetDigit,
+        digitFrequency: targetDigitFreq,
         contractId: contract.contract_id.toString(),
         status: 'success',
         openTimeMs: Date.now() - startTime,
@@ -187,13 +198,13 @@ export async function executeFrenetic9TokensBurst(
       const msg = err?.message ?? String(err);
       const isInsufficientBalance = msg.includes('InsufficientBalance') || msg.includes('insufficient');
 
-      console.warn(`❌ [FRENÉTICO-10T S${slot.slotIndex}] ${symbol} falhou: ${msg}`);
+      console.warn(`❌ [FRENÉTICO-10T S${slot.slotIndex}] falhou: ${msg}`);
 
       return {
         slotIndex: slot.slotIndex,
-        symbol,
-        digit: 0,
-        digitFrequency: 0,
+        symbol: targetSymbol,
+        digit: targetDigit,
+        digitFrequency: targetDigitFreq,
         contractId: null,
         status: isInsufficientBalance ? 'insufficient_balance' : 'failed',
         errorMessage: msg,
@@ -202,12 +213,15 @@ export async function executeFrenetic9TokensBurst(
     }
   });
 
-  // DISPARO SIMULTÂNEO — todos os slots ao mesmo tempo
   const settled = await Promise.allSettled(slotPromises);
   const results: SlotResult[] = settled.map(r =>
     r.status === 'fulfilled' ? r.value : {
-      slotIndex: -1, symbol: '?', digit: 0, digitFrequency: 0,
-      contractId: null, status: 'failed' as const,
+      slotIndex: -1,
+      symbol: targetSymbol,
+      digit: targetDigit,
+      digitFrequency: targetDigitFreq,
+      contractId: null,
+      status: 'failed' as const,
       errorMessage: r.reason?.message ?? 'Erro desconhecido',
       openTimeMs: Date.now() - startTime,
     }
@@ -215,11 +229,13 @@ export async function executeFrenetic9TokensBurst(
 
   const opened = results.filter(r => r.status === 'success').length;
   const failed = results.filter(r => r.status !== 'success').length;
-  const avgFreq = results.filter(r => r.status === 'success')
-    .reduce((sum, r) => sum + r.digitFrequency, 0) / Math.max(opened, 1);
-  const estimatedEdge = avgFreq * 8.5 - (1 - avgFreq); // EV real com payout 8.5x
+  const estimatedEdge = targetDigitFreq * 8.5 - (1 - targetDigitFreq);
 
-  console.log(`🏁 [FRENÉTICO-10T] Rajada concluída: ${opened}/${slots.length} | Tempo: ${Date.now() - startTime}ms | Edge estimado: ${(estimatedEdge * 100).toFixed(1)}%`);
+  console.log(
+    `🏁 [FRENÉTICO-10T] Concluído: ${opened}/${slots.length} contratos | ` +
+    `${targetSymbol} dígito ${targetDigit} | ` +
+    `Tempo: ${Date.now() - startTime}ms | Edge: ${(estimatedEdge * 100).toFixed(1)}%`
+  );
 
   return {
     totalSlots: slots.length,
@@ -228,11 +244,14 @@ export async function executeFrenetic9TokensBurst(
     results,
     burstDurationMs: Date.now() - startTime,
     estimatedEdge,
+    targetSymbol,
+    targetDigit,
+    targetDigitFrequency: targetDigitFreq,
   };
 }
 
 /**
- * Encerra todas as conexões do pool de um usuário (ao parar o sistema)
+ * Encerra todas as conexões do pool de um usuário
  */
 export async function closeAllSlotConnections(userId: string): Promise<void> {
   const userPool = connectionPool.get(userId);
