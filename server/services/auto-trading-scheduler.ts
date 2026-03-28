@@ -1260,8 +1260,22 @@ export class AutoTradingScheduler {
 
       // 💰 PROTEÇÃO DE SALDO MÍNIMO: Parar quando saldo está crítico
       // Saldo < $2.00 = modo crítico, evitar qualquer nova operação para preservar capital
-      const currentBalance = this.cachedBalance?.value ?? 0;
+      let currentBalance = this.cachedBalance?.value ?? 0;
       const MINIMUM_SAFE_BALANCE = 2.00;
+      if (currentBalance > 0 && currentBalance < MINIMUM_SAFE_BALANCE) {
+        // 🔄 Saldo crítico em cache — verificar saldo REAL no Deriv antes de bloquear
+        // (conta demo pode ter sido recarregada ou resetada)
+        try {
+          const freshBalance = await derivAPI.getBalance();
+          if (freshBalance && freshBalance.balance >= 0) {
+            currentBalance = freshBalance.balance;
+            this.cachedBalance = { value: currentBalance, currency: freshBalance.currency, loginid: freshBalance.loginid, fetchedAt: Date.now() };
+            console.log(`🔄 [${operationId}] Saldo crítico — refresh forçado Deriv: $${currentBalance.toFixed(2)} ${freshBalance.currency}`);
+          }
+        } catch (e) {
+          console.warn(`⚠️ [${operationId}] Falha ao atualizar saldo crítico: ${e}`);
+        }
+      }
       if (currentBalance > 0 && currentBalance < MINIMUM_SAFE_BALANCE) {
         console.error(`🛑 [${operationId}] PROTEÇÃO DE CAPITAL: Saldo $${currentBalance.toFixed(2)} abaixo do mínimo seguro $${MINIMUM_SAFE_BALANCE} — operações suspensas para proteger capital restante.`);
         this.setPhase('PAUSADO', `🛑 Saldo crítico ($${currentBalance.toFixed(2)}) — operações suspensas`, 'warning');
