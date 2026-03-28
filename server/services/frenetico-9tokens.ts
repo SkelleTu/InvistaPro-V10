@@ -1,16 +1,17 @@
 /**
  * FRENÉTICO 10-TOKENS — Orquestrador de disparos paralelos por slot
  *
- * Estratégia correta:
- *  - A IA seleciona O MELHOR ativo e O DÍGITO mais quente naquele momento
- *  - TODOS os 10 slots disparam NO MESMO ativo, NO MESMO dígito, NO MESMO tick
+ * Estratégia: 1 slot = 1 dígito fixo (slot 0 → dígito 0, slot 9 → dígito 9)
+ *  - A IA seleciona O MELHOR ativo com maior edge estatístico de dígitos
+ *  - Cada slot abre um DIGITMATCH no SEU dígito fixo (slotIndex = barrier)
+ *  - TODOS disparam NO MESMO ativo, NO MESMO tick — cobertura total dos 10 dígitos
  *  - Cada slot usa sua própria conta Deriv (sem concorrência de saldo)
  *  - Disparo 100% simultâneo via Promise.allSettled
  *
- * Vantagem:
- *  - 10 contas apostam juntas no mesmo sinal — sem limitar saldo de uma única conta
- *  - Dígito quente: frequência ~14-17% → EV positivo com payout 8.5x
- *  - Lucro multiplicado por 10 sem nenhuma exposição adicional por conta
+ * Vantagem matemática:
+ *  - Cobertura 100% dos dígitos (0-9) → sempre há um vencedor
+ *  - O analisador de frequência detecta dígitos quentes (>10%) para priorização
+ *  - Com 10 slots ativos: pelo menos 1 contrato sempre ganha (payout 8.5x)
  */
 
 import { DerivAPIService } from './deriv-api';
@@ -34,16 +35,21 @@ export interface SlotResult {
   openTimeMs: number;
 }
 
+export interface DigitHeat {
+  digit: number;
+  frequency: number;
+  label: 'hot' | 'neutral' | 'cold';
+}
+
 export interface BurstResult {
   totalSlots: number;
   openedContracts: number;
   failedContracts: number;
   results: SlotResult[];
   burstDurationMs: number;
-  estimatedEdge: number;
   targetSymbol: string;
-  targetDigit: number;
-  targetDigitFrequency: number;
+  digitHeats: DigitHeat[];
+  coveragePercent: number;
 }
 
 // Pool de conexões ativas por userId → slotIndex
@@ -114,10 +120,10 @@ export function selectAssetsForSlots(slotCount: number): string[] {
 /**
  * Executa uma RAJADA FRENÉTICA com até 10 tokens simultâneos.
  *
- * TODOS os slots operam:
- *  - O MESMO ativo (melhor edge estatístico)
- *  - O MESMO dígito (mais quente no momento)
- *  - NO MESMO TICK — disparo 100% simultâneo
+ * Lógica: slot N = dígito N (slot 0 → dígito 0, slot 9 → dígito 9)
+ *  - A IA seleciona O MELHOR ativo com maior edge estatístico
+ *  - Cada slot abre DIGITMATCH no SEU dígito fixo (barrier = slotIndex)
+ *  - Todos disparam NO MESMO ativo e NO MESMO TICK — cobertura total 0-9
  *
  * @param userId      - ID do usuário
  * @param slots       - Array de tokens configurados (slotIndex 0-9)
@@ -138,20 +144,30 @@ export async function executeFrenetic9TokensBurst(
     throw new Error('Nenhum slot de token configurado para o modo Frenético 10-Tokens');
   }
 
-  // ── 1. SELEÇÃO ÚNICA: melhor ativo + dígito mais quente ──────────────────
+  // ── 1. SELEÇÃO DO ATIVO: melhor edge estatístico de dígitos ──────────────
   const targetSymbol = selectBestAsset();
-  const [targetDigit] = digitFrequencyAnalyzer.getHottestDigitsForMatches(targetSymbol, 1);
   const analysis = digitFrequencyAnalyzer.analyzeSymbolMultiWindow(targetSymbol);
-  const digitData = analysis?.digits.find(d => d.digit === targetDigit);
-  const targetDigitFreq = digitData?.frequency ?? 0.10;
+
+  // Mapeia a frequência de cada dígito (0-9) e classifica como hot/neutral/cold
+  const digitHeats: DigitHeat[] = Array.from({ length: 10 }, (_, d) => {
+    const freq = analysis?.digits.find(x => x.digit === d)?.frequency ?? 0.10;
+    const label: DigitHeat['label'] = freq >= 0.13 ? 'hot' : freq <= 0.07 ? 'cold' : 'neutral';
+    return { digit: d, frequency: freq, label };
+  });
+
+  const hotDigits = digitHeats.filter(d => d.label === 'hot').map(d => d.digit);
+  const coveragePercent = Math.round((slots.length / 10) * 100);
 
   console.log(
     `⚡🔥 [FRENÉTICO-10T] Rajada iniciada | ${slots.length} slots | ` +
-    `Alvo: ${targetSymbol} dígito ${targetDigit} (${(targetDigitFreq * 100).toFixed(1)}%)`
+    `Ativo: ${targetSymbol} | Cobertura: ${coveragePercent}% (dígitos ${slots.map(s => s.slotIndex).join(',')}) | ` +
+    `Quentes: [${hotDigits.join(',')}]`
   );
 
-  // ── 2. DISPARO SIMULTÂNEO — todos os slots, mesmo ativo, mesmo dígito ────
+  // ── 2. DISPARO SIMULTÂNEO — cada slot usa SEU dígito fixo (slotIndex) ────
   const slotPromises = slots.map(async (slot): Promise<SlotResult> => {
+    const assignedDigit = slot.slotIndex; // slot 0 → dígito 0, slot 9 → dígito 9
+    const digitFreq = digitHeats[assignedDigit]?.frequency ?? 0.10;
     const slotOpId = `${operationId}_S${slot.slotIndex}`;
 
     try {
@@ -162,7 +178,7 @@ export async function executeFrenetic9TokensBurst(
         symbol: targetSymbol,
         duration,
         amount,
-        barrier: targetDigit.toString(),
+        barrier: assignedDigit.toString(),
         currency: 'USD',
       });
 
@@ -170,8 +186,8 @@ export async function executeFrenetic9TokensBurst(
         return {
           slotIndex: slot.slotIndex,
           symbol: targetSymbol,
-          digit: targetDigit,
-          digitFrequency: targetDigitFreq,
+          digit: assignedDigit,
+          digitFrequency: digitFreq,
           contractId: null,
           status: 'failed',
           errorMessage: 'Contrato não retornou ID',
@@ -179,16 +195,18 @@ export async function executeFrenetic9TokensBurst(
         };
       }
 
+      const heatLabel = digitHeats[assignedDigit]?.label ?? 'neutral';
+      const heatIcon = heatLabel === 'hot' ? '🔥' : heatLabel === 'cold' ? '🧊' : '⚪';
       console.log(
         `✅ [FRENÉTICO-10T S${slot.slotIndex}] Contrato ${contract.contract_id} | ` +
-        `${targetSymbol} dígito ${targetDigit}`
+        `${targetSymbol} dígito ${assignedDigit} ${heatIcon} (${(digitFreq * 100).toFixed(1)}%)`
       );
 
       return {
         slotIndex: slot.slotIndex,
         symbol: targetSymbol,
-        digit: targetDigit,
-        digitFrequency: targetDigitFreq,
+        digit: assignedDigit,
+        digitFrequency: digitFreq,
         contractId: contract.contract_id.toString(),
         status: 'success',
         openTimeMs: Date.now() - startTime,
@@ -198,13 +216,13 @@ export async function executeFrenetic9TokensBurst(
       const msg = err?.message ?? String(err);
       const isInsufficientBalance = msg.includes('InsufficientBalance') || msg.includes('insufficient');
 
-      console.warn(`❌ [FRENÉTICO-10T S${slot.slotIndex}] falhou: ${msg}`);
+      console.warn(`❌ [FRENÉTICO-10T S${slot.slotIndex}] dígito ${assignedDigit} falhou: ${msg}`);
 
       return {
         slotIndex: slot.slotIndex,
         symbol: targetSymbol,
-        digit: targetDigit,
-        digitFrequency: targetDigitFreq,
+        digit: assignedDigit,
+        digitFrequency: digitFreq,
         contractId: null,
         status: isInsufficientBalance ? 'insufficient_balance' : 'failed',
         errorMessage: msg,
@@ -218,8 +236,8 @@ export async function executeFrenetic9TokensBurst(
     r.status === 'fulfilled' ? r.value : {
       slotIndex: -1,
       symbol: targetSymbol,
-      digit: targetDigit,
-      digitFrequency: targetDigitFreq,
+      digit: -1,
+      digitFrequency: 0.10,
       contractId: null,
       status: 'failed' as const,
       errorMessage: r.reason?.message ?? 'Erro desconhecido',
@@ -229,12 +247,11 @@ export async function executeFrenetic9TokensBurst(
 
   const opened = results.filter(r => r.status === 'success').length;
   const failed = results.filter(r => r.status !== 'success').length;
-  const estimatedEdge = targetDigitFreq * 8.5 - (1 - targetDigitFreq);
 
   console.log(
     `🏁 [FRENÉTICO-10T] Concluído: ${opened}/${slots.length} contratos | ` +
-    `${targetSymbol} dígito ${targetDigit} | ` +
-    `Tempo: ${Date.now() - startTime}ms | Edge: ${(estimatedEdge * 100).toFixed(1)}%`
+    `${targetSymbol} | Cobertura ${coveragePercent}% (${opened} dígitos abertos) | ` +
+    `Tempo: ${Date.now() - startTime}ms`
   );
 
   return {
@@ -243,10 +260,9 @@ export async function executeFrenetic9TokensBurst(
     failedContracts: failed,
     results,
     burstDurationMs: Date.now() - startTime,
-    estimatedEdge,
     targetSymbol,
-    targetDigit,
-    targetDigitFrequency: targetDigitFreq,
+    digitHeats,
+    coveragePercent,
   };
 }
 

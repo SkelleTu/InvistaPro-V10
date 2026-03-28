@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   Zap, Key, Trash2, RefreshCw, PlayCircle,
   CheckCircle2, AlertCircle, Loader2, Eye, EyeOff,
-  TrendingUp, DollarSign
+  TrendingUp, DollarSign, Flame, Snowflake, Circle
 } from "lucide-react";
 
 interface SlotInfo {
@@ -26,22 +26,37 @@ interface SlotBalance {
   error?: string;
 }
 
+interface DigitHeat {
+  digit: number;
+  frequency: number;
+  label: "hot" | "neutral" | "cold";
+}
+
 interface BalancesResponse {
   sharedAsset: string | null;
+  digitHeats: DigitHeat[];
   balances: SlotBalance[];
 }
 
-const SLOT_LABELS = [
-  "Slot 1", "Slot 2", "Slot 3", "Slot 4", "Slot 5",
-  "Slot 6", "Slot 7", "Slot 8", "Slot 9", "Slot 10",
-];
-
-const SLOT_COLORS = [
+// Slot N → dígito N (slot 0 = dígito 0, slot 9 = dígito 9)
+const DIGIT_COLORS = [
   "border-violet-500/40", "border-blue-500/40", "border-cyan-500/40",
-  "border-green-500/40", "border-yellow-500/40", "border-orange-500/40",
-  "border-red-500/40", "border-pink-500/40", "border-purple-500/40",
+  "border-teal-500/40", "border-green-500/40", "border-yellow-500/40",
+  "border-orange-500/40", "border-red-500/40", "border-pink-500/40",
   "border-rose-500/40",
 ];
+
+function HeatIcon({ label }: { label: "hot" | "neutral" | "cold" }) {
+  if (label === "hot") return <Flame className="w-3 h-3 text-orange-400" />;
+  if (label === "cold") return <Snowflake className="w-3 h-3 text-blue-400" />;
+  return <Circle className="w-3 h-3 text-muted-foreground" />;
+}
+
+function heatColor(label: "hot" | "neutral" | "cold") {
+  if (label === "hot") return "text-orange-400";
+  if (label === "cold") return "text-blue-400";
+  return "text-muted-foreground";
+}
 
 export default function Frenetico9TokensPanel() {
   const { toast } = useToast();
@@ -116,9 +131,10 @@ export default function Frenetico9TokensPanel() {
       return res.json();
     },
     onSuccess: (data) => {
+      const hotDigits = (data.digitHeats ?? []).filter((d: DigitHeat) => d.label === "hot").map((d: DigitHeat) => d.digit);
       toast({
-        title: `⚡ Rajada disparada! ${data.openedContracts}/${data.totalSlots} contratos`,
-        description: `${data.targetSymbol} · dígito ${data.targetDigit} (${(data.targetDigitFrequency * 100).toFixed(1)}%) · ${data.burstDurationMs}ms`,
+        title: `⚡ Rajada! ${data.openedContracts}/${data.totalSlots} contratos abertos`,
+        description: `${data.targetSymbol} · cobertura ${data.coveragePercent}% (dígitos 0-9) · ${data.burstDurationMs}ms${hotDigits.length > 0 ? ` · 🔥 quentes: [${hotDigits.join(",")}]` : ""}`,
       });
     },
     onError: (err: any) => {
@@ -147,13 +163,13 @@ export default function Frenetico9TokensPanel() {
             <div>
               <CardTitle className="text-lg">Frenético 10-Tokens</CardTitle>
               <CardDescription>
-                10 contas · mesmo ativo · mesmo dígito · disparo simultâneo no mesmo tick
+                Slot 0→dígito 0 … Slot 9→dígito 9 · mesmo ativo · disparo simultâneo
               </CardDescription>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <Badge variant={totalConfigured > 0 ? "default" : "secondary"} className="text-xs">
-              {totalConfigured}/10 slots
+              {totalConfigured}/10 dígitos
             </Badge>
             {totalConfigured > 0 && (
               <Badge variant="outline" className="text-xs text-green-400 border-green-500/30">
@@ -165,11 +181,11 @@ export default function Frenetico9TokensPanel() {
         </div>
 
         {totalConfigured > 0 && (
-          <div className="mt-3 p-3 rounded-lg bg-violet-500/5 border border-violet-500/20 text-xs text-muted-foreground space-y-1">
+          <div className="mt-3 p-3 rounded-lg bg-violet-500/5 border border-violet-500/20 text-xs text-muted-foreground space-y-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-violet-300 font-medium">
                 <TrendingUp className="w-3.5 h-3.5" />
-                Ativo único compartilhado por todos os slots
+                Ativo selecionado pela IA
               </div>
               {sharedAsset && (
                 <span className="font-mono font-bold text-violet-400 text-sm tracking-wide">
@@ -177,7 +193,22 @@ export default function Frenetico9TokensPanel() {
                 </span>
               )}
             </div>
-            <p>A IA seleciona <strong>1 único ativo</strong> e o <strong>dígito mais quente</strong> no momento do disparo. Todos os {totalConfigured} slots abrem contrato <strong>no mesmo ativo, mesmo dígito e mesmo tick</strong> — cada um com sua conta separada, sem concorrência de saldo.</p>
+            <p>Cada slot cobre <strong>1 dígito fixo</strong> (slot 0 = dígito 0, slot 9 = dígito 9). No disparo, todos abrem DIGITMATCH no <strong>mesmo ativo e mesmo tick</strong>, cada um no seu dígito — cobertura total dos 10 dígitos com {totalConfigured} conta(s).</p>
+            {balancesData?.digitHeats && (
+              <div className="flex gap-1 flex-wrap pt-1">
+                {balancesData.digitHeats.map(h => (
+                  <span key={h.digit} className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold ${
+                    h.label === "hot" ? "bg-orange-500/20 text-orange-400" :
+                    h.label === "cold" ? "bg-blue-500/20 text-blue-400" :
+                    "bg-muted text-muted-foreground"
+                  }`}>
+                    <HeatIcon label={h.label} />
+                    {h.digit}
+                    <span className="opacity-70 font-normal">{(h.frequency * 100).toFixed(0)}%</span>
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </CardHeader>
@@ -190,6 +221,8 @@ export default function Frenetico9TokensPanel() {
             const balance = getSlotBalance(i);
             const isConfiguring = activeSlotInput === i;
             const isConfigured = !!slot;
+            // slot i → dígito i (fixo)
+            const digitHeat = balancesData?.digitHeats?.[i];
 
             return (
               <div
@@ -197,12 +230,22 @@ export default function Frenetico9TokensPanel() {
                 data-testid={`slot-card-${i}`}
                 className={`rounded-lg border p-3 transition-all ${
                   isConfigured
-                    ? `${SLOT_COLORS[i]} bg-card`
+                    ? `${DIGIT_COLORS[i]} bg-card`
                     : "border-dashed border-border/50 bg-card/30"
                 }`}
               >
+                {/* Cabeçalho: dígito + indicador de calor */}
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-medium text-muted-foreground">{SLOT_LABELS[i]}</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-base font-bold font-mono leading-none">{i}</span>
+                    <span className="text-[10px] text-muted-foreground">dígito</span>
+                    {digitHeat && (
+                      <span className={`inline-flex items-center gap-0.5 text-[10px] ${heatColor(digitHeat.label)}`}>
+                        <HeatIcon label={digitHeat.label} />
+                        {(digitHeat.frequency * 100).toFixed(0)}%
+                      </span>
+                    )}
+                  </div>
                   {isConfigured && (
                     <Badge variant="outline" className="text-[10px] h-4 px-1 text-green-400 border-green-500/30">
                       ativo
@@ -300,7 +343,7 @@ export default function Frenetico9TokensPanel() {
                     data-testid={`btn-configure-slot-${i}`}
                   >
                     <Key className="w-3 h-3 mr-1" />
-                    Configurar
+                    Adicionar conta
                   </Button>
                 )}
               </div>
@@ -334,7 +377,7 @@ export default function Frenetico9TokensPanel() {
               ) : (
                 <PlayCircle className="w-4 h-4 mr-2" />
               )}
-              Disparar Rajada ({totalConfigured} slots)
+              Disparar Rajada ({totalConfigured} dígitos)
             </Button>
             <Button
               variant="ghost"
@@ -351,8 +394,8 @@ export default function Frenetico9TokensPanel() {
         {totalConfigured === 0 && (
           <div className="text-center py-4 text-muted-foreground text-sm">
             <AlertCircle className="w-8 h-8 mx-auto mb-2 opacity-40" />
-            <p>Configure ao menos 1 slot para começar.</p>
-            <p className="text-xs mt-1">Todos os slots disparam no mesmo ativo e dígito — cada um com sua conta separada, sem concorrência de saldo.</p>
+            <p>Adicione uma conta em cada dígito para começar.</p>
+            <p className="text-xs mt-1">Cada dígito (0-9) usa uma conta Deriv separada. Com 10 dígitos configurados, cada rajada cobre 100% dos dígitos no mesmo tick e ativo.</p>
           </div>
         )}
       </CardContent>

@@ -2424,8 +2424,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }));
       const balances = await getSlotBalances(userId, slots);
       const sharedAsset = selectBestAsset();
+      // Calor de cada dígito (0-9) para exibição no painel
+      const { digitFrequencyAnalyzer } = await import('./services/digit-frequency-analyzer');
+      const analysis = digitFrequencyAnalyzer.analyzeSymbolMultiWindow(sharedAsset);
+      const digitHeats = Array.from({ length: 10 }, (_, d) => {
+        const freq = analysis?.digits?.find((x: any) => x.digit === d)?.frequency ?? 0.10;
+        const label = freq >= 0.13 ? 'hot' : freq <= 0.07 ? 'cold' : 'neutral';
+        return { digit: d, frequency: freq, label };
+      });
       res.json({
         sharedAsset,
+        digitHeats,
         balances: balances.map(b => ({ ...b })),
       });
     } catch (err: any) {
