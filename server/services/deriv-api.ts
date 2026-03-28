@@ -1261,6 +1261,51 @@ export class DerivAPIService extends EventEmitter {
   }
 
   /**
+   * Consulta o payout real de um DIGITMATCH sem abrir contrato.
+   * Retorna o multiplicador (ex: 8.5 significa que $1 stake retorna $8.50 total).
+   * Usado para calibrar o tamanho do burst: burst seguro = floor(payout) - 1
+   */
+  async getDigitMatchPayoutMultiplier(symbol: string, duration: number, amount: number, barrier: string): Promise<number | null> {
+    if (!this.isConnected) return null;
+    const reqId = this.generateRequestId();
+    const proposalMsg: any = {
+      proposal: 1,
+      contract_type: 'DIGITMATCH',
+      symbol,
+      duration,
+      duration_unit: 't',
+      currency: 'USD',
+      amount,
+      basis: 'stake',
+      barrier,
+      req_id: reqId,
+    };
+    return new Promise<number | null>((resolve) => {
+      const handler = (message: any) => {
+        if (message.req_id === reqId) {
+          this.removeListener('message', handler);
+          clearTimeout(timer);
+          if (message.proposal) {
+            const askPrice = message.proposal.ask_price ?? 0;
+            const payout = message.proposal.payout ?? 0;
+            const multiplier = askPrice > 0 ? payout / askPrice : 0;
+            console.log(`📊 [PAYOUT CHECK] DIGITMATCH ${symbol} | stake=$${amount} | payout=$${payout.toFixed(2)} | ask=$${askPrice.toFixed(2)} | multiplicador=${multiplier.toFixed(2)}x`);
+            resolve(multiplier > 0 ? multiplier : null);
+          } else {
+            resolve(null);
+          }
+        }
+      };
+      const timer = setTimeout(() => {
+        this.removeListener('message', handler);
+        resolve(null);
+      }, 8000);
+      this.on('message', handler);
+      this.sendMessage(proposalMsg);
+    });
+  }
+
+  /**
    * Obtém o preço atual de um símbolo via histórico de ticks (request único, sem subscrição)
    */
   async getCurrentPrice(symbol: string): Promise<number | null> {

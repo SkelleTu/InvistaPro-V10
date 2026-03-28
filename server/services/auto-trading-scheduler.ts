@@ -2359,8 +2359,29 @@ export class AutoTradingScheduler {
             : 1;
           const isBurstMode = contractType === 'DIGITMATCH' && multiDigitCount > 1;
           if (isBurstMode) {
+            // ── CALIBRAÇÃO DE PAYOUT: consultar o multiplicador real da Deriv antes de decidir o burst size ──
+            // Regra: burst seguro = floor(payout) - 1 (garantindo lucro mesmo quando só 1 contrato vence)
+            // Ex: payout=8.5x → max seguro=8 contratos (retorno 8.5 - 8 = +0.5 lucro)
+            const sampleDigit = digitFrequencyAnalyzer.getBestBarrierForMatches(selectedSymbol).barrier;
+            let safeBurstMax = multiDigitCount; // fallback: usa o configurado
+            try {
+              const payoutMultiplier = await derivAPI.getDigitMatchPayoutMultiplier(selectedSymbol, digitDuration, tradeParams.amount, sampleDigit);
+              if (payoutMultiplier && payoutMultiplier > 1) {
+                // floor(payout) - 1 garante lucro; min 1, cap pelo configurado pelo usuário
+                const payoutBasedMax = Math.max(1, Math.floor(payoutMultiplier) - 1);
+                safeBurstMax = Math.min(multiDigitCount, payoutBasedMax);
+                console.log(`💰 [BURST CALIBRADO] Payout real=${payoutMultiplier.toFixed(2)}x → burst seguro=${safeBurstMax} contratos (configurado=${multiDigitCount}) | vitória cobre investimento + lucro`);
+              } else {
+                // Payout não disponível → usar conservador: 4 contratos
+                safeBurstMax = Math.min(multiDigitCount, 4);
+                console.log(`⚠️ [BURST CALIBRADO] Payout indisponível → fallback conservador: ${safeBurstMax} contratos`);
+              }
+            } catch {
+              safeBurstMax = Math.min(multiDigitCount, 4);
+            }
+
             // Obtém os N dígitos mais quentes com score composto (frequência + tendência)
-            const BURST_SIZE = multiDigitCount;
+            const BURST_SIZE = safeBurstMax;
             const hottestDigits = digitFrequencyAnalyzer.getHottestDigitsForMatches(selectedSymbol, BURST_SIZE);
             const coverage = Math.round((BURST_SIZE / 10) * 100);
             // Log com resumo completo das tendências
