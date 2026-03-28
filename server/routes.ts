@@ -2526,7 +2526,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (typeof circuitBreakerPauseMinutes === 'number' && circuitBreakerPauseMinutes >= 1 && circuitBreakerPauseMinutes <= 60) {
       patch.circuitBreakerPauseMinutes = Math.round(circuitBreakerPauseMinutes);
     }
-    if (stakeMode === 'ai' || stakeMode === 'fixed') patch.stakeMode = stakeMode;
+    if (stakeMode === 'ai' || stakeMode === 'fixed' || stakeMode === 'manual') patch.stakeMode = stakeMode;
     if (typeof fixedStake === 'number' && fixedStake >= 0.35 && fixedStake <= 1000) {
       patch.fixedStake = Math.round(fixedStake * 100) / 100;
     }

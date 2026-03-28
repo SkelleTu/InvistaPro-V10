@@ -1746,12 +1746,25 @@ export class AutoTradingScheduler {
       const digitEdgePositive = digitQuality.edge > 0;
       const digitSignalGood = digitConfidenceOk && digitEdgePositive;
 
+      // ⚡ MODO FRENÉTICO DIGIT MATCHES: verificar se está ativo (para relaxar gate de sinal)
+      let isDigitMatchFrenetico = false;
+      try {
+        if (preActiveModalities.includes('digit_matches')) {
+          const freqObj = JSON.parse((config as any).modalityFrequency || '{}');
+          isDigitMatchFrenetico = freqObj['digit_matches'] === 'frenetico';
+        }
+      } catch {}
+
       if (hasDigitModalities) {
-        console.log(`🧠 [${operationId}] ANÁLISE DÍGITOS: conf=${digitQuality.confidence.toFixed(0)}% | edge=+${digitQuality.edge.toFixed(1)}% | barreira=${digitQuality.barrier} | sinal=${digitSignalGood ? '✅ BOM' : '⚠️ AGUARDANDO'}`);
+        console.log(`🧠 [${operationId}] ANÁLISE DÍGITOS: conf=${digitQuality.confidence.toFixed(0)}% | edge=+${digitQuality.edge.toFixed(1)}% | barreira=${digitQuality.barrier} | sinal=${digitSignalGood ? '✅ BOM' : '⚠️ AGUARDANDO'}${isDigitMatchFrenetico ? ' | FRENÉTICO: gate relaxado' : ''}`);
         // 🛑 SE O ANALISADOR DE DÍGITOS NÃO TEM DADOS SUFICIENTES, AGUARDAR
-        if (!digitSignalGood) {
+        // ⚡ EXCEÇÃO: DIGITMATCH FRENÉTICO usa análise de frequência própria — ignora edge gate do DIGITDIFF
+        if (!digitSignalGood && !isDigitMatchFrenetico) {
           console.log(`⏸️ [${operationId}] Aguardando dados de dígitos: conf=${digitQuality.confidence.toFixed(0)}% (mín 50%) | edge=${digitQuality.edge.toFixed(1)}% (mín >0%)`);
           return { success: false, error: `Analisador de dígitos aguardando mais dados: confiança ${digitQuality.confidence.toFixed(0)}%` };
+        }
+        if (!digitSignalGood && isDigitMatchFrenetico) {
+          console.log(`⚡ [FRENÉTICO] Gate de sinal ignorado — DIGITMATCH frenético usa análise de frequência própria (conf=${digitQuality.confidence.toFixed(0)}%)`);
         }
       } else {
         console.log(`ℹ️ [${operationId}] Análise de dígitos ignorada — modalidades selecionadas não incluem dígitos: [${preActiveModalities.join(', ')}]`);
@@ -1881,7 +1894,12 @@ export class AutoTradingScheduler {
           recoveryMultiplier = await this.calculateCooperativeRecoveryMultiplier(config.userId, recoveryStrategy);
           
           // Aplicar multiplicador de recuperação gradual baseado na cooperação das IAs
-          tradeParams.amount = tradeParams.amount * recoveryMultiplier;
+          // 📌 STAKE MANUAL: stake fixo pelo usuário — não permite modificações pelo sistema
+          if ((config as any)?.stakeMode !== 'manual') {
+            tradeParams.amount = tradeParams.amount * recoveryMultiplier;
+          } else {
+            console.log(`📌 [STAKE MANUAL] Multiplicador de recuperação ignorado — stake manual bloqueado em $${tradeParams.amount.toFixed(2)}`);
+          }
           
           console.log(`🔥 [${operationId}] MODO RECUPERAÇÃO ATIVADO - COOPERAÇÃO AI:`);
           console.log(`🧠 Estratégia: ${recoveryStrategy.name} (Taxa de sucesso: ${recoveryStrategy.successRate}%)`);
@@ -2232,11 +2250,14 @@ export class AutoTradingScheduler {
           'digit_over':        58,  'digit_under':       58,
         };
         const modalityMinConsensus = MODALITY_CONSENSUS_MAP[selectedModality] ?? 65;
-        if (aiDirectionalConsensus < modalityMinConsensus) {
-          console.log(`⛔ [${operationId}] GATE MODALIDADE: ${selectedModality} exige consenso ≥${modalityMinConsensus}% | atual=${aiDirectionalConsensus.toFixed(1)}% — EV negativo para esta modalidade. Aguardando sinal mais forte.`);
-          return { success: false, error: `${selectedModality}: consenso ${aiDirectionalConsensus.toFixed(1)}% < mínimo ${modalityMinConsensus}% (break-even calibrado). Aguardando.` };
+        // ⚡ MODO FRENÉTICO: consenso direcional irrelevante — estratégia é puramente baseada em frequência de dígitos
+        const isFraneticoGate = selectedModality === 'digit_matches' && modalityFrequency['digit_matches'] === 'frenetico';
+        const effectiveMinConsensus = isFraneticoGate ? 40 : modalityMinConsensus;
+        if (aiDirectionalConsensus < effectiveMinConsensus) {
+          console.log(`⛔ [${operationId}] GATE MODALIDADE: ${selectedModality} exige consenso ≥${effectiveMinConsensus}%${isFraneticoGate ? ' (frenético)' : ''} | atual=${aiDirectionalConsensus.toFixed(1)}% — EV negativo para esta modalidade. Aguardando sinal mais forte.`);
+          return { success: false, error: `${selectedModality}: consenso ${aiDirectionalConsensus.toFixed(1)}% < mínimo ${effectiveMinConsensus}%${isFraneticoGate ? ' (frenético)' : ''} (break-even calibrado). Aguardando.` };
         }
-        console.log(`✅ [${operationId}] GATE MODALIDADE: ${selectedModality} mín=${modalityMinConsensus}% | atual=${aiDirectionalConsensus.toFixed(1)}% — EV positivo confirmado.`);
+        console.log(`✅ [${operationId}] GATE MODALIDADE: ${selectedModality} mín=${effectiveMinConsensus}%${isFraneticoGate ? ' (frenético)' : ''} | atual=${aiDirectionalConsensus.toFixed(1)}% — EV positivo confirmado.`);
 
         // ─── EXECUÇÃO POR MODALIDADE ─────────────────────────────────────
         let contract: any = null;
@@ -2266,6 +2287,14 @@ export class AutoTradingScheduler {
             const smartBarrier = this.selectDigitBarrierForOverUnder(selectedSymbol, 'under');
             barrier = smartBarrier.barrier;
             console.log(`🎯 [DIGITUNDER] ${selectedSymbol}: barreira inteligente=${barrier} | winRate≈${smartBarrier.winRateEst}% | ${smartBarrier.reason}`);
+          }
+          // 🎯 DIGITMATCH padrão: usar dígito MAIS QUENTE (maior frequência) como barreira
+          if (contractType === 'DIGITMATCH') {
+            const hottestSingle = digitFrequencyAnalyzer.getHottestDigitsForMatches(selectedSymbol, 1);
+            if (hottestSingle.length > 0) {
+              barrier = hottestSingle[0].toString();
+              console.log(`🎯 [DIGITMATCH] ${selectedSymbol}: barreira mais quente=${barrier} (dígito mais frequente)`);
+            }
           }
           if (!needsBarrier) barrier = undefined;
 
@@ -4219,10 +4248,11 @@ export class AutoTradingScheduler {
     let amount = 0.35; // Default para bancas pequenas (conservador)
     let duration = 10; // ⚡ OTIMIZAÇÃO: Aumentado de 5 para 10 ticks para distribuir fechamento
 
-    // 📌 STAKE FIXO — bypassa cálculo da IA completamente
-    if (riskConfig?.stakeMode === 'fixed' && typeof riskConfig?.fixedStake === 'number' && riskConfig.fixedStake >= 0.35) {
+    // 📌 STAKE FIXO / MANUAL — bypassa cálculo da IA completamente
+    if ((riskConfig?.stakeMode === 'fixed' || riskConfig?.stakeMode === 'manual') && typeof riskConfig?.fixedStake === 'number' && riskConfig.fixedStake >= 0.35) {
       amount = riskConfig.fixedStake;
-      console.log(`📌 [STAKE FIXO] Usando stake definido pelo usuário: $${amount.toFixed(2)} (bypassing IA)`);
+      const label = riskConfig.stakeMode === 'manual' ? 'STAKE MANUAL' : 'STAKE FIXO';
+      console.log(`📌 [${label}] Usando stake definido pelo usuário: $${amount.toFixed(2)} (bypassing IA)`);
       // ainda precisa de duration/barrier — vai setar abaixo via modo
     }
     

@@ -713,8 +713,8 @@ export default function TradingSystemPage() {
   const [circuitBreakerPauseMinutes, setCircuitBreakerPauseMinutes] = useState<number>(() => {
     try { const s = localStorage.getItem("circuit_breaker_pause_minutes"); if (s) return parseInt(s); } catch {} return 2;
   });
-  const [stakeMode, setStakeMode] = useState<'ai' | 'fixed'>(() => {
-    try { const s = localStorage.getItem("stake_mode"); if (s === 'fixed') return 'fixed'; } catch {} return 'ai';
+  const [stakeMode, setStakeMode] = useState<'ai' | 'fixed' | 'manual'>(() => {
+    try { const s = localStorage.getItem("stake_mode"); if (s === 'fixed') return 'fixed'; if (s === 'manual') return 'manual'; } catch {} return 'ai';
   });
   const [fixedStake, setFixedStake] = useState<number>(() => {
     try { const s = localStorage.getItem("fixed_stake"); if (s) { const n = parseFloat(s); if (n >= 0.35) return n; } } catch {} return 0.35;
@@ -819,7 +819,7 @@ export default function TradingSystemPage() {
           setCircuitBreakerPauseMinutes(data.circuitBreakerPauseMinutes);
           localStorage.setItem("circuit_breaker_pause_minutes", String(data.circuitBreakerPauseMinutes));
         }
-        if (data?.stakeMode === 'ai' || data?.stakeMode === 'fixed') {
+        if (data?.stakeMode === 'ai' || data?.stakeMode === 'fixed' || data?.stakeMode === 'manual') {
           setStakeMode(data.stakeMode);
           localStorage.setItem("stake_mode", data.stakeMode);
         }
@@ -2300,7 +2300,7 @@ export default function TradingSystemPage() {
                   <p className="text-sm font-bold text-blue-800 dark:text-blue-200 flex items-center gap-2">
                     <span>💰</span> Valor do Stake por Operação
                   </p>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-3 gap-2">
                     <button
                       onClick={() => {
                         setStakeMode('ai');
@@ -2310,14 +2310,14 @@ export default function TradingSystemPage() {
                         toast({ title: "IA decide o stake", description: "A IA calculará o valor ideal a cada operação com base na banca e sinal." });
                       }}
                       data-testid="button-stake-mode-ai"
-                      className={`flex flex-col items-center gap-1 rounded-lg border-2 p-3 transition-all text-left ${
+                      className={`flex flex-col items-center gap-1 rounded-lg border-2 p-3 transition-all text-center ${
                         stakeMode === 'ai'
                           ? 'border-blue-500 bg-blue-500 text-white shadow-lg'
                           : 'border-blue-200 dark:border-blue-700 bg-white dark:bg-gray-900 text-blue-700 dark:text-blue-300 hover:border-blue-400'
                       }`}
                     >
-                      <span className="text-base font-bold">🧠 IA Decide</span>
-                      <span className={`text-xs ${stakeMode === 'ai' ? 'text-blue-100' : 'text-muted-foreground'}`}>Dinâmico por banca</span>
+                      <span className="text-sm font-bold">🧠 IA Decide</span>
+                      <span className={`text-[10px] ${stakeMode === 'ai' ? 'text-blue-100' : 'text-muted-foreground'}`}>Dinâmico</span>
                     </button>
                     <button
                       onClick={() => {
@@ -2325,22 +2325,40 @@ export default function TradingSystemPage() {
                         localStorage.setItem("stake_mode", 'fixed');
                         const patch = { stakeMode: 'fixed', fixedStake };
                         apiRequest("/api/trading/risk-settings", { method: "PUT", body: JSON.stringify(patch) }).catch(() => {});
-                        toast({ title: "Stake fixo ativado", description: `Todas as operações usarão $${fixedStake.toFixed(2)} como stake.` });
+                        toast({ title: "Stake fixo ativado", description: `Operações usarão $${fixedStake.toFixed(2)} — a IA ainda pode ajustar em recuperação.` });
                       }}
                       data-testid="button-stake-mode-fixed"
-                      className={`flex flex-col items-center gap-1 rounded-lg border-2 p-3 transition-all text-left ${
+                      className={`flex flex-col items-center gap-1 rounded-lg border-2 p-3 transition-all text-center ${
                         stakeMode === 'fixed'
                           ? 'border-green-500 bg-green-500 text-white shadow-lg'
                           : 'border-green-200 dark:border-green-700 bg-white dark:bg-gray-900 text-green-700 dark:text-green-300 hover:border-green-400'
                       }`}
                     >
-                      <span className="text-base font-bold">📌 Stake Fixo</span>
-                      <span className={`text-xs ${stakeMode === 'fixed' ? 'text-green-100' : 'text-muted-foreground'}`}>Valor definido por você</span>
+                      <span className="text-sm font-bold">📌 Fixo</span>
+                      <span className={`text-[10px] ${stakeMode === 'fixed' ? 'text-green-100' : 'text-muted-foreground'}`}>Base definida</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setStakeMode('manual');
+                        localStorage.setItem("stake_mode", 'manual');
+                        const patch = { stakeMode: 'manual', fixedStake };
+                        apiRequest("/api/trading/risk-settings", { method: "PUT", body: JSON.stringify(patch) }).catch(() => {});
+                        toast({ title: "Stake manual ativado", description: `O sistema usará exatamente $${fixedStake.toFixed(2)} — sem qualquer ajuste automático.` });
+                      }}
+                      data-testid="button-stake-mode-manual"
+                      className={`flex flex-col items-center gap-1 rounded-lg border-2 p-3 transition-all text-center ${
+                        stakeMode === 'manual'
+                          ? 'border-purple-500 bg-purple-500 text-white shadow-lg'
+                          : 'border-purple-200 dark:border-purple-700 bg-white dark:bg-gray-900 text-purple-700 dark:text-purple-300 hover:border-purple-400'
+                      }`}
+                    >
+                      <span className="text-sm font-bold">✋ Manual</span>
+                      <span className={`text-[10px] ${stakeMode === 'manual' ? 'text-purple-100' : 'text-muted-foreground'}`}>100% seu controle</span>
                     </button>
                   </div>
-                  {stakeMode === 'fixed' && (
+                  {(stakeMode === 'fixed' || stakeMode === 'manual') && (
                     <div className="flex items-center gap-3 mt-1">
-                      <label className="text-sm font-medium text-green-800 dark:text-green-200 whitespace-nowrap">Valor ($):</label>
+                      <label className={`text-sm font-medium whitespace-nowrap ${stakeMode === 'manual' ? 'text-purple-800 dark:text-purple-200' : 'text-green-800 dark:text-green-200'}`}>Valor ($):</label>
                       <div className="flex-1 flex items-center gap-2">
                         <input
                           type="number"
@@ -2355,16 +2373,20 @@ export default function TradingSystemPage() {
                               setFixedStake(rounded);
                               setFixedStakeInput(String(rounded));
                               localStorage.setItem("fixed_stake", String(rounded));
-                              const patch = { stakeMode: 'fixed', fixedStake: rounded };
+                              const patch = { stakeMode, fixedStake: rounded };
                               apiRequest("/api/trading/risk-settings", { method: "PUT", body: JSON.stringify(patch) }).catch(() => {});
-                              toast({ title: "Stake fixo salvo", description: `Operações usarão $${rounded.toFixed(2)} por trade.` });
+                              toast({ title: stakeMode === 'manual' ? "Stake manual salvo" : "Stake fixo salvo", description: `Operações usarão $${rounded.toFixed(2)} por trade.` });
                             } else {
                               setFixedStakeInput(String(fixedStake));
                               toast({ title: "Valor inválido", description: "O stake mínimo é $0.35.", variant: "destructive" });
                             }
                           }}
                           data-testid="input-fixed-stake"
-                          className="w-28 rounded-lg border-2 border-green-300 dark:border-green-600 bg-white dark:bg-gray-900 px-3 py-2 text-sm font-bold text-green-900 dark:text-green-100 focus:outline-none focus:border-green-500"
+                          className={`w-28 rounded-lg border-2 bg-white dark:bg-gray-900 px-3 py-2 text-sm font-bold focus:outline-none ${
+                            stakeMode === 'manual'
+                              ? 'border-purple-300 dark:border-purple-600 text-purple-900 dark:text-purple-100 focus:border-purple-500'
+                              : 'border-green-300 dark:border-green-600 text-green-900 dark:text-green-100 focus:border-green-500'
+                          }`}
                         />
                         <span className="text-xs text-muted-foreground">mín. $0.35</span>
                       </div>
@@ -2373,6 +2395,16 @@ export default function TradingSystemPage() {
                   {stakeMode === 'ai' && (
                     <p className="text-xs text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/50 rounded-lg px-3 py-2">
                       A IA calcula o stake ideal por operação com base no saldo, consenso dos modelos, volatilidade e regime de mercado.
+                    </p>
+                  )}
+                  {stakeMode === 'fixed' && (
+                    <p className="text-xs text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/30 rounded-lg px-3 py-2">
+                      Stake base definido por você. O sistema pode ajustar em modo de recuperação ou martingale se ativados.
+                    </p>
+                  )}
+                  {stakeMode === 'manual' && (
+                    <p className="text-xs text-purple-700 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/30 rounded-lg px-3 py-2">
+                      <strong>Controle total:</strong> O sistema usará exatamente o valor definido em <strong>toda e qualquer operação</strong>, sem ajustes de recuperação, martingale ou IA.
                     </p>
                   )}
                 </div>
