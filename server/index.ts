@@ -373,9 +373,9 @@ app.use((req, res, next) => {
       );
     }
     
-    // 🔍 KEEP-ALIVE: Ping externo via URL pública a cada 4 minutos
-    // Replit hiberna após ~5 min sem tráfego externo — 4 min mantém sempre ativo
-    setInterval(keepWorkspaceAlive, 4 * 60 * 1000);
+    // 🔍 KEEP-ALIVE: Ping externo via URL pública a cada 2 minutos
+    // Replit hiberna após ~5 min sem tráfego externo — 2 min garante margem segura
+    setInterval(keepWorkspaceAlive, 2 * 60 * 1000);
     setTimeout(keepWorkspaceAlive, 5000);
     
     log('\n' + '='.repeat(80));
@@ -390,7 +390,7 @@ app.use((req, res, next) => {
     log('   3. Use qualquer endpoint: /api/ping, /api/status, etc');
     log('   4. Apenas TRÁFEGO EXTERNO impede hibernação');
     log('');
-    log('📊 Sistema de debug interno ativo (60s):');
+    log('📊 Sistema de keep-alive ativo (2 min):');
     log('   • Monitora uptime e saúde do sistema');
     log('   • Gera logs para debug');
     log('   • NÃO previne hibernação');
