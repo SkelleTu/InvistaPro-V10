@@ -2385,7 +2385,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const savedToken = await dbStorage.upsertDerivTokenBySlot(userId, slotIndex, token.trim(), accountType);
 
-      console.log(`✅ [FRENÉTICO-9T] Slot ${slotIndex} configurado para usuário ${userId} | saldo: $${balance}`);
+      console.log(`✅ [FRENÉTICO-10T] Slot ${slotIndex} configurado para usuário ${userId} | saldo: $${balance}`);
       res.json({
         message: `Slot ${slotIndex} configurado com sucesso`,
         slotIndex,

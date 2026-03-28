@@ -673,7 +673,7 @@ export function initializeDatabase() {
       sqlite.exec(`ALTER TABLE trade_configurations ADD COLUMN fixed_stake REAL DEFAULT 0.35`);
     } catch {}
 
-    // Frenético 9-Tokens: slot_index para múltiplos tokens por usuário
+    // Frenético 10-Tokens: slot_index para múltiplos tokens por usuário
     try {
       sqlite.exec(`ALTER TABLE deriv_tokens ADD COLUMN slot_index INTEGER DEFAULT 0`);
     } catch {}

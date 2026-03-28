@@ -237,7 +237,7 @@ export class DualStorage implements IStorage {
   async updateDerivToken(uid: string, token: string, accountType: string) { return this.write(() => this.turso!.updateDerivToken(uid, token, accountType), () => this.sqlite.updateDerivToken(uid, token, accountType), 'updateDerivToken'); }
   async deactivateDerivToken(uid: string)                                  { return this.write(() => this.turso!.deactivateDerivToken(uid), () => this.sqlite.deactivateDerivToken(uid), 'deactivateDerivToken'); }
 
-  // ─── Frenético 9-Tokens ───────────────────────────────────────────────────
+  // ─── Frenético 10-Tokens ──────────────────────────────────────────────────
   async getAllDerivTokens(uid: string) {
     return this.localRead(() => this.turso!.getAllDerivTokens(uid), () => this.sqlite.getAllDerivTokens(uid), 'getAllDerivTokens');
   }

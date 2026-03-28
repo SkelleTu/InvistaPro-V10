@@ -1,17 +1,17 @@
 /**
- * FRENÉTICO 9-TOKENS — Orquestrador de disparos paralelos por slot
+ * FRENÉTICO 10-TOKENS — Orquestrador de disparos paralelos por slot
  *
  * Estratégia:
- *  - Até 9 tokens Deriv, cada um em seu próprio slot (0-8)
+ *  - Até 10 tokens Deriv, cada um em seu próprio slot (0-9)
  *  - Cada slot monitora um ativo diferente
  *  - Para cada ativo, a IA identifica o ÚNICO dígito mais quente
- *  - Todos os 9 contratos disparam SIMULTANEAMENTE (Promise.allSettled)
+ *  - Todos os 10 contratos disparam SIMULTANEAMENTE (Promise.allSettled)
  *  - Sem gargalo, sem delay entre operações, sem concorrência de saldo
  *
  * Vantagem matemática:
  *  - Dígito quente: frequência ~14-17% (acima dos 10% neutros)
  *  - Com payout 8.5x: EV = 0.15 × 8.5 − 0.85 = +$0.425 por dólar apostado
- *  - Multiplicado por 9 slots simultâneos em 9 ativos independentes
+ *  - Multiplicado por 10 slots simultâneos em 10 ativos independentes
  */
 
 import { DerivAPIService } from './deriv-api';
@@ -106,10 +106,10 @@ export function selectAssetsForSlots(slotCount: number): string[] {
 }
 
 /**
- * Executa uma RAJADA FRENÉTICA com 9 tokens simultâneos
+ * Executa uma RAJADA FRENÉTICA com até 10 tokens simultâneos
  *
  * @param userId   - ID do usuário
- * @param slots    - Array de tokens configurados (slotIndex 0-8)
+ * @param slots    - Array de tokens configurados (slotIndex 0-9)
  * @param amount   - Valor por contrato (em USD)
  * @param duration - Duração em ticks (1-10)
  * @param operationId - ID da operação para logs
@@ -124,12 +124,12 @@ export async function executeFrenetic9TokensBurst(
   const startTime = Date.now();
 
   if (slots.length === 0) {
-    throw new Error('Nenhum slot de token configurado para o modo Frenético 9-Tokens');
+    throw new Error('Nenhum slot de token configurado para o modo Frenético 10-Tokens');
   }
 
   // Seleciona os melhores ativos (um por slot)
   const assets = selectAssetsForSlots(slots.length);
-  console.log(`⚡🔥 [FRENÉTICO-9T] Iniciando rajada | ${slots.length} slots | Ativos: [${assets.join(',')}]`);
+  console.log(`⚡🔥 [FRENÉTICO-10T] Iniciando rajada | ${slots.length} slots | Ativos: [${assets.join(',')}]`);
 
   // Prepara os disparos simultâneos — um por slot
   const slotPromises = slots.map(async (slot, idx): Promise<SlotResult> => {
@@ -146,7 +146,7 @@ export async function executeFrenetic9TokensBurst(
       const digitData = analysis?.digits.find(d => d.digit === hottestDigit);
       const digitFreq = digitData?.frequency ?? 0.10;
 
-      console.log(`🎯 [FRENÉTICO-9T S${slot.slotIndex}] ${symbol} → dígito ${hottestDigit} (freq ${(digitFreq * 100).toFixed(1)}%)`);
+      console.log(`🎯 [FRENÉTICO-10T S${slot.slotIndex}] ${symbol} → dígito ${hottestDigit} (freq ${(digitFreq * 100).toFixed(1)}%)`);
 
       // Dispara o contrato
       const contract = await api.buyGenericDigitContract({
@@ -171,7 +171,7 @@ export async function executeFrenetic9TokensBurst(
         };
       }
 
-      console.log(`✅ [FRENÉTICO-9T S${slot.slotIndex}] Contrato ${contract.contract_id} aberto | ${symbol} dígito ${hottestDigit}`);
+      console.log(`✅ [FRENÉTICO-10T S${slot.slotIndex}] Contrato ${contract.contract_id} aberto | ${symbol} dígito ${hottestDigit}`);
 
       return {
         slotIndex: slot.slotIndex,
@@ -187,7 +187,7 @@ export async function executeFrenetic9TokensBurst(
       const msg = err?.message ?? String(err);
       const isInsufficientBalance = msg.includes('InsufficientBalance') || msg.includes('insufficient');
 
-      console.warn(`❌ [FRENÉTICO-9T S${slot.slotIndex}] ${symbol} falhou: ${msg}`);
+      console.warn(`❌ [FRENÉTICO-10T S${slot.slotIndex}] ${symbol} falhou: ${msg}`);
 
       return {
         slotIndex: slot.slotIndex,
@@ -219,7 +219,7 @@ export async function executeFrenetic9TokensBurst(
     .reduce((sum, r) => sum + r.digitFrequency, 0) / Math.max(opened, 1);
   const estimatedEdge = avgFreq * 8.5 - (1 - avgFreq); // EV real com payout 8.5x
 
-  console.log(`🏁 [FRENÉTICO-9T] Rajada concluída: ${opened}/${slots.length} | Tempo: ${Date.now() - startTime}ms | Edge estimado: ${(estimatedEdge * 100).toFixed(1)}%`);
+  console.log(`🏁 [FRENÉTICO-10T] Rajada concluída: ${opened}/${slots.length} | Tempo: ${Date.now() - startTime}ms | Edge estimado: ${(estimatedEdge * 100).toFixed(1)}%`);
 
   return {
     totalSlots: slots.length,
@@ -241,7 +241,7 @@ export async function closeAllSlotConnections(userId: string): Promise<void> {
   for (const [slotIndex, api] of userPool.entries()) {
     try {
       await api.disconnect();
-      console.log(`🔌 [FRENÉTICO-9T] Slot ${slotIndex} desconectado`);
+      console.log(`🔌 [FRENÉTICO-10T] Slot ${slotIndex} desconectado`);
     } catch {
       // ignora erros ao fechar
     }

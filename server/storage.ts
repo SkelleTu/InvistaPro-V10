@@ -160,7 +160,7 @@ export interface IStorage {
   getUserDerivToken(userId: string): Promise<DerivToken | undefined>;
   updateDerivToken(userId: string, token: string, accountType: string): Promise<DerivToken>;
   deactivateDerivToken(userId: string): Promise<void>;
-  // Frenético 9-Tokens: gerenciamento de múltiplos slots de token
+  // Frenético 10-Tokens: gerenciamento de múltiplos slots de token
   getAllDerivTokens(userId: string): Promise<DerivToken[]>;
   upsertDerivTokenBySlot(userId: string, slotIndex: number, token: string, accountType: string): Promise<DerivToken>;
   deleteDerivTokenBySlot(userId: string, slotIndex: number): Promise<void>;
@@ -510,7 +510,7 @@ export class DatabaseStorage implements IStorage {
       .where(eq(derivTokens.userId, userId));
   }
 
-  // Frenético 9-Tokens: retorna TODOS os tokens ativos do usuário (um por slot)
+  // Frenético 10-Tokens: retorna TODOS os tokens ativos do usuário (um por slot)
   async getAllDerivTokens(userId: string): Promise<DerivToken[]> {
     const tokens = await db
       .select()
@@ -522,7 +522,7 @@ export class DatabaseStorage implements IStorage {
     }));
   }
 
-  // Frenético 9-Tokens: insere ou atualiza o token de um slot específico (0-8)
+  // Frenético 10-Tokens: insere ou atualiza o token de um slot específico (0-9)
   async upsertDerivTokenBySlot(userId: string, slotIndex: number, token: string, accountType: string): Promise<DerivToken> {
     return db.transaction((tx: any) => {
       // Desativa o slot anterior se existir
@@ -546,7 +546,7 @@ export class DatabaseStorage implements IStorage {
     });
   }
 
-  // Frenético 9-Tokens: remove o token de um slot específico
+  // Frenético 10-Tokens: remove o token de um slot específico
   async deleteDerivTokenBySlot(userId: string, slotIndex: number): Promise<void> {
     await db
       .update(derivTokens)
