@@ -510,33 +510,54 @@ export class HuggingFaceAIService {
         }
 
         if (externalVoterWeight > 0) {
-          // Recalcular agreementScore incluindo o votante externo
-          const extAgrees = (finalDir === extDir || finalDir === 'neutral') ? 1.0 : 0.0;
-          const newAgreementScore = agreementScore + extAgrees * externalVoterWeight;
-          const newTotalWeight = totalWeight + externalVoterWeight;
-          const newAgreementRatio = newAgreementScore / newTotalWeight;
+          // ─── Proteção do Drift Boost para Crash/Boom ──────────────────────────
+          // Se o drift técnico já foi confirmado e corrigiu o consenso para cima,
+          // o votante externo (notícias BR / Girassol) NÃO pode anular esse boost.
+          // O drift multi-escala é muito mais confiável do que noticiário macro para
+          // índices sintéticos Crash/Boom. Regra:
+          //   • Conflito (extDir ≠ driftDir): pula o recálculo — preserva o boost do drift
+          //   • Acordo  (extDir = driftDir):  aplica normalmente (pode amplificar)
+          const confirmedDriftDir: 'up' | 'down' | null = (hybridResult as any)._driftOverride ?? null;
+          if (confirmedDriftDir !== null && extDir !== confirmedDriftDir) {
+            // Votante externo CONFLITA com drift confirmado → ignorar recálculo
+            console.log(`🛡️ [DRIFT GUARD] ${symbol}: votante externo (dir:${extDir}, peso:${externalVoterWeight}) conflita com drift ${confirmedDriftDir.toUpperCase()} confirmado — consenso ${finalConsensus}% preservado`);
+          } else {
+            // Direção da comparação: usa o drift confirmado se disponível, senão a IA
+            const effectiveDir = confirmedDriftDir ?? finalDir;
 
-          // Recalcular consenso com votante externo
-          // Confiança do votante externo = newsStrength (capped a 90)
-          const extConf = Math.min(90, newsAligned ? newsStr : gLevels * 28);
-          const newConfTotalWeight = confTotalWeight + externalVoterWeight;
-          const newWeightedConf = (weightedConf * confTotalWeight + extConf * externalVoterWeight) / newConfTotalWeight;
+            // Recalcular agreementScore incluindo o votante externo
+            const extAgrees = (effectiveDir === extDir || effectiveDir === 'neutral') ? 1.0 : 0.0;
+            const newAgreementScore = agreementScore + extAgrees * externalVoterWeight;
+            const newTotalWeight = totalWeight + externalVoterWeight;
+            const newAgreementRatio = newAgreementScore / newTotalWeight;
 
-          const newRaw = (newAgreementRatio * 0.6 + (newWeightedConf / 100) * 0.4) * 100;
-          const newBoosted = newAgreementRatio >= 0.99 ? Math.min(95, newRaw * 1.15) : newRaw;
-          const newConsensus = Math.round(Math.min(95, Math.max(0, newBoosted)));
+            // Recalcular consenso com votante externo
+            // Confiança do votante externo = newsStrength (capped a 90)
+            const extConf = Math.min(90, newsAligned ? newsStr : gLevels * 28);
+            const newConfTotalWeight = confTotalWeight + externalVoterWeight;
+            const newWeightedConf = (weightedConf * confTotalWeight + extConf * externalVoterWeight) / newConfTotalWeight;
 
-          // Se a IA estava neutra mas contexto externo tem peso suficiente → adotar direção do contexto
-          // ≥ 0.7 = confirmação técnica (Girassol ativo) — substitui sem restrições
-          // ≥ 0.2 = apenas noticiário — sobrescreve neutro, mas consenso ainda precisa passar threshold
-          if (finalDir === 'neutral' && externalVoterWeight >= 0.2) {
-            contextInjectedDir = extDir;
-            const contextType = gLevels >= 1 ? `Girassol ${gLevels}/3 + Notícias ${newsStr}%` : `Noticiário BR ${newsStr}% ${externalContext!.newsDirection.toUpperCase()} (sem Girassol)`;
-            console.log(`🌻🇧🇷 [CONTEXT INJECT] IA neutra → direção do contexto externo: ${extDir.toUpperCase()} | ${contextType}`);
+            const newRaw = (newAgreementRatio * 0.6 + (newWeightedConf / 100) * 0.4) * 100;
+            const newBoosted = newAgreementRatio >= 0.99 ? Math.min(95, newRaw * 1.15) : newRaw;
+            const newConsensus = Math.round(Math.min(95, Math.max(0, newBoosted)));
+
+            // Se o drift já foi confirmado: votante externo só pode AUMENTAR o consenso, nunca reduzir
+            const protectedConsensus = confirmedDriftDir !== null
+              ? Math.max(finalConsensus, newConsensus)
+              : newConsensus;
+
+            // Se a IA estava neutra mas contexto externo tem peso suficiente → adotar direção do contexto
+            // ≥ 0.7 = confirmação técnica (Girassol ativo) — substitui sem restrições
+            // ≥ 0.2 = apenas noticiário — sobrescreve neutro, mas consenso ainda precisa passar threshold
+            if (finalDir === 'neutral' && externalVoterWeight >= 0.2) {
+              contextInjectedDir = extDir;
+              const contextType = gLevels >= 1 ? `Girassol ${gLevels}/3 + Notícias ${newsStr}%` : `Noticiário BR ${newsStr}% ${externalContext!.newsDirection.toUpperCase()} (sem Girassol)`;
+              console.log(`🌻🇧🇷 [CONTEXT INJECT] IA neutra → direção do contexto externo: ${extDir.toUpperCase()} | ${contextType}`);
+            }
+
+            console.log(`🌻🇧🇷 [EXTERNAL VOTER] Peso: ${externalVoterWeight} | Consenso antes: ${finalConsensus}% → depois: ${protectedConsensus}% | Dir IA: ${finalDir} | Dir externa: ${extDir}${confirmedDriftDir ? ` | 🛡️ drift ${confirmedDriftDir} protegido` : ''}`);
+            finalConsensus = protectedConsensus;
           }
-
-          console.log(`🌻🇧🇷 [EXTERNAL VOTER] Peso: ${externalVoterWeight} | Consenso antes: ${finalConsensus}% → depois: ${newConsensus}% | Dir IA: ${finalDir} | Dir externa: ${extDir}`);
-          finalConsensus = newConsensus;
         }
       }
 

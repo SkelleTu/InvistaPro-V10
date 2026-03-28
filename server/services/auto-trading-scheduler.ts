@@ -2136,7 +2136,11 @@ export class AutoTradingScheduler {
         };
 
         // Determinar modalidades compatíveis com o símbolo selecionado
-        const symbolCompatible = new Set<string>(SYMBOL_COMPAT[selectedSymbol] ?? [...DIGIT_KEYS, ...RISFALL_KEYS]);
+        // ⚠️ CRASH/BOOM: a Deriv não oferece dígitos para esses ativos — apenas Rise/Fall
+        const isCrashBoomSymbol = /^(CRASH|BOOM)\d+N?$/i.test(selectedSymbol);
+        const symbolCompatible = new Set<string>(
+          SYMBOL_COMPAT[selectedSymbol] ?? (isCrashBoomSymbol ? [...RISFALL_KEYS] : [...DIGIT_KEYS, ...RISFALL_KEYS])
+        );
 
         // 🤖 MODO AUTOMÁTICO: usar todas as modalidades compatíveis com o símbolo
         // A IA (selectModalityByMarketFit) escolhe a melhor para cada ciclo.
@@ -3195,10 +3199,17 @@ export class AutoTradingScheduler {
 
       // Se o usuário tem modalidades ativas, pré-filtrar símbolos compatíveis com PELO MENOS UMA.
       // Símbolos não mapeados aceitam dígitos e rise/fall — são descartados se o usuário só tem ACCU/MULT/etc.
+      // ⚠️  CRASH/BOOM: a Deriv NÃO oferece contratos de dígito (DIGITMATCH/DIGITDIFF) para esses ativos.
+      //     Eles suportam apenas Rise/Fall (CALL/PUT). Sem mapeamento explícito aqui, o fallback
+      //     incorretamente incluiria dígitos e causaria "Trading is not offered for this asset".
+      const _isCrashBoomSym = (sym: string) => /^(CRASH|BOOM)\d+N?$/i.test(sym);
       const modalityFilter = activeModalities && activeModalities.length > 0 ? new Set(activeModalities) : null;
       const isSymbolCompatibleWithModalities = (sym: string): boolean => {
         if (!modalityFilter) return true;
-        const supported = _COMPAT[sym] ?? [..._DIGIT_K, ..._RF_K]; // default: dígitos + rise/fall
+        // Crash/Boom: somente Rise/Fall — nunca dígitos
+        const supported = _isCrashBoomSym(sym)
+          ? [..._RF_K]
+          : (_COMPAT[sym] ?? [..._DIGIT_K, ..._RF_K]);
         return [...modalityFilter].some(m => supported.includes(m));
       };
       
