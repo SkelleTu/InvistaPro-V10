@@ -2701,6 +2701,58 @@ export default function TradingSystemPage() {
                                   </div>
                                 )}
 
+                                {/* ── Modo Frenético (somente DIGITMATCH ativo) ── */}
+                                {modality.id === 'digit_matches' && isEnabled && (
+                                  <div className="mt-2 pt-2 border-t border-border">
+                                    <div className="rounded-md bg-orange-50 dark:bg-orange-950/30 border border-orange-300 dark:border-orange-700 p-2.5">
+                                      <div className="flex items-center justify-between gap-2 mb-1.5">
+                                        <p className="text-[11px] font-bold text-orange-700 dark:text-orange-300 flex items-center gap-1">
+                                          <Zap className="h-3.5 w-3.5" />
+                                          Modo Frenético
+                                        </p>
+                                        <button
+                                          type="button"
+                                          data-testid="toggle-digit-match-frenetico"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            const isOn = modalityFrequency['digit_matches'] === 'frenetico';
+                                            const next = { ...modalityFrequency };
+                                            if (isOn) {
+                                              delete next['digit_matches'];
+                                            } else {
+                                              next['digit_matches'] = 'frenetico';
+                                            }
+                                            setModalityFrequency(next);
+                                            saveModalityFrequency(next);
+                                            toast({
+                                              title: isOn ? '⚡ Frenético desativado' : '⚡🔥 Modo Frenético ATIVADO!',
+                                              description: isOn
+                                                ? 'Digit Matches voltou ao modo padrão (1 operação por ciclo).'
+                                                : 'Sistema dispara 4 DIGITMATCH simultâneos nos dígitos mais quentes a cada ciclo!',
+                                              duration: 3500,
+                                            });
+                                          }}
+                                          className={`px-3 py-1 rounded-full text-[11px] font-bold transition-all border shadow-sm ${
+                                            modalityFrequency['digit_matches'] === 'frenetico'
+                                              ? 'bg-orange-500 text-white border-orange-500 animate-pulse'
+                                              : 'bg-white dark:bg-gray-800 text-orange-600 dark:text-orange-400 border-orange-300 dark:border-orange-600 hover:bg-orange-50 dark:hover:bg-orange-950/50'
+                                          }`}
+                                        >
+                                          {modalityFrequency['digit_matches'] === 'frenetico' ? '⚡ ATIVO' : 'Ativar'}
+                                        </button>
+                                      </div>
+                                      <p className="text-[10px] text-orange-600 dark:text-orange-400 leading-relaxed">
+                                        Dispara <strong>4 contratos simultâneos</strong> nos dígitos mais frequentes (IA analisa histórico de ticks). Cobertura de 40% dos dígitos possíveis por ciclo — maximiza acertos em sequências de matches.
+                                      </p>
+                                      {modalityFrequency['digit_matches'] === 'frenetico' && (
+                                        <div className="mt-1.5 p-1.5 bg-orange-100 dark:bg-orange-900/40 rounded text-[10px] text-orange-700 dark:text-orange-300 font-medium">
+                                          🔥 ATIVO: A cada ciclo, 4 trades DIGITMATCH são abertos em paralelo nos dígitos mais quentes do ativo. Sem atrasos entre disparos.
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+
                                 {/* ── Taxas de Crescimento (somente ACCU) — sempre visível ── */}
                                 {modality.id === 'accumulator' && (
                                   <div className="mt-2 pt-2 border-t border-border space-y-2">

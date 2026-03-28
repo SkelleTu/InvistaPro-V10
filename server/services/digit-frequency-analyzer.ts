@@ -279,6 +279,23 @@ export class DigitFrequencyAnalyzer {
     return results.sort((a, b) => b.coldestDigitEdge - a.coldestDigitEdge);
   }
 
+  /**
+   * Retorna os N dígitos mais quentes (maior frequência) — usados no modo FRENÉTICO de Digit Matches.
+   * Para DIGITMATCH queremos os dígitos que aparecem MAIS frequentemente (oposto do DIFFERS).
+   */
+  getHottestDigitsForMatches(symbol: string, n: number = 3): number[] {
+    const analysis = this.analyzeSymbolMultiWindow(symbol);
+    if (!analysis) {
+      // Sem dados: retorna dígitos aleatórios como fallback
+      const all = [0,1,2,3,4,5,6,7,8,9];
+      const shuffled = all.sort(() => Math.random() - 0.5);
+      return shuffled.slice(0, n);
+    }
+    // Ordenar dígitos por frequência decrescente (mais quente = mais provável para MATCHES)
+    const sorted = [...analysis.digits].sort((a, b) => b.frequency - a.frequency);
+    return sorted.slice(0, n).map(d => d.digit);
+  }
+
   getSymbolCount(): number {
     return this.states.size;
   }

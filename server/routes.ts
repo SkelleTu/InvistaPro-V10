@@ -2551,7 +2551,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (typeof frequency !== 'object' || Array.isArray(frequency)) {
       return res.status(400).json({ message: 'frequency deve ser um objeto { modality_id: level }' });
     }
-    const VALID_LEVELS = new Set(['low','normal','high']);
+    const VALID_LEVELS = new Set(['low','normal','high','frenetico']);
     const cleaned: Record<string, string> = {};
     for (const [k, v] of Object.entries(frequency)) {
       if (VALID_LEVELS.has(String(v))) cleaned[k] = String(v);

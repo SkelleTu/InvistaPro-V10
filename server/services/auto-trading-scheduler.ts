@@ -2277,14 +2277,51 @@ export class AutoTradingScheduler {
               : rawDigitTicks
                 ? Math.max(1, Math.min(rawDigitTicks, 10)) // ⚙️ Fixo
                 : tradeParams.duration;
-          contract = await derivAPI.buyGenericDigitContract({
-            contract_type: contractType,
-            symbol: selectedSymbol,
-            duration: digitDuration,
-            amount: tradeParams.amount,
-            barrier,
-            currency: 'USD',
-          });
+
+          // ⚡ MODO FRENÉTICO: disparo em rajada de múltiplos DIGITMATCH simultâneos
+          const isFraneticoMode = contractType === 'DIGITMATCH' && modalityFrequency['digit_matches'] === 'frenetico';
+          if (isFraneticoMode) {
+            // Obtém os N dígitos mais quentes (maior frequência) para maximizar chance de acerto
+            const BURST_SIZE = 4; // 4 contratos paralelos = 40% de cobertura (4 dígitos distintos)
+            const hottestDigits = digitFrequencyAnalyzer.getHottestDigitsForMatches(selectedSymbol, BURST_SIZE);
+            console.log(`⚡🔥 [${operationId}] MODO FRENÉTICO DIGITMATCH | ${selectedSymbol} | Dígitos alvo: [${hottestDigits.join(',')}] | ${BURST_SIZE} contratos simultâneos | stake×${BURST_SIZE}: $${(tradeParams.amount * BURST_SIZE).toFixed(2)}`);
+
+            // Dispara todos os contratos em paralelo sem esperar cada um
+            const burstPromises = hottestDigits.map((digit, idx) =>
+              derivAPI.buyGenericDigitContract({
+                contract_type: 'DIGITMATCH',
+                symbol: selectedSymbol,
+                duration: digitDuration,
+                amount: tradeParams.amount,
+                barrier: digit.toString(),
+                currency: 'USD',
+              }).then(c => {
+                console.log(`⚡ [FRENÉTICO #${idx+1}] Dígito ${digit} → contrato ${c?.contract_id ?? 'N/A'} aberto`);
+                return c;
+              }).catch(err => {
+                console.warn(`⚠️ [FRENÉTICO #${idx+1}] Dígito ${digit} falhou: ${err?.message ?? err}`);
+                return null;
+              })
+            );
+            // Aguarda TODOS dispararem (sem bloqueio — cada um é independente)
+            const burstResults = await Promise.allSettled(burstPromises);
+            // Usa o primeiro contrato bem-sucedido como representante para o log/monitor
+            const firstOk = burstResults
+              .filter(r => r.status === 'fulfilled' && r.value != null)
+              .map(r => (r as PromiseFulfilledResult<any>).value)[0] ?? null;
+            const wonCount = burstResults.filter(r => r.status === 'fulfilled' && r.value != null).length;
+            console.log(`⚡🔥 [FRENÉTICO] Rajada concluída: ${wonCount}/${BURST_SIZE} contratos abertos | Representante: ${firstOk?.contract_id ?? 'nenhum'}`);
+            contract = firstOk;
+          } else {
+            contract = await derivAPI.buyGenericDigitContract({
+              contract_type: contractType,
+              symbol: selectedSymbol,
+              duration: digitDuration,
+              amount: tradeParams.amount,
+              barrier,
+              currency: 'USD',
+            });
+          }
           resolvedTradeType = selectedModality.replace('_', '');
 
         } else if (RISFALL_TYPES.has(selectedModality)) {
