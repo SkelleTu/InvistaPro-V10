@@ -1278,7 +1278,9 @@ export class AutoTradingScheduler {
       }
       if (currentBalance > 0 && currentBalance < MINIMUM_SAFE_BALANCE) {
         console.error(`🛑 [${operationId}] PROTEÇÃO DE CAPITAL: Saldo $${currentBalance.toFixed(2)} abaixo do mínimo seguro $${MINIMUM_SAFE_BALANCE} — operações suspensas para proteger capital restante.`);
-        this.setPhase('PAUSADO', `🛑 Saldo crítico ($${currentBalance.toFixed(2)}) — operações suspensas`, 'warning');
+        this.setPhase('PAUSADO', `🛑 Saldo crítico ($${currentBalance.toFixed(2)}) — aguardando recarga...`, 'warning');
+        // Dormir 30s para não girar o loop em vazio enquanto saldo está crítico
+        this.loopSleepUntil = Date.now() + 30_000;
         return { success: false, error: `Saldo $${currentBalance.toFixed(2)} abaixo do mínimo seguro ($${MINIMUM_SAFE_BALANCE}) — recarregue sua conta.` };
       }
 
