@@ -2464,8 +2464,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     const parsedDigitCount = digitCount ? Math.min(10, Math.max(1, parseInt(digitCount))) : undefined;
 
+    // 🛡️ BURST GUARD: buscar saldo real antes de disparar para limitar exposição
+    let liveBalance: number | undefined;
+    try {
+      const { derivAPI: derivApiService } = await import('./services/deriv-api');
+      const balData = await derivApiService.getBalance();
+      if (balData?.balance && balData.balance > 0) {
+        liveBalance = balData.balance;
+        console.log(`💰 [BURST ROUTE] Saldo real obtido: $${liveBalance.toFixed(2)} — passando ao BURST GUARD`);
+      }
+    } catch (balErr: any) {
+      console.warn(`⚠️ [BURST ROUTE] Falha ao buscar saldo — BURST GUARD sem referência de banca:`, balErr?.message);
+    }
+
     const operationId = `MANUAL_BURST_${Date.now()}`;
-    const result = await executeFrenetic9TokensBurst(userId, slots, amount, duration, operationId, mode as any, parsedDigitCount);
+    const result = await executeFrenetic9TokensBurst(userId, slots, amount, duration, operationId, mode as any, parsedDigitCount, liveBalance);
     res.json(result);
   }));
 

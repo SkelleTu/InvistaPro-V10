@@ -2380,7 +2380,30 @@ export class AutoTradingScheduler {
                 }
                 return { digit: d, stake };
               });
-              const totalKelly = kellyStakes.reduce((s, k) => s + k.stake, 0);
+              let totalKelly = kellyStakes.reduce((s, k) => s + k.stake, 0);
+
+              // ═══════════════════════════════════════════════════════════════
+              // 🛡️ BURST GUARD KELLY×10 — CAP TOTAL ≤ 20% DA BANCA
+              // Kelly multiplica stakes por freq-ratio — pode chegar a 46%+!
+              // ═══════════════════════════════════════════════════════════════
+              {
+                const kellyBal = this.cachedBalance?.value ?? 0;
+                const KELLY_MAX_PCT = 0.20; // 20% da banca máximo
+                if (kellyBal > 0 && totalKelly > kellyBal * KELLY_MAX_PCT) {
+                  const scaleFactor = (kellyBal * KELLY_MAX_PCT) / totalKelly;
+                  console.warn(
+                    `🛡️ [BURST GUARD KELLY×10] Total $${totalKelly.toFixed(2)} ` +
+                    `(${(totalKelly / kellyBal * 100).toFixed(1)}% da banca $${kellyBal.toFixed(2)}) ` +
+                    `> ${KELLY_MAX_PCT * 100}% → escalonando stakes ×${scaleFactor.toFixed(3)}`
+                  );
+                  for (const ks of kellyStakes) {
+                    ks.stake = Math.max(MIN_STAKE, Math.round(ks.stake * scaleFactor * 100) / 100);
+                  }
+                  totalKelly = kellyStakes.reduce((s, k) => s + k.stake, 0);
+                  console.warn(`🛡️ [BURST GUARD KELLY×10] Novo total: $${totalKelly.toFixed(2)} (${(totalKelly / kellyBal * 100).toFixed(1)}% da banca) ✅`);
+                }
+              }
+
               console.log(`🎯💜 [${operationId}] DIGITMATCH KELLY×10 | ${selectedSymbol} | 10 dígitos (100% cobertura) | Investimento total: $${totalKelly.toFixed(2)} | Stakes: ${kellyStakes.map(k => `${k.digit}→$${k.stake}`).join(', ')}`);
 
               const kellyPromises = kellyStakes.map(({ digit, stake }, idx) =>

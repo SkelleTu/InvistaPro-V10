@@ -258,7 +258,8 @@ export async function executeFrenetic9TokensBurst(
   duration: number,
   operationId: string,
   stakeMode: StakeMode = 'kelly',
-  digitCount?: number
+  digitCount?: number,
+  currentBalance?: number
 ): Promise<BurstResult> {
   const startTime = Date.now();
 
@@ -300,17 +301,47 @@ export async function executeFrenetic9TokensBurst(
   // ── 2. DISTRIBUIÇÃO DE STAKES INTELIGENTE ────────────────────────────────
   const stakeDistribution = computeSmartStakes(digitHeats, amount, stakeMode);
   const burstStats = computeBurstStats(digitHeats, stakeDistribution);
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 🛡️ BURST GUARD — CAP TOTAL DE EXPOSIÇÃO POR RAJADA
+  // O multiplier Kelly/Agressivo pode explodir o total mesmo com amount=$0.35:
+  //   Ex: 3 dígitos quentes × 2.2^1.5 × 2.0 × $0.35 = $2.28 cada → $6.84 só nos quentes
+  //   Somando 10 dígitos → $4.54+ numa banca de $9.86 = 46% — INACEITÁVEL.
+  // Regra: total do burst ≤ 20% da banca → escalonar TODOS os stakes proporcionalmente.
+  // A distribuição Kelly é preservada — apenas a escala muda.
+  // ═══════════════════════════════════════════════════════════════════════════
+  const MAX_BURST_EXPOSURE_PCT = 0.20; // 20% da banca por rajada
+  if (currentBalance && currentBalance > 0 && burstStats.totalStaked > 0) {
+    const maxAllowed = currentBalance * MAX_BURST_EXPOSURE_PCT;
+    if (burstStats.totalStaked > maxAllowed) {
+      const scaleFactor = maxAllowed / burstStats.totalStaked;
+      console.warn(
+        `🛡️ [BURST GUARD] Total $${burstStats.totalStaked.toFixed(2)} ` +
+        `(${(burstStats.totalStaked / currentBalance * 100).toFixed(1)}% da banca $${currentBalance.toFixed(2)}) ` +
+        `> ${MAX_BURST_EXPOSURE_PCT * 100}% → escalonando stakes ×${scaleFactor.toFixed(3)} ` +
+        `(${stakeMode.toUpperCase()} — distribuição preservada)`
+      );
+      for (const digitKey of Object.keys(stakeDistribution)) {
+        const d = Number(digitKey);
+        stakeDistribution[d] = Math.max(MIN_STAKE, Math.round(stakeDistribution[d] * scaleFactor * 100) / 100);
+      }
+      const newTotal = Object.values(stakeDistribution).reduce((s, v) => s + v, 0);
+      console.warn(`🛡️ [BURST GUARD] Novo total: $${newTotal.toFixed(2)} (${(newTotal / currentBalance * 100).toFixed(1)}% da banca) ✅`);
+    }
+  }
   const coveragePercent = Math.round((activeSlots.length / 10) * 100);
 
+  // Recalcular stats reais após possível escalonamento do BURST GUARD
+  const realBurstStats = computeBurstStats(digitHeats, stakeDistribution);
   const hotDigits = digitHeats.filter(d => d.label === 'hot');
   const coldDigits = digitHeats.filter(d => d.label === 'cold');
 
   console.log(
     `⚡🔥 [FRENÉTICO-10T] Rajada ${stakeMode.toUpperCase()} | ${activeSlots.length} slots${digitCount ? ` (top ${digitCount}× digit_matches)` : ''} | ` +
     `Ativo: ${targetSymbol} | Cobertura: ${coveragePercent}% | ` +
-    `EV: ${burstStats.expectedProfit >= 0 ? '+' : ''}$${burstStats.expectedProfit.toFixed(2)} | ` +
-    `ROI esperado: ${burstStats.expectedROI.toFixed(1)}% | ` +
-    `Total: $${burstStats.totalStaked.toFixed(2)} | ` +
+    `EV: ${realBurstStats.expectedProfit >= 0 ? '+' : ''}$${realBurstStats.expectedProfit.toFixed(2)} | ` +
+    `ROI esperado: ${realBurstStats.expectedROI.toFixed(1)}% | ` +
+    `Total: $${realBurstStats.totalStaked.toFixed(2)} | ` +
     `🔥 Quentes: [${hotDigits.map(d => `${d.digit}(${(d.frequency * 100).toFixed(0)}%)`).join(',')}] | ` +
     `🧊 Frios: [${coldDigits.map(d => d.digit).join(',')}]`
   );
@@ -410,8 +441,8 @@ export async function executeFrenetic9TokensBurst(
   history.push({
     timestamp: Date.now(),
     symbol: targetSymbol,
-    totalStaked: burstStats.totalStaked,
-    expectedProfit: burstStats.expectedProfit,
+    totalStaked: realBurstStats.totalStaked,
+    expectedProfit: realBurstStats.expectedProfit,
     mode: stakeMode,
     openedContracts: opened,
   });
@@ -421,8 +452,8 @@ export async function executeFrenetic9TokensBurst(
   console.log(
     `🏁 [FRENÉTICO-10T] Concluído: ${opened}/${activeSlots.length} contratos | ` +
     `${targetSymbol} | Modo: ${stakeMode} | ` +
-    `Total investido: $${burstStats.totalStaked.toFixed(2)} | ` +
-    `EV: ${burstStats.expectedProfit >= 0 ? '+' : ''}$${burstStats.expectedProfit.toFixed(2)} | ` +
+    `Total investido: $${realBurstStats.totalStaked.toFixed(2)} | ` +
+    `EV: ${realBurstStats.expectedProfit >= 0 ? '+' : ''}$${realBurstStats.expectedProfit.toFixed(2)} | ` +
     `Tempo: ${Date.now() - startTime}ms`
   );
 
@@ -437,7 +468,7 @@ export async function executeFrenetic9TokensBurst(
     coveragePercent,
     stakeMode,
     stakeDistribution,
-    burstStats,
+    burstStats: realBurstStats,
   };
 }
 
