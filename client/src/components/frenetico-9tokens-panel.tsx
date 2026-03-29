@@ -248,7 +248,7 @@ export default function Frenetico9TokensPanel() {
               <Zap className="w-5 h-5 text-violet-400" />
             </div>
             <div>
-              <CardTitle className="text-lg">Frenético 10-Tokens</CardTitle>
+              <CardTitle className="text-lg">9 Dígitos Simultâneos</CardTitle>
               <CardDescription>
                 100% cobertura simultânea · stake inteligente por calor de dígito
               </CardDescription>
