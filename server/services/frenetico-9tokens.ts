@@ -17,6 +17,7 @@
 
 import { DerivAPIService } from './deriv-api';
 import { digitFrequencyAnalyzer } from './digit-frequency-analyzer';
+import { digitPatternEngine } from './digit-pattern-engine';
 
 export type StakeMode = 'uniform' | 'kelly' | 'aggressive';
 
@@ -298,8 +299,32 @@ export async function executeFrenetic9TokensBurst(
     console.log(`🎯 [FRENÉTICO] Sincronizado com digit_matches: top ${digitCount} dígitos mais quentes → [${topNDigits.join(',')}] | slots ativos: ${activeSlots.length}`);
   }
 
-  // ── 2. DISTRIBUIÇÃO DE STAKES INTELIGENTE ────────────────────────────────
-  const stakeDistribution = computeSmartStakes(digitHeats, amount, stakeMode);
+  // ── 2. DISTRIBUIÇÃO DE STAKES INTELIGENTE (PREDITIVA) ───────────────────
+  // Tenta usar o motor preditivo (Markov + momentum) para stakes mais precisos
+  // Se não houver dados suficientes, usa o Kelly de frequência clássico como fallback
+  let stakeDistribution: Record<number, number>;
+  {
+    const { stakes: predictiveStakes, prediction } = digitPatternEngine.computePredictiveStakes(
+      targetSymbol, amount, MIN_STAKE
+    );
+
+    if (prediction.confidence >= 40 && prediction.markovOrder >= 1) {
+      // Motor preditivo tem dados suficientes — usa stakes preditivos
+      stakeDistribution = predictiveStakes;
+      console.log(
+        `🧠 [PADRÃO IA] Markov Ord${prediction.markovOrder} (${prediction.sampleCount} amostras) | ` +
+        `Conf: ${prediction.confidence}% | ${prediction.insights[0]} | ` +
+        `${prediction.insights[1] ?? ''}`
+      );
+      if (prediction.insights[2]) {
+        console.log(`🧠 [PADRÃO IA] ${prediction.insights[2]}`);
+      }
+    } else {
+      // Fallback: Kelly clássico baseado em frequência
+      stakeDistribution = computeSmartStakes(digitHeats, amount, stakeMode);
+      console.log(`📊 [FREQUÊNCIA] Markov com dados insuficientes (conf=${prediction.confidence}%) — usando Kelly frequência`);
+    }
+  }
   const burstStats = computeBurstStats(digitHeats, stakeDistribution);
 
   // ═══════════════════════════════════════════════════════════════════════════

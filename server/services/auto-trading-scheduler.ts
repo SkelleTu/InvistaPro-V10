@@ -8,6 +8,7 @@ import { dynamicThresholdTracker } from './dynamic-threshold-tracker';
 import { resilienceSupervisor } from './resilience-supervisor';
 import { derivTradeSync } from './deriv-trade-sync';
 import { digitFrequencyAnalyzer } from './digit-frequency-analyzer';
+import { digitPatternEngine } from './digit-pattern-engine';
 import { assetScorer, AssetPerformanceRecord } from './asset-scorer';
 import { realStatsTracker } from './real-stats-tracker';
 import { contractMonitor } from './contract-monitor';
@@ -2364,22 +2365,38 @@ export class AutoTradingScheduler {
             // ── MODO 10× KELLY: todos os dígitos, stakes por calor (sempre vence) ──
             if (isKellyMode) {
               const MIN_STAKE = 0.35;
-              const PAYOUT_EST = 9.0;
-              const analysis = digitFrequencyAnalyzer.analyzeSymbolMultiWindow(selectedSymbol);
-              const kellyStakes: { digit: number; stake: number }[] = Array.from({ length: 10 }, (_, d) => {
-                const freq = analysis?.digits?.find((x: any) => x.digit === d)?.frequency ?? 0.10;
-                const label = freq >= 0.13 ? 'hot' : freq <= 0.07 ? 'cold' : 'neutral';
-                const ratio = freq / 0.10;
-                let stake: number;
-                if (label === 'hot') {
-                  stake = parseFloat(Math.max(MIN_STAKE, tradeParams.amount * Math.pow(ratio, 1.5) * 2.0).toFixed(2));
-                } else if (label === 'cold') {
-                  stake = MIN_STAKE;
-                } else {
-                  stake = parseFloat(Math.max(MIN_STAKE, tradeParams.amount * ratio).toFixed(2));
+              // ── KELLY×10 COM MOTOR PREDITIVO (Markov + Momentum + Frequência) ──
+              // Usa padrões sequenciais para concentrar stake nos dígitos mais PROVÁVEIS
+              // ao invés de apenas nos mais frequentes historicamente
+              const { stakes: predictiveStakeMap, prediction: pred10 } = digitPatternEngine.computePredictiveStakes(
+                selectedSymbol, tradeParams.amount, MIN_STAKE
+              );
+              const kellyStakes: { digit: number; stake: number }[] = Array.from({ length: 10 }, (_, d) => ({
+                digit: d,
+                stake: predictiveStakeMap[d] ?? MIN_STAKE,
+              }));
+              if (pred10.confidence >= 40 && pred10.markovOrder >= 1) {
+                console.log(
+                  `🧠 [KELLY×10 PREDITIVO] Markov Ord${pred10.markovOrder} (${pred10.sampleCount} amostras) | ` +
+                  `Conf: ${pred10.confidence}% | ${pred10.insights[0]} | ${pred10.insights[1] ?? ''}`
+                );
+              } else {
+                // Sem dados suficientes para Markov: fallback puro para Kelly de frequência
+                const analysis = digitFrequencyAnalyzer.analyzeSymbolMultiWindow(selectedSymbol);
+                for (const ks of kellyStakes) {
+                  const freq = analysis?.digits?.find((x: any) => x.digit === ks.digit)?.frequency ?? 0.10;
+                  const label = freq >= 0.13 ? 'hot' : freq <= 0.07 ? 'cold' : 'neutral';
+                  const ratio = freq / 0.10;
+                  if (label === 'hot') {
+                    ks.stake = parseFloat(Math.max(MIN_STAKE, tradeParams.amount * Math.pow(ratio, 1.5) * 2.0).toFixed(2));
+                  } else if (label === 'cold') {
+                    ks.stake = MIN_STAKE;
+                  } else {
+                    ks.stake = parseFloat(Math.max(MIN_STAKE, tradeParams.amount * ratio).toFixed(2));
+                  }
                 }
-                return { digit: d, stake };
-              });
+                console.log(`📊 [KELLY×10] Markov indisponível (conf=${pred10.confidence}%) — Kelly frequência`);
+              }
               let totalKelly = kellyStakes.reduce((s, k) => s + k.stake, 0);
 
               // ═══════════════════════════════════════════════════════════════
@@ -2478,9 +2495,20 @@ export class AutoTradingScheduler {
               }
             }
 
-            const hottestDigits = digitFrequencyAnalyzer.getHottestDigitsForMatches(selectedSymbol, BURST_SIZE);
+            // Seleciona os N dígitos alvo — motor preditivo tem prioridade sobre frequência simples
+            const predResult = digitPatternEngine.getPredictionScores(selectedSymbol);
+            let hottestDigits: number[];
+            if (predResult.confidence >= 40 && predResult.markovOrder >= 1) {
+              hottestDigits = digitPatternEngine.getTopPredictedDigits(selectedSymbol, BURST_SIZE);
+              console.log(
+                `🧠 [MULTI-DÍGITO IA] Markov Ord${predResult.markovOrder} | Conf: ${predResult.confidence}% | ` +
+                `${predResult.insights[0]} | Alvos selecionados: [${hottestDigits.join(',')}]`
+              );
+            } else {
+              hottestDigits = digitFrequencyAnalyzer.getHottestDigitsForMatches(selectedSymbol, BURST_SIZE);
+              console.log(`📊 [MULTI-DÍGITO] Usando frequência (Markov conf=${predResult.confidence}%): [${hottestDigits.join(',')}]`);
+            }
             const coverage = Math.round((BURST_SIZE / 10) * 100);
-            // Log com resumo completo das tendências
             const summary = digitFrequencyAnalyzer.getSummary(selectedSymbol);
             console.log(`⚡🔥 [${operationId}] DIGITMATCH MULTI-DÍGITO | ${selectedSymbol} | Dígitos alvo: [${hottestDigits.join(',')}] | ${BURST_SIZE} contratos (${coverage}% cobertura) | stake×${BURST_SIZE}: $${(tradeParams.amount * BURST_SIZE).toFixed(2)}`);
             console.log(`📊 [MULTI-DÍGITO STATS] ${summary}`);
