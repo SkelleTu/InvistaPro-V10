@@ -2442,11 +2442,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   }));
 
-  // POST /api/trading/frenetico-9tokens/burst — dispara uma rajada manual de teste
+  // POST /api/trading/frenetico-9tokens/burst — dispara uma rajada manual sincronizada com digit_matches
   app.post('/api/trading/frenetico-9tokens/burst', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
     if (!req.user?.id) return res.status(401).json({ message: 'Não autenticado' });
     const userId = req.user.id;
-    const { amount = 0.35, duration = 1, stakeMode = 'kelly' } = req.body;
+    const { amount = 0.35, duration = 1, stakeMode = 'kelly', digitCount } = req.body;
 
     const validModes = ['uniform', 'kelly', 'aggressive'];
     const mode = validModes.includes(stakeMode) ? stakeMode : 'kelly';
@@ -2462,8 +2462,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       accountType: t.accountType as 'demo' | 'real',
     }));
 
+    const parsedDigitCount = digitCount ? Math.min(10, Math.max(1, parseInt(digitCount))) : undefined;
+
     const operationId = `MANUAL_BURST_${Date.now()}`;
-    const result = await executeFrenetic9TokensBurst(userId, slots, amount, duration, operationId, mode as any);
+    const result = await executeFrenetic9TokensBurst(userId, slots, amount, duration, operationId, mode as any, parsedDigitCount);
     res.json(result);
   }));
 

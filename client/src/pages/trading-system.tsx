@@ -2282,8 +2282,15 @@ export default function TradingSystemPage() {
               <TradingConfigPanel />
             </div>
 
-            {/* Frenético 9-Tokens */}
-            <Frenetico9TokensPanel />
+            {/* Frenético 9-Tokens — sincronizado com digit_matches */}
+            <Frenetico9TokensPanel
+              syncedDigitCount={(() => {
+                const rawVal = modalityFrequency['digit_matches'];
+                return rawVal === 'frenetico' ? 9 : (parseInt(rawVal ?? '10') || 10);
+              })()}
+              syncedStakeMode={stakeMode}
+              syncedFixedStake={fixedStake}
+            />
 
             {/* Modalidades de Trade */}
             <Card className="border-blue-200 dark:border-blue-900">

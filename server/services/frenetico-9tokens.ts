@@ -257,7 +257,8 @@ export async function executeFrenetic9TokensBurst(
   amount: number,
   duration: number,
   operationId: string,
-  stakeMode: StakeMode = 'kelly'
+  stakeMode: StakeMode = 'kelly',
+  digitCount?: number
 ): Promise<BurstResult> {
   const startTime = Date.now();
 
@@ -282,16 +283,30 @@ export async function executeFrenetic9TokensBurst(
     return { digit: d, frequency: freq, label, recommendedStakeMultiplier };
   });
 
+  // ── SELEÇÃO DE N DÍGITOS MAIS QUENTES (sincronizado com config digit_matches) ──
+  // Se digitCount < 10, filtra apenas os N slots com os dígitos mais quentes
+  let activeSlots = slots;
+  if (digitCount && digitCount > 0 && digitCount < 10) {
+    // Ordena dígitos por frequência decrescente e pega os top N
+    const topNDigits = [...digitHeats]
+      .sort((a, b) => b.frequency - a.frequency)
+      .slice(0, digitCount)
+      .map(h => h.digit);
+    activeSlots = slots.filter(s => topNDigits.includes(s.slotIndex));
+    if (activeSlots.length === 0) activeSlots = slots.slice(0, digitCount);
+    console.log(`🎯 [FRENÉTICO] Sincronizado com digit_matches: top ${digitCount} dígitos mais quentes → [${topNDigits.join(',')}] | slots ativos: ${activeSlots.length}`);
+  }
+
   // ── 2. DISTRIBUIÇÃO DE STAKES INTELIGENTE ────────────────────────────────
   const stakeDistribution = computeSmartStakes(digitHeats, amount, stakeMode);
   const burstStats = computeBurstStats(digitHeats, stakeDistribution);
-  const coveragePercent = Math.round((slots.length / 10) * 100);
+  const coveragePercent = Math.round((activeSlots.length / 10) * 100);
 
   const hotDigits = digitHeats.filter(d => d.label === 'hot');
   const coldDigits = digitHeats.filter(d => d.label === 'cold');
 
   console.log(
-    `⚡🔥 [FRENÉTICO-10T] Rajada ${stakeMode.toUpperCase()} | ${slots.length} slots | ` +
+    `⚡🔥 [FRENÉTICO-10T] Rajada ${stakeMode.toUpperCase()} | ${activeSlots.length} slots${digitCount ? ` (top ${digitCount}× digit_matches)` : ''} | ` +
     `Ativo: ${targetSymbol} | Cobertura: ${coveragePercent}% | ` +
     `EV: ${burstStats.expectedProfit >= 0 ? '+' : ''}$${burstStats.expectedProfit.toFixed(2)} | ` +
     `ROI esperado: ${burstStats.expectedROI.toFixed(1)}% | ` +
@@ -300,8 +315,8 @@ export async function executeFrenetic9TokensBurst(
     `🧊 Frios: [${coldDigits.map(d => d.digit).join(',')}]`
   );
 
-  // ── 3. DISPARO SIMULTÂNEO — cada slot usa SEU dígito fixo + seu stake ────
-  const slotPromises = slots.map(async (slot): Promise<SlotResult> => {
+  // ── 3. DISPARO SIMULTÂNEO — apenas slots dos N dígitos mais quentes ──────
+  const slotPromises = activeSlots.map(async (slot): Promise<SlotResult> => {
     const assignedDigit = slot.slotIndex;
     const digitFreq = digitHeats[assignedDigit]?.frequency ?? 0.10;
     const slotStake = stakeDistribution[assignedDigit] ?? amount;
@@ -404,7 +419,7 @@ export async function executeFrenetic9TokensBurst(
   if (history.length > 50) history.splice(0, history.length - 50);
 
   console.log(
-    `🏁 [FRENÉTICO-10T] Concluído: ${opened}/${slots.length} contratos | ` +
+    `🏁 [FRENÉTICO-10T] Concluído: ${opened}/${activeSlots.length} contratos | ` +
     `${targetSymbol} | Modo: ${stakeMode} | ` +
     `Total investido: $${burstStats.totalStaked.toFixed(2)} | ` +
     `EV: ${burstStats.expectedProfit >= 0 ? '+' : ''}$${burstStats.expectedProfit.toFixed(2)} | ` +
@@ -412,7 +427,7 @@ export async function executeFrenetic9TokensBurst(
   );
 
   return {
-    totalSlots: slots.length,
+    totalSlots: activeSlots.length,
     openedContracts: opened,
     failedContracts: failed,
     results,

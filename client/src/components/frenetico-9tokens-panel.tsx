@@ -117,15 +117,28 @@ function StakeBar({ stake, maxStake }: { stake: number; maxStake: number }) {
   );
 }
 
-export default function Frenetico9TokensPanel() {
+interface Frenetico9TokensPanelProps {
+  syncedDigitCount?: number;
+  syncedStakeMode?: 'ai' | 'fixed' | 'manual';
+  syncedFixedStake?: number;
+}
+
+export default function Frenetico9TokensPanel({ syncedDigitCount, syncedStakeMode, syncedFixedStake }: Frenetico9TokensPanelProps) {
   const { toast } = useToast();
   const [activeSlotInput, setActiveSlotInput] = useState<number | null>(null);
   const [tokenInput, setTokenInput] = useState("");
   const [accountType, setAccountType] = useState<"demo" | "real">("demo");
   const [showToken, setShowToken] = useState(false);
-  const [burstAmount, setBurstAmount] = useState("0.35");
-  const [stakeMode, setStakeMode] = useState<StakeMode>("kelly");
   const [showHistory, setShowHistory] = useState(false);
+
+  // Mapeamento sincronizado das configs do digit_matches:
+  // stakeMode 'ai' → kelly (IA decide = Kelly inteligente)
+  // stakeMode 'fixed'/'manual' → uniform com o stake fixo definido
+  const effectiveStakeMode: StakeMode = syncedStakeMode === 'ai' ? 'kelly' : 'uniform';
+  const effectiveAmount = (syncedStakeMode === 'fixed' || syncedStakeMode === 'manual')
+    ? (syncedFixedStake ?? 0.35)
+    : 0.35;
+  const effectiveDigitCount = syncedDigitCount ?? 10;
 
   const { data: slotsData, isLoading, refetch } = useQuery<{ slots: SlotInfo[]; totalConfigured: number }>({
     queryKey: ["/api/trading/deriv-tokens/slots"],
@@ -139,9 +152,9 @@ export default function Frenetico9TokensPanel() {
   });
 
   const { data: previewData, refetch: refetchPreview } = useQuery<PreviewResponse>({
-    queryKey: ["/api/trading/frenetico-9tokens/preview", burstAmount, stakeMode],
+    queryKey: ["/api/trading/frenetico-9tokens/preview", effectiveAmount, effectiveStakeMode],
     queryFn: () =>
-      fetch(`/api/trading/frenetico-9tokens/preview?amount=${burstAmount}&stakeMode=${stakeMode}`, {
+      fetch(`/api/trading/frenetico-9tokens/preview?amount=${effectiveAmount}&stakeMode=${effectiveStakeMode}`, {
         credentials: "include",
       }).then(r => r.json()),
     refetchInterval: 15000,
@@ -202,7 +215,12 @@ export default function Frenetico9TokensPanel() {
     mutationFn: async () => {
       const res = await apiRequest("/api/trading/frenetico-9tokens/burst", {
         method: "POST",
-        body: JSON.stringify({ amount: parseFloat(burstAmount), duration: 1, stakeMode }),
+        body: JSON.stringify({
+          amount: effectiveAmount,
+          duration: 1,
+          stakeMode: effectiveStakeMode,
+          digitCount: effectiveDigitCount,
+        }),
       });
       if (!res.ok) throw new Error((await res.json()).message);
       return res.json();
@@ -210,8 +228,9 @@ export default function Frenetico9TokensPanel() {
     onSuccess: (data) => {
       const stats = data.burstStats;
       const evSign = stats?.expectedProfit >= 0 ? "+" : "";
+      const modeLabel = effectiveStakeMode === 'kelly' ? 'KELLY (IA)' : 'UNIFORME';
       toast({
-        title: `⚡ Rajada ${data.stakeMode?.toUpperCase()}! ${data.openedContracts}/${data.totalSlots} contratos`,
+        title: `⚡ Rajada ${modeLabel}! ${data.openedContracts}/${data.totalSlots} contratos`,
         description: `${data.targetSymbol} · $${stats?.totalStaked?.toFixed(2)} investido · EV: ${evSign}$${stats?.expectedProfit?.toFixed(2)} (${stats?.expectedROI?.toFixed(1)}% ROI) · ${data.burstDurationMs}ms`,
       });
       queryClient.invalidateQueries({ queryKey: ["/api/trading/frenetico-9tokens/history"] });
@@ -234,9 +253,9 @@ export default function Frenetico9TokensPanel() {
   const stakeDistribution = previewData?.stakeDistribution ?? {};
   const burstStats = previewData?.burstStats;
 
-  const maxStake = Math.max(...Object.values(stakeDistribution), parseFloat(burstAmount) || 0.35);
+  const maxStake = Math.max(...Object.values(stakeDistribution), effectiveAmount || 0.35);
 
-  const modeInfo = MODE_CONFIG[stakeMode];
+  const modeInfo = MODE_CONFIG[effectiveStakeMode];
   const ModeIcon = modeInfo.icon;
 
   return (
@@ -339,30 +358,31 @@ export default function Frenetico9TokensPanel() {
       </CardHeader>
 
       <CardContent className="space-y-4">
-        {/* Seletor de modo */}
+        {/* Banner de sincronização com digit_matches */}
         {totalConfigured > 0 && (
-          <div className="space-y-2">
-            <Label className="text-xs text-muted-foreground">Modo de distribuição de stakes</Label>
-            <div className="grid grid-cols-3 gap-2">
-              {(Object.keys(MODE_CONFIG) as StakeMode[]).map(m => {
-                const cfg = MODE_CONFIG[m];
-                const Icon = cfg.icon;
-                const isActive = stakeMode === m;
-                return (
-                  <button
-                    key={m}
-                    onClick={() => setStakeMode(m)}
-                    data-testid={`btn-mode-${m}`}
-                    className={`rounded-lg border p-2 text-left transition-all text-xs ${isActive ? cfg.color + " border-2" : "border-border/40 bg-card/30 text-muted-foreground hover:border-border"}`}
-                  >
-                    <div className="flex items-center gap-1 font-bold mb-0.5">
-                      <Icon className="w-3 h-3" />
-                      {cfg.label}
-                    </div>
-                    <div className="text-[10px] leading-tight opacity-80">{cfg.description}</div>
-                  </button>
-                );
-              })}
+          <div className="rounded-lg border border-violet-400/40 bg-violet-500/10 p-3 space-y-2">
+            <div className="flex items-center gap-2">
+              <Zap className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+              <span className="text-xs font-bold text-violet-300">Sincronizado com Digit Matches</span>
+              <span className="ml-auto text-[10px] text-violet-400/70">idêntico ao modo automático</span>
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-[10px]">
+              <div className="rounded bg-violet-500/10 border border-violet-500/20 p-1.5 text-center">
+                <div className="text-violet-400/70 mb-0.5">Dígitos</div>
+                <div className="font-bold text-violet-200">
+                  {effectiveDigitCount === 10 ? '10× (todos)' : `${effectiveDigitCount}× top quentes`}
+                </div>
+              </div>
+              <div className="rounded bg-violet-500/10 border border-violet-500/20 p-1.5 text-center">
+                <div className="text-violet-400/70 mb-0.5">Modo</div>
+                <div className="font-bold text-violet-200">
+                  {effectiveStakeMode === 'kelly' ? '🧠 Kelly (IA)' : '📌 Uniforme'}
+                </div>
+              </div>
+              <div className="rounded bg-violet-500/10 border border-violet-500/20 p-1.5 text-center">
+                <div className="text-violet-400/70 mb-0.5">Stake base</div>
+                <div className="font-bold text-violet-200">${effectiveAmount.toFixed(2)}</div>
+              </div>
             </div>
           </div>
         )}
@@ -375,7 +395,7 @@ export default function Frenetico9TokensPanel() {
             const isConfiguring = activeSlotInput === i;
             const isConfigured = !!slot;
             const digitHeat = digitHeats[i] ?? null;
-            const stake = (stakeDistribution[i] ?? parseFloat(burstAmount)) || 0.35;
+            const stake = (stakeDistribution[i] ?? effectiveAmount) || 0.35;
 
             return (
               <div
@@ -522,18 +542,11 @@ export default function Frenetico9TokensPanel() {
         {/* Barra de ação */}
         {totalConfigured > 0 && (
           <div className="space-y-3 pt-2 border-t border-border/30">
-            <div className="flex items-end gap-3">
-              <div className="space-y-1">
-                <Label className="text-xs">Valor base por contrato (USD)</Label>
-                <Input
-                  value={burstAmount}
-                  onChange={e => setBurstAmount(e.target.value)}
-                  type="number"
-                  min="0.35"
-                  step="0.05"
-                  className="h-8 w-28 text-xs"
-                  data-testid="input-burst-amount"
-                />
+            <div className="flex items-center gap-3">
+              <div className="flex-1 text-xs text-muted-foreground">
+                <span className="text-violet-400 font-semibold">{effectiveDigitCount}×</span> dígitos mais quentes ·{" "}
+                <span className="text-violet-400 font-semibold">${effectiveAmount.toFixed(2)}</span> base ·{" "}
+                <span className="text-violet-400 font-semibold">{effectiveStakeMode === 'kelly' ? 'Kelly IA' : 'Uniforme'}</span>
               </div>
               <Button
                 onClick={() => burstMutation.mutate()}
@@ -546,7 +559,7 @@ export default function Frenetico9TokensPanel() {
                 ) : (
                   <PlayCircle className="w-4 h-4 mr-2" />
                 )}
-                Disparar Rajada
+                Rajada Manual
                 <ModeIcon className="w-3.5 h-3.5 ml-1.5 opacity-70" />
               </Button>
               <Button
