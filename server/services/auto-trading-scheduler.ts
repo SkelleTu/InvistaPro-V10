@@ -2428,6 +2428,33 @@ export class AutoTradingScheduler {
 
             // Obtém os N dígitos mais quentes com score composto (frequência + tendência)
             const BURST_SIZE = safeBurstMax;
+
+            // ═══════════════════════════════════════════════════════════════════
+            // 🛡️ BURST GUARD — CAP TOTAL DE EXPOSIÇÃO POR RAJADA
+            // O safety cap individual por contrato NÃO protege contra a soma do burst.
+            // Ex: $1.56/contrato parece seguro, mas ×7 = $10.92 em banca de $11 = 96%!
+            // Regra: total do burst ≤ 15% da banca (ex: $10 → max $1.50 total = $0.21/cont)
+            // ═══════════════════════════════════════════════════════════════════
+            {
+              const liveBal = this.cachedBalance?.value ?? 0;
+              const MAX_BURST_EXPOSURE_PCT = 0.15; // máx 15% da banca por ciclo de burst
+              if (liveBal > 0) {
+                const maxTotalBurst = Math.max(0.35 * BURST_SIZE, liveBal * MAX_BURST_EXPOSURE_PCT);
+                const rawBurstTotal = tradeParams.amount * BURST_SIZE;
+                if (rawBurstTotal > maxTotalBurst) {
+                  const cappedPerContract = Math.max(0.35, Math.round((maxTotalBurst / BURST_SIZE) * 100) / 100);
+                  console.log(
+                    `🛡️ [BURST GUARD] Exposição $${rawBurstTotal.toFixed(2)} ` +
+                    `(${(rawBurstTotal / liveBal * 100).toFixed(1)}% da banca $${liveBal.toFixed(2)}) ` +
+                    `> ${MAX_BURST_EXPOSURE_PCT * 100}% → stake limitado: ` +
+                    `$${tradeParams.amount.toFixed(2)}→$${cappedPerContract.toFixed(2)}/contrato ` +
+                    `(total: $${(cappedPerContract * BURST_SIZE).toFixed(2)})`
+                  );
+                  tradeParams = { ...tradeParams, amount: cappedPerContract };
+                }
+              }
+            }
+
             const hottestDigits = digitFrequencyAnalyzer.getHottestDigitsForMatches(selectedSymbol, BURST_SIZE);
             const coverage = Math.round((BURST_SIZE / 10) * 100);
             // Log com resumo completo das tendências
@@ -4464,10 +4491,12 @@ export class AutoTradingScheduler {
           console.log(`🛡️ [SAFETY CAP] Stake $${amount.toFixed(2)} > ${(capPct * 100).toFixed(0)}% da banca ($${maxSafeStake.toFixed(2)}) → limitado a $${maxSafeStake.toFixed(2)}`);
           amount = maxSafeStake;
         }
-        // 🎯 RECOVERY FLOOR: garantir mínimo $1.00 em modo de recuperação (mínimo ACCU/Digit Differs)
-        if (inRecovery && amount < 1.00) {
-          console.log(`🔺 [RECOVERY FLOOR] Stake $${amount.toFixed(2)} < $1.00 mínimo ACCU → elevado a $1.00`);
-          amount = 1.00;
+        // 🎯 FLOOR UNIVERSAL: mínimo $0.35 (mínimo Deriv para qualquer contrato digital)
+        // NOTA: O antigo floor de $1.00 era para ACCU, mas digit_matches (DIGITMATCH)
+        // aceita $0.35 — com 7 contratos, $1.00/contrato = $7.00 total, o que é perigoso.
+        // O controle de mínimo por tipo de contrato é feito pela Deriv, não aqui.
+        if (amount < 0.35) {
+          amount = 0.35;
         }
 
         // Arredondar para 2 casas decimais
