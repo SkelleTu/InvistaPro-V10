@@ -221,7 +221,8 @@ export class MicroscopicTechnicalAnalyzer extends EventEmitter {
       volumeAnalysis,
       supportResistance,
       digitAnalysis,
-      latestTick.quote
+      latestTick.quote,
+      ticks.length
     );
 
     return {
@@ -582,7 +583,8 @@ export class MicroscopicTechnicalAnalyzer extends EventEmitter {
     volume: MicroscopicAnalysis['volumeAnalysis'],
     sr: MicroscopicAnalysis['supportResistance'],
     digits: MicroscopicAnalysis['digitAnalysis'],
-    currentPrice: number
+    currentPrice: number,
+    tickCount: number = 0
   ): MicroscopicAnalysis['cooperativeSignal'] {
     
     let upSignals = 0;
@@ -670,10 +672,26 @@ export class MicroscopicTechnicalAnalyzer extends EventEmitter {
     }
 
     const netSignal = upSignals - downSignals;
-    
-    const confidence = activeSignalsWeight > 0 
-      ? Math.min(97, (Math.abs(netSignal) / activeSignalsWeight * 100))
+
+    // Teto de confiança escalado pelo volume de dados disponíveis:
+    // Sem dados suficientes, a confiança deve ser baixa independente dos indicadores.
+    // < 50 ticks  → máx 35% (muito pouco para análise confiável)
+    // 50-100 ticks → máx 55% (dados mínimos)
+    // 100-200 ticks → máx 72% (dados razoáveis)
+    // 200-400 ticks → máx 85% (dados bons)
+    // 400+ ticks   → máx 97% (dados robustos)
+    const maxConfByDataVolume =
+      tickCount < 50  ? 35 :
+      tickCount < 100 ? 55 :
+      tickCount < 200 ? 72 :
+      tickCount < 400 ? 85 : 97;
+
+    // Fator de concordância dos indicadores: só chega perto do teto quando TODOS concordam
+    const rawSignalConf = activeSignalsWeight > 0
+      ? (Math.abs(netSignal) / activeSignalsWeight * 100)
       : 0;
+
+    const confidence = Math.min(maxConfByDataVolume, rawSignalConf);
     
     let technicalDirection: 'up' | 'down' | 'neutral' = 'neutral';
     if (netSignal > 10) technicalDirection = 'up';

@@ -1,19 +1,22 @@
 /**
  * ASSET CLASSIFIER — Classificação inteligente de ativos por tipo e mercado
  *
- * Cada tipo de ativo tem características próprias que determinam o ceiling realístico
- * de previsão de IAs. O threshold mínimo de consenso é calibrado por tipo:
+ * Thresholds calibrados com base em análise real de win rate:
+ * - O consenso bruto das IAs retorna entre 50-80%.
+ * - Para cada tipo de ativo, o threshold mínimo de entrada deve filtrar
+ *   pelo menos os 40% inferiores dos sinais — garantindo que só sinais
+ *   com edge real passem pelo gate.
  *
- * - SYNTHETIC_RANDOM  (R_*, 1HZ*)    → base 52% — gerados por RNG auditado, sem notícias
- * - CRASH_BOOM        (CRASH_*, BOOM_*) → base 54% — padrões de spike detectáveis
- * - JUMP_STEP         (JUMP_*, STEP_*) → base 54% — movimentos estruturados por parâmetro
- * - FOREX             (pares cambiais)  → base 57% — influenciados por fundamentais globais
- * - B3_BRAZIL         (WIN*, WDO*, etc) → base 62% — mercado técnico com alta previsibilidade
- * - DEFAULT           (outros)          → base 55% — tratamento conservador desconhecido
+ * HISTÓRICO DE CALIBRAÇÃO:
+ *  v1: base 46-52% → win rate 8.3% (24 trades, 2 vitórias) — MUITO BAIXO
+ *  v2: base 58-62% → thresholds reais que filtram sinais fracos
  *
- * NOTA: Thresholds recalibrados para o range real do AssetScorer multidimensional (~52-68%).
- * O scorer produz scores naturalmente 8-10% abaixo do consenso bruto das IAs por incluir
- * dimensões históricas, de risco e de qualidade de dados no cálculo ponderado.
+ * - SYNTHETIC_RANDOM  (R_*, 1HZ*)      → base 58% — RNG auditado, sem notícias
+ * - CRASH_BOOM        (CRASH_*, BOOM_*) → base 60% — spikes detectáveis mas raros
+ * - JUMP_STEP         (JUMP_*, STEP_*)  → base 60% — movimentos estruturados
+ * - FOREX             (pares cambiais)   → base 62% — fundamentais globais
+ * - B3_BRAZIL         (WIN*, WDO*, etc) → base 65% — alto nível técnico
+ * - DEFAULT           (outros)           → base 60% — tratamento conservador
  */
 
 export type AssetCategory =
@@ -28,21 +31,15 @@ export interface AssetProfile {
   symbol: string;
   category: AssetCategory;
   categoryLabel: string;
-  baseThreshold: number;       // threshold mínimo base para entrar (sem recovery)
-  gateThreshold: number;       // threshold do gate principal (base + margem)
-  recoveryDeltas: [number, number, number]; // adicionais por streak 1/2/3+ perdas
+  baseThreshold: number;
+  gateThreshold: number;
+  recoveryDeltas: [number, number, number];
   description: string;
 }
 
-/**
- * Classifica o símbolo e retorna o perfil completo do ativo.
- */
 export function classifyAsset(symbol: string): AssetProfile {
   const s = (symbol || '').toUpperCase().trim();
 
-  // ── Sintéticos Aleatórios Deriv ──────────────────────────────────────────
-  // Códigos: R_10, R_25, R_50, R_75, R_100 e variantes com 1HZ
-  // Nomes completos: "Volatility 10 Index", "Volatility 75 Index", etc.
   if (
     /^R_\d+/.test(s) ||
     /^1HZ\d+V$/.test(s) ||
@@ -50,23 +47,19 @@ export function classifyAsset(symbol: string): AssetProfile {
     /^VOLATILITY\s+\d+(\s+INDEX)?$/i.test(s) ||
     /VOLATILITY\s+\d+\s+INDEX/i.test(s)
   ) {
-    return profile(s, 'SYNTHETIC_RANDOM', 'Sintético Aleatório (Deriv)', 46, [2, 6, 12],
-      'Índice sintético gerado por RNG auditado. Sem influência de notícias externas.');
+    return profile(s, 'SYNTHETIC_RANDOM', 'Sintético Aleatório (Deriv)', 58, [6, 12, 20],
+      'Índice sintético gerado por RNG auditado. Threshold alto exigido para filtrar ruído.');
   }
 
-  // ── Crash & Boom ──────────────────────────────────────────────────────────
-  // Códigos: CRASH_300, BOOM_500, etc. | Nomes: "Crash 50 Index", "Boom 100 Index"
   if (
     /^(CRASH|BOOM)_?\d+/.test(s) ||
     /^(CRASH|BOOM)\s+\d+(\s+INDEX)?$/i.test(s) ||
     /^(CRASH|BOOM)\s+\d+/i.test(s)
   ) {
-    return profile(s, 'CRASH_BOOM', 'Crash/Boom (Deriv)', 48, [2, 6, 12],
-      'Índice sintético com spikes programados. Padrões detectáveis mas raros.');
+    return profile(s, 'CRASH_BOOM', 'Crash/Boom (Deriv)', 60, [6, 12, 20],
+      'Índice sintético com spikes programados. Padrões detectáveis mas exigem sinal forte.');
   }
 
-  // ── Jump & Step ───────────────────────────────────────────────────────────
-  // Códigos: JUMP_10, STEP_INDEX | Nomes: "Jump 50 Index", "Step Index"
   if (
     /^JUMP_?\d+/.test(s) ||
     /^STEP_?INDEX/.test(s) ||
@@ -74,56 +67,44 @@ export function classifyAsset(symbol: string): AssetProfile {
     /^JUMP\s+\d+(\s+INDEX)?$/i.test(s) ||
     /^STEP\s+INDEX$/i.test(s)
   ) {
-    return profile(s, 'JUMP_STEP', 'Jump/Step Index (Deriv)', 48, [2, 6, 12],
-      'Índice sintético com movimentos estruturados por parâmetro de volatilidade.');
+    return profile(s, 'JUMP_STEP', 'Jump/Step Index (Deriv)', 60, [6, 12, 20],
+      'Índice sintético com movimentos estruturados por volatilidade.');
   }
 
-  // ── Ativos Brasileiros B3 ─────────────────────────────────────────────────
   if (
     /^(WIN|WDO|DOL|IND|BGI|CCM|ICF|OZ1|OZ2|SFI|FRC|DI1|DAP|DDI)\w*/.test(s) ||
     /^(PETR|VALE|ITUB|BBDC|ABEV|JBSS|SUZB|WEGE|MGLU|RENT|LREN|GNDI|RAIL|CPLE|EMBR|BPAC|SANB|CSAN|PRIO|AZUL|GOLL|BRKM|KLBN|UGPA|RAIZ|BRFS)\w*/.test(s) ||
     s.includes('IBOV') || s.includes('B3:')
   ) {
-    return profile(s, 'B3_BRAZIL', 'Mercado Brasileiro (B3)', 62, [2, 6, 12],
+    return profile(s, 'B3_BRAZIL', 'Mercado Brasileiro (B3)', 65, [5, 10, 18],
       'Ativo do mercado brasileiro. Alta previsibilidade técnica e fundamentalista.');
   }
 
-  // ── Forex ─────────────────────────────────────────────────────────────────
   if (
     /^(EUR|GBP|USD|JPY|CHF|AUD|NZD|CAD)(EUR|GBP|USD|JPY|CHF|AUD|NZD|CAD)/.test(s) ||
     /^(EUR|GBP|USD|JPY|CHF|AUD|NZD|CAD)\/(EUR|GBP|USD|JPY|CHF|AUD|NZD|CAD)/.test(s) ||
     /^(XAUUSD|XAGUSD|XPTUSD|WTIUSD|BRENTUSD)/.test(s)
   ) {
-    return profile(s, 'FOREX', 'Forex / Commodities', 57, [2, 6, 12],
+    return profile(s, 'FOREX', 'Forex / Commodities', 62, [5, 10, 18],
       'Par cambial ou commodity influenciado por fundamentos e notícias globais.');
   }
 
-  // ── Default ───────────────────────────────────────────────────────────────
-  return profile(s, 'DEFAULT', 'Ativo Genérico', 55, [2, 6, 12],
+  return profile(s, 'DEFAULT', 'Ativo Genérico', 60, [6, 12, 20],
     'Tipo de ativo não identificado. Usando threshold conservador padrão.');
 }
 
-/**
- * Retorna os thresholds de recovery para um dado streak de perdas e símbolo.
- * streak 0 = fora do recovery (retorna 0)
- */
 export function getRecoveryThreshold(symbol: string, consecutiveLosses: number): number {
   if (consecutiveLosses <= 0) return 0;
   const p = classifyAsset(symbol);
   const level = Math.min(consecutiveLosses, 3) as 1 | 2 | 3;
-  const deltaIdx = level - 1; // 0, 1, 2
+  const deltaIdx = level - 1;
   return p.baseThreshold + p.recoveryDeltas[deltaIdx];
 }
 
-/**
- * Retorna o gate threshold (limiar mínimo para entrar num trade) para o símbolo.
- * É base + 2% por padrão em todos os tipos.
- */
 export function getGateThreshold(symbol: string): number {
   return classifyAsset(symbol).gateThreshold;
 }
 
-// ── Helper interno ─────────────────────────────────────────────────────────
 function profile(
   symbol: string,
   category: AssetCategory,
@@ -137,7 +118,7 @@ function profile(
     category,
     categoryLabel,
     baseThreshold: base,
-    gateThreshold: base + 2, // gate sempre 2% acima da base
+    gateThreshold: base + 2,
     recoveryDeltas,
     description,
   };

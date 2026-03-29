@@ -108,10 +108,10 @@ export class AutoTradingScheduler {
   // 🚫 PAUSA POR MERCADO RUIM — Bloqueia operações quando o mercado global está desfavorável
   private badMarketPausedUntil: number = 0;             // Timestamp até quando operações estão pausadas
   private badMarketReducedGrowthActive: boolean = false; // true = opera com growth 1% (recuperação parcial)
-  private readonly BAD_MARKET_PAUSE_MS = 30 * 1000;      // 30 segundos (antes: 15 min) — IA retoma quase imediatamente
-  private readonly BAD_MARKET_QUALITY_THRESHOLD = 30;    // Qualidade ≤ 30% → pausa — pausa quando mercado está claramente desfavorável
-  private readonly BAD_MARKET_RECOVERED_THRESHOLD = 60;  // Qualidade > 60% → recuperação plena (5%)
-  private readonly BAD_MARKET_PARTIAL_THRESHOLD = 30;    // Qualidade 31-60% → recuperação parcial (antes: 40%)
+  private readonly BAD_MARKET_PAUSE_MS = 5 * 60 * 1000;  // 5 minutos — mercado ruim precisa de pausa real
+  private readonly BAD_MARKET_QUALITY_THRESHOLD = 40;    // Qualidade ≤ 40% → pausa (antes 30% — muito permissivo)
+  private readonly BAD_MARKET_RECOVERED_THRESHOLD = 65;  // Qualidade > 65% → recuperação plena
+  private readonly BAD_MARKET_PARTIAL_THRESHOLD = 40;    // Qualidade 41-65% → recuperação parcial
   private readonly BAD_MARKET_GROWTH_REDUCED = 0.01;     // Taxa de crescimento reduzida (1%)
   private activityLog: Array<{ time: number; message: string; type: 'info' | 'success' | 'warning' | 'trade' }> = [];
 
@@ -125,8 +125,8 @@ export class AutoTradingScheduler {
     cooldownUntil: number;
   }> = new Map();
   private pendingMartingaleContracts: Map<string, { userId: string; part: number }> = new Map();
-  private readonly MARTINGALE_CONSENSUS_THRESHOLD = 75; // Reduzido de 92→75: sistema máx atinge ~75-80%
-  private readonly MARTINGALE_COOLDOWN_MS = 30 * 1000; // 30 segundos entre sequências (antes: 15 min — IA não fica travada)
+  private readonly MARTINGALE_CONSENSUS_THRESHOLD = 82; // Martingale exige consenso real muito alto (82%+)
+  private readonly MARTINGALE_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutos entre sequências — evita martingale em loop
 
   // 🚀 MODO ALAVANCAGEM — disparo raro e cirúrgico quando o mercado geral está excepcional
   private leverageLastFiredAt: number = 0;
@@ -1624,16 +1624,24 @@ export class AutoTradingScheduler {
             }
           }
 
-          // 2️⃣ Exigir consenso mínimo de 85% para qualquer trade em modo recuperação
+          // 2️⃣ Exigir consenso mínimo escalado pelo streak de perdas
           const currentConsensus = aiConsensusPreCalculated?.consensusStrength ?? 0;
           if (currentConsensus < reqs.minConsensus) {
-            console.log(`⛔ [${operationId}] RECOVERY MODE: Consenso ${currentConsensus}% < mínimo ${reqs.minConsensus}% exigido`);
-            console.log(`   → Sistema aguarda sinal excepcional antes de operar novamente`);
+            // Pausa proporcional ao número de perdas consecutivas para dar tempo real ao mercado mudar
+            const pauseMs = reqs.consecutiveLosses >= 3
+              ? 10 * 60 * 1000   // 3+ perdas → 10 minutos de pausa obrigatória
+              : reqs.consecutiveLosses === 2
+              ? 5 * 60 * 1000    // 2 perdas → 5 minutos de pausa
+              : 2 * 60 * 1000;   // 1 perda → 2 minutos de pausa
+            this.loopSleepUntil = Math.max(this.loopSleepUntil, Date.now() + pauseMs);
+            const pauseMin = Math.round(pauseMs / 60000);
+            console.log(`⛔ [${operationId}] RECOVERY MODE: Consenso ${currentConsensus.toFixed(1)}% < mínimo ${reqs.minConsensus}% exigido`);
+            console.log(`   → ${reqs.consecutiveLosses} perda(s) consecutiva(s): PAUSA DE ${pauseMin} MIN aplicada`);
             console.log(`   → Saldo atual estimado: $${recoveryPnL?.currentBalance?.toFixed(2) || '?'} | Alvo: $${reqs.balanceToRecover.toFixed(2)}`);
-            return { success: false, error: `RECOVERY MODE: Consenso ${currentConsensus}% insuficiente — exigido ≥${reqs.minConsensus}% após perda` };
+            return { success: false, error: `RECOVERY MODE: ${reqs.consecutiveLosses} perda(s) — pausando ${pauseMin}min para o mercado se reorganizar` };
           }
 
-          console.log(`🔥 [${operationId}] RECOVERY MODE: Sinal EXCEPCIONAL ${currentConsensus}% ≥ ${reqs.minConsensus}% | Trade AUTORIZADO em ${selectedSymbol}`);
+          console.log(`🔥 [${operationId}] RECOVERY MODE: Sinal EXCEPCIONAL ${currentConsensus.toFixed(1)}% ≥ ${reqs.minConsensus}% | Trade AUTORIZADO em ${selectedSymbol}`);
         }
       } catch (recoveryCheckError) {
         console.warn(`⚠️ [${operationId}] Erro na verificação de recovery mode:`, recoveryCheckError);
@@ -2227,12 +2235,11 @@ export class AutoTradingScheduler {
           }
         }
 
-        // 🎯 FILTRO DE QUALIDADE — DIGIT DIFFERS: só opera com consenso ≥65%
-        // Fundamento matemático: payout ~9% por trade exige win rate >92% para ser lucrativo.
-        // Threshold rebaixado de 90% para 65% pois agora usamos o consenso bruto das IAs
-        // (aiRawScore), que tem range real de 50-80%, tornando 90% praticamente inalcançável.
-        // Com 65% de consenso bruto das IAs o edge já está confirmado para DIFFER.
-        const DIGIT_DIFFERS_MIN_CONSENSUS = 65;
+        // 🎯 FILTRO DE QUALIDADE — DIGIT DIFFERS: só opera com consenso ≥75%
+        // O motor de Markov deve ter confiança real antes de selecionar o dígito barreira.
+        // Com range real de 50-80% do consenso, exigir 75% garante que estamos no topo
+        // da distribuição — sinais onde o edge estatístico é real, não aleatório.
+        const DIGIT_DIFFERS_MIN_CONSENSUS = 75;
         if (compatibleModalities.includes('digit_differs') && aiConsensus.consensusStrength < DIGIT_DIFFERS_MIN_CONSENSUS) {
           const withoutDD = compatibleModalities.filter(m => m !== 'digit_differs');
           if (withoutDD.length === 0) {
@@ -2385,7 +2392,10 @@ export class AutoTradingScheduler {
             : 1;
           const isBurstMode = contractType === 'DIGITMATCH' && multiDigitCount > 1;
           if (isBurstMode) {
-            const isKellyMode = multiDigitCount === 10; // Modo 10× usa Kelly agressivo (stakes variáveis)
+            // KELLY×10 DESATIVADO: cobrir todos os 10 dígitos é matematicamente perdedor.
+            // Payout DIGITMATCH típico ~8.5x. Com 10 contratos: custo=10×stake, retorno=8.5×stake → -1.5 por rodada.
+            // Sempre usar modo burst calibrado (floor(payout)-1 contratos) que é o único lucrativo.
+            const isKellyMode = false; // PERMANENTEMENTE DESABILITADO — EV negativo garantido
 
             // ── MODO 10× KELLY: todos os dígitos, stakes por calor (sempre vence) ──
             if (isKellyMode) {
@@ -3474,10 +3484,11 @@ export class AutoTradingScheduler {
           const symbol = symbolData.symbol;
           
           // Verificar se temos dados suficientes
-          // 🔥 REDUZIDO de 50 para 20 ticks mínimos — evita falha logo após inicialização
+          // Mínimo 100 ticks para análise confiável de Markov e indicadores técnicos.
+          // Com menos dados, os indicadores oscilam aleatoriamente e o sinal não tem valor.
           const priceHistory = JSON.parse(symbolData.priceHistory);
-          if (priceHistory.length < 20) {
-            console.log(`📉 [ANALISE] ${symbol}: dados insuficientes (${priceHistory.length} ticks < 20 mínimo) — aguardando coleta`);
+          if (priceHistory.length < 100) {
+            console.log(`📉 [ANALISE] ${symbol}: dados insuficientes (${priceHistory.length} ticks < 100 mínimo) — aguardando coleta`);
             return null;
           }
           
