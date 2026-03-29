@@ -331,7 +331,7 @@ export class AutoTradingScheduler {
           console.log(`🏆 [CONTRACT CLOSED] WIN registrado imediatamente: +$${finalProfit.toFixed(4)} | ${symbol}`);
         } else if (finalProfit < 0 || data.status === 'lost') {
           const lossAmount = finalProfit < 0 ? finalProfit : -1;
-          realStatsTracker.recordLoss(lossAmount, symbol, contractIdStr);
+          realStatsTracker.recordLoss(lossAmount, symbol, contractIdStr, data.contractType);
           console.log(`❌ [CONTRACT CLOSED] LOSS registrado imediatamente: $${lossAmount.toFixed(4)} | ${symbol} | Recovery Mode: ATIVADO`);
         }
       } catch (statsErr) {
@@ -1231,31 +1231,56 @@ export class AutoTradingScheduler {
       if (userCbLosses > 0 && userCbPauseMin > 0) {
         realStatsTracker.configureCircuitBreaker(userCbLosses, userCbPauseMin);
       }
-      if (userEnableCircuitBreaker && realStatsTracker.isCircuitBreakerActive()) {
-        const reqs = realStatsTracker.getRecoveryRequirements();
-        const remainingSec = Math.ceil(reqs.circuitBreakerRemainingMs / 1000);
-        const remainingMin = Math.ceil(remainingSec / 60);
-        // 🛑 Sinaliza o loop para dormir pelo tempo restante do circuit breaker (máx 90s por fatia)
-        this.loopSleepUntil = Date.now() + Math.min(reqs.circuitBreakerRemainingMs, 90_000);
-        console.log(`🔴 [${operationId}] CIRCUIT BREAKER ATIVO: ${reqs.consecutiveLosses} perdas consecutivas — pausa obrigatória (${remainingMin} min restantes)`);
-        return {
-          success: false,
-          error: `CIRCUIT BREAKER: ${reqs.consecutiveLosses} perdas consecutivas — aguardando ${remainingMin} min antes do próximo trade`
-        };
-      } else if (!userEnableCircuitBreaker && realStatsTracker.isCircuitBreakerActive()) {
-        console.log(`🔴 [${operationId}] CIRCUIT BREAKER ignorado — desabilitado pelo usuário`);
+      // ⚠️ DIGIT CB BYPASS: Modalidades de dígito NÃO usam circuit breaker.
+      // Perdas consecutivas em índices pseudoaleatórios são variância normal,
+      // não sinal de mercado adverso. O CB interromperia janelas de frequência favoráveis.
+      const DIGIT_MODALITY_KEYS_CB = new Set(['digit_differs','digit_matches','digit_even','digit_odd','digit_over','digit_under']);
+      let _cbModalitiesRaw: string[] = [];
+      try {
+        if (config.selectedModalities) {
+          const _parsed = JSON.parse(config.selectedModalities);
+          _cbModalitiesRaw = Array.isArray(_parsed)
+            ? _parsed
+            : config.selectedModalities.split(',').map((s: string) => s.trim()).filter(Boolean);
+        }
+      } catch {
+        _cbModalitiesRaw = config.selectedModalities
+          ? config.selectedModalities.split(',').map((s: string) => s.trim()).filter(Boolean)
+          : [];
       }
+      const isDigitOnlyMode = _cbModalitiesRaw.length > 0 &&
+        _cbModalitiesRaw.every((m: string) => DIGIT_MODALITY_KEYS_CB.has(m));
 
-      // 🤖 CIRCUIT BREAKER PROATIVO — IA verifica condições de mercado sem precisar de perdas
-      if (userEnableCircuitBreaker && !realStatsTracker.isCircuitBreakerActive()) {
-        const proactive = realStatsTracker.checkProactiveBreaker();
-        if (proactive.shouldPause) {
-          this.loopSleepUntil = Date.now() + Math.min(proactive.pauseMs, 90_000);
-          console.log(`🤖 [${operationId}] CIRCUIT BREAKER PROATIVO: ${proactive.reason} → aguardando ${Math.round(proactive.pauseMs/1000)}s`);
+      if (isDigitOnlyMode) {
+        if (realStatsTracker.isCircuitBreakerActive()) {
+          console.log(`📊 [${operationId}] CB BYPASS — modalidades DIGIT: circuit breaker ignorado (CB não se aplica a índices pseudoaleatórios)`);
+        }
+      } else {
+        if (userEnableCircuitBreaker && realStatsTracker.isCircuitBreakerActive()) {
+          const reqs = realStatsTracker.getRecoveryRequirements();
+          const remainingSec = Math.ceil(reqs.circuitBreakerRemainingMs / 1000);
+          const remainingMin = Math.ceil(remainingSec / 60);
+          this.loopSleepUntil = Date.now() + Math.min(reqs.circuitBreakerRemainingMs, 90_000);
+          console.log(`🔴 [${operationId}] CIRCUIT BREAKER ATIVO: ${reqs.consecutiveLosses} perdas consecutivas — pausa obrigatória (${remainingMin} min restantes)`);
           return {
             success: false,
-            error: `Circuit Breaker proativo: ${proactive.reason}`,
+            error: `CIRCUIT BREAKER: ${reqs.consecutiveLosses} perdas consecutivas — aguardando ${remainingMin} min antes do próximo trade`
           };
+        } else if (!userEnableCircuitBreaker && realStatsTracker.isCircuitBreakerActive()) {
+          console.log(`🔴 [${operationId}] CIRCUIT BREAKER ignorado — desabilitado pelo usuário`);
+        }
+
+        // 🤖 CIRCUIT BREAKER PROATIVO — IA verifica condições de mercado sem precisar de perdas
+        if (userEnableCircuitBreaker && !realStatsTracker.isCircuitBreakerActive()) {
+          const proactive = realStatsTracker.checkProactiveBreaker();
+          if (proactive.shouldPause) {
+            this.loopSleepUntil = Date.now() + Math.min(proactive.pauseMs, 90_000);
+            console.log(`🤖 [${operationId}] CIRCUIT BREAKER PROATIVO: ${proactive.reason} → aguardando ${Math.round(proactive.pauseMs/1000)}s`);
+            return {
+              success: false,
+              error: `Circuit Breaker proativo: ${proactive.reason}`,
+            };
+          }
         }
       }
 

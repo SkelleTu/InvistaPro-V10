@@ -21,6 +21,18 @@
 
 import { getRecoveryThreshold } from '../utils/asset-classifier';
 
+// Tipos de contrato que NÃO usam circuit breaker — índices pseudoaleatórios onde
+// perdas consecutivas são variância normal, não sinal de mercado adverso.
+const DIGIT_CONTRACT_TYPES = new Set([
+  'DIGITMATCH', 'DIGITDIFF', 'DIGITOVER', 'DIGITUNDER', 'DIGITEVEN', 'DIGITODD',
+  'digitmatch', 'digitdiff', 'digitover', 'digitunder', 'digiteven', 'digitodd',
+]);
+
+function isDigitContract(contractType?: string): boolean {
+  if (!contractType) return false;
+  return DIGIT_CONTRACT_TYPES.has(contractType.toUpperCase());
+}
+
 const RECOVERY_ASSET_BLOCK_MS = 5 * 60 * 1000; // 5 minutos — ativo perdedor precisa de pausa real
 
 // Pausas reais por perdas consecutivas para proteção de banca
@@ -485,7 +497,7 @@ class RealStatsTracker {
     }
   }
 
-  recordLoss(loss: number, symbol: string = '', contractId?: string): void {
+  recordLoss(loss: number, symbol: string = '', contractId?: string, contractType?: string): void {
     if (contractId && this.isContractAlreadyProcessed(contractId)) {
       console.log(`⚠️ [REAL STATS] Contrato ${contractId} já registrado — ignorando loss duplicado`);
       return;
@@ -501,28 +513,34 @@ class RealStatsTracker {
     this.consecutiveLosses++;
 
     // 🛡️ CAMADA 3 - Ativar Circuit Breaker
-    // Se usuário configurou threshold+pausa, usa config customizada; senão usa padrão escalonado
-    // 🤖 ADAPTAÇÃO POR MERCADO: multiplicador ajusta a pausa com base na qualidade atual
-    const marketMultiplier = this.getMarketContextMultiplier();
-    let breakerPauseMs: number;
-    if (this.cbUserLossThreshold !== null && this.cbUserPauseMs !== null) {
-      // Config do usuário: ativa quando atingir o threshold configurado
-      const basePause = this.consecutiveLosses >= this.cbUserLossThreshold ? this.cbUserPauseMs : 0;
-      breakerPauseMs = Math.round(basePause * marketMultiplier);
+    // ⚠️  DIGIT CONTRACTS EXEMPT: DIGITMATCH/DIFF/OVER/UNDER/EVEN/ODD operam sobre
+    // índices pseudoaleatórios onde perdas consecutivas são variância normal — não sinal
+    // de mercado adverso. O CB interromperia operações em janelas ainda favoráveis.
+    const digitExempt = isDigitContract(contractType);
+    let breakerPauseMs = 0;
+    if (!digitExempt) {
+      const marketMultiplier = this.getMarketContextMultiplier();
+      if (this.cbUserLossThreshold !== null && this.cbUserPauseMs !== null) {
+        const basePause = this.consecutiveLosses >= this.cbUserLossThreshold ? this.cbUserPauseMs : 0;
+        breakerPauseMs = Math.round(basePause * marketMultiplier);
+      } else {
+        const streakLevel = Math.min(this.consecutiveLosses, 3);
+        const basePause = CIRCUIT_BREAKER_PAUSE_MS[streakLevel] ?? 0;
+        breakerPauseMs = Math.round(basePause * marketMultiplier);
+      }
+      if (breakerPauseMs > 0) {
+        this.circuitBreakerUntil = Date.now() + breakerPauseMs;
+        const pauseMin = Math.round(breakerPauseMs / 60000);
+        const pauseSec = Math.round(breakerPauseMs / 1000);
+        const display = pauseMin >= 1 ? `${pauseMin} minuto(s)` : `${pauseSec} segundos`;
+        const mkt = this.getMarketContextMultiplier();
+        const contextNote = mkt !== 1.0 ? ` (×${mkt.toFixed(1)} por qualidade de mercado ${this.marketQuality.toFixed(0)}%)` : '';
+        console.log(`🔴 [CIRCUIT BREAKER] ${this.consecutiveLosses} perdas consecutivas → PAUSA OBRIGATÓRIA de ${display}${contextNote}`);
+        console.log(`   → Próximo trade permitido após: ${new Date(this.circuitBreakerUntil).toLocaleTimeString()}`);
+      }
     } else {
-      // Padrão escalonado: 1 perda=2min, 2=5min, 3+=15min + ajuste de mercado
-      const streakLevel = Math.min(this.consecutiveLosses, 3);
-      const basePause = CIRCUIT_BREAKER_PAUSE_MS[streakLevel] ?? 0;
-      breakerPauseMs = Math.round(basePause * marketMultiplier);
-    }
-    if (breakerPauseMs > 0) {
-      this.circuitBreakerUntil = Date.now() + breakerPauseMs;
-      const pauseMin = Math.round(breakerPauseMs / 60000);
-      const pauseSec = Math.round(breakerPauseMs / 1000);
-      const display = pauseMin >= 1 ? `${pauseMin} minuto(s)` : `${pauseSec} segundos`;
-      const contextNote = marketMultiplier !== 1.0 ? ` (×${marketMultiplier.toFixed(1)} por qualidade de mercado ${this.marketQuality.toFixed(0)}%)` : '';
-      console.log(`🔴 [CIRCUIT BREAKER] ${this.consecutiveLosses} perdas consecutivas → PAUSA OBRIGATÓRIA de ${display}${contextNote}`);
-      console.log(`   → Próximo trade permitido após: ${new Date(this.circuitBreakerUntil).toLocaleTimeString()}`);
+      // Digits: sem circuit breaker — mantém streak contado mas não pausa
+      console.log(`📊 [DIGIT CB-EXEMPT] ${contractType?.toUpperCase()} — streak de perdas: ${this.consecutiveLosses} (sem pausa — variância esperada em índices pseudoaleatórios)`);
     }
 
     // 🛡️ CAMADA 2/4 - Ativar/atualizar modo recuperação
@@ -535,11 +553,12 @@ class RealStatsTracker {
 
     console.log(`❌ [REAL STATS] Trade PERDIDO. WinRate: ${this.winRate.toFixed(1)}% (${this.wonTrades}W/${this.lostTrades}L) | $${loss.toFixed(2)}`);
     console.log(`🛡️ [RECOVERY] MODO RECUPERAÇÃO ATIVADO (streak: ${this.consecutiveLosses} perdas consecutivas):`);
-    console.log(`   • Ativo bloqueado (CAMADA 4): ${symbol || 'N/A'} por 30 min`);
+    console.log(`   • Ativo bloqueado (CAMADA 4): ${symbol || 'N/A'} por 5 min`);
     console.log(`   • Saldo alvo: $${balanceBefore.toFixed(2)} (precisa SUPERAR este valor)`);
     console.log(`   • Consenso mínimo escalado (CAMADA 2): ${minConsensus}% (streak: ${this.consecutiveLosses})`);
-    console.log(`   • Anti-repetição (CAMADA 1): ativo anterior bloqueado para próximo ciclo`);
-    if (breakerPauseMs > 0) {
+    if (digitExempt) {
+      console.log(`   • Circuit Breaker (CAMADA 3): ISENTO — contrato DIGIT não pausa o sistema`);
+    } else if (breakerPauseMs > 0) {
       console.log(`   • Circuit Breaker (CAMADA 3): ${Math.round(breakerPauseMs / 60000)} min de pausa ativa`);
     }
 
