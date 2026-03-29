@@ -320,7 +320,7 @@ export default function Frenetico9TokensPanel({ syncedDigitCount, syncedStakeMod
               <div className="p-3 rounded-lg bg-card border border-border/40 text-xs space-y-1.5">
                 <div className="flex items-center gap-1.5 text-muted-foreground font-medium mb-1">
                   <Target className="w-3.5 h-3.5" />
-                  Projeção para próxima rajada ({stakeMode})
+                  Projeção para próxima rajada ({effectiveStakeMode})
                 </div>
                 <div className="grid grid-cols-4 gap-2">
                   <div className="text-center">
@@ -583,7 +583,7 @@ export default function Frenetico9TokensPanel({ syncedDigitCount, syncedStakeMod
             </div>
 
             {/* Legenda de stakes do modo atual */}
-            {stakeMode !== "uniform" && Object.keys(stakeDistribution).length > 0 && (
+            {effectiveStakeMode !== "uniform" && Object.keys(stakeDistribution).length > 0 && (
               <div className="text-[10px] text-muted-foreground flex flex-wrap gap-1 items-center">
                 <span className="font-medium text-foreground">Stakes {modeInfo.label}:</span>
                 {Array.from({ length: 10 }, (_, i) => {
