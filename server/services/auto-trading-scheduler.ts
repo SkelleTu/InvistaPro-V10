@@ -2288,7 +2288,7 @@ export class AutoTradingScheduler {
         // ⚡ MODO MULTI-DÍGITO: gate de consenso relaxado — estratégia baseia-se em frequência de dígitos + cobertura
         const rawMatchFreqGate = modalityFrequency['digit_matches'];
         const burstCountGate = selectedModality === 'digit_matches'
-          ? (rawMatchFreqGate === 'frenetico' ? 9 : Math.min(9, Math.max(1, parseInt(rawMatchFreqGate ?? '9') || 9)))
+          ? (rawMatchFreqGate === 'frenetico' ? 9 : Math.min(10, Math.max(1, parseInt(rawMatchFreqGate ?? '9') || 9)))
           : 1;
         const isMultiDigitGate = selectedModality === 'digit_matches' && burstCountGate > 1;
         // Quanto mais dígitos, menor o consenso mínimo exigido (cobertura compensa)
@@ -2355,10 +2355,56 @@ export class AutoTradingScheduler {
           // Backward-compat: 'frenetico' = 4 dígitos
           const rawMatchFreq = modalityFrequency['digit_matches'];
           const multiDigitCount = contractType === 'DIGITMATCH'
-            ? (rawMatchFreq === 'frenetico' ? 9 : Math.min(9, Math.max(1, parseInt(rawMatchFreq ?? '9') || 9)))
+            ? (rawMatchFreq === 'frenetico' ? 9 : Math.min(10, Math.max(1, parseInt(rawMatchFreq ?? '9') || 9)))
             : 1;
           const isBurstMode = contractType === 'DIGITMATCH' && multiDigitCount > 1;
           if (isBurstMode) {
+            const isKellyMode = multiDigitCount === 10; // Modo 10× usa Kelly agressivo (stakes variáveis)
+
+            // ── MODO 10× KELLY: todos os dígitos, stakes por calor (sempre vence) ──
+            if (isKellyMode) {
+              const MIN_STAKE = 0.35;
+              const PAYOUT_EST = 9.0;
+              const analysis = digitFrequencyAnalyzer.analyzeSymbolMultiWindow(selectedSymbol);
+              const kellyStakes: { digit: number; stake: number }[] = Array.from({ length: 10 }, (_, d) => {
+                const freq = analysis?.digits?.find((x: any) => x.digit === d)?.frequency ?? 0.10;
+                const label = freq >= 0.13 ? 'hot' : freq <= 0.07 ? 'cold' : 'neutral';
+                const ratio = freq / 0.10;
+                let stake: number;
+                if (label === 'hot') {
+                  stake = parseFloat(Math.max(MIN_STAKE, tradeParams.amount * Math.pow(ratio, 1.5) * 2.0).toFixed(2));
+                } else if (label === 'cold') {
+                  stake = MIN_STAKE;
+                } else {
+                  stake = parseFloat(Math.max(MIN_STAKE, tradeParams.amount * ratio).toFixed(2));
+                }
+                return { digit: d, stake };
+              });
+              const totalKelly = kellyStakes.reduce((s, k) => s + k.stake, 0);
+              console.log(`🎯💜 [${operationId}] DIGITMATCH KELLY×10 | ${selectedSymbol} | 10 dígitos (100% cobertura) | Investimento total: $${totalKelly.toFixed(2)} | Stakes: ${kellyStakes.map(k => `${k.digit}→$${k.stake}`).join(', ')}`);
+
+              const kellyPromises = kellyStakes.map(({ digit, stake }, idx) =>
+                derivAPI.buyGenericDigitContract({
+                  contract_type: 'DIGITMATCH',
+                  symbol: selectedSymbol,
+                  duration: digitDuration,
+                  amount: stake,
+                  barrier: digit.toString(),
+                  currency: 'USD',
+                }).then(c => {
+                  console.log(`🎯 [KELLY×10 #${idx+1}/10] Dígito ${digit} ($${stake}) → contrato ${c?.contract_id ?? 'N/A'} aberto`);
+                  return c;
+                }).catch(err => {
+                  console.warn(`⚠️ [KELLY×10 #${idx+1}/10] Dígito ${digit} ($${stake}) falhou: ${err?.message ?? err}`);
+                  return null;
+                })
+              );
+              const kellyResults = await Promise.allSettled(kellyPromises);
+              const firstKellyOk = kellyResults.filter(r => r.status === 'fulfilled' && (r as any).value != null).map(r => (r as any).value)[0] ?? null;
+              const kellyOpened = kellyResults.filter(r => r.status === 'fulfilled' && (r as any).value != null).length;
+              console.log(`💜 [KELLY×10] Rajada concluída: ${kellyOpened}/10 contratos | total=$${totalKelly.toFixed(2)} | Representante: ${firstKellyOk?.contract_id ?? 'nenhum'}`);
+              contract = firstKellyOk;
+            } else {
             // ── CALIBRAÇÃO DE PAYOUT: consultar o multiplicador real da Deriv antes de decidir o burst size ──
             // Regra: burst seguro = floor(payout) - 1 (garantindo lucro mesmo quando só 1 contrato vence)
             // Ex: payout=8.5x → max seguro=8 contratos (retorno 8.5 - 8 = +0.5 lucro)
@@ -2421,6 +2467,7 @@ export class AutoTradingScheduler {
             const openedCount = burstResults.filter(r => r.status === 'fulfilled' && r.value != null).length;
             console.log(`⚡🔥 [MULTI-DÍGITO] Rajada concluída: ${openedCount}/${BURST_SIZE} contratos abertos | Representante: ${firstOk?.contract_id ?? 'nenhum'}`);
             contract = firstOk;
+            } // fim else !isKellyMode
           } else {
             contract = await derivAPI.buyGenericDigitContract({
               contract_type: contractType,

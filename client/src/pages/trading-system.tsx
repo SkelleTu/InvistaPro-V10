@@ -2740,34 +2740,69 @@ export default function TradingSystemPage() {
                                 {/* ── Cobertura Multi-Dígito (somente DIGITMATCH ativo) ── */}
                                 {modality.id === 'digit_matches' && isEnabled && (() => {
                                   const rawVal = modalityFrequency['digit_matches'];
-                                  const currentCount = rawVal === 'frenetico' ? 4 : (parseInt(rawVal ?? '1') || 1);
+                                  const currentCount = rawVal === 'frenetico' ? 9 : (parseInt(rawVal ?? '9') || 9);
                                   const coverage = Math.round((currentCount / 10) * 100);
+
+                                  // Cores por faixa de cobertura
+                                  const countColor = currentCount === 1 ? 'gray'
+                                    : currentCount <= 3 ? 'blue'
+                                    : currentCount <= 6 ? 'indigo'
+                                    : currentCount <= 9 ? 'orange'
+                                    : 'violet';
+
+                                  const colorMap: Record<string, string> = {
+                                    gray:   'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600',
+                                    blue:   'bg-blue-500 text-white border-blue-500 shadow-sm',
+                                    indigo: 'bg-indigo-500 text-white border-indigo-500 shadow-sm',
+                                    orange: 'bg-orange-500 text-white border-orange-500 shadow-sm',
+                                    violet: 'bg-violet-600 text-white border-violet-600 shadow-sm',
+                                  };
+                                  const badgeColor = currentCount === 1
+                                    ? 'bg-gray-100 dark:bg-gray-800 text-muted-foreground border-border'
+                                    : currentCount <= 3 ? 'bg-blue-500 text-white border-blue-500'
+                                    : currentCount <= 6 ? 'bg-indigo-500 text-white border-indigo-500'
+                                    : currentCount <= 9 ? 'bg-orange-500 text-white border-orange-500'
+                                    : 'bg-violet-600 text-white border-violet-600 animate-pulse';
+
+                                  const strategyLabel = currentCount === 1 ? 'Precisão Máxima'
+                                    : currentCount <= 3 ? 'Alta Precisão Kelly'
+                                    : currentCount <= 6 ? 'Kelly Moderado'
+                                    : currentCount <= 9 ? 'Cobertura Ampla'
+                                    : 'Cobertura Total Kelly ✦';
+
                                   return (
                                     <div className="mt-2 pt-2 border-t border-border">
-                                      <div className="rounded-md bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-300 dark:border-indigo-700 p-2.5">
+                                      <div className={`rounded-md border p-2.5 ${
+                                        currentCount <= 6
+                                          ? 'bg-indigo-50 dark:bg-indigo-950/30 border-indigo-300 dark:border-indigo-700'
+                                          : currentCount <= 9
+                                          ? 'bg-orange-50 dark:bg-orange-950/30 border-orange-300 dark:border-orange-700'
+                                          : 'bg-violet-50 dark:bg-violet-950/30 border-violet-300 dark:border-violet-700'
+                                      }`}>
+                                        {/* Header */}
                                         <div className="flex items-center justify-between gap-2 mb-2">
-                                          <p className="text-[11px] font-bold text-indigo-700 dark:text-indigo-300 flex items-center gap-1">
+                                          <p className={`text-[11px] font-bold flex items-center gap-1 ${
+                                            currentCount <= 6 ? 'text-indigo-700 dark:text-indigo-300'
+                                            : currentCount <= 9 ? 'text-orange-700 dark:text-orange-300'
+                                            : 'text-violet-700 dark:text-violet-300'
+                                          }`}>
                                             <Zap className="h-3.5 w-3.5" />
                                             Dígitos Simultâneos
                                           </p>
-                                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                                            currentCount === 1
-                                              ? 'bg-white dark:bg-gray-800 text-muted-foreground border-border'
-                                              : currentCount <= 3
-                                              ? 'bg-indigo-500 text-white border-indigo-500'
-                                              : currentCount <= 6
-                                              ? 'bg-orange-500 text-white border-orange-500'
-                                              : 'bg-red-500 text-white border-red-500 animate-pulse'
-                                          }`}>
-                                            {currentCount === 1 ? 'Padrão' : `${currentCount} dígitos · ${coverage}% cobertura`}
+                                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${badgeColor}`}>
+                                            {currentCount === 1 ? 'Padrão' : `${currentCount}× · ${coverage}% cobertura`}
                                           </span>
                                         </div>
-                                        <p className="text-[10px] text-indigo-600 dark:text-indigo-400 leading-relaxed mb-2">
-                                          A IA seleciona os <strong>N dígitos mais quentes</strong> e dispara N contratos DIGITMATCH em paralelo, sem delay. Quanto mais dígitos, maior a cobertura — com 9 dígitos, a vitória em ao menos um é quase garantida.
-                                        </p>
-                                        <div className="flex flex-wrap gap-1">
-                                          {[1,2,3,4,5,6,7,8,9].map((count) => {
+
+                                        {/* Botões 1-10 */}
+                                        <div className="flex flex-wrap gap-1 mb-2">
+                                          {[1,2,3,4,5,6,7,8,9,10].map((count) => {
                                             const isSelected = currentCount === count;
+                                            const btnColor = count === 1 ? colorMap.gray
+                                              : count <= 3 ? colorMap.blue
+                                              : count <= 6 ? colorMap.indigo
+                                              : count <= 9 ? colorMap.orange
+                                              : colorMap.violet;
                                             return (
                                               <button
                                                 key={count}
@@ -2784,45 +2819,81 @@ export default function TradingSystemPage() {
                                                   setModalityFrequency(next);
                                                   saveModalityFrequency(next);
                                                   toast({
-                                                    title: count === 1
-                                                      ? 'Modo padrão ativado'
-                                                      : `${count} dígitos simultâneos ativados`,
-                                                    description: count === 1
-                                                      ? 'Digit Matches opera 1 contrato por ciclo (IA escolhe o melhor dígito).'
-                                                      : `Sistema dispara ${count} DIGITMATCH em paralelo · ${Math.round((count/10)*100)}% de cobertura por ciclo.`,
+                                                    title: count === 1 ? 'Modo padrão ativado' : `${count} dígitos simultâneos`,
+                                                    description: count === 10
+                                                      ? 'Kelly×10: 100% cobertura com stakes variáveis por calor de dígito.'
+                                                      : count === 1
+                                                      ? 'IA escolhe o dígito mais quente por ciclo.'
+                                                      : `${count} DIGITMATCH simultâneos · ${Math.round((count/10)*100)}% cobertura.`,
                                                     duration: 2500,
                                                   });
                                                 }}
                                                 className={`px-2.5 py-1 rounded-full text-[11px] font-bold transition-all border ${
-                                                  isSelected
-                                                    ? count === 1
-                                                      ? 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600'
-                                                      : count <= 3
-                                                      ? 'bg-indigo-500 text-white border-indigo-500 shadow-sm'
-                                                      : count <= 6
-                                                      ? 'bg-orange-500 text-white border-orange-500 shadow-sm'
-                                                      : 'bg-red-500 text-white border-red-500 shadow-sm'
+                                                  isSelected ? btnColor
                                                     : 'bg-white dark:bg-gray-800 text-muted-foreground border-border hover:border-indigo-400 dark:hover:border-indigo-500'
                                                 }`}
                                               >
-                                                {count === 1 ? '1×' : `${count}×`}
+                                                {count === 10 ? '10× ✦' : `${count}×`}
                                               </button>
                                             );
                                           })}
                                         </div>
-                                        {currentCount > 1 && (
-                                          <div className={`mt-1.5 p-1.5 rounded text-[10px] font-medium ${
-                                            currentCount <= 3
-                                              ? 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300'
-                                              : currentCount <= 6
-                                              ? 'bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300'
-                                              : 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300'
-                                          }`}>
-                                            {currentCount <= 3 && `⚡ ${currentCount} contratos simultâneos · IA escolhe os ${currentCount} dígitos mais quentes · Stake total: ×${currentCount}`}
-                                            {currentCount > 3 && currentCount <= 6 && `🔥 ${currentCount} contratos em rajada · ${coverage}% de cobertura · Stake total: ×${currentCount}`}
-                                            {currentCount > 6 && `💥 ${currentCount} dígitos · ${coverage}% de cobertura — vitória garantida em 9/10 resultados possíveis · Stake total: ×${currentCount}`}
-                                          </div>
-                                        )}
+
+                                        {/* Card de estratégia por faixa */}
+                                        <div className={`p-2 rounded text-[10px] space-y-1 ${
+                                          currentCount === 10
+                                            ? 'bg-violet-100 dark:bg-violet-900/40 text-violet-800 dark:text-violet-200'
+                                            : currentCount >= 7
+                                            ? 'bg-orange-100 dark:bg-orange-900/40 text-orange-800 dark:text-orange-300'
+                                            : currentCount >= 4
+                                            ? 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300'
+                                            : 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300'
+                                        }`}>
+                                          <div className="font-bold">{strategyLabel}</div>
+                                          {currentCount === 1 && (
+                                            <div>IA escolhe o dígito mais quente. Máximo EV quando a edge é real. Alta recompensa, menor win rate.</div>
+                                          )}
+                                          {currentCount >= 2 && currentCount <= 3 && (
+                                            <div>Top {currentCount} dígitos mais quentes com Kelly agressivo. Stakes concentrados na maior probabilidade.</div>
+                                          )}
+                                          {currentCount >= 4 && currentCount <= 6 && (
+                                            <div>Top {currentCount} dígitos com stakes proporcionais à frequência. Equilíbrio entre cobertura e lucro.</div>
+                                          )}
+                                          {currentCount >= 7 && currentCount <= 9 && (
+                                            <div>Top {currentCount} dígitos. Stake uniforme calibrado pelo payout real — vitória sempre retorna lucro positivo.</div>
+                                          )}
+                                          {currentCount === 10 && (
+                                            <div>
+                                              <span className="font-bold text-violet-700 dark:text-violet-200">100% cobertura garantida.</span>{' '}
+                                              Stakes variáveis por calor: dígitos quentes recebem muito mais stake. EV positivo quando freq. quente {'>'} 11%.
+                                              <br/>
+                                              <span className="opacity-75">Ex: dígito com 20% freq → 9× payout × stake_alto → cobre todos os outros.</span>
+                                            </div>
+                                          )}
+                                          {/* Mini heat bar para visualizar distribuição */}
+                                          {currentCount > 1 && (
+                                            <div className="flex items-center gap-0.5 mt-1">
+                                              <span className="opacity-60 mr-1">Cobertura:</span>
+                                              {[...Array(10)].map((_, i) => (
+                                                <div
+                                                  key={i}
+                                                  className={`h-2 w-4 rounded-sm ${
+                                                    i < currentCount
+                                                      ? currentCount === 10
+                                                        ? 'bg-violet-500'
+                                                        : currentCount >= 7
+                                                        ? 'bg-orange-400'
+                                                        : currentCount >= 4
+                                                        ? 'bg-indigo-400'
+                                                        : 'bg-blue-400'
+                                                      : 'bg-gray-200 dark:bg-gray-700'
+                                                  }`}
+                                                />
+                                              ))}
+                                              <span className="ml-1 opacity-75 font-bold">{coverage}%</span>
+                                            </div>
+                                          )}
+                                        </div>
                                       </div>
                                     </div>
                                   );

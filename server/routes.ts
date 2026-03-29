@@ -2504,6 +2504,125 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json({ targetSymbol, digitHeats, stakeDistribution, burstStats, stakeMode: mode });
   }));
 
+  // GET /api/trading/digit-matches/strategy-preview — prévia de estratégia por cobertura N dígitos
+  app.get('/api/trading/digit-matches/strategy-preview', isAuthenticated, asyncErrorHandler(async (req: any, res: any) => {
+    const { count = '7', amount = '0.35' } = req.query as any;
+    const { digitFrequencyAnalyzer } = await import('./services/digit-frequency-analyzer');
+    const { selectBestAsset } = await import('./services/frenetico-9tokens');
+
+    const N = Math.min(10, Math.max(1, parseInt(count) || 7));
+    const baseAmount = Math.max(0.35, parseFloat(amount) || 0.35);
+    const MIN_STAKE = 0.35;
+    const PAYOUT = 9.0; // estimativa conservadora do payout DIGITMATCH
+
+    const targetSymbol = selectBestAsset();
+    const analysis = digitFrequencyAnalyzer.analyzeSymbolMultiWindow(targetSymbol);
+
+    // Monta heat map completo de todos os 10 dígitos
+    const allDigits = Array.from({ length: 10 }, (_, d) => {
+      const freq = analysis?.digits?.find((x: any) => x.digit === d)?.frequency ?? 0.10;
+      const label: 'hot' | 'neutral' | 'cold' = freq >= 0.13 ? 'hot' : freq <= 0.07 ? 'cold' : 'neutral';
+      return { digit: d, frequency: freq, label };
+    }).sort((a, b) => b.frequency - a.frequency);
+
+    // ── Calcula stakes por estratégia dependendo do N ──────────────────────
+    let stakeDist: Record<number, number> = {};
+    let strategyName = '';
+    let strategyDesc = '';
+    let strategyColor: 'blue' | 'indigo' | 'orange' | 'red' | 'violet' = 'blue';
+    let selectedDigits: typeof allDigits = [];
+
+    if (N === 10) {
+      // KELLY AGRESSIVO: todos os dígitos, stakes por calor
+      // EV = Σ freq_i × PAYOUT × stake_i - Σ stake_i
+      // Foco: maximizar stake nos dígitos EV+ (freq_i > 1/PAYOUT)
+      strategyName = 'Cobertura Total Kelly';
+      strategyDesc = 'Todos os 10 dígitos cobertos. Stakes concentrados nos mais quentes. Sempre vence — EV positivo se dígitos quentes têm frequência > 11%.';
+      strategyColor = 'violet';
+      selectedDigits = allDigits;
+      const avgFreq = 0.10;
+      for (const d of allDigits) {
+        const ratio = d.frequency / avgFreq;
+        if (d.label === 'hot') {
+          stakeDist[d.digit] = parseFloat(Math.max(MIN_STAKE, baseAmount * Math.pow(ratio, 1.5) * 2.0).toFixed(2));
+        } else if (d.label === 'cold') {
+          stakeDist[d.digit] = MIN_STAKE;
+        } else {
+          stakeDist[d.digit] = parseFloat(Math.max(MIN_STAKE, baseAmount * ratio).toFixed(2));
+        }
+      }
+    } else if (N >= 7) {
+      // CALIBRADO POR PAYOUT: uniform, burst seguro = floor(payout) - 1
+      strategyName = N === 9 ? 'Alta Cobertura' : 'Cobertura Ampla';
+      strategyDesc = `Stake uniforme. A vitória de 1 contrato retorna ${PAYOUT}× o stake — cobrindo os ${N} investidos com lucro mínimo garantido.`;
+      strategyColor = N === 9 ? 'orange' : 'red';
+      selectedDigits = allDigits.slice(0, N);
+      for (const d of selectedDigits) { stakeDist[d.digit] = baseAmount; }
+    } else if (N >= 4) {
+      // KELLY MODERADO: top N quentes, kelly proporcional
+      strategyName = 'Kelly Moderado';
+      strategyDesc = `Top ${N} dígitos mais quentes. Stakes proporcionais à frequência — mais stake onde a probabilidade é maior.`;
+      strategyColor = N <= 5 ? 'orange' : 'indigo';
+      selectedDigits = allDigits.slice(0, N);
+      const totalFreq = selectedDigits.reduce((s, d) => s + d.frequency, 0);
+      for (const d of selectedDigits) {
+        const w = d.frequency / totalFreq;
+        stakeDist[d.digit] = parseFloat(Math.max(MIN_STAKE, baseAmount * N * w).toFixed(2));
+      }
+    } else {
+      // PRECISÃO: top N quentes, kelly agressivo (N=1-3)
+      strategyName = N === 1 ? 'Precisão Máxima' : 'Alta Precisão Kelly';
+      strategyDesc = N === 1
+        ? 'Aposta no único dígito mais quente. EV máximo quando a edge é real. Maior risco, maior retorno.'
+        : `Top ${N} dígitos mais quentes com Kelly agressivo. Máxima concentração de edge.`;
+      strategyColor = 'blue';
+      selectedDigits = allDigits.slice(0, N);
+      const totalFreq = selectedDigits.reduce((s, d) => s + d.frequency, 0);
+      for (const d of selectedDigits) {
+        const w = d.frequency / totalFreq;
+        stakeDist[d.digit] = parseFloat(Math.max(MIN_STAKE, baseAmount * N * w * 1.2).toFixed(2));
+      }
+    }
+
+    // ── Calcula stats da estratégia ────────────────────────────────────────
+    const totalInvested = Object.values(stakeDist).reduce((s, v) => s + v, 0);
+    let ev = 0;
+    let winProb = 0;
+    for (const d of allDigits) {
+      const stake = stakeDist[d.digit] ?? 0;
+      if (stake > 0) {
+        ev += d.frequency * PAYOUT * stake - stake;
+        winProb += d.frequency;
+      }
+    }
+    // Retorno esperado na vitória: payout × stake do dígito vencedor (ponderado por probabilidade)
+    let expectedReturn = 0;
+    for (const d of allDigits) {
+      const stake = stakeDist[d.digit] ?? 0;
+      if (stake > 0) {
+        expectedReturn += (d.frequency / winProb) * (PAYOUT * stake);
+      }
+    }
+
+    res.json({
+      count: N,
+      symbol: targetSymbol,
+      payout: PAYOUT,
+      strategyName,
+      strategyDesc,
+      strategyColor,
+      stakeDist,
+      selectedDigits: selectedDigits.map(d => ({ ...d, stake: stakeDist[d.digit] ?? 0 })),
+      allDigits: allDigits.map(d => ({ ...d, stake: stakeDist[d.digit] ?? 0 })),
+      totalInvested: parseFloat(totalInvested.toFixed(2)),
+      expectedReturn: parseFloat(expectedReturn.toFixed(2)),
+      returnOnWin: totalInvested > 0 ? parseFloat(((expectedReturn / totalInvested) * 100).toFixed(1)) : 0,
+      ev: parseFloat(ev.toFixed(3)),
+      evPercent: totalInvested > 0 ? parseFloat(((ev / totalInvested) * 100).toFixed(1)) : 0,
+      winProbPercent: parseFloat((winProb * 100).toFixed(1)),
+    });
+  }));
+
   // =========================== TRADE CONFIGURATION ===========================
 
   app.post('/api/trading/config', isAuthenticated, isTradingAuthorized, async (req, res) => {
