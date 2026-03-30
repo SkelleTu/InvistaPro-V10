@@ -1,5 +1,28 @@
 # InvestaPRO - Sistema de Renda Variável + MetaTrader Integration
 
+## 🎰 GATE DE EV + BURST GUARD CORRIGIDO — Março 2026
+
+### Melhorias no Sistema DIGITMATCH:
+
+#### Gate de EV (Valor Esperado) — `frenetico-9tokens.ts` e `auto-trading-scheduler.ts`
+- **Matemática**: EV = P×Σ(f²) − 1 para Kelly×10; EV = avgFreq(top-N)×P − 1 para burst-N
+- **Limiar**: Σ(f²) > 1/P (= 0.1176 para payout 8.5x). Distribuição uniforme = 0.10 → sempre bloqueado.
+- **Dupla verificação**: EV Gate + Alinhamento Markov/Frequência (score 0-100%)
+- **Regra**: burst bloqueado se EV negativo **E** alinhamento fraco (`wait`). Alinhamento forte pode sobrepor EV marginal.
+- **Logs**: `🎰 [EV GATE]` e `🧭 [ALINHAMENTO IA]` exibidos ANTES de cada rajada
+- **Kelly×10 reabilitado condicionalmente**: habilitado quando Σ(f²) > limiar E multiDigitCount=10
+
+#### Burst Guard Corrigido — `frenetico-9tokens.ts`
+- **Bug antigo**: `Math.max(MIN_STAKE, scaled)` fazia o floor ignorar o cap → 8 slots × $0.35 = $2.80 mesmo com banca $0.46
+- **Regra 1**: Total ≤ 20% da banca → escalonamento proporcional SEM floor MIN_STAKE
+- **Regra 2 (nova)**: Se `MIN_STAKE × nSlots > maxAllowed` → reduzir slots para `floor(maxAllowed / MIN_STAKE)` slots mais quentes
+- **Regra 3 (nova)**: Se `saldo < MIN_STAKE × 2` → BURST CANCELADO imediatamente (sem desperdiçar $)
+
+#### Seleção de Dígitos Melhorada
+- Prioridade 1: dígitos onde Markov + Frequência **convergem** (alinhamento)
+- Prioridade 2: top-N por frequência histórica (fallback)
+- Boost de stake: ×1.2 para alinhamento 'strong', ×1.0 'moderate', ×0.8 'weak'
+
 ## 🔧 PROJETO PERDA ZERO — Correções Críticas (Março 2026)
 
 ### Problemas resolvidos nesta sessão:

@@ -351,6 +351,144 @@ class DigitPatternEngine {
       .map(x => x.d);
   }
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // SCORE DE ALINHAMENTO — Markov + Frequência
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Mede o grau de CONCORDÂNCIA entre o que Markov prediz e o que a frequência
+   * histórica aponta. Quando ambos apontam para os mesmos dígitos quentes,
+   * a confiança da entrada é máxima.
+   *
+   * Score 0-100:
+   *   0-39  → Discordância: Markov e frequência divergem — aguardar
+   *   40-69 → Alinhamento parcial — entrada com stake conservador
+   *   70-100→ Alinhamento forte — entrada com stake pleno
+   *
+   * Também retorna Σ(score_composto²) como proxy para EV preditivo:
+   * quanto mais concentrado o score em poucos dígitos, maior o edge.
+   */
+  getEntryAlignmentScore(symbol: string): {
+    alignmentScore: number;   // 0-100 — concordância Markov × frequência
+    entryQuality: 'strong' | 'moderate' | 'weak' | 'wait';
+    topAlignedDigits: number[];  // dígitos onde ambos os sinais convergem
+    predictiveEdge: number;   // Σ(score²)×10 — quanto mais alto, mais edge preditivo
+    markovConfidence: number; // confiança do Markov (0-100)
+    freqConfidence: number;   // confiança da frequência (0-100)
+    combinedInsight: string;  // resumo para log
+  } {
+    const prediction = this.getPredictionScores(symbol);
+    const { scores: markovFreqScores, markovOrder, confidence: markovConf } = prediction;
+
+    // Top-3 do Markov e da frequência
+    const sortedByComposite = markovFreqScores
+      .map((s, d) => ({ d, s }))
+      .sort((a, b) => b.s - a.s);
+    const topMarkov = new Set(sortedByComposite.slice(0, 3).map(x => x.d));
+
+    // Top-3 pela frequência pura (sem Markov)
+    const freqScores = prediction.frequencyScores;
+    const sortedByFreq = freqScores
+      .map((s, d) => ({ d, s }))
+      .sort((a, b) => b.s - a.s);
+    const topFreq = new Set(sortedByFreq.slice(0, 3).map(x => x.d));
+
+    // Overlap: quantos dígitos estão no top-3 de ambos
+    const overlap = [...topMarkov].filter(d => topFreq.has(d)).length;
+    const overlapScore = (overlap / 3) * 100; // 0, 33, 66, 100
+
+    // Momento: os dígitos top-Markov também têm momentum positivo?
+    const momentumScores = prediction.momentumScores;
+    const topMarkovMomentum = [...topMarkov].map(d => momentumScores[d]);
+    const avgMomentum = topMarkovMomentum.reduce((s, v) => s + v, 0) / 3;
+    const momentumBonus = Math.max(0, (avgMomentum - 0.5) * 40); // -20 a +20
+
+    // Score de alinhamento final
+    const rawAlignment = overlapScore + momentumBonus;
+    const alignmentScore = Math.min(100, Math.max(0, rawAlignment));
+
+    // Classificação de qualidade
+    let entryQuality: 'strong' | 'moderate' | 'weak' | 'wait';
+    if (alignmentScore >= 70 && markovConf >= 50) entryQuality = 'strong';
+    else if (alignmentScore >= 40 && markovConf >= 30) entryQuality = 'moderate';
+    else if (alignmentScore >= 20) entryQuality = 'weak';
+    else entryQuality = 'wait';
+
+    // Dígitos alinhados: top de ambos os sinais
+    const topAlignedDigits = [...topMarkov].filter(d => topFreq.has(d));
+    if (topAlignedDigits.length === 0) {
+      // fallback: top-2 do composto
+      topAlignedDigits.push(...sortedByComposite.slice(0, 2).map(x => x.d));
+    }
+
+    // Edge preditivo: Σ(score²) — quanto mais concentrado, mais edge
+    const predictiveEdge = markovFreqScores.reduce((s, v) => s + v * v, 0) * 10;
+
+    const combinedInsight = `Alinhamento=${alignmentScore.toFixed(0)}% (overlap=${overlap}/3) | ` +
+      `MarkovOrd${markovOrder} conf=${markovConf}% | momentum=${(avgMomentum*100).toFixed(0)}% | ` +
+      `qualidade=${entryQuality.toUpperCase()} | digits=[${topAlignedDigits.join(',')}]`;
+
+    return {
+      alignmentScore,
+      entryQuality,
+      topAlignedDigits,
+      predictiveEdge,
+      markovConfidence: markovConf,
+      freqConfidence: Math.min(100, (this.recentDigitsCache.get(symbol)?.length ?? 0) / 200 * 100),
+      combinedInsight,
+    };
+  }
+
+  /**
+   * GATE DE ENTRADA COMPLETO — combina EV matemático + alinhamento Markov + momentum.
+   * Retorna uma decisão GO/NO-GO clara para o motor de trading.
+   *
+   * @param symbol        - Símbolo
+   * @param payout        - Payout do contrato (ex: 8.5)
+   * @param nDigits       - Quantos dígitos serão cobertos
+   * @param minAlignment  - Score mínimo de alinhamento (default 40)
+   */
+  getFullEntryDecision(symbol: string, payout: number = 8.5, nDigits: number = 10, minAlignment: number = 40): {
+    goTrade: boolean;           // DECISÃO FINAL
+    reason: string;             // justificativa
+    alignment: ReturnType<DigitPatternEngine['getEntryAlignmentScore']>;
+    targetDigits: number[];     // dígitos recomendados para cobertura
+    stakeBoost: number;         // multiplicador sugerido (1.0 = normal, >1 = boost para sinal forte)
+  } {
+    const alignment = this.getEntryAlignmentScore(symbol);
+    const topDigits = this.getTopPredictedDigits(symbol, nDigits);
+
+    const alignmentOk = alignment.alignmentScore >= minAlignment;
+    const markovReliable = alignment.markovConfidence >= 30 || alignment.entryQuality !== 'wait';
+
+    if (!alignmentOk) {
+      return {
+        goTrade: false,
+        reason: `NO-GO: Alinhamento fraco (${alignment.alignmentScore.toFixed(0)}% < ${minAlignment}%). Markov e frequência discordam — aguardar convergência.`,
+        alignment, targetDigits: topDigits, stakeBoost: 1.0,
+      };
+    }
+
+    if (!markovReliable) {
+      return {
+        goTrade: false,
+        reason: `NO-GO: Markov insuficiente (conf=${alignment.markovConfidence.toFixed(0)}%). Aguardar mais dados sequenciais.`,
+        alignment, targetDigits: topDigits, stakeBoost: 1.0,
+      };
+    }
+
+    // Stake boost baseado na qualidade do sinal
+    const stakeBoost = alignment.entryQuality === 'strong' ? 1.2
+      : alignment.entryQuality === 'moderate' ? 1.0
+      : 0.8;
+
+    return {
+      goTrade: true,
+      reason: `GO: ${alignment.combinedInsight}`,
+      alignment, targetDigits: topDigits, stakeBoost,
+    };
+  }
+
   hasData(symbol: string): boolean {
     return (this.recentDigitsCache.get(symbol)?.length ?? 0) >= 30;
   }

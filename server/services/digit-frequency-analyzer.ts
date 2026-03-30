@@ -360,6 +360,154 @@ export class DigitFrequencyAnalyzer {
     return results.sort((a, b) => b.coldestDigitEdge - a.coldestDigitEdge);
   }
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // GATE DE VALOR ESPERADO (EV) — Matemática exata para DIGITMATCH
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Verifica se a distribuição atual cria EV positivo para burst DIGITMATCH.
+   *
+   * MATEMÁTICA EXATA:
+   *
+   * A) BURST KELLY×10 (cobre todos os 10 dígitos, stakes ∝ frequência):
+   *    EV = P × Σ(f_d²) − 1
+   *    Condição EV > 0: Σ(f_d²) > 1/P  (ex: > 0.1176 para P=8.5)
+   *    Σ(f_d²) uniforme = 0.10 → sempre negativo. Precisa de skew real.
+   *
+   * B) BURST PARCIAL (N dígitos top, stake uniforme):
+   *    EV por rodada = [Σ_{top-N}(f_d) × P − N] × stake
+   *    Condição EV > 0: média_freq_topN > 1/P
+   *    Ex: top-3 com média 14% cada → 0.14×3=0.42 vs 3/8.5=0.353 → EV+
+   *
+   * C) DIGITMATCH ÚNICO (1 dígito, stake base):
+   *    EV = f_hottest × P − 1
+   *    Condição: f_hottest > 1/P = 11.76%
+   *
+   * @param symbol   - Símbolo a analisar
+   * @param payout   - Multiplicador de payout do DIGITMATCH (ex: 8.5)
+   * @param nDigits  - Quantos dígitos serão cobertos (default 10 = Kelly completo)
+   */
+  computeEVGate(symbol: string, payout: number = 8.5, nDigits: number = 10): {
+    evScore: number;        // EV esperado relativo (>1.0 = positivo, 1.0 = break-even)
+    freqSumSq: number;      // Σ(f_d²) — indicador de dispersão/skew
+    evThreshold: number;    // 1/P — limiar mínimo para EV positivo
+    isPositiveEV: boolean;  // true quando EV esperado é positivo
+    topNAvgFreq: number;    // frequência média dos top-N dígitos selecionados
+    topNSumFreq: number;    // soma das frequências dos top-N
+    entryAllowed: boolean;  // RECOMENDAÇÃO FINAL: entrar ou aguardar
+    kellySumSq: number;     // Σ(f_d²) corrigido pelas janelas recentes
+    hotDigitCount: number;  // quantos dígitos têm f_d > 1/P (potencialmente positivos)
+    reason: string;         // explicação legível para logs
+  } {
+    const evThreshold = 1 / payout; // 0.1176 para payout 8.5x
+    const analysis = this.analyzeSymbolMultiWindow(symbol);
+
+    if (!analysis || analysis.confidence < 30) {
+      return {
+        evScore: 1.0, freqSumSq: 0.10, evThreshold,
+        isPositiveEV: false, topNAvgFreq: 0.10, topNSumFreq: nDigits * 0.10,
+        entryAllowed: false, kellySumSq: 0.10, hotDigitCount: 0,
+        reason: `Dados insuficientes (conf=${analysis?.confidence.toFixed(0) ?? 0}% < 30%)`,
+      };
+    }
+
+    const freqs = analysis.digits.map(d => d.frequency);
+
+    // A) Σ(f_d²) para Kelly×10
+    const freqSumSq = freqs.reduce((s, f) => s + f * f, 0);
+    const kellyEV = payout * freqSumSq;  // deve ser > 1.0 para EV positivo
+
+    // B) Frequências dos top-N dígitos por combinedMatchScore
+    const sortedByMatch = [...analysis.digits].sort((a, b) => b.combinedMatchScore - a.combinedMatchScore);
+    const topN = sortedByMatch.slice(0, nDigits);
+    const topNSumFreq = topN.reduce((s, d) => s + d.frequency, 0);
+    const topNAvgFreq = topNSumFreq / nDigits;
+    // EV burst parcial uniforme: topNSumFreq × P > N
+    const partialEV = topNSumFreq * payout; // deve ser > nDigits para EV positivo
+
+    // C) Dígitos individualmente acima do limiar
+    const hotDigitCount = freqs.filter(f => f > evThreshold).length;
+
+    // evScore principal: usa Kelly×10 se nDigits=10, parcial caso contrário
+    const evScore = nDigits >= 10
+      ? kellyEV           // deve ser > 1.0
+      : partialEV / nDigits; // deve ser > 1.0
+
+    const isPositiveEV = evScore > 1.0;
+
+    // Gate adicional: exige pelo menos 1 dígito acima do limiar para burst parcial
+    const hasEnoughHotDigits = nDigits < 10
+      ? hotDigitCount >= Math.min(1, nDigits)
+      : isPositiveEV;
+
+    const entryAllowed = isPositiveEV && hasEnoughHotDigits && analysis.confidence >= 40;
+
+    let reason: string;
+    if (!isPositiveEV) {
+      reason = nDigits >= 10
+        ? `Kelly×10 EV negativo: Σ(f²)=${freqSumSq.toFixed(4)} < limiar ${evThreshold.toFixed(4)} (payout ${payout}x). Distribuição muito uniforme — aguardar skew.`
+        : `Burst-${nDigits} EV negativo: avgFreq=${(topNAvgFreq*100).toFixed(1)}% < limiar ${(evThreshold*100).toFixed(1)}%. Aguardar aquecimento.`;
+    } else if (!hasEnoughHotDigits) {
+      reason = `EV positivo mas sem dígitos quentes suficientes (${hotDigitCount} > limiar). Sinal fraco.`;
+    } else if (analysis.confidence < 40) {
+      reason = `EV positivo mas confiança baixa (${analysis.confidence.toFixed(0)}% < 40%). Aguardando mais ticks.`;
+    } else {
+      reason = nDigits >= 10
+        ? `✅ Kelly×10 EV POSITIVO: Σ(f²)=${freqSumSq.toFixed(4)} > ${evThreshold.toFixed(4)} | EV=${((evScore-1)*100).toFixed(1)}% acima break-even`
+        : `✅ Burst-${nDigits} EV POSITIVO: avgFreq=${(topNAvgFreq*100).toFixed(1)}% > limiar ${(evThreshold*100).toFixed(1)}% | EV=${((evScore-1)*100).toFixed(1)}%`;
+    }
+
+    return {
+      evScore, freqSumSq, evThreshold, isPositiveEV,
+      topNAvgFreq, topNSumFreq, entryAllowed, kellySumSq: freqSumSq,
+      hotDigitCount, reason,
+    };
+  }
+
+  /**
+   * Gate de entrada otimizado para DIGITMATCH ÚNICO ou burst pequeno.
+   * Combina: frequência do melhor dígito + tendência de aquecimento + EV positivo.
+   *
+   * @param symbol  - Símbolo a analisar
+   * @param payout  - Multiplicador de payout (ex: 8.5)
+   * @returns Sinal de entrada com justificativa
+   */
+  getSingleMatchEntrySignal(symbol: string, payout: number = 8.5): {
+    shouldEnter: boolean;
+    digit: number;
+    frequency: number;
+    evPositive: boolean;
+    trendUp: boolean;
+    confidence: number;
+    evMargin: number;     // % acima do limiar (negativo = abaixo)
+    reason: string;
+  } {
+    const analysis = this.analyzeSymbolMultiWindow(symbol);
+    const evThreshold = 1 / payout;
+
+    if (!analysis) {
+      return { shouldEnter: false, digit: 5, frequency: 0.10, evPositive: false, trendUp: false, confidence: 0, evMargin: -100, reason: 'Sem dados' };
+    }
+
+    const best = analysis.digits
+      .slice()
+      .sort((a, b) => b.combinedMatchScore - a.combinedMatchScore)[0];
+
+    const evPositive = best.frequency > evThreshold;
+    const trendUp = best.trendDiff > 0.5; // esquentando na janela curta
+    const evMargin = ((best.frequency - evThreshold) / evThreshold) * 100;
+
+    // Sinal FORTE: frequência bem acima do limiar + tendência positiva
+    const shouldEnter = evPositive && analysis.confidence >= 40 &&
+      (trendUp || best.frequency > evThreshold * 1.3); // 30% acima do limiar ou tendência up
+
+    const reason = shouldEnter
+      ? `✅ ENTRADA: dígito ${best.digit} freq=${(best.frequency*100).toFixed(1)}% (${evMargin.toFixed(1)}% acima limiar) | tendência=${trendUp ? '↑' : '→'}`
+      : `⏸️ AGUARDAR: dígito ${best.digit} freq=${(best.frequency*100).toFixed(1)}% | EV margin=${evMargin.toFixed(1)}% | conf=${analysis.confidence.toFixed(0)}%`;
+
+    return { shouldEnter, digit: best.digit, frequency: best.frequency, evPositive, trendUp, confidence: analysis.confidence, evMargin, reason };
+  }
+
   getSymbolCount(): number { return this.states.size; }
 
   hasData(symbol: string): boolean {

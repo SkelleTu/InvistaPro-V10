@@ -67,6 +67,16 @@ export interface BurstResult {
   stakeMode: StakeMode;
   stakeDistribution: Record<number, number>;
   burstStats: BurstStats;
+  evGate?: {
+    evScore: number;
+    freqSumSq: number;
+    isPositiveEV: boolean;
+    reason: string;
+    alignmentScore: number;
+    entryQuality: string;
+  };
+  blockedByEVGate?: boolean;
+  evGateReason?: string;
 }
 
 // Payout aproximado do DIGITMATCH na Deriv (~8.5x para 1 tick)
@@ -272,6 +282,54 @@ export async function executeFrenetic9TokensBurst(
   const targetSymbol = selectBestAsset();
   const analysis = digitFrequencyAnalyzer.analyzeSymbolMultiWindow(targetSymbol);
 
+  // ── 1b. GATE DE EV — verificar se vale a pena entrar ANTES de qualquer disparo ──
+  // Matemática: com stakes Kelly, EV = P×Σ(f²) − 1. Só entrar se Σ(f²) > 1/P.
+  // Para burst parcial de N dígitos: EV positivo se avgFreq(top-N) > 1/P.
+  const nSlotsTotal = digitCount && digitCount > 0 && digitCount < 10 ? digitCount : slots.length;
+  const evGateResult = digitFrequencyAnalyzer.computeEVGate(targetSymbol, DIGITMATCH_PAYOUT, nSlotsTotal);
+  const entryDecision = digitPatternEngine.getFullEntryDecision(
+    targetSymbol, DIGITMATCH_PAYOUT, nSlotsTotal,
+    evGateResult.isPositiveEV ? 30 : 50 // mais permissivo quando EV já é positivo
+  );
+
+  console.log(`🎰 [EV GATE] ${evGateResult.reason}`);
+  console.log(`🧭 [ALINHAMENTO IA] ${entryDecision.alignment.combinedInsight}`);
+
+  // BLOQUEIO: sem EV positivo E sem sinal forte de alinhamento → NÃO disparar
+  const evGateBlocked = !evGateResult.isPositiveEV && entryDecision.alignment.entryQuality === 'wait';
+  if (evGateBlocked) {
+    console.warn(
+      `🚫 [EV GATE BLOQUEADO] Rajada cancelada — EV negativo + alinhamento fraco.\n` +
+      `   EV: ${evGateResult.reason}\n` +
+      `   Alinhamento: ${entryDecision.alignment.combinedInsight}\n` +
+      `   Recomendação: aguardar skew na distribuição de frequências.`
+    );
+    // Retorna resultado vazio indicando bloqueio — sem gastar dinheiro
+    return {
+      totalSlots: 0,
+      openedContracts: 0,
+      failedContracts: 0,
+      results: [],
+      burstDurationMs: Date.now() - startTime,
+      targetSymbol,
+      digitHeats: [],
+      coveragePercent: 0,
+      stakeMode,
+      stakeDistribution: {},
+      burstStats: { totalStaked: 0, expectedWin: 0, expectedProfit: 0, expectedROI: 0, edgeScore: 0 },
+      blockedByEVGate: true,
+      evGateReason: evGateResult.reason,
+      evGate: {
+        evScore: evGateResult.evScore,
+        freqSumSq: evGateResult.freqSumSq,
+        isPositiveEV: false,
+        reason: evGateResult.reason,
+        alignmentScore: entryDecision.alignment.alignmentScore,
+        entryQuality: entryDecision.alignment.entryQuality,
+      },
+    };
+  }
+
   // Mapeia frequência e calor de cada dígito (0-9)
   const digitHeats: DigitHeat[] = Array.from({ length: 10 }, (_, d) => {
     const freq = analysis?.digits.find(x => x.digit === d)?.frequency ?? 0.10;
@@ -285,27 +343,35 @@ export async function executeFrenetic9TokensBurst(
     return { digit: d, frequency: freq, label, recommendedStakeMultiplier };
   });
 
-  // ── SELEÇÃO DE N DÍGITOS MAIS QUENTES (sincronizado com config digit_matches) ──
-  // Se digitCount < 10, filtra apenas os N slots com os dígitos mais quentes
+  // ── SELEÇÃO DE N DÍGITOS MAIS QUENTES — com prioridade para dígitos alinhados (Markov+Freq) ──
+  // Se digitCount < 10, usa os dígitos onde AMBOS os sinais convergem (alinhamento)
   let activeSlots = slots;
   if (digitCount && digitCount > 0 && digitCount < 10) {
-    // Ordena dígitos por frequência decrescente e pega os top N
-    const topNDigits = [...digitHeats]
+    // Prioridade 1: dígitos alinhados (Markov + frequência concordam)
+    const alignedDigits = entryDecision.targetDigits.slice(0, digitCount);
+    // Prioridade 2: top-N por frequência (fallback)
+    const topNByFreq = [...digitHeats]
       .sort((a, b) => b.frequency - a.frequency)
       .slice(0, digitCount)
       .map(h => h.digit);
+
+    const topNDigits = alignedDigits.length >= digitCount ? alignedDigits : topNByFreq;
     activeSlots = slots.filter(s => topNDigits.includes(s.slotIndex));
     if (activeSlots.length === 0) activeSlots = slots.slice(0, digitCount);
-    console.log(`🎯 [FRENÉTICO] Sincronizado com digit_matches: top ${digitCount} dígitos mais quentes → [${topNDigits.join(',')}] | slots ativos: ${activeSlots.length}`);
+    console.log(
+      `🎯 [FRENÉTICO] Top ${digitCount} dígitos | Alinhados: [${alignedDigits.join(',')}] | ` +
+      `Top-freq: [${topNByFreq.join(',')}] | Slots ativos: ${activeSlots.length}`
+    );
   }
 
   // ── 2. DISTRIBUIÇÃO DE STAKES INTELIGENTE (PREDITIVA) ───────────────────
+  // Quando EV é positivo E alinhamento é forte → aplica boost de stake
   // Tenta usar o motor preditivo (Markov + momentum) para stakes mais precisos
-  // Se não houver dados suficientes, usa o Kelly de frequência clássico como fallback
   let stakeDistribution: Record<number, number>;
   {
+    const effectiveAmount = amount * entryDecision.stakeBoost; // boost quando sinal forte
     const { stakes: predictiveStakes, prediction } = digitPatternEngine.computePredictiveStakes(
-      targetSymbol, amount, MIN_STAKE
+      targetSymbol, effectiveAmount, MIN_STAKE
     );
 
     if (prediction.confidence >= 40 && prediction.markovOrder >= 1) {
@@ -313,45 +379,104 @@ export async function executeFrenetic9TokensBurst(
       stakeDistribution = predictiveStakes;
       console.log(
         `🧠 [PADRÃO IA] Markov Ord${prediction.markovOrder} (${prediction.sampleCount} amostras) | ` +
-        `Conf: ${prediction.confidence}% | ${prediction.insights[0]} | ` +
-        `${prediction.insights[1] ?? ''}`
+        `Conf: ${prediction.confidence}% | StakeBoost: ×${entryDecision.stakeBoost.toFixed(2)} | ` +
+        `${prediction.insights[0]} | ${prediction.insights[1] ?? ''}`
       );
       if (prediction.insights[2]) {
         console.log(`🧠 [PADRÃO IA] ${prediction.insights[2]}`);
       }
     } else {
       // Fallback: Kelly clássico baseado em frequência
-      stakeDistribution = computeSmartStakes(digitHeats, amount, stakeMode);
-      console.log(`📊 [FREQUÊNCIA] Markov com dados insuficientes (conf=${prediction.confidence}%) — usando Kelly frequência`);
+      stakeDistribution = computeSmartStakes(digitHeats, effectiveAmount, stakeMode);
+      console.log(`📊 [FREQUÊNCIA] Markov com dados insuficientes (conf=${prediction.confidence}%) — usando Kelly frequência | StakeBoost: ×${entryDecision.stakeBoost.toFixed(2)}`);
     }
   }
   const burstStats = computeBurstStats(digitHeats, stakeDistribution);
 
   // ═══════════════════════════════════════════════════════════════════════════
   // 🛡️ BURST GUARD — CAP TOTAL DE EXPOSIÇÃO POR RAJADA
-  // O multiplier Kelly/Agressivo pode explodir o total mesmo com amount=$0.35:
-  //   Ex: 3 dígitos quentes × 2.2^1.5 × 2.0 × $0.35 = $2.28 cada → $6.84 só nos quentes
-  //   Somando 10 dígitos → $4.54+ numa banca de $9.86 = 46% — INACEITÁVEL.
-  // Regra: total do burst ≤ 20% da banca → escalonar TODOS os stakes proporcionalmente.
-  // A distribuição Kelly é preservada — apenas a escala muda.
+  //
+  // Regra 1: total do burst ≤ 20% da banca → escalonar stakes proporcionalmente
+  //          A distribuição Kelly é preservada — apenas a escala muda.
+  //
+  // Regra 2 (crítica): se MIN_STAKE × nSlots > maxAllowed, reduzir o número
+  //          de slots ativos para floor(maxAllowed / MIN_STAKE).
+  //          Isso evita o caso onde o floor em MIN_STAKE ignora o cap.
+  //
+  // Regra 3: se banca < MIN_STAKE × 2, NÃO disparar (saldo insuficiente).
   // ═══════════════════════════════════════════════════════════════════════════
   const MAX_BURST_EXPOSURE_PCT = 0.20; // 20% da banca por rajada
   if (currentBalance && currentBalance > 0 && burstStats.totalStaked > 0) {
     const maxAllowed = currentBalance * MAX_BURST_EXPOSURE_PCT;
+
+    // Regra 3: saldo mínimo absoluto para disparar
+    if (currentBalance < MIN_STAKE * 2) {
+      console.error(`🛑 [BURST GUARD] Saldo $${currentBalance.toFixed(2)} < mínimo absoluto ($${(MIN_STAKE * 2).toFixed(2)}) — BURST CANCELADO`);
+      return {
+        totalSlots: 0,
+        openedContracts: 0,
+        failedContracts: 0,
+        results: [],
+        burstDurationMs: Date.now() - startTime,
+        targetSymbol,
+        digitHeats,
+        coveragePercent: 0,
+        stakeMode,
+        stakeDistribution: {},
+        burstStats: { totalStaked: 0, expectedWin: 0, expectedProfit: 0, expectedROI: 0, edgeScore: 0 },
+        blockedByEVGate: true,
+        evGateReason: `Saldo insuficiente ($${currentBalance.toFixed(2)} < $${(MIN_STAKE * 2).toFixed(2)} mínimo)`,
+        evGate: evGateResult ? {
+          evScore: evGateResult.evScore,
+          freqSumSq: evGateResult.freqSumSq,
+          isPositiveEV: false,
+          reason: `Saldo insuficiente`,
+          alignmentScore: 0,
+          entryQuality: 'wait',
+        } : undefined,
+      };
+    }
+
     if (burstStats.totalStaked > maxAllowed) {
       const scaleFactor = maxAllowed / burstStats.totalStaked;
-      console.warn(
-        `🛡️ [BURST GUARD] Total $${burstStats.totalStaked.toFixed(2)} ` +
-        `(${(burstStats.totalStaked / currentBalance * 100).toFixed(1)}% da banca $${currentBalance.toFixed(2)}) ` +
-        `> ${MAX_BURST_EXPOSURE_PCT * 100}% → escalonando stakes ×${scaleFactor.toFixed(3)} ` +
-        `(${stakeMode.toUpperCase()} — distribuição preservada)`
-      );
-      for (const digitKey of Object.keys(stakeDistribution)) {
-        const d = Number(digitKey);
-        stakeDistribution[d] = Math.max(MIN_STAKE, Math.round(stakeDistribution[d] * scaleFactor * 100) / 100);
+
+      // Verificar se escalonamento vai funcionar ou o floor MIN_STAKE vai quebrar o cap
+      const maxSlotsAffordable = Math.floor(maxAllowed / MIN_STAKE);
+      if (maxSlotsAffordable < activeSlots.length && maxSlotsAffordable > 0) {
+        // Reduzir slots: manter apenas os mais quentes
+        const topDigitsByHeat = [...digitHeats]
+          .sort((a, b) => b.frequency - a.frequency)
+          .slice(0, maxSlotsAffordable)
+          .map(h => h.digit);
+        const prevLen = activeSlots.length;
+        activeSlots = activeSlots.filter(s => topDigitsByHeat.includes(s.slotIndex));
+        if (activeSlots.length === 0) activeSlots = activeSlots.slice(0, maxSlotsAffordable);
+        console.warn(
+          `🛡️ [BURST GUARD] Reduzindo slots ${prevLen}→${activeSlots.length} (banca $${currentBalance.toFixed(2)}, ` +
+          `max ${maxSlotsAffordable} slots ao MIN_STAKE $${MIN_STAKE})`
+        );
+        // Redistribuir stakes para os slots reduzidos com stake uniforme (mais seguro)
+        for (const digitKey of Object.keys(stakeDistribution)) {
+          const d = Number(digitKey);
+          stakeDistribution[d] = activeSlots.some(s => s.slotIndex === d) ? MIN_STAKE : 0;
+        }
+      } else {
+        // Escalonamento normal preservando distribuição Kelly
+        console.warn(
+          `🛡️ [BURST GUARD] Total $${burstStats.totalStaked.toFixed(2)} ` +
+          `(${(burstStats.totalStaked / currentBalance * 100).toFixed(1)}% da banca $${currentBalance.toFixed(2)}) ` +
+          `> ${MAX_BURST_EXPOSURE_PCT * 100}% → escalonando stakes ×${scaleFactor.toFixed(3)} ` +
+          `(${stakeMode.toUpperCase()} — distribuição preservada)`
+        );
+        for (const digitKey of Object.keys(stakeDistribution)) {
+          const d = Number(digitKey);
+          const scaled = stakeDistribution[d] * scaleFactor;
+          // Usa floor sem MIN_STAKE para respeitar o cap de banca
+          stakeDistribution[d] = Math.max(0.01, Math.round(scaled * 100) / 100);
+        }
       }
-      const newTotal = Object.values(stakeDistribution).reduce((s, v) => s + v, 0);
-      console.warn(`🛡️ [BURST GUARD] Novo total: $${newTotal.toFixed(2)} (${(newTotal / currentBalance * 100).toFixed(1)}% da banca) ✅`);
+      const newTotal = Object.values(stakeDistribution).filter(v => v > 0).reduce((s, v) => s + v, 0);
+      console.warn(`🛡️ [BURST GUARD] Novo total: $${newTotal.toFixed(2)} (${(newTotal / currentBalance * 100).toFixed(1)}% da banca $${currentBalance.toFixed(2)}) ✅`);
     }
   }
   const coveragePercent = Math.round((activeSlots.length / 10) * 100);
@@ -494,6 +619,15 @@ export async function executeFrenetic9TokensBurst(
     stakeMode,
     stakeDistribution,
     burstStats: realBurstStats,
+    blockedByEVGate: false,
+    evGate: {
+      evScore: evGateResult.evScore,
+      freqSumSq: evGateResult.freqSumSq,
+      isPositiveEV: evGateResult.isPositiveEV,
+      reason: evGateResult.reason,
+      alignmentScore: entryDecision.alignment.alignmentScore,
+      entryQuality: entryDecision.alignment.entryQuality,
+    },
   };
 }
 

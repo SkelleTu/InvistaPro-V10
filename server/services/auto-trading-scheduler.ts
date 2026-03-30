@@ -2392,72 +2392,73 @@ export class AutoTradingScheduler {
             : 1;
           const isBurstMode = contractType === 'DIGITMATCH' && multiDigitCount > 1;
           if (isBurstMode) {
-            // KELLY×10 DESATIVADO: cobrir todos os 10 dígitos é matematicamente perdedor.
-            // Payout DIGITMATCH típico ~8.5x. Com 10 contratos: custo=10×stake, retorno=8.5×stake → -1.5 por rodada.
-            // Sempre usar modo burst calibrado (floor(payout)-1 contratos) que é o único lucrativo.
-            const isKellyMode = false; // PERMANENTEMENTE DESABILITADO — EV negativo garantido
+            // ══════════════════════════════════════════════════════════════════
+            // 🎰 GATE DE EV (VALOR ESPERADO) — ANÁLISE MATEMÁTICA ANTES DO DISPARO
+            //
+            // Matemática exata para DIGITMATCH:
+            //   Kelly×10: EV = P×Σ(f²) − 1  →  só entrar se Σ(f²) > 1/P
+            //   Burst-N:  EV = avgFreq(top-N) × P − 1  →  só entrar se avgFreq > 1/P
+            //
+            // Regra: NUNCA disparar quando distribuição é quase uniforme (EV sempre negativo).
+            // Sistema espera pacientemente até que haja assimetria estatística real.
+            // ══════════════════════════════════════════════════════════════════
+            const BURST_PAYOUT_ASSUMED = 8.5; // payout típico DIGITMATCH (ajustado abaixo se obtido da API)
+            const burstEVGate = digitFrequencyAnalyzer.computeEVGate(selectedSymbol, BURST_PAYOUT_ASSUMED, multiDigitCount);
+            const burstAlignment = digitPatternEngine.getEntryAlignmentScore(selectedSymbol);
 
-            // ── MODO 10× KELLY: todos os dígitos, stakes por calor (sempre vence) ──
-            if (isKellyMode) {
-              const MIN_STAKE = 0.35;
-              // ── KELLY×10 COM MOTOR PREDITIVO (Markov + Momentum + Frequência) ──
-              // Usa padrões sequenciais para concentrar stake nos dígitos mais PROVÁVEIS
-              // ao invés de apenas nos mais frequentes historicamente
-              const { stakes: predictiveStakeMap, prediction: pred10 } = digitPatternEngine.computePredictiveStakes(
-                selectedSymbol, tradeParams.amount, MIN_STAKE
+            console.log(`🎰 [EV GATE AUTÔNOMO] ${burstEVGate.reason}`);
+            console.log(`🧭 [ALINHAMENTO IA] ${burstAlignment.combinedInsight}`);
+
+            // BLOQUEIO: sem EV positivo E alinhamento fraco → aguardar
+            const autonomousBlocked = !burstEVGate.isPositiveEV && burstAlignment.entryQuality === 'wait';
+            if (autonomousBlocked) {
+              console.warn(
+                `🚫 [EV GATE] DIGITMATCH BLOQUEADO — distribuição uniforme + Markov discordante.\n` +
+                `   Σ(f²)=${burstEVGate.freqSumSq.toFixed(4)} < limiar ${burstEVGate.evThreshold.toFixed(4)} | ` +
+                `alinhamento=${burstAlignment.alignmentScore.toFixed(0)}% | ` +
+                `qualidade=${burstAlignment.entryQuality}\n` +
+                `   Aguardando assimetria estatística real para entrar.`
+              );
+              return { success: false, error: `DIGITMATCH bloqueado pelo Gate de EV: distribuição uniforme (Σf²=${burstEVGate.freqSumSq.toFixed(4)}, limiar=${burstEVGate.evThreshold.toFixed(4)}). Aguardando skew.` };
+            }
+
+            // ── KELLY×10: HABILITADO CONDICIONALMENTE quando EV é positivo ──
+            // Condição: Σ(f²) > 1/P E multiDigitCount = 10 (cobertura total)
+            // Isso garante que SEMPRE um contrato vence, com lucro esperado positivo.
+            const isKelly10 = multiDigitCount >= 10 && burstEVGate.isPositiveEV && burstEVGate.freqSumSq > burstEVGate.evThreshold;
+
+            if (isKelly10) {
+              // ── KELLY×10: cobertura total com stakes proporcionais à probabilidade preditiva ──
+              const MIN_STAKE_K10 = 0.35;
+              const stakeBoost10 = burstAlignment.entryQuality === 'strong' ? 1.2 : 1.0;
+              const { stakes: predictiveStakeMap10, prediction: pred10 } = digitPatternEngine.computePredictiveStakes(
+                selectedSymbol, tradeParams.amount * stakeBoost10, MIN_STAKE_K10
               );
               const kellyStakes: { digit: number; stake: number }[] = Array.from({ length: 10 }, (_, d) => ({
                 digit: d,
-                stake: predictiveStakeMap[d] ?? MIN_STAKE,
+                stake: predictiveStakeMap10[d] ?? MIN_STAKE_K10,
               }));
-              if (pred10.confidence >= 40 && pred10.markovOrder >= 1) {
-                console.log(
-                  `🧠 [KELLY×10 PREDITIVO] Markov Ord${pred10.markovOrder} (${pred10.sampleCount} amostras) | ` +
-                  `Conf: ${pred10.confidence}% | ${pred10.insights[0]} | ${pred10.insights[1] ?? ''}`
-                );
-              } else {
-                // Sem dados suficientes para Markov: fallback puro para Kelly de frequência
-                const analysis = digitFrequencyAnalyzer.analyzeSymbolMultiWindow(selectedSymbol);
-                for (const ks of kellyStakes) {
-                  const freq = analysis?.digits?.find((x: any) => x.digit === ks.digit)?.frequency ?? 0.10;
-                  const label = freq >= 0.13 ? 'hot' : freq <= 0.07 ? 'cold' : 'neutral';
-                  const ratio = freq / 0.10;
-                  if (label === 'hot') {
-                    ks.stake = parseFloat(Math.max(MIN_STAKE, tradeParams.amount * Math.pow(ratio, 1.5) * 2.0).toFixed(2));
-                  } else if (label === 'cold') {
-                    ks.stake = MIN_STAKE;
-                  } else {
-                    ks.stake = parseFloat(Math.max(MIN_STAKE, tradeParams.amount * ratio).toFixed(2));
-                  }
-                }
-                console.log(`📊 [KELLY×10] Markov indisponível (conf=${pred10.confidence}%) — Kelly frequência`);
-              }
-              let totalKelly = kellyStakes.reduce((s, k) => s + k.stake, 0);
+              console.log(
+                `✅ [KELLY×10 HABILITADO] Σ(f²)=${burstEVGate.freqSumSq.toFixed(4)} > limiar ${burstEVGate.evThreshold.toFixed(4)} | ` +
+                `EV esperado: +${((burstEVGate.evScore - 1) * 100).toFixed(1)}% | ` +
+                `Markov Ord${pred10.markovOrder} | ${pred10.insights[0]}`
+              );
 
-              // ═══════════════════════════════════════════════════════════════
               // 🛡️ BURST GUARD KELLY×10 — CAP TOTAL ≤ 20% DA BANCA
-              // Kelly multiplica stakes por freq-ratio — pode chegar a 46%+!
-              // ═══════════════════════════════════════════════════════════════
+              let totalKelly = kellyStakes.reduce((s, k) => s + k.stake, 0);
               {
                 const kellyBal = this.cachedBalance?.value ?? 0;
-                const KELLY_MAX_PCT = 0.20; // 20% da banca máximo
+                const KELLY_MAX_PCT = 0.20;
                 if (kellyBal > 0 && totalKelly > kellyBal * KELLY_MAX_PCT) {
                   const scaleFactor = (kellyBal * KELLY_MAX_PCT) / totalKelly;
-                  console.warn(
-                    `🛡️ [BURST GUARD KELLY×10] Total $${totalKelly.toFixed(2)} ` +
-                    `(${(totalKelly / kellyBal * 100).toFixed(1)}% da banca $${kellyBal.toFixed(2)}) ` +
-                    `> ${KELLY_MAX_PCT * 100}% → escalonando stakes ×${scaleFactor.toFixed(3)}`
-                  );
                   for (const ks of kellyStakes) {
-                    ks.stake = Math.max(MIN_STAKE, Math.round(ks.stake * scaleFactor * 100) / 100);
+                    ks.stake = Math.max(MIN_STAKE_K10, Math.round(ks.stake * scaleFactor * 100) / 100);
                   }
                   totalKelly = kellyStakes.reduce((s, k) => s + k.stake, 0);
-                  console.warn(`🛡️ [BURST GUARD KELLY×10] Novo total: $${totalKelly.toFixed(2)} (${(totalKelly / kellyBal * 100).toFixed(1)}% da banca) ✅`);
+                  console.warn(`🛡️ [BURST GUARD K10] Escalonado para ≤20% banca | Novo total: $${totalKelly.toFixed(2)}`);
                 }
               }
-
-              console.log(`🎯💜 [${operationId}] DIGITMATCH KELLY×10 | ${selectedSymbol} | 10 dígitos (100% cobertura) | Investimento total: $${totalKelly.toFixed(2)} | Stakes: ${kellyStakes.map(k => `${k.digit}→$${k.stake}`).join(', ')}`);
-
+              console.log(`🎯💜 [${operationId}] DIGITMATCH KELLY×10 | ${selectedSymbol} | 10 dígitos | Total: $${totalKelly.toFixed(2)} | Stakes: ${kellyStakes.map(k => `${k.digit}→$${k.stake}`).join(', ')}`);
               const kellyPromises = kellyStakes.map(({ digit, stake }, idx) =>
                 derivAPI.buyGenericDigitContract({
                   contract_type: 'DIGITMATCH',
@@ -2477,78 +2478,68 @@ export class AutoTradingScheduler {
               const kellyResults = await Promise.allSettled(kellyPromises);
               const firstKellyOk = kellyResults.filter(r => r.status === 'fulfilled' && (r as any).value != null).map(r => (r as any).value)[0] ?? null;
               const kellyOpened = kellyResults.filter(r => r.status === 'fulfilled' && (r as any).value != null).length;
-              console.log(`💜 [KELLY×10] Rajada concluída: ${kellyOpened}/10 contratos | total=$${totalKelly.toFixed(2)} | Representante: ${firstKellyOk?.contract_id ?? 'nenhum'}`);
+              console.log(`💜 [KELLY×10] Concluído: ${kellyOpened}/10 contratos | total=$${totalKelly.toFixed(2)}`);
               contract = firstKellyOk;
             } else {
-            // ── CALIBRAÇÃO DE PAYOUT: consultar o multiplicador real da Deriv antes de decidir o burst size ──
-            // Regra: burst seguro = floor(payout) - 1 (garantindo lucro mesmo quando só 1 contrato vence)
-            // Ex: payout=8.5x → max seguro=8 contratos (retorno 8.5 - 8 = +0.5 lucro)
+            // ── BURST PARCIAL (N < 10 dígitos) com EV gate já verificado ──
+            // Consulta payout real da Deriv para calibrar tamanho do burst
             const sampleDigit = digitFrequencyAnalyzer.getBestBarrierForMatches(selectedSymbol).barrier;
-            let safeBurstMax = multiDigitCount; // fallback: usa o configurado
+            let safeBurstMax = multiDigitCount;
+            let realPayoutMultiplier = BURST_PAYOUT_ASSUMED;
             try {
               const payoutMultiplier = await derivAPI.getDigitMatchPayoutMultiplier(selectedSymbol, digitDuration, tradeParams.amount, sampleDigit);
               if (payoutMultiplier && payoutMultiplier > 1) {
-                // floor(payout) - 1 garante lucro; min 1, cap pelo configurado pelo usuário
+                realPayoutMultiplier = payoutMultiplier;
                 const payoutBasedMax = Math.max(1, Math.floor(payoutMultiplier) - 1);
                 safeBurstMax = Math.min(multiDigitCount, payoutBasedMax);
-                console.log(`💰 [BURST CALIBRADO] Payout real=${payoutMultiplier.toFixed(2)}x → burst seguro=${safeBurstMax} contratos (configurado=${multiDigitCount}) | vitória cobre investimento + lucro`);
+                console.log(`💰 [BURST CALIBRADO] Payout real=${payoutMultiplier.toFixed(2)}x → burst seguro=${safeBurstMax} (max configurado=${multiDigitCount})`);
               } else {
-                // Payout não disponível → usar conservador: 4 contratos
                 safeBurstMax = Math.min(multiDigitCount, 4);
-                console.log(`⚠️ [BURST CALIBRADO] Payout indisponível → fallback conservador: ${safeBurstMax} contratos`);
+                console.log(`⚠️ [BURST CALIBRADO] Payout indisponível → conservador: ${safeBurstMax} contratos`);
               }
             } catch {
               safeBurstMax = Math.min(multiDigitCount, 4);
             }
 
-            // Obtém os N dígitos mais quentes com score composto (frequência + tendência)
+            // Verificar EV com payout real (segunda verificação mais precisa)
+            const realEVGate = digitFrequencyAnalyzer.computeEVGate(selectedSymbol, realPayoutMultiplier, safeBurstMax);
+            if (!realEVGate.isPositiveEV && burstAlignment.entryQuality !== 'strong') {
+              console.warn(`🚫 [EV GATE PAYOUT REAL] ${realEVGate.reason} — aguardando.`);
+              return { success: false, error: `EV gate (payout real ${realPayoutMultiplier.toFixed(2)}x): ${realEVGate.reason}` };
+            }
+
             const BURST_SIZE = safeBurstMax;
 
-            // ═══════════════════════════════════════════════════════════════════
-            // 🛡️ BURST GUARD — CAP TOTAL DE EXPOSIÇÃO POR RAJADA
-            // O safety cap individual por contrato NÃO protege contra a soma do burst.
-            // Ex: $1.56/contrato parece seguro, mas ×7 = $10.92 em banca de $11 = 96%!
-            // Regra: total do burst ≤ 15% da banca (ex: $10 → max $1.50 total = $0.21/cont)
-            // ═══════════════════════════════════════════════════════════════════
+            // 🛡️ BURST GUARD — CAP TOTAL ≤ 15% DA BANCA
             {
               const liveBal = this.cachedBalance?.value ?? 0;
-              const MAX_BURST_EXPOSURE_PCT = 0.15; // máx 15% da banca por ciclo de burst
+              const MAX_BURST_EXPOSURE_PCT = 0.15;
               if (liveBal > 0) {
                 const maxTotalBurst = Math.max(0.35 * BURST_SIZE, liveBal * MAX_BURST_EXPOSURE_PCT);
                 const rawBurstTotal = tradeParams.amount * BURST_SIZE;
                 if (rawBurstTotal > maxTotalBurst) {
                   const cappedPerContract = Math.max(0.35, Math.round((maxTotalBurst / BURST_SIZE) * 100) / 100);
-                  console.log(
-                    `🛡️ [BURST GUARD] Exposição $${rawBurstTotal.toFixed(2)} ` +
-                    `(${(rawBurstTotal / liveBal * 100).toFixed(1)}% da banca $${liveBal.toFixed(2)}) ` +
-                    `> ${MAX_BURST_EXPOSURE_PCT * 100}% → stake limitado: ` +
-                    `$${tradeParams.amount.toFixed(2)}→$${cappedPerContract.toFixed(2)}/contrato ` +
-                    `(total: $${(cappedPerContract * BURST_SIZE).toFixed(2)})`
-                  );
+                  console.log(`🛡️ [BURST GUARD] $${rawBurstTotal.toFixed(2)} > ${MAX_BURST_EXPOSURE_PCT*100}% banca → stake cap $${cappedPerContract.toFixed(2)}/contrato`);
                   tradeParams = { ...tradeParams, amount: cappedPerContract };
                 }
               }
             }
 
-            // Seleciona os N dígitos alvo — motor preditivo tem prioridade sobre frequência simples
-            const predResult = digitPatternEngine.getPredictionScores(selectedSymbol);
+            // Seleciona dígitos alvo com prioridade para alinhamento Markov+Freq
+            const fullDecision = digitPatternEngine.getFullEntryDecision(selectedSymbol, realPayoutMultiplier, BURST_SIZE, 30);
             let hottestDigits: number[];
-            if (predResult.confidence >= 40 && predResult.markovOrder >= 1) {
-              hottestDigits = digitPatternEngine.getTopPredictedDigits(selectedSymbol, BURST_SIZE);
-              console.log(
-                `🧠 [MULTI-DÍGITO IA] Markov Ord${predResult.markovOrder} | Conf: ${predResult.confidence}% | ` +
-                `${predResult.insights[0]} | Alvos selecionados: [${hottestDigits.join(',')}]`
-              );
+            if (fullDecision.goTrade && fullDecision.targetDigits.length >= BURST_SIZE) {
+              hottestDigits = fullDecision.targetDigits.slice(0, BURST_SIZE);
+              console.log(`🧠 [MULTI-DÍGITO IA] ${fullDecision.reason} | Alvos: [${hottestDigits.join(',')}]`);
             } else {
               hottestDigits = digitFrequencyAnalyzer.getHottestDigitsForMatches(selectedSymbol, BURST_SIZE);
-              console.log(`📊 [MULTI-DÍGITO] Usando frequência (Markov conf=${predResult.confidence}%): [${hottestDigits.join(',')}]`);
+              console.log(`📊 [MULTI-DÍGITO FREQ] Frequência: [${hottestDigits.join(',')}] | EV: ${realEVGate.reason}`);
             }
             const coverage = Math.round((BURST_SIZE / 10) * 100);
             const summary = digitFrequencyAnalyzer.getSummary(selectedSymbol);
-            console.log(`⚡🔥 [${operationId}] DIGITMATCH MULTI-DÍGITO | ${selectedSymbol} | Dígitos alvo: [${hottestDigits.join(',')}] | ${BURST_SIZE} contratos (${coverage}% cobertura) | stake×${BURST_SIZE}: $${(tradeParams.amount * BURST_SIZE).toFixed(2)}`);
-            console.log(`📊 [MULTI-DÍGITO STATS] ${summary}`);
+            console.log(`⚡🔥 [${operationId}] DIGITMATCH BURST | ${selectedSymbol} | [${hottestDigits.join(',')}] | ${BURST_SIZE} contratos (${coverage}%) | total: $${(tradeParams.amount * BURST_SIZE).toFixed(2)}`);
+            console.log(`📊 [STATS] ${summary}`);
 
-            // Dispara todos os contratos em paralelo sem esperar cada um (zero delay entre disparos)
             const burstPromises = hottestDigits.map((digit, idx) =>
               derivAPI.buyGenericDigitContract({
                 contract_type: 'DIGITMATCH',
@@ -2558,29 +2549,26 @@ export class AutoTradingScheduler {
                 barrier: digit.toString(),
                 currency: 'USD',
               }).then(c => {
-                console.log(`⚡ [MULTI-DÍGITO #${idx+1}/${BURST_SIZE}] Dígito ${digit} → contrato ${c?.contract_id ?? 'N/A'} aberto`);
+                console.log(`⚡ [BURST #${idx+1}/${BURST_SIZE}] Dígito ${digit} → contrato ${c?.contract_id ?? 'N/A'} aberto`);
                 return c;
               }).catch(err => {
-                console.warn(`⚠️ [MULTI-DÍGITO #${idx+1}/${BURST_SIZE}] Dígito ${digit} falhou: ${err?.message ?? err}`);
-                // Se a conta não tem saldo, atualizar cache imediatamente e pausar loop por 30s
+                console.warn(`⚠️ [BURST #${idx+1}/${BURST_SIZE}] Dígito ${digit} falhou: ${err?.message ?? err}`);
                 if (err?.code === 'InsufficientBalance' || err?.message?.includes('insufficient')) {
-                  console.error(`🛑 [MULTI-DÍGITO] Saldo insuficiente detectado — zerando cache e pausando 30s`);
+                  console.error(`🛑 [BURST] Saldo insuficiente — pausando 30s`);
                   this.cachedBalance = { value: 0, currency: 'USD', loginid: this.cachedBalance?.loginid ?? 'N/A', fetchedAt: Date.now() };
                   this.loopSleepUntil = Date.now() + 30_000;
                 }
                 return null;
               })
             );
-            // Aguarda TODOS dispararem (sem bloqueio — cada um é independente)
             const burstResults = await Promise.allSettled(burstPromises);
-            // Usa o primeiro contrato bem-sucedido como representante para o log/monitor
             const firstOk = burstResults
               .filter(r => r.status === 'fulfilled' && r.value != null)
               .map(r => (r as PromiseFulfilledResult<any>).value)[0] ?? null;
             const openedCount = burstResults.filter(r => r.status === 'fulfilled' && r.value != null).length;
-            console.log(`⚡🔥 [MULTI-DÍGITO] Rajada concluída: ${openedCount}/${BURST_SIZE} contratos abertos | Representante: ${firstOk?.contract_id ?? 'nenhum'}`);
+            console.log(`⚡🔥 [BURST] Concluído: ${openedCount}/${BURST_SIZE} contratos | EV: ${realEVGate.reason}`);
             contract = firstOk;
-            } // fim else !isKellyMode
+            } // fim else !isKelly10
           } else {
             contract = await derivAPI.buyGenericDigitContract({
               contract_type: contractType,
