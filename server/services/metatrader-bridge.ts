@@ -3136,20 +3136,35 @@ class MetaTraderBridge extends EventEmitter {
           : modelResults;
       }
 
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      // GUARD 1 — TENDÊNCIA FORTE (ADX ≥ 65): bloqueia override counter-trend.
+      // Raiz do problema forense em 02/04/2026: ADX=91 (downtrend) + IA UP → BUY aberto
+      // numa queda clara. ADX alto confirma que o técnico está certo — a IA não deve
+      // sobrepor esse sinal independente do consenso.
+      // GUARD 2 — OVERRIDE THRESHOLD: elevado de 80% → 92%.
+      // Consenso de 89% num único ciclo não é confiável o suficiente para ignorar o técnico.
+      // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      const adxForOverride = indicators?.adx ?? 0;
+      const strongTrendBlock = !technicalAgrees && adxForOverride >= 65;
+
       const techDecisionReason = aiOnlyMode
         ? `Modo IA pura: consenso ${aiConsensus.toFixed(1)}% → ${aiDirection.toUpperCase()} | ${participatingModels} modelos | Sem validação técnica (EA não enviou candles)`
-        : !technicalAgrees && aiConsensus < 80
-          ? `Divergência: IA diz ${aiDirection.toUpperCase()} mas análise técnica diz ${technicalSignal.action}. Consenso ${aiConsensus.toFixed(1)}% < 80% — sem trade. ${technicalSignal.profileNotes}`
-          : technicalAgrees
-            ? `Confirmação técnica (${derivProfile?.family ?? 'padrão'}): RSI=${indicators.rsi.toFixed(1)} [thr: ${derivProfile?.rsiOversold ?? 30}/${derivProfile?.rsiOverbought ?? 70}] | EMA20 ${indicators.ema20 > indicators.ema50 ? '>' : '<'} EMA50 | ADX=${indicators.adx.toFixed(1)} | ${technicalSignal.profileNotes}`
-            : `Alta confiança (${aiConsensus.toFixed(1)}% ≥ 80%) — override da análise técnica divergente | ${technicalSignal.profileNotes}`;
+        : strongTrendBlock
+          ? `⛔ Tendência forte bloqueada: ADX=${adxForOverride.toFixed(0)} (≥65) + técnico ${technicalSignal.action} divergente — override proibido em tendência forte. ${technicalSignal.profileNotes}`
+          : !technicalAgrees && aiConsensus < 92
+            ? `Divergência: IA diz ${aiDirection.toUpperCase()} mas análise técnica diz ${technicalSignal.action}. Consenso ${aiConsensus.toFixed(1)}% < 92% — sem trade. ${technicalSignal.profileNotes}`
+            : technicalAgrees
+              ? `Confirmação técnica (${derivProfile?.family ?? 'padrão'}): RSI=${indicators.rsi.toFixed(1)} [thr: ${derivProfile?.rsiOversold ?? 30}/${derivProfile?.rsiOverbought ?? 70}] | EMA20 ${indicators.ema20 > indicators.ema50 ? '>' : '<'} EMA50 | ADX=${indicators.adx.toFixed(1)} | ${technicalSignal.profileNotes}`
+              : `Alta confiança excepcional (${aiConsensus.toFixed(1)}% ≥ 92%) — override validado | ADX=${adxForOverride.toFixed(0)} | ${technicalSignal.profileNotes}`;
+
+      const techBlocked = !aiOnlyMode && !technicalAgrees && (aiConsensus < 92 || strongTrendBlock);
 
       this.logAnalysis({
         id: `${entryId}_tech`,
         timestamp: Date.now(),
         symbol,
         phase: 'technical',
-        status: (!aiOnlyMode && !technicalAgrees && aiConsensus < 80) ? 'rejected' : 'processing',
+        status: techBlocked ? 'rejected' : 'processing',
         technicalAction: (aiOnlyMode ? (aiDirection === 'up' ? 'BUY' : 'SELL') : technicalSignal.action) as 'BUY' | 'SELL' | 'HOLD',
         technicalAgrees,
         technicalScore: Math.round(technicalSignal.confidence * 100),
@@ -3161,7 +3176,10 @@ class MetaTraderBridge extends EventEmitter {
         decisionReason: techDecisionReason
       });
 
-      if (!aiOnlyMode && !technicalAgrees && aiConsensus < 80) {
+      if (techBlocked) {
+        if (strongTrendBlock) {
+          console.warn(`[MT5Bridge] ⛔ ${symbol}: Override BLOQUEADO — ADX=${adxForOverride.toFixed(0)} (≥65) + técnico ${technicalSignal.action} divergente. Tendência forte demais para counter-trend.`);
+        }
         return null;
       }
 
