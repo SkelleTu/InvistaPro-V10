@@ -4516,34 +4516,43 @@ class MetaTraderBridge extends EventEmitter {
     // ══════════════════════════════════════════════════════════════════
     // PRIORIDADE 3 — CAPTURA DE RECUPERAÇÃO PÓS-SPIKE
     // Posição que esteve negativa e agora está positiva = spike resgatou.
-    // Essa janela dura segundos — fechar IMEDIATAMENTE antes de reverter.
+    // Aguarda recuperação MÍNIMA antes de fechar — evita sair com migalhas
+    // quando o movimento ainda tem potencial maior.
     // ══════════════════════════════════════════════════════════════════
     if (profit > 0 && ctx.wasEverNegative) {
-      console.log(`[MONITOR] 🎯 RECUPERAÇÃO #${position.ticket}: +$${profit.toFixed(2)} após pior de $${ctx.maxAdverseExcursion.toFixed(2)} | ${ctx.monitorCycles} ciclos | ${ageMinutes.toFixed(1)}min`);
-      return {
-        ...base,
-        action:    'CLOSE_PROFIT',
-        urgency:   'critical',
-        reason:    `🎯 Recuperação pós-spike: +$${profit.toFixed(2)} (pior foi $${ctx.maxAdverseExcursion.toFixed(2)})`,
-        narrative: `Spike resgatou a posição ${position.type} #${position.ticket}. Estava em $${ctx.maxAdverseExcursion.toFixed(2)} de perda e reverteu para +$${profit.toFixed(2)} positivo após ${ageMinutes.toFixed(1)}min. Realizando lucro de recuperação antes do spike reverter.`
-      };
+      // Exige recuperar pelo menos 30% da pior perda ou $1.00 (o que for maior)
+      // Isso evita fechar com $0.01 de lucro quando o movimento continuou
+      const minRecovery = Math.max(1.00, Math.abs(ctx.maxAdverseExcursion) * 0.30);
+      if (profit >= minRecovery) {
+        console.log(`[MONITOR] 🎯 RECUPERAÇÃO #${position.ticket}: +$${profit.toFixed(2)} (≥ mínimo $${minRecovery.toFixed(2)}) após pior de $${ctx.maxAdverseExcursion.toFixed(2)} | ${ctx.monitorCycles} ciclos | ${ageMinutes.toFixed(1)}min`);
+        return {
+          ...base,
+          action:    'CLOSE_PROFIT',
+          urgency:   'critical',
+          reason:    `🎯 Recuperação pós-spike: +$${profit.toFixed(2)} (pior foi $${ctx.maxAdverseExcursion.toFixed(2)})`,
+          narrative: `Spike resgatou a posição ${position.type} #${position.ticket}. Estava em $${ctx.maxAdverseExcursion.toFixed(2)} de perda e reverteu para +$${profit.toFixed(2)} positivo após ${ageMinutes.toFixed(1)}min. Recuperação mínima atingida ($${minRecovery.toFixed(2)}). Realizando lucro.`
+        };
+      }
+      // Recuperação insuficiente — aguardar mais lucro antes de sair
+      base.narrative += `♻️ Recuperando: +$${profit.toFixed(2)} (mín: $${minRecovery.toFixed(2)} para fechar). `;
     }
 
     // ══════════════════════════════════════════════════════════════════
     // PRIORIDADE 4 — TRAILING STOP DE LUCRO
-    // Se o lucro já chegou a um pico e recuou mais de 40% desse pico,
-    // fechar para não devolver tudo. Ex: chegou a +$10, recuou para +$6.
+    // Ativa apenas quando o pico de lucro for significativo ($4+).
+    // Retração de 50% do pico antes de fechar — deixa o movimento respirar.
+    // Antes era 40% com pico mínimo $2 — muito agressivo, fechava cedo.
     // ══════════════════════════════════════════════════════════════════
-    if (ctx.profitTrailing > 2 && profit > 0) {
+    if (ctx.profitTrailing > 4 && profit > 0) {
       const retreatPct = (ctx.profitTrailing - profit) / ctx.profitTrailing;
-      if (retreatPct >= 0.40) {
+      if (retreatPct >= 0.50) {
         console.log(`[MONITOR] 📉 TRAILING STOP #${position.ticket}: pico $${ctx.profitTrailing.toFixed(2)} → atual $${profit.toFixed(2)} (recuo ${(retreatPct*100).toFixed(0)}%)`);
         return {
           ...base,
           action:    'CLOSE_PROFIT',
           urgency:   'high',
           reason:    `📉 Trailing stop: recuou ${(retreatPct*100).toFixed(0)}% do pico +$${ctx.profitTrailing.toFixed(2)}`,
-          narrative: `Posição #${position.ticket} atingiu pico de +$${ctx.profitTrailing.toFixed(2)} e recuou para +$${profit.toFixed(2)} (${(retreatPct*100).toFixed(0)}% de retração). Ativando trailing stop para preservar lucro antes de virar perda.`
+          narrative: `Posição #${position.ticket} atingiu pico de +$${ctx.profitTrailing.toFixed(2)} e recuou para +$${profit.toFixed(2)} (${(retreatPct*100).toFixed(0)}% de retração). Preservando lucro antes de reverter completamente.`
         };
       }
     }
@@ -4594,23 +4603,21 @@ class MetaTraderBridge extends EventEmitter {
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // PRIORIDADE 6.5 — GIRASSOL COMO SINAL DE SAÍDA (espelha entrada)
-    // A mesma lógica técnica e movimentacional usada para ENTRAR
-    // é aplicada para SAIR. O Girassol indica reversão do movimento
-    // corrente → assim como gerou a entrada, agora gera a saída.
+    // PRIORIDADE 6.5 — GIRASSOL COMO SINAL DE SAÍDA (inteligente)
+    // O Girassol oposto à posição indica possível reversão — MAS o sistema
+    // não fecha imediatamente. Exige MÍNIMO DE LUCRO proporcional ao nível
+    // do Girassol antes de sair.
     //
-    //  PULLBACK (posição contra o trend macro):
-    //    → Se Girassol agora mostra retomada do trend macro (sinal oposto
-    //      à posição), o pullback acabou → fechar com lucro disponível
+    //  NÍVEL 3/3 (extremo) + Zona Fib chave  → sair com $0.50+ ou 25% MFE
+    //  NÍVEL 3/3 (extremo) sem zona Fib      → sair com $1.50+ ou 40% MFE
+    //  NÍVEL 2/3 (médio)                     → sair com $2.50+ ou 55% MFE
+    //  NÍVEL 1/3 (fraco)                     → NÃO sair, apenas logar
     //
-    //  TREND (posição a favor do trend macro):
-    //    → Girassol Extremo (nível 1) oposto ao trade em zona de
-    //      resistência/suporte → estrutura de reversão → fechar
+    //  PULLBACK mode: mais agressivo (sair mais cedo — movimento curto)
+    //  EXTREME_REVERSAL mode: mais paciente (movimento explosivo esperado)
     //
-    //  EXTREME_REVERSAL:
-    //    → Aguardar mais tempo (movimento explosivo esperado)
-    //    → Só sai quando Girassol Extremo oposto aparece E preço
-    //      está acima de 70% do range esperado
+    //  Isso evita o "medo" de fechar com $0.01 quando o movimento
+    //  ainda tem muito mais potencial — especialmente em topos/fundos duplos.
     // ══════════════════════════════════════════════════════════════════
     if (!this.isSpikeIndex(symbol)) {
       const girassolForExit = this.getGirassolBias(symbol);
@@ -4622,23 +4629,55 @@ class MetaTraderBridge extends EventEmitter {
 
         if (girassolOppositeToPosition) {
           const exitTradeMode = girassolForExit.tradeMode ?? 'trend';
-          const isExtreme = girassolForExit.levelCount >= 1 && girassolForExit.fibKeyZone;
+          // Nível extremo = 3/3 OU (2/3 + extremo@fib)
+          const isExtremoAtFib = girassolForExit.extremoAtFib === true || girassolForExit.fibKeyZone === true;
+          const isExtreme = girassolForExit.levelCount >= 3 ||
+            (girassolForExit.levelCount >= 2 && isExtremoAtFib);
 
-          // Para trades de pullback: sair imediatamente quando Girassol retoma o trend macro
-          // (o pullback completou — o trend principal está retomando)
-          if (exitTradeMode === 'trend' || exitTradeMode === 'extreme_reversal') {
-            const minProfitForExit = profit > 0.01; // qualquer lucro positivo
-            if (minProfitForExit) {
-              const urgencyLevel: 'high' | 'critical' = isExtreme ? 'critical' : 'high';
-              console.log(`[MONITOR] 🌻 SAÍDA GIRASSOL #${position.ticket}: ${positionDir} vs Girassol ${girassolForExit.bias} (${girassolForExit.levelCount}/3) | Lucro: +$${profit.toFixed(2)} | ${isExtreme ? '⭐ Extremo@Fib' : ''}`);
+          // ── Calcular mínimo de lucro exigido para este sinal de saída ──
+          // Quanto maior o lucro atingido (MFE), mais difícil fechar com pouco
+          let minProfitForGirassolExit: number;
+
+          if (girassolForExit.levelCount <= 1) {
+            // Nível 1/3 = sinal fraco — NÃO fechar ainda
+            console.log(`[MONITOR] 🌻 Girassol ${girassolForExit.bias} 1/3 (fraco) vs ${positionDir} — aguardando confirmação | Lucro: +$${profit.toFixed(2)}`);
+            base.narrative += `🌻 Girassol ${girassolForExit.bias} 1/3 — sinal fraco, aguardando. `;
+            // Não retorna — continua o monitoramento
+          } else if (isExtreme) {
+            // Nível 3/3 ou 2/3+@Fib = sinal forte de reversão
+            // Exige $0.50 mínimo ou 25% do melhor lucro histórico
+            minProfitForGirassolExit = Math.max(0.50, ctx.maxFavorableExcursion * 0.25);
+            if (profit >= minProfitForGirassolExit) {
+              console.log(`[MONITOR] 🌻⭐ SAÍDA GIRASSOL EXTREMO #${position.ticket}: ${positionDir} vs ${girassolForExit.bias} (${girassolForExit.levelCount}/3)${isExtremoAtFib ? ' @Fib' : ''} | Lucro: +$${profit.toFixed(2)} ≥ mín $${minProfitForGirassolExit.toFixed(2)}`);
               return {
                 ...base,
                 action: 'CLOSE_PROFIT',
-                urgency: urgencyLevel,
-                reason: `🌻 Girassol ${girassolForExit.bias} (${girassolForExit.levelCount}/3) indica fim do movimento ${positionDir} | +$${profit.toFixed(2)}${isExtreme ? ' ⭐ Reversão em Fib' : ''}`,
-                narrative: `A mesma lógica do Girassol que gerou a entrada agora indica saída. Posição ${positionDir} #${position.ticket} aberta há ${ageMinutes.toFixed(1)}min. Girassol mostra ${girassolForExit.bias} (${girassolForExit.levelCount}/3 níveis${isExtreme ? ', extremo em zona Fib-chave' : ''}). Lucro: +$${profit.toFixed(2)}. MAE: $${ctx.maxAdverseExcursion.toFixed(2)} | MFE: +$${ctx.maxFavorableExcursion.toFixed(2)}.`
+                urgency: 'critical',
+                reason: `🌻⭐ Girassol EXTREMO ${girassolForExit.bias} (${girassolForExit.levelCount}/3${isExtremoAtFib ? ' @Fib-chave' : ''}) confirma reversão | +$${profit.toFixed(2)}`,
+                narrative: `Girassol extremo ${girassolForExit.bias} ${isExtremoAtFib ? 'em zona Fibonacci chave ' : ''}indica reversão sólida. Posição ${positionDir} #${position.ticket} aberta há ${ageMinutes.toFixed(1)}min. Lucro: +$${profit.toFixed(2)} | Pico MFE: +$${ctx.maxFavorableExcursion.toFixed(2)} | MAE: $${ctx.maxAdverseExcursion.toFixed(2)}.`
               };
             }
+            base.narrative += `🌻⭐ Girassol extremo ${girassolForExit.bias} — aguardando mín $${minProfitForGirassolExit.toFixed(2)} (atual +$${profit.toFixed(2)}). `;
+          } else {
+            // Nível 2/3 = sinal moderado
+            // Para pullback: exige 45% do MFE ou $1.50 mín (pullback é curto, sair antes)
+            // Para trend/reversal: exige 60% do MFE ou $2.50 mín (movimento maior esperado)
+            if (exitTradeMode === 'pullback') {
+              minProfitForGirassolExit = Math.max(1.50, ctx.maxFavorableExcursion * 0.45);
+            } else {
+              minProfitForGirassolExit = Math.max(2.50, ctx.maxFavorableExcursion * 0.60);
+            }
+            if (profit >= minProfitForGirassolExit) {
+              console.log(`[MONITOR] 🌻 SAÍDA GIRASSOL 2/3 #${position.ticket}: ${positionDir} vs ${girassolForExit.bias} | Modo: ${exitTradeMode} | Lucro: +$${profit.toFixed(2)} ≥ mín $${minProfitForGirassolExit.toFixed(2)}`);
+              return {
+                ...base,
+                action: 'CLOSE_PROFIT',
+                urgency: 'high',
+                reason: `🌻 Girassol ${girassolForExit.bias} (2/3 níveis) indica fim do movimento ${positionDir} | +$${profit.toFixed(2)}`,
+                narrative: `Girassol ${girassolForExit.bias} 2/3 indica reversão moderada (modo: ${exitTradeMode}). Posição ${positionDir} #${position.ticket} aberta há ${ageMinutes.toFixed(1)}min. Lucro: +$${profit.toFixed(2)} atingiu mínimo exigido $${minProfitForGirassolExit.toFixed(2)} | MFE: +$${ctx.maxFavorableExcursion.toFixed(2)}.`
+              };
+            }
+            base.narrative += `🌻 Girassol ${girassolForExit.bias} 2/3 — aguardando mín $${minProfitForGirassolExit.toFixed(2)} (atual +$${profit.toFixed(2)}). `;
           }
         }
       }
@@ -4680,14 +4719,21 @@ class MetaTraderBridge extends EventEmitter {
         };
       }
 
-      if (isProfitTarget && behavior.confirmation === 'reversal' && profit > 0.01) {
+      // Fibonacci: exige progresso real antes de fechar — evita sair em retração mínima
+      // Mínimo: $1.00 ou 35% do pico de lucro histórico (MFE)
+      const minFibProfit = Math.max(1.00, ctx.maxFavorableExcursion * 0.35);
+      if (isProfitTarget && behavior.confirmation === 'reversal' && profit >= minFibProfit) {
+        console.log(`[MONITOR] 📐 SAÍDA FIBONACCI #${position.ticket}: nível ${zone.level} confirmado | Lucro: +$${profit.toFixed(2)} ≥ mín $${minFibProfit.toFixed(2)}`);
         return {
           ...base,
           action:    'CLOSE_PROFIT',
-          urgency:   'normal',
-          reason:    `Alvo Fib ${zone.level} atingido com reversão confirmada`,
-          narrative: `${behavior.narrative} Lucro atual: +$${profit.toFixed(2)} (pico foi +$${ctx.maxFavorableExcursion.toFixed(2)}).`
+          urgency:   fib.confluenceScore >= 70 ? 'high' : 'normal',
+          reason:    `📐 Alvo Fib ${zone.level} atingido com reversão confirmada | +$${profit.toFixed(2)}`,
+          narrative: `${behavior.narrative} Lucro: +$${profit.toFixed(2)} (pico MFE: +$${ctx.maxFavorableExcursion.toFixed(2)}) | mín exigido: $${minFibProfit.toFixed(2)}.`
         };
+      } else if (isProfitTarget && behavior.confirmation === 'reversal' && profit > 0) {
+        // Fibonacci confirmado mas lucro ainda insuficiente — logar e aguardar
+        base.narrative += `📐 Fib ${zone.level} confirmado — aguardando mín $${minFibProfit.toFixed(2)} (atual +$${profit.toFixed(2)}). `;
       }
 
       base.narrative += `Fib ${zone.level} (${zone.layer}). ${behavior.narrative} `;
