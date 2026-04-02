@@ -2551,6 +2551,22 @@ class MetaTraderBridge extends EventEmitter {
           // a entrada BUY deve aguardar a confirmação de fundo (reversão real).
           // Também verificar se o preço está se aproximando de um fundo macro anterior
           // sem ter formado fundo duplo — nesse caso a IA deve esperar o teste + bounce.
+          //
+          // ── BYPASS GIRASSOL (GATE B apenas) ──────────────────────────────────────
+          // O Girassol detecta Fundo Duplo e Topo Duplo internamente (multi-level).
+          // Quando o Girassol tem ≥2/3 níveis na direção correta, ele JÁ é a confirmação
+          // do Fundo/Topo Duplo. Exigir a confirmação do GATE B além disso é redundante
+          // e causa atrasos de 2+ minutos em entradas legítimas observadas pelo Girassol.
+          // GATE A (momentum descendente ativo) e GATE C (abaixo do fundo) permanecem
+          // sempre ativos — protegem contra entrar num spike ainda em curso.
+          const _girassolForGateB = this.getGirassolBias(symbol);
+          const _girassolBypassGateB_BUY = _girassolForGateB
+            && _girassolForGateB.bias === 'BUY'
+            && _girassolForGateB.levelCount >= 2;
+          const _girassolBypassGateB_SELL = _girassolForGateB
+            && _girassolForGateB.bias === 'SELL'
+            && _girassolForGateB.levelCount >= 2;
+
           if (naturalAction === 'BUY' && marketData.length >= 8) {
             // GATE A: Momentum descendente ativo — últimos 5 candles em queda contínua
             const last5 = marketData.slice(-5).map((d: any) => d.close as number);
@@ -2568,7 +2584,7 @@ class MetaTraderBridge extends EventEmitter {
             }
 
             // GATE B: Fundo macro anterior não testado — mercado ainda convergindo para ele
-            // Procura o fundo mais baixo nos últimos 80 barras (excluindo últimos 3)
+            // ⚡ BYPASS: ignorado quando Girassol ≥2/3 (ele já confirma o Fundo Duplo internamente)
             const lookback = marketData.slice(-80, -3);
             if (lookback.length >= 10) {
               const previousMacroLow = Math.min(...lookback.map((d: any) => d.low as number));
@@ -2577,18 +2593,21 @@ class MetaTraderBridge extends EventEmitter {
 
               // Se o preço atual está dentro de 0.5% ACIMA do fundo anterior e ainda descendo
               if (distToLow >= 0 && distToLow < 0.005 && dropPct > 0.0001) {
-                this.logAnalysis({
-                  id: `${entryId}_approaching_macro_low`,
-                  timestamp: Date.now(), symbol, phase: 'decision', status: 'rejected',
-                  consecutiveLosses: this.consecutiveLosses,
-                  decisionReason: `⏳ GATE MACRO: Preço a ${(distToLow * 100).toFixed(3)}% do fundo macro @ ${previousMacroLow.toFixed(5)} — aguardando teste + bounce (Fundo Duplo) para confirmar reversão antes de BUY`
-                });
-                console.log(`[MT5Bridge] ⏳ ${symbol}: GATE MACRO — preço a ${(distToLow * 100).toFixed(3)}% do fundo macro ${previousMacroLow.toFixed(5)} sem bounce — BUY bloqueado`);
-                return null;
+                if (_girassolBypassGateB_BUY) {
+                  console.log(`[MT5Bridge] 🌻 ${symbol}: GATE B bypass — Girassol BUY ${_girassolForGateB!.levelCount}/3 níveis confirma Fundo Duplo (${(distToLow * 100).toFixed(3)}% do fundo macro ${previousMacroLow.toFixed(5)})`);
+                } else {
+                  this.logAnalysis({
+                    id: `${entryId}_approaching_macro_low`,
+                    timestamp: Date.now(), symbol, phase: 'decision', status: 'rejected',
+                    consecutiveLosses: this.consecutiveLosses,
+                    decisionReason: `⏳ GATE MACRO: Preço a ${(distToLow * 100).toFixed(3)}% do fundo macro @ ${previousMacroLow.toFixed(5)} — aguardando teste + bounce (Fundo Duplo) para confirmar reversão antes de BUY`
+                  });
+                  console.log(`[MT5Bridge] ⏳ ${symbol}: GATE MACRO — preço a ${(distToLow * 100).toFixed(3)}% do fundo macro ${previousMacroLow.toFixed(5)} sem bounce — BUY bloqueado`);
+                  return null;
+                }
               }
 
-              // Se o preço já atingiu/ultrapassou o fundo anterior mas ainda não bounced
-              // (a última barra fecha ABAIXO do fundo anterior → spike ainda ocorrendo)
+              // GATE C: Preço já abaixo do fundo — spike ainda ocorrendo (sem bypass)
               if (currentClose < previousMacroLow) {
                 this.logAnalysis({
                   id: `${entryId}_below_macro_low`,
@@ -2623,16 +2642,24 @@ class MetaTraderBridge extends EventEmitter {
               const previousMacroHigh = Math.max(...lookback.map((d: any) => d.high as number));
               const currentClose = marketData[marketData.length - 1].close as number;
               const distToHigh = (previousMacroHigh - currentClose) / (previousMacroHigh || 1);
+
+              // GATE B equivalente para Boom (bypass quando Girassol ≥2/3 confirma Topo Duplo)
               if (distToHigh >= 0 && distToHigh < 0.005 && risePct > 0.0001) {
-                this.logAnalysis({
-                  id: `${entryId}_approaching_macro_high`,
-                  timestamp: Date.now(), symbol, phase: 'decision', status: 'rejected',
-                  consecutiveLosses: this.consecutiveLosses,
-                  decisionReason: `⏳ GATE MACRO: Preço a ${(distToHigh * 100).toFixed(3)}% do topo macro @ ${previousMacroHigh.toFixed(5)} — aguardando teste + rejeição (Topo Duplo) antes de SELL`
-                });
-                console.log(`[MT5Bridge] ⏳ ${symbol}: GATE MACRO — preço a ${(distToHigh * 100).toFixed(3)}% do topo macro ${previousMacroHigh.toFixed(5)} sem rejeição — SELL bloqueado`);
-                return null;
+                if (_girassolBypassGateB_SELL) {
+                  console.log(`[MT5Bridge] 🌻 ${symbol}: GATE B bypass — Girassol SELL ${_girassolForGateB!.levelCount}/3 níveis confirma Topo Duplo (${(distToHigh * 100).toFixed(3)}% do topo macro ${previousMacroHigh.toFixed(5)})`);
+                } else {
+                  this.logAnalysis({
+                    id: `${entryId}_approaching_macro_high`,
+                    timestamp: Date.now(), symbol, phase: 'decision', status: 'rejected',
+                    consecutiveLosses: this.consecutiveLosses,
+                    decisionReason: `⏳ GATE MACRO: Preço a ${(distToHigh * 100).toFixed(3)}% do topo macro @ ${previousMacroHigh.toFixed(5)} — aguardando teste + rejeição (Topo Duplo) antes de SELL`
+                  });
+                  console.log(`[MT5Bridge] ⏳ ${symbol}: GATE MACRO — preço a ${(distToHigh * 100).toFixed(3)}% do topo macro ${previousMacroHigh.toFixed(5)} sem rejeição — SELL bloqueado`);
+                  return null;
+                }
               }
+
+              // GATE C equivalente para Boom (sem bypass — spike ativo)
               if (currentClose > previousMacroHigh) {
                 this.logAnalysis({
                   id: `${entryId}_above_macro_high`,
