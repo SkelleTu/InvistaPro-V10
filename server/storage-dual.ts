@@ -522,6 +522,10 @@ export class DualStorage implements IStorage {
     }
     return this.sqlite.resetAllTradingData(uid);
   }
+
+  async clearTabData(userId: string, tab: string): Promise<{ cleared: string[]; rowsDeleted: number }> {
+    return this.sqlite.clearTabData(userId, tab);
+  }
 }
 
 export const dualStorage = new DualStorage();
