@@ -3832,9 +3832,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json({ success: true, message: 'Aba sem dados limpáveis', rowsDeleted: 0, cleared: [] });
       }
 
-      // Para o monitor, também encerra sessões ativas na memória
+      // Para o monitor, também encerra sessões ativas na memória e limpa contratos travados
       if (tab === 'monitor') {
         autoTradingScheduler.clearAllSessions();
+        contractMonitor.clearAll();
       }
 
       // Para learning/stats também reseta a memória em tempo real

@@ -38,6 +38,11 @@ router.get('/status', isAuthenticated, (req: Request, res: Response) => {
   });
 });
 
+router.post('/clear', isAuthenticated, (req: Request, res: Response) => {
+  const cleared = contractMonitor.clearAll();
+  res.json({ success: true, message: `${cleared} contrato(s) removido(s) do monitor`, cleared });
+});
+
 router.get('/contract/:id', isAuthenticated, (req: Request, res: Response) => {
   const id = parseInt(req.params.id);
   const state = contractMonitor.getContractState(id);

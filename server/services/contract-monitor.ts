@@ -782,6 +782,21 @@ class UniversalContractMonitor extends EventEmitter {
     return undefined;
   }
 
+  /**
+   * Encerra o monitoramento de TODOS os contratos da memória.
+   * Usado ao limpar a aba monitor ou ao resetar o sistema.
+   */
+  clearAll(): number {
+    const total = this.monitored.size;
+    const ids = Array.from(this.monitored.keys());
+    for (const contractId of ids) {
+      this.stopMonitoring(contractId);
+    }
+    this.recentlyClosed.clear();
+    console.log(`🧹 [MONITOR] clearAll() executado — ${total} contrato(s) removido(s) da memória`);
+    return total;
+  }
+
   // ── WebSocket interno ────────────────────────────────────
 
   private async ensureConnected(): Promise<void> {
