@@ -320,7 +320,20 @@ export default function Frenetico9TokensPanel({ syncedDigitCount, syncedStakeMod
               <div className="p-3 rounded-lg bg-card border border-border/40 text-xs space-y-1.5">
                 <div className="flex items-center gap-1.5 text-muted-foreground font-medium mb-1">
                   <Target className="w-3.5 h-3.5" />
-                  Projeção para próxima rajada ({effectiveStakeMode})
+                  <span className="flex-1">Projeção para próxima rajada ({effectiveStakeMode})</span>
+                  <Button
+                    onClick={() => burstMutation.mutate()}
+                    disabled={burstMutation.isPending || totalConfigured === 0}
+                    className="h-6 px-2.5 text-[10px] bg-violet-600 hover:bg-violet-700 text-white font-semibold ml-auto"
+                    data-testid="btn-fire-burst-projection"
+                  >
+                    {burstMutation.isPending ? (
+                      <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                    ) : (
+                      <PlayCircle className="w-3 h-3 mr-1" />
+                    )}
+                    Rajada Manual
+                  </Button>
                 </div>
                 <div className="grid grid-cols-4 gap-2">
                   <div className="text-center">
