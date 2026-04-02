@@ -11,7 +11,7 @@ import {
   Zap, Key, Trash2, RefreshCw, PlayCircle,
   CheckCircle2, AlertCircle, Loader2, Eye, EyeOff,
   TrendingUp, DollarSign, Flame, Snowflake, Circle,
-  BarChart2, History, Target, Layers
+  BarChart2, History, Target, Layers, Settings, Link, Minus, Plus
 } from "lucide-react";
 
 type StakeMode = "uniform" | "kelly" | "aggressive";
@@ -131,14 +131,63 @@ export default function Frenetico9TokensPanel({ syncedDigitCount, syncedStakeMod
   const [showToken, setShowToken] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
 
-  // Mapeamento sincronizado das configs do digit_matches:
-  // stakeMode 'ai' → kelly (IA decide = Kelly inteligente)
-  // stakeMode 'fixed'/'manual' → uniform com o stake fixo definido
-  const effectiveStakeMode: StakeMode = syncedStakeMode === 'ai' ? 'kelly' : 'uniform';
-  const effectiveAmount = (syncedStakeMode === 'fixed' || syncedStakeMode === 'manual')
-    ? (syncedFixedStake ?? 0.35)
-    : 0.35;
-  const effectiveDigitCount = syncedDigitCount ?? 10;
+  // ── Configurações próprias da Rajada Manual (independentes do automático) ──
+  const [burstOwnConfig, setBurstOwnConfig] = useState<boolean>(() => {
+    try { return localStorage.getItem("burst_own_config") === "true"; } catch { return false; }
+  });
+  const [burstStakeMode, setBurstStakeMode] = useState<'ai' | 'fixed' | 'manual'>(() => {
+    try {
+      const s = localStorage.getItem("burst_stake_mode");
+      if (s === 'fixed') return 'fixed';
+      if (s === 'manual') return 'manual';
+    } catch {} return 'ai';
+  });
+  const [burstFixedStake, setBurstFixedStake] = useState<number>(() => {
+    try { const s = localStorage.getItem("burst_fixed_stake"); if (s) { const n = parseFloat(s); if (n >= 0.35) return n; } } catch {} return 0.35;
+  });
+  const [burstFixedStakeInput, setBurstFixedStakeInput] = useState<string>(() => {
+    try { const s = localStorage.getItem("burst_fixed_stake"); if (s) return s; } catch {} return "0.35";
+  });
+  const [burstDigitCount, setBurstDigitCount] = useState<number>(() => {
+    try { const s = localStorage.getItem("burst_digit_count"); if (s) { const n = parseInt(s); if (n >= 1 && n <= 10) return n; } } catch {} return 10;
+  });
+  const [burstDistMode, setBurstDistMode] = useState<StakeMode>(() => {
+    try {
+      const s = localStorage.getItem("burst_dist_mode");
+      if (s === 'kelly') return 'kelly';
+      if (s === 'aggressive') return 'aggressive';
+      if (s === 'uniform') return 'uniform';
+    } catch {} return 'kelly';
+  });
+
+  // ── Valores efetivos usados pela rajada ──
+  // Se o usuário configurou manualmente, usa as configs próprias.
+  // Caso contrário, herda do sistema automático de digit_matches.
+  const effectiveStakeMode: StakeMode = burstOwnConfig
+    ? burstDistMode
+    : (syncedStakeMode === 'ai' ? 'kelly' : 'uniform');
+  const effectiveAmount = burstOwnConfig
+    ? ((burstStakeMode === 'fixed' || burstStakeMode === 'manual') ? burstFixedStake : 0.35)
+    : ((syncedStakeMode === 'fixed' || syncedStakeMode === 'manual') ? (syncedFixedStake ?? 0.35) : 0.35);
+  const effectiveDigitCount = burstOwnConfig ? burstDigitCount : (syncedDigitCount ?? 10);
+
+  function saveBurstStakeMode(mode: 'ai' | 'fixed' | 'manual') {
+    setBurstStakeMode(mode);
+    try { localStorage.setItem("burst_stake_mode", mode); } catch {}
+  }
+  function saveBurstDigitCount(n: number) {
+    const clamped = Math.max(1, Math.min(10, n));
+    setBurstDigitCount(clamped);
+    try { localStorage.setItem("burst_digit_count", String(clamped)); } catch {}
+  }
+  function saveBurstDistMode(mode: StakeMode) {
+    setBurstDistMode(mode);
+    try { localStorage.setItem("burst_dist_mode", mode); } catch {}
+  }
+  function toggleOwnConfig(val: boolean) {
+    setBurstOwnConfig(val);
+    try { localStorage.setItem("burst_own_config", String(val)); } catch {}
+  }
 
   const { data: slotsData, isLoading, refetch } = useQuery<{ slots: SlotInfo[]; totalConfigured: number }>({
     queryKey: ["/api/trading/deriv-tokens/slots"],
@@ -371,32 +420,200 @@ export default function Frenetico9TokensPanel({ syncedDigitCount, syncedStakeMod
       </CardHeader>
 
       <CardContent className="space-y-4">
-        {/* Banner de sincronização com digit_matches */}
+        {/* Painel de configuração da rajada */}
         {totalConfigured > 0 && (
-          <div className="rounded-lg border border-violet-400/40 bg-violet-500/10 p-3 space-y-2">
+          <div className={`rounded-lg border p-3 space-y-3 ${burstOwnConfig ? 'border-violet-500/60 bg-violet-500/8' : 'border-violet-400/30 bg-violet-500/5'}`}>
+            {/* Cabeçalho com toggle */}
             <div className="flex items-center gap-2">
-              <Zap className="w-3.5 h-3.5 text-violet-400 shrink-0" />
-              <span className="text-xs font-bold text-violet-300">Sincronizado com Digit Matches</span>
-              <span className="ml-auto text-[10px] text-violet-400/70">idêntico ao modo automático</span>
+              {burstOwnConfig ? (
+                <Settings className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+              ) : (
+                <Link className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+              )}
+              <span className="text-xs font-bold text-violet-300 flex-1">
+                {burstOwnConfig ? 'Configurações da Rajada' : 'Sincronizado com Digit Matches'}
+              </span>
+              <button
+                onClick={() => toggleOwnConfig(!burstOwnConfig)}
+                className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
+                  burstOwnConfig
+                    ? 'border-violet-400/60 text-violet-300 hover:bg-violet-500/20'
+                    : 'border-violet-400/40 text-violet-400/70 hover:bg-violet-500/10'
+                }`}
+                data-testid="btn-toggle-burst-own-config"
+              >
+                {burstOwnConfig ? '← Usar automático' : 'Configurar manualmente →'}
+              </button>
             </div>
-            <div className="grid grid-cols-3 gap-2 text-[10px]">
-              <div className="rounded bg-violet-500/10 border border-violet-500/20 p-1.5 text-center">
-                <div className="text-violet-400/70 mb-0.5">Dígitos</div>
-                <div className="font-bold text-violet-200">
-                  {effectiveDigitCount === 10 ? '10× (todos)' : `${effectiveDigitCount}× top quentes`}
+
+            {/* Modo SINCRONIZADO: resumo em 3 colunas */}
+            {!burstOwnConfig && (
+              <div className="grid grid-cols-3 gap-2 text-[10px]">
+                <div className="rounded bg-violet-500/10 border border-violet-500/20 p-1.5 text-center">
+                  <div className="text-violet-400/70 mb-0.5">Dígitos</div>
+                  <div className="font-bold text-violet-200">
+                    {effectiveDigitCount === 10 ? '10× (todos)' : `${effectiveDigitCount}× top quentes`}
+                  </div>
+                </div>
+                <div className="rounded bg-violet-500/10 border border-violet-500/20 p-1.5 text-center">
+                  <div className="text-violet-400/70 mb-0.5">Distribuição</div>
+                  <div className="font-bold text-violet-200">
+                    {effectiveStakeMode === 'kelly' ? '🧠 Kelly' : effectiveStakeMode === 'aggressive' ? '🔥 Agressi' : '📌 Uniforme'}
+                  </div>
+                </div>
+                <div className="rounded bg-violet-500/10 border border-violet-500/20 p-1.5 text-center">
+                  <div className="text-violet-400/70 mb-0.5">Stake base</div>
+                  <div className="font-bold text-violet-200">${effectiveAmount.toFixed(2)}</div>
                 </div>
               </div>
-              <div className="rounded bg-violet-500/10 border border-violet-500/20 p-1.5 text-center">
-                <div className="text-violet-400/70 mb-0.5">Modo</div>
-                <div className="font-bold text-violet-200">
-                  {effectiveStakeMode === 'kelly' ? '🧠 Kelly (IA)' : '📌 Uniforme'}
+            )}
+
+            {/* Modo PRÓPRIO: painel de configuração completo */}
+            {burstOwnConfig && (
+              <div className="space-y-3">
+
+                {/* 1. Modo de stake */}
+                <div className="space-y-1.5">
+                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">💰 Modo de Stake</p>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {(['ai', 'fixed', 'manual'] as const).map(mode => (
+                      <button
+                        key={mode}
+                        onClick={() => saveBurstStakeMode(mode)}
+                        data-testid={`btn-burst-stake-mode-${mode}`}
+                        className={`flex flex-col items-center gap-0.5 rounded-lg border px-2 py-2 text-center text-[10px] transition-all ${
+                          burstStakeMode === mode
+                            ? mode === 'ai'
+                              ? 'border-blue-500 bg-blue-500 text-white shadow-sm'
+                              : mode === 'fixed'
+                                ? 'border-green-500 bg-green-500 text-white shadow-sm'
+                                : 'border-purple-500 bg-purple-500 text-white shadow-sm'
+                            : 'border-border bg-card text-muted-foreground hover:border-violet-400/60'
+                        }`}
+                      >
+                        <span className="font-bold text-xs">
+                          {mode === 'ai' ? '🧠 IA' : mode === 'fixed' ? '📌 Fixo' : '✋ Manual'}
+                        </span>
+                        <span className="opacity-80">
+                          {mode === 'ai' ? 'Dinâmico' : mode === 'fixed' ? 'Base definida' : '100% controle'}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                  {(burstStakeMode === 'fixed' || burstStakeMode === 'manual') && (
+                    <div className="flex items-center gap-2 pt-1">
+                      <span className={`text-[10px] font-medium whitespace-nowrap ${burstStakeMode === 'manual' ? 'text-purple-300' : 'text-green-300'}`}>
+                        Valor ($):
+                      </span>
+                      <input
+                        type="number"
+                        min="0.35"
+                        step="0.01"
+                        value={burstFixedStakeInput}
+                        onChange={e => setBurstFixedStakeInput(e.target.value)}
+                        onBlur={() => {
+                          const val = parseFloat(burstFixedStakeInput);
+                          if (!isNaN(val) && val >= 0.35) {
+                            const rounded = Math.round(val * 100) / 100;
+                            setBurstFixedStake(rounded);
+                            setBurstFixedStakeInput(String(rounded));
+                            try { localStorage.setItem("burst_fixed_stake", String(rounded)); } catch {}
+                            toast({ title: "Stake da rajada salvo", description: `Rajadas usarão $${rounded.toFixed(2)} por dígito.` });
+                          } else {
+                            setBurstFixedStakeInput(String(burstFixedStake));
+                            toast({ title: "Valor inválido", description: "O stake mínimo é $0.35.", variant: "destructive" });
+                          }
+                        }}
+                        data-testid="input-burst-fixed-stake"
+                        className={`w-24 rounded border bg-card px-2 py-1 text-xs font-bold focus:outline-none ${
+                          burstStakeMode === 'manual'
+                            ? 'border-purple-500/50 text-purple-200 focus:border-purple-400'
+                            : 'border-green-500/50 text-green-200 focus:border-green-400'
+                        }`}
+                      />
+                      <span className="text-[10px] text-muted-foreground">mín. $0.35</span>
+                    </div>
+                  )}
+                  {burstStakeMode === 'ai' && (
+                    <p className="text-[10px] text-blue-400/80 bg-blue-500/10 rounded px-2 py-1">
+                      A IA calcula o stake ideal com base no saldo e calor dos dígitos.
+                    </p>
+                  )}
                 </div>
+
+                {/* 2. Distribuição de stakes */}
+                <div className="space-y-1.5">
+                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">📊 Distribuição por Dígito</p>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {(['uniform', 'kelly', 'aggressive'] as StakeMode[]).map(mode => {
+                      const cfg = MODE_CONFIG[mode];
+                      return (
+                        <button
+                          key={mode}
+                          onClick={() => saveBurstDistMode(mode)}
+                          data-testid={`btn-burst-dist-mode-${mode}`}
+                          className={`flex flex-col items-center gap-0.5 rounded-lg border px-2 py-2 text-center text-[10px] transition-all ${
+                            burstDistMode === mode
+                              ? `${cfg.color} shadow-sm`
+                              : 'border-border bg-card text-muted-foreground hover:border-violet-400/60'
+                          }`}
+                        >
+                          <span className="font-bold text-xs">{cfg.label}</span>
+                          <span className="opacity-75 leading-tight">{cfg.description.split(' — ')[0]}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 3. Número de dígitos */}
+                <div className="space-y-1.5">
+                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">🎯 Nº de Dígitos Simultâneos</p>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => saveBurstDigitCount(burstDigitCount - 1)}
+                      disabled={burstDigitCount <= 1}
+                      className="h-7 w-7 rounded border border-border bg-card flex items-center justify-center hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed"
+                      data-testid="btn-burst-digit-count-minus"
+                    >
+                      <Minus className="w-3 h-3" />
+                    </button>
+                    <div className="flex-1 text-center">
+                      <span className="text-xl font-bold text-violet-400">{burstDigitCount}</span>
+                      <span className="text-xs text-muted-foreground ml-1">
+                        {burstDigitCount === 10 ? 'dígitos (todos)' : burstDigitCount === 1 ? 'dígito' : 'dígitos top'}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => saveBurstDigitCount(burstDigitCount + 1)}
+                      disabled={burstDigitCount >= 10}
+                      className="h-7 w-7 rounded border border-border bg-card flex items-center justify-center hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed"
+                      data-testid="btn-burst-digit-count-plus"
+                    >
+                      <Plus className="w-3 h-3" />
+                    </button>
+                    {/* Atalhos rápidos */}
+                    <div className="flex gap-1">
+                      {[3, 5, 10].map(n => (
+                        <button
+                          key={n}
+                          onClick={() => saveBurstDigitCount(n)}
+                          className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${
+                            burstDigitCount === n
+                              ? 'border-violet-500 bg-violet-500/20 text-violet-300'
+                              : 'border-border text-muted-foreground hover:border-violet-400/50'
+                          }`}
+                          data-testid={`btn-burst-digit-count-${n}`}
+                        >
+                          {n === 10 ? 'todos' : `top ${n}`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
               </div>
-              <div className="rounded bg-violet-500/10 border border-violet-500/20 p-1.5 text-center">
-                <div className="text-violet-400/70 mb-0.5">Stake base</div>
-                <div className="font-bold text-violet-200">${effectiveAmount.toFixed(2)}</div>
-              </div>
-            </div>
+            )}
           </div>
         )}
 
