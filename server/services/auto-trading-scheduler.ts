@@ -2304,7 +2304,7 @@ export class AutoTradingScheduler {
         const MODALITY_CONSENSUS_MAP: Record<string, number> = {
           'rise':              60,  'fall':              60,
           'higher':            62,  'lower':             62,
-          'accumulator':       65,
+          'accumulator':       75,  // elevado de 65→75: ACCU perde TUDO no knockout — margem maior obrigatória
           'multiplier_up':     68,  'multiplier_down':   68,
           'turbo_up':          75,  'turbo_down':        75,
           'touch':             78,
@@ -2856,6 +2856,49 @@ export class AutoTradingScheduler {
             console.warn(`⛔ [${operationId}] ACCU BLOQUEADO: ${selectedSymbol} tem alta volatilidade nativa e regime desconhecido — risco de knockout elevado.`);
             this.setPhase('AGUARDANDO', `⛔ ACCU bloqueado: ${selectedSymbol} é de alta volatilidade e regime está desconhecido`, 'warning');
             return { success: false, error: `ACCU: ${selectedSymbol} (alta volatilidade) com regime desconhecido — bloqueado por segurança` };
+          }
+
+          // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+          // 🛡️ FILTRO 1 — DUPLA CONFIRMAÇÃO BEARISH: RSI < 40 + MACD negativo
+          // Quando ambos indicam pressão de baixa, um ACCU UP enfrenta knockout imediato.
+          // Raiz do loss forense em 02/04/2026: RSI=34.69 + MACD=-0.079 + ACCU UP → derrubado em 25s.
+          // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+          {
+            const rsiVal  = aiConsensus.rsi  as number | undefined;
+            const macdVal = aiConsensus.macd as number | undefined;
+            if (safeDirection === 'up' && rsiVal !== undefined && macdVal !== undefined) {
+              if (rsiVal < 40 && macdVal < 0) {
+                console.warn(`⛔ [${operationId}] ACCU UP BLOQUEADO (dupla baixa): RSI=${rsiVal.toFixed(1)}<40 E MACD=${macdVal.toFixed(6)}<0 em ${selectedSymbol} — pressão descendente confirmada, knockout imediato provável.`);
+                this.setPhase('AGUARDANDO', `⛔ ACCU bloqueado: RSI+MACD ambos bearish em ${selectedSymbol}`, 'warning');
+                return { success: false, error: `ACCU UP bloqueado: RSI=${rsiVal.toFixed(1)} (<40) + MACD=${macdVal.toFixed(6)} (<0) — dupla confirmação de baixa, risco de knockout imediato.` };
+              }
+            }
+            if (safeDirection === 'down' && rsiVal !== undefined && macdVal !== undefined) {
+              if (rsiVal > 60 && macdVal > 0) {
+                console.warn(`⛔ [${operationId}] ACCU DOWN BLOQUEADO (dupla alta): RSI=${rsiVal.toFixed(1)}>60 E MACD=${macdVal.toFixed(6)}>0 em ${selectedSymbol} — pressão ascendente confirmada, knockout imediato provável.`);
+                this.setPhase('AGUARDANDO', `⛔ ACCU bloqueado: RSI+MACD ambos bullish em ${selectedSymbol}`, 'warning');
+                return { success: false, error: `ACCU DOWN bloqueado: RSI=${rsiVal.toFixed(1)} (>60) + MACD=${macdVal.toFixed(6)} (>0) — dupla confirmação de alta, risco de knockout imediato.` };
+              }
+            }
+          }
+
+          // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+          // 🛡️ FILTRO 2 — MARGEM DIRECIONAL MÍNIMA: upScore vs downScore (≥ 6 pontos)
+          // ACCU exige movimento contínuo sem nenhum tick adverso. Empate 50×50 não é
+          // suficiente — a IA precisa ter vantagem real e clara na direção escolhida.
+          // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+          {
+            const upScoreVal   = (aiConsensus.upScore   as number | undefined) ?? 50;
+            const downScoreVal = (aiConsensus.downScore as number | undefined) ?? 50;
+            const directionMargin = safeDirection === 'up'
+              ? (upScoreVal - downScoreVal)
+              : (downScoreVal - upScoreVal);
+            if (directionMargin < 6) {
+              console.warn(`⛔ [${operationId}] ACCU ${safeDirection.toUpperCase()} BLOQUEADO (margem insuficiente): upScore=${upScoreVal} vs downScore=${downScoreVal} → margem=${directionMargin}<6 — empate direcional inaceitável para ACCU.`);
+              this.setPhase('AGUARDANDO', `⛔ ACCU bloqueado: scores direcionais empatados (${upScoreVal}×${downScoreVal}) em ${selectedSymbol}`, 'warning');
+              return { success: false, error: `ACCU ${safeDirection.toUpperCase()} bloqueado: margem direcional ${directionMargin}<6 (up=${upScoreVal} vs down=${downScoreVal}). Aguardando sinal mais claro.` };
+            }
+            console.log(`✅ [${operationId}] ACCU margem direcional OK: ${safeDirection.toUpperCase()} margem=${directionMargin} (up=${upScoreVal} vs down=${downScoreVal})`);
           }
 
           // 🧠 ACCU: stake via IA por ativo — mesmo motor de calculateAIStakePercentage
