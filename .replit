@@ -69,6 +69,7 @@ DATABASE_URL = "postgresql://neondb_owner:npg_0jaPdFiLS2wr@ep-solitary-violet-ah
 SESSION_SECRET = "+7DCSHJmNUxnv7r51rv5JX9T2GDfzeIS+RE+1Cx50GqQtp8AV6qNTxIcJMAj5dlbT85SS5MZocRCqMckGHWQrw=="
 TURSO_AUTH_TOKEN = "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3NzM5NzM3NzMsImlkIjoiMDE5ZDA5MTMtNTEwMS03MGVjLTlmNDMtZWQ1ZGY3MjNhZDhlIiwicmlkIjoiNzI5MDA1NjUtZjRmMS00MzJkLWJkMGItODUzYmYwMjc5MzdkIn0.sADqY65Adk7kHeIIXIqDEnf0emrra5EbhTUerFWxP1ldwc_k1blHSGUg0B2TQmdQ_Bw2Gyi0EaPXvkp9yeVcCg"
 TURSO_DATABASE_URL = "libsql://invista-pro-skelletuii.aws-us-east-2.turso.io"
+GROQ_API_KEY = "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"
 
 [userenv.development]
 

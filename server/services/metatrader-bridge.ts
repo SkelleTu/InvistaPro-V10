@@ -2624,17 +2624,19 @@ class MetaTraderBridge extends EventEmitter {
 
           // ── GATE MACRO-ESTRUTURA: Boom — bloquear SELL enquanto subida ativa ──────
           if (naturalAction === 'SELL' && marketData.length >= 8) {
-            const last5 = marketData.slice(-5).map((d: any) => d.close as number);
-            const risePct = (last5[last5.length - 1] - last5[0]) / (last5[0] || 1);
-            const allRising = last5.every((c: number, i: number) => i === 0 || c >= last5[i - 1]);
-            if (allRising && risePct > 0.0003) {
+            // GATE A: Momentum ascendente ativo — últimos 7 candles em alta contínua
+            // (5 candles era muito restritivo — pullbacks normais em Boom são de 4-6 candles)
+            const last7Boom = marketData.slice(-7).map((d: any) => d.close as number);
+            const risePct = (last7Boom[last7Boom.length - 1] - last7Boom[0]) / (last7Boom[0] || 1);
+            const allRising = last7Boom.every((c: number, i: number) => i === 0 || c >= last7Boom[i - 1]);
+            if (allRising && risePct > 0.0005) {
               this.logAnalysis({
                 id: `${entryId}_active_rise`,
                 timestamp: Date.now(), symbol, phase: 'decision', status: 'rejected',
                 consecutiveLosses: this.consecutiveLosses,
-                decisionReason: `🔴 GATE MACRO: Boom em alta ativa — ${(risePct * 100).toFixed(3)}% nos últimos 5 candles — aguardando confirmação de topo antes de SELL`
+                decisionReason: `🔴 GATE MACRO: Boom em alta ativa — ${(risePct * 100).toFixed(3)}% nos últimos 7 candles — aguardando confirmação de topo antes de SELL`
               });
-              console.log(`[MT5Bridge] 🔴 ${symbol}: GATE MACRO — alta ativa (${(risePct * 100).toFixed(3)}% em 5 barras) — SELL bloqueado até topo confirmado`);
+              console.log(`[MT5Bridge] 🔴 ${symbol}: GATE MACRO — alta ativa (${(risePct * 100).toFixed(3)}% em 7 barras) — SELL bloqueado até topo confirmado`);
               return null;
             }
 
