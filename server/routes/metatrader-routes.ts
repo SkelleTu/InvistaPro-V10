@@ -312,8 +312,16 @@ router.post('/signal-with-indicators', async (req: Request, res: Response) => {
             girassolBias = 'SELL';
             girassolDesc = `${friendlyName}: VENDA (HighSymbol/vermelho) na barra ${recent_sell.bar} @ ${recent_sell.value}`;
           } else if (recent_buy && recent_sell) {
-            girassolBias = 'NEUTRAL';
-            girassolDesc = `${friendlyName}: sinais conflitantes (compra e venda simultâneas) — aguardando confirmação`;
+            // Girassol aparece em extremos — é exatamente o sinal direcional.
+            // Quando ambos estão presentes, o MAIS RECENTE (barra menor) vence,
+            // pois representa a nova extremidade do gráfico formada agora.
+            if (recent_buy.bar <= recent_sell.bar) {
+              girassolBias = 'BUY';
+              girassolDesc = `${friendlyName}: COMPRA (mais recente: barra ${recent_buy.bar}) prevalece sobre sinal anterior de venda (barra ${recent_sell.bar})`;
+            } else {
+              girassolBias = 'SELL';
+              girassolDesc = `${friendlyName}: VENDA (mais recente: barra ${recent_sell.bar}) prevalece sobre sinal anterior de compra (barra ${recent_buy.bar})`;
+            }
           }
         } else {
           girassolBias = 'NEUTRAL';
