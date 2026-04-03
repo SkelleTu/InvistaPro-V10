@@ -381,6 +381,10 @@ export interface DerivSyntheticProfile {
   aiContextHint: string;
   tickSize: number;
   avgDailyRange: number;
+  // GATE A por-variante: candles consecutivos e movimento mínimo para bloquear entrada
+  // 300 (trend ~30 candles): mais restritivo | 500: default | 1000 (trend ~100 candles): mais tolerante
+  gateACandleCount?: number;
+  gateAMinMove?: number;
 }
 
 const DERIV_SYNTHETIC_PROFILES: Record<string, DerivSyntheticProfile> = {
@@ -627,6 +631,63 @@ const DERIV_SYNTHETIC_PROFILES: Record<string, DerivSyntheticProfile> = {
     avgDailyRange: 250,
   },
   // ── CRASH INDICES ────────────────────────────────────────────
+  'CRASH50': {
+    family: 'Crash Index',
+    description: 'Crash 50 Index — spikes de queda a cada ~50 ticks, ultra-alta frequência',
+    alwaysOpen: true,
+    spikeIndex: true,
+    volClass: 'ultra-high',
+    slAtrMultiplier: 0.3,
+    tpAtrMultiplier: 1.5,
+    minSlPips: 3, maxSlPips: 15, minTpPips: 5, maxTpPips: 40,
+    rsiOversold: 20, rsiOverbought: 80,
+    trendType: 'spike-dominant',
+    indicatorNotes: 'Spikes extremamente frequentes (~5 velas M1). Trend entre spikes é curtíssima — continuidade de BUY tem janela muito estreita. Scalping puro.',
+    behaviorKnowledge: [
+      'Spike de QUEDA a cada ~50 ticks (~5 velas M1)',
+      'Trend de alta entre spikes é curtíssima — apenas 3-5 candles em média',
+      'Qualquer run de 4+ candles consecutivos é alto risco imediato de spike',
+      'Preferível capturar spikes do que operar continuidade',
+      'SL muito curto obrigatório — spikes ocorrem quase a todo momento',
+    ],
+    spikeFrequency: 'A cada ~50 ticks (aprox. 5 velas M1)',
+    spikeDirection: 'down',
+    optimalTimeframe: 'M1 (scalp)',
+    useFibonacci: false,
+    aiContextHint: 'Crash 50: ultra-alta frequência. BUY de continuidade janela curtíssima (2-3 candles). Preferir capturar spike (SELL curto) com iminência >60%.',
+    tickSize: 0.01,
+    avgDailyRange: 100,
+    gateACandleCount: 4,   // trend ~5 candles — 4 consecutivos já é perigo iminente
+    gateAMinMove: 0.0002,  // threshold mínimo — spikes ocorrem com movimentos compactos
+  },
+  'CRASH150': {
+    family: 'Crash Index',
+    description: 'Crash 150 Index — spikes de queda a cada ~150 ticks, muito alta frequência',
+    alwaysOpen: true,
+    spikeIndex: true,
+    volClass: 'high',
+    slAtrMultiplier: 0.4,
+    tpAtrMultiplier: 1.8,
+    minSlPips: 4, maxSlPips: 20, minTpPips: 8, maxTpPips: 60,
+    rsiOversold: 20, rsiOverbought: 80,
+    trendType: 'spike-dominant',
+    indicatorNotes: 'Mais frequente que o 300. Trend de alta entre spikes dura ~15 velas M1. Runs de 5+ candles já indicam spike próximo.',
+    behaviorKnowledge: [
+      'Spike de QUEDA a cada ~150 ticks (~15 velas M1)',
+      'Trend de alta entre spikes é curta — 10-15 candles em média',
+      'Runs de 5 candles consecutivos já são alertas de spike iminente',
+      'Oportunidades de BUY existem mas são de duração curta',
+    ],
+    spikeFrequency: 'A cada ~150 ticks (aprox. 15 velas M1)',
+    spikeDirection: 'down',
+    optimalTimeframe: 'M1, M5',
+    useFibonacci: false,
+    aiContextHint: 'Crash 150: alta frequência. BUY com janela de 8-12 candles. SELL quando RSI sobrecomprado e iminência >55%.',
+    tickSize: 0.01,
+    avgDailyRange: 150,
+    gateACandleCount: 5,   // trend ~15 candles — 5 consecutivos já é sinal claro
+    gateAMinMove: 0.0003,  // threshold baixo — spikes acontecem com movimentos menores
+  },
   'CRASH300': {
     family: 'Crash Index',
     description: 'Crash 300 Index — spikes de queda a cada ~300 ticks, mais frequente da família Crash',
@@ -657,6 +718,8 @@ const DERIV_SYNTHETIC_PROFILES: Record<string, DerivSyntheticProfile> = {
     aiContextHint: 'Crash 300: spikes de queda a cada ~300 ticks. IA deve detectar iminência de spike (RSI alto + momentum) para SELL curto. Para continuidade: BUY na retomada pós-spike com SL abaixo do spike.',
     tickSize: 0.01,
     avgDailyRange: 200,
+    gateACandleCount: 6,   // trend curta ~30 candles — 6 consecutivos já é sinal de perigo
+    gateAMinMove: 0.0004,  // menor threshold — movimentos entre spikes são mais compactos
   },
   'CRASH500': {
     family: 'Crash Index',
@@ -685,6 +748,8 @@ const DERIV_SYNTHETIC_PROFILES: Record<string, DerivSyntheticProfile> = {
     aiContextHint: 'Crash 500: spikes de queda menos frequentes. IA deve focar em trades de continuidade (BUY) na tendência de alta entre spikes, e SELL rápido quando spike é iminente.',
     tickSize: 0.01,
     avgDailyRange: 300,
+    gateACandleCount: 7,   // default balanceado — trend ~50 candles
+    gateAMinMove: 0.0005,  // threshold padrão
   },
   'CRASH1000': {
     family: 'Crash Index',
@@ -713,8 +778,120 @@ const DERIV_SYNTHETIC_PROFILES: Record<string, DerivSyntheticProfile> = {
     aiContextHint: 'Crash 1000: tendência de alta longa. IA deve operar BUY com SL abaixo de EMA50. Fibonacci válido para TP. SELL apenas quando spike for muito iminente (>85% de iminência).',
     tickSize: 0.01,
     avgDailyRange: 500,
+    gateACandleCount: 10,  // trend longuíssima ~100 candles — runs de 8-9 são normais, só bloquear com 10+
+    gateAMinMove: 0.0008,  // threshold maior — movimentos de continuidade são mais amplos
+  },
+  'CRASH600': {
+    family: 'Crash Index',
+    description: 'Crash 600 Index — spikes de queda a cada ~600 ticks',
+    alwaysOpen: true,
+    spikeIndex: true,
+    volClass: 'high',
+    slAtrMultiplier: 0.65,
+    tpAtrMultiplier: 2.3,
+    minSlPips: 9, maxSlPips: 50, minTpPips: 18, maxTpPips: 120,
+    rsiOversold: 20, rsiOverbought: 80,
+    trendType: 'spike-dominant',
+    indicatorNotes: 'Frequência intermediária entre 500 e 1000. Trend de alta moderadamente longa entre spikes.',
+    behaviorKnowledge: [
+      'Spike de QUEDA a cada ~600 ticks (~60 velas M1)',
+      'Tendência de alta mais longa que o 500 — mais espaço para continuidade',
+      'Amplitude de spike similar ao 500',
+    ],
+    spikeFrequency: 'A cada ~600 ticks (aprox. 60 velas M1)',
+    spikeDirection: 'down',
+    optimalTimeframe: 'M1, M5',
+    useFibonacci: false,
+    aiContextHint: 'Crash 600: BUY de continuidade com trend ~60 candles. SELL apenas em spike iminente.',
+    tickSize: 0.01,
+    avgDailyRange: 350,
+    gateACandleCount: 8,   // trend ~60 candles — entre 500 (7) e 1000 (10)
+    gateAMinMove: 0.0006,
+  },
+  'CRASH900': {
+    family: 'Crash Index',
+    description: 'Crash 900 Index — spikes de queda a cada ~900 ticks',
+    alwaysOpen: true,
+    spikeIndex: true,
+    volClass: 'ultra-high',
+    slAtrMultiplier: 0.68,
+    tpAtrMultiplier: 2.4,
+    minSlPips: 10, maxSlPips: 55, minTpPips: 20, maxTpPips: 140,
+    rsiOversold: 20, rsiOverbought: 80,
+    trendType: 'spike-dominant',
+    indicatorNotes: 'Próximo ao 1000 em frequência. Trend de alta muito longa — runs longas são normais.',
+    behaviorKnowledge: [
+      'Spike de QUEDA a cada ~900 ticks (~90 velas M1)',
+      'Tendência de alta muito longa — quase igual ao 1000',
+      'Runs de 8-9 candles consecutivos são comuns e normais',
+    ],
+    spikeFrequency: 'A cada ~900 ticks (aprox. 90 velas M1)',
+    spikeDirection: 'down',
+    optimalTimeframe: 'M5, M15',
+    useFibonacci: true,
+    aiContextHint: 'Crash 900: BUY de continuidade dominante. SELL com iminência >80%. Fibonacci válido.',
+    tickSize: 0.01,
+    avgDailyRange: 450,
+    gateACandleCount: 9,   // trend ~90 candles — próximo ao 1000 (10)
+    gateAMinMove: 0.0007,
   },
   // ── BOOM INDICES ─────────────────────────────────────────────
+  'BOOM50': {
+    family: 'Boom Index',
+    description: 'Boom 50 Index — spikes de alta a cada ~50 ticks, ultra-alta frequência',
+    alwaysOpen: true,
+    spikeIndex: true,
+    volClass: 'ultra-high',
+    slAtrMultiplier: 0.3,
+    tpAtrMultiplier: 1.5,
+    minSlPips: 3, maxSlPips: 15, minTpPips: 5, maxTpPips: 40,
+    rsiOversold: 20, rsiOverbought: 80,
+    trendType: 'spike-dominant',
+    indicatorNotes: 'Espelho do Crash 50 com spikes de alta. Trend de baixa entre spikes curtíssima — SELL tem janela muito estreita.',
+    behaviorKnowledge: [
+      'Spike de ALTA a cada ~50 ticks (~5 velas M1)',
+      'Trend de baixa entre spikes é curtíssima — apenas 3-5 candles em média',
+      'Qualquer run de 4+ candles consecutivos de alta é risco iminente de reversão',
+      'Preferível capturar spikes do que operar continuidade',
+    ],
+    spikeFrequency: 'A cada ~50 ticks (aprox. 5 velas M1)',
+    spikeDirection: 'up',
+    optimalTimeframe: 'M1 (scalp)',
+    useFibonacci: false,
+    aiContextHint: 'Boom 50: ultra-alta frequência. SELL de continuidade janela curtíssima (2-3 candles). Preferir capturar spike (BUY curto) com iminência >60%.',
+    tickSize: 0.01,
+    avgDailyRange: 100,
+    gateACandleCount: 4,   // trend ~5 candles — 4 consecutivos já é perigo iminente
+    gateAMinMove: 0.0002,  // threshold mínimo
+  },
+  'BOOM150': {
+    family: 'Boom Index',
+    description: 'Boom 150 Index — spikes de alta a cada ~150 ticks, muito alta frequência',
+    alwaysOpen: true,
+    spikeIndex: true,
+    volClass: 'high',
+    slAtrMultiplier: 0.4,
+    tpAtrMultiplier: 1.8,
+    minSlPips: 4, maxSlPips: 20, minTpPips: 8, maxTpPips: 60,
+    rsiOversold: 20, rsiOverbought: 80,
+    trendType: 'spike-dominant',
+    indicatorNotes: 'Espelho do Crash 150. Trend de baixa entre spikes dura ~15 velas M1.',
+    behaviorKnowledge: [
+      'Spike de ALTA a cada ~150 ticks (~15 velas M1)',
+      'Trend de baixa entre spikes é curta — 10-15 candles em média',
+      'Runs de 5 candles consecutivos de alta já são alertas de spike iminente',
+      'SELL com janela de 8-12 candles',
+    ],
+    spikeFrequency: 'A cada ~150 ticks (aprox. 15 velas M1)',
+    spikeDirection: 'up',
+    optimalTimeframe: 'M1, M5',
+    useFibonacci: false,
+    aiContextHint: 'Boom 150: alta frequência. SELL com janela de 8-12 candles. BUY quando RSI sobrevendido e iminência >55%.',
+    tickSize: 0.01,
+    avgDailyRange: 150,
+    gateACandleCount: 5,   // trend ~15 candles — 5 consecutivos já é sinal claro
+    gateAMinMove: 0.0003,  // threshold baixo
+  },
   'BOOM300': {
     family: 'Boom Index',
     description: 'Boom 300 Index — spikes de alta a cada ~300 ticks, mais frequente da família Boom',
@@ -743,6 +920,8 @@ const DERIV_SYNTHETIC_PROFILES: Record<string, DerivSyntheticProfile> = {
     aiContextHint: 'Boom 300: spikes de ALTA frequentes. IA deve detectar iminência de spike para BUY rápido. Continuidade: SELL na tendência de queda entre spikes.',
     tickSize: 0.01,
     avgDailyRange: 200,
+    gateACandleCount: 6,   // espelho do Crash 300 — trend curta ~30 candles
+    gateAMinMove: 0.0004,  // threshold compacto para série 300
   },
   'BOOM500': {
     family: 'Boom Index',
@@ -764,6 +943,8 @@ const DERIV_SYNTHETIC_PROFILES: Record<string, DerivSyntheticProfile> = {
     aiContextHint: 'Boom 500: SELL de continuidade é a estratégia primária. BUY apenas em spike iminente.',
     tickSize: 0.01,
     avgDailyRange: 300,
+    gateACandleCount: 7,   // espelho do Crash 500 — default balanceado
+    gateAMinMove: 0.0005,  // threshold padrão
   },
   'BOOM1000': {
     family: 'Boom Index',
@@ -785,6 +966,61 @@ const DERIV_SYNTHETIC_PROFILES: Record<string, DerivSyntheticProfile> = {
     aiContextHint: 'Boom 1000: SELL com SL acima de EMA50. Fibonacci válido para TP. BUY apenas com iminência de spike >85%.',
     tickSize: 0.01,
     avgDailyRange: 500,
+    gateACandleCount: 10,  // espelho do Crash 1000 — trend longuíssima ~100 candles
+    gateAMinMove: 0.0008,  // threshold maior — movimentos de continuidade são mais amplos
+  },
+  'BOOM600': {
+    family: 'Boom Index',
+    description: 'Boom 600 Index — spikes de alta a cada ~600 ticks',
+    alwaysOpen: true,
+    spikeIndex: true,
+    volClass: 'high',
+    slAtrMultiplier: 0.65,
+    tpAtrMultiplier: 2.3,
+    minSlPips: 9, maxSlPips: 50, minTpPips: 18, maxTpPips: 120,
+    rsiOversold: 20, rsiOverbought: 80,
+    trendType: 'spike-dominant',
+    indicatorNotes: 'Espelho do Crash 600 com spikes de alta. Tendência de baixa moderadamente longa entre spikes.',
+    behaviorKnowledge: [
+      'Spike de ALTA a cada ~600 ticks (~60 velas M1)',
+      'Tendência de baixa mais longa que o 500 — mais espaço para SELL de continuidade',
+    ],
+    spikeFrequency: 'A cada ~600 ticks (aprox. 60 velas M1)',
+    spikeDirection: 'up',
+    optimalTimeframe: 'M1, M5',
+    useFibonacci: false,
+    aiContextHint: 'Boom 600: SELL de continuidade com trend ~60 candles. BUY apenas em spike iminente.',
+    tickSize: 0.01,
+    avgDailyRange: 350,
+    gateACandleCount: 8,   // trend ~60 candles — espelho do Crash 600
+    gateAMinMove: 0.0006,
+  },
+  'BOOM900': {
+    family: 'Boom Index',
+    description: 'Boom 900 Index — spikes de alta a cada ~900 ticks, tendência de baixa muito longa',
+    alwaysOpen: true,
+    spikeIndex: true,
+    volClass: 'ultra-high',
+    slAtrMultiplier: 0.68,
+    tpAtrMultiplier: 2.4,
+    minSlPips: 10, maxSlPips: 55, minTpPips: 20, maxTpPips: 140,
+    rsiOversold: 20, rsiOverbought: 80,
+    trendType: 'spike-dominant',
+    indicatorNotes: 'Espelho do Crash 900. Trend de baixa muito longa — runs longas de queda são normais.',
+    behaviorKnowledge: [
+      'Spike de ALTA a cada ~900 ticks (~90 velas M1)',
+      'Tendência de baixa muito longa — quase igual ao 1000',
+      'Runs de 8-9 candles consecutivos de queda são comuns e normais',
+    ],
+    spikeFrequency: 'A cada ~900 ticks (aprox. 90 velas M1)',
+    spikeDirection: 'up',
+    optimalTimeframe: 'M5, M15',
+    useFibonacci: true,
+    aiContextHint: 'Boom 900: SELL de continuidade dominante. BUY com iminência >80%. Fibonacci válido.',
+    tickSize: 0.01,
+    avgDailyRange: 450,
+    gateACandleCount: 9,   // trend ~90 candles — espelho do Crash 900
+    gateAMinMove: 0.0007,
   },
   // ── STEP INDEX ───────────────────────────────────────────────
   'STEPINDEX': {
@@ -1058,15 +1294,25 @@ function resolveDerivProfile(symbol: string): DerivSyntheticProfile | null {
   if (sym.includes('1HZ75') || sym === '1HZ75V') return DERIV_SYNTHETIC_PROFILES['1HZ75V'];
   if (sym.includes('1HZ100') || sym === '1HZ100V') return DERIV_SYNTHETIC_PROFILES['1HZ100V'];
 
-  // Crash
-  if (sym.includes('CRASH300') || sym.includes('CRASH_300')) return DERIV_SYNTHETIC_PROFILES['CRASH300'];
-  if (sym.includes('CRASH500') || sym.includes('CRASH_500')) return DERIV_SYNTHETIC_PROFILES['CRASH500'];
-  if (sym.includes('CRASH1000') || sym.includes('CRASH_1000') || (sym.includes('CRASH') && !sym.includes('300') && !sym.includes('500'))) return DERIV_SYNTHETIC_PROFILES['CRASH1000'];
+  // Crash — ordem importa: strings mais longas/específicas antes (evitar match parcial)
+  if (sym.includes('CRASH1000') || sym.includes('CRASH_1000')) return DERIV_SYNTHETIC_PROFILES['CRASH1000'];
+  if (sym.includes('CRASH900')  || sym.includes('CRASH_900'))  return DERIV_SYNTHETIC_PROFILES['CRASH900'];
+  if (sym.includes('CRASH600')  || sym.includes('CRASH_600'))  return DERIV_SYNTHETIC_PROFILES['CRASH600'];
+  if (sym.includes('CRASH500')  || sym.includes('CRASH_500'))  return DERIV_SYNTHETIC_PROFILES['CRASH500'];
+  if (sym.includes('CRASH300')  || sym.includes('CRASH_300'))  return DERIV_SYNTHETIC_PROFILES['CRASH300'];
+  if (sym.includes('CRASH150')  || sym.includes('CRASH_150'))  return DERIV_SYNTHETIC_PROFILES['CRASH150'];
+  if (sym.includes('CRASH50')   || sym.includes('CRASH_50'))   return DERIV_SYNTHETIC_PROFILES['CRASH50'];
+  if (sym.includes('CRASH')) return DERIV_SYNTHETIC_PROFILES['CRASH1000']; // catch-all → 1000
 
-  // Boom
-  if (sym.includes('BOOM300') || sym.includes('BOOM_300')) return DERIV_SYNTHETIC_PROFILES['BOOM300'];
-  if (sym.includes('BOOM500') || sym.includes('BOOM_500')) return DERIV_SYNTHETIC_PROFILES['BOOM500'];
-  if (sym.includes('BOOM1000') || sym.includes('BOOM_1000') || (sym.includes('BOOM') && !sym.includes('300') && !sym.includes('500'))) return DERIV_SYNTHETIC_PROFILES['BOOM1000'];
+  // Boom — ordem importa: strings mais longas/específicas antes
+  if (sym.includes('BOOM1000') || sym.includes('BOOM_1000')) return DERIV_SYNTHETIC_PROFILES['BOOM1000'];
+  if (sym.includes('BOOM900')  || sym.includes('BOOM_900'))  return DERIV_SYNTHETIC_PROFILES['BOOM900'];
+  if (sym.includes('BOOM600')  || sym.includes('BOOM_600'))  return DERIV_SYNTHETIC_PROFILES['BOOM600'];
+  if (sym.includes('BOOM500')  || sym.includes('BOOM_500'))  return DERIV_SYNTHETIC_PROFILES['BOOM500'];
+  if (sym.includes('BOOM300')  || sym.includes('BOOM_300'))  return DERIV_SYNTHETIC_PROFILES['BOOM300'];
+  if (sym.includes('BOOM150')  || sym.includes('BOOM_150'))  return DERIV_SYNTHETIC_PROFILES['BOOM150'];
+  if (sym.includes('BOOM50')   || sym.includes('BOOM_50'))   return DERIV_SYNTHETIC_PROFILES['BOOM50'];
+  if (sym.includes('BOOM')) return DERIV_SYNTHETIC_PROFILES['BOOM1000']; // catch-all → 1000
 
   // Step
   if (sym.includes('STEP')) return DERIV_SYNTHETIC_PROFILES['STEPINDEX'];
@@ -2568,19 +2814,21 @@ class MetaTraderBridge extends EventEmitter {
             && _girassolForGateB.levelCount >= 2;
 
           if (naturalAction === 'BUY' && marketData.length >= 8) {
-            // GATE A: Momentum descendente ativo — últimos 7 candles em queda contínua
-            // (5 candles era muito restritivo — pullbacks normais em Crash são de 4-6 candles)
-            const last7 = marketData.slice(-7).map((d: any) => d.close as number);
-            const dropPct = (last7[0] - last7[last7.length - 1]) / (last7[0] || 1);
-            const allDeclining = last7.every((c: number, i: number) => i === 0 || c <= last7[i - 1]);
-            if (allDeclining && dropPct > 0.0005) {
+            // GATE A: Momentum descendente ativo — por-variante
+            // 300 (~30 candles trend): 6 candles + 0.0004 | 500: 7 + 0.0005 | 1000 (~100 candles): 10 + 0.0008
+            const gateACount = profile?.gateACandleCount ?? 7;
+            const gateAMin   = profile?.gateAMinMove    ?? 0.0005;
+            const lastNCrash = marketData.slice(-gateACount).map((d: any) => d.close as number);
+            const dropPct = (lastNCrash[0] - lastNCrash[lastNCrash.length - 1]) / (lastNCrash[0] || 1);
+            const allDeclining = lastNCrash.every((c: number, i: number) => i === 0 || c <= lastNCrash[i - 1]);
+            if (allDeclining && dropPct > gateAMin) {
               this.logAnalysis({
                 id: `${entryId}_active_descent`,
                 timestamp: Date.now(), symbol, phase: 'decision', status: 'rejected',
                 consecutiveLosses: this.consecutiveLosses,
-                decisionReason: `🔴 GATE MACRO: Crash em queda ativa — ${(dropPct * 100).toFixed(3)}% nos últimos 7 candles — aguardando confirmação de fundo antes de BUY`
+                decisionReason: `🔴 GATE MACRO: Crash em queda ativa — ${(dropPct * 100).toFixed(3)}% nos últimos ${gateACount} candles (gate: ${(gateAMin * 100).toFixed(3)}%) — aguardando confirmação de fundo antes de BUY`
               });
-              console.log(`[MT5Bridge] 🔴 ${symbol}: GATE MACRO — queda ativa (${(dropPct * 100).toFixed(3)}% em 7 barras) — BUY bloqueado até bounce confirmado`);
+              console.log(`[MT5Bridge] 🔴 ${symbol}: GATE MACRO — queda ativa (${(dropPct * 100).toFixed(3)}% em ${gateACount} barras | gate ${(gateAMin * 100).toFixed(3)}%) — BUY bloqueado`);
               return null;
             }
 
@@ -2624,19 +2872,21 @@ class MetaTraderBridge extends EventEmitter {
 
           // ── GATE MACRO-ESTRUTURA: Boom — bloquear SELL enquanto subida ativa ──────
           if (naturalAction === 'SELL' && marketData.length >= 8) {
-            // GATE A: Momentum ascendente ativo — últimos 7 candles em alta contínua
-            // (5 candles era muito restritivo — pullbacks normais em Boom são de 4-6 candles)
-            const last7Boom = marketData.slice(-7).map((d: any) => d.close as number);
-            const risePct = (last7Boom[last7Boom.length - 1] - last7Boom[0]) / (last7Boom[0] || 1);
-            const allRising = last7Boom.every((c: number, i: number) => i === 0 || c >= last7Boom[i - 1]);
-            if (allRising && risePct > 0.0005) {
+            // GATE A: Momentum ascendente ativo — por-variante (espelho do Crash)
+            // 300 (~30 candles trend): 6 candles + 0.0004 | 500: 7 + 0.0005 | 1000 (~100 candles): 10 + 0.0008
+            const gateACountBoom = profile?.gateACandleCount ?? 7;
+            const gateAMinBoom   = profile?.gateAMinMove    ?? 0.0005;
+            const lastNBoom = marketData.slice(-gateACountBoom).map((d: any) => d.close as number);
+            const risePct = (lastNBoom[lastNBoom.length - 1] - lastNBoom[0]) / (lastNBoom[0] || 1);
+            const allRising = lastNBoom.every((c: number, i: number) => i === 0 || c >= lastNBoom[i - 1]);
+            if (allRising && risePct > gateAMinBoom) {
               this.logAnalysis({
                 id: `${entryId}_active_rise`,
                 timestamp: Date.now(), symbol, phase: 'decision', status: 'rejected',
                 consecutiveLosses: this.consecutiveLosses,
-                decisionReason: `🔴 GATE MACRO: Boom em alta ativa — ${(risePct * 100).toFixed(3)}% nos últimos 7 candles — aguardando confirmação de topo antes de SELL`
+                decisionReason: `🔴 GATE MACRO: Boom em alta ativa — ${(risePct * 100).toFixed(3)}% nos últimos ${gateACountBoom} candles (gate: ${(gateAMinBoom * 100).toFixed(3)}%) — aguardando confirmação de topo antes de SELL`
               });
-              console.log(`[MT5Bridge] 🔴 ${symbol}: GATE MACRO — alta ativa (${(risePct * 100).toFixed(3)}% em 7 barras) — SELL bloqueado até topo confirmado`);
+              console.log(`[MT5Bridge] 🔴 ${symbol}: GATE MACRO — alta ativa (${(risePct * 100).toFixed(3)}% em ${gateACountBoom} barras | gate ${(gateAMinBoom * 100).toFixed(3)}%) — SELL bloqueado`);
               return null;
             }
 
