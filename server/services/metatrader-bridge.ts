@@ -2672,31 +2672,65 @@ class MetaTraderBridge extends EventEmitter {
         // ── ANÁLISE IA EM BACKGROUND: Crash/Boom sempre recebe consenso ──────────
         // Garante que o painel sempre exiba o símbolo e o consenso corretos,
         // mesmo quando gates macro ou zona de perigo bloqueiam o trade.
-        const tickDataForConsensus: DerivTickData[] = marketData.slice(-30).map((candle: any, i: number) => ({
-          symbol,
-          quote: candle.close,
-          epoch: candle.time ? Math.floor(candle.time) : Math.floor(Date.now() / 1000) - (30 - i) * 60,
-        }));
-        const consensusEntryId = `${entryId}_spike_bg_consensus`;
-        Promise.resolve().then(async () => {
-          try {
-            const consensus = await huggingFaceAI.analyzeMarketData(tickDataForConsensus, symbol);
-            const bgRequired = consensus.requiredConsensus ?? (sym.includes('CRASH') || sym.includes('BOOM') ? 50 : 70);
-            this.logAnalysis({
-              id: consensusEntryId,
-              timestamp: Date.now(),
-              symbol,
-              phase: 'huggingface',
-              status: consensus.consensusStrength >= bgRequired && consensus.finalDecision !== 'neutral' ? 'processing' : 'rejected',
-              aiConsensus: consensus.consensusStrength,
-              requiredConsensus: bgRequired,
-              aiDirection: consensus.finalDecision as 'up' | 'down' | 'neutral',
-              aiReasoning: consensus.reasoning,
-              participatingModels: consensus.participatingModels || 0,
-              decisionReason: `[Background] Consenso IA ${symbol}: ${consensus.consensusStrength.toFixed(1)}% → ${String(consensus.finalDecision).toUpperCase()}`
-            });
-          } catch { /* silencioso — falha não impede o sinal */ }
-        });
+        //
+        // ⚠️ ANTI-CONTAMINAÇÃO POR SPIKE:
+        // Os modelos de IA (FinBERT, RoBERTa, etc.) foram treinados em dados convencionais.
+        // Ao ver um spike de queda (Crash) nos últimos candles, eles votam SELL/DOWN —
+        // mas em Crash isso é ERRADO: o spike É o evento, e o pós-spike é sempre de ALTA.
+        // Solução: detectar spike nos últimos candles e usar dados PRÉ-SPIKE para consenso,
+        // preservando a tendência natural (up para Crash, down para Boom).
+        {
+          const closes = marketData.slice(-40).map((c: any) => c.close as number);
+          const atr = closes.length >= 5
+            ? closes.slice(-20).reduce((sum, v, i, arr) => i === 0 ? 0 : sum + Math.abs(v - arr[i-1]), 0) / 19
+            : 0;
+
+          // Encontrar onde começa o spike: candle com movimento > 4× ATR
+          let spikeStartIdx = -1;
+          const raw30 = marketData.slice(-40);
+          for (let i = raw30.length - 1; i >= 1; i--) {
+            const move = Math.abs((raw30[i].close as number) - (raw30[i-1].close as number));
+            if (atr > 0 && move > atr * 4) { spikeStartIdx = i; break; }
+          }
+
+          // Se spike recente (nos últimos 8 candles): usar apenas candles PRÉ-spike
+          // Isso evita que a IA veja o spike e vote na direção errada
+          let candlesForConsensus: typeof raw30;
+          let antiContaminationNote = '';
+          if (spikeStartIdx >= 0 && spikeStartIdx >= raw30.length - 8) {
+            candlesForConsensus = raw30.slice(0, spikeStartIdx); // pré-spike
+            if (candlesForConsensus.length < 10) candlesForConsensus = raw30.slice(0, Math.max(10, spikeStartIdx));
+            antiContaminationNote = ` [ANTI-CONTAMINAÇÃO: spike detectado em candle ${raw30.length - spikeStartIdx} atrás — usando dados pré-spike para evitar viés]`;
+          } else {
+            candlesForConsensus = raw30.slice(-30);
+          }
+
+          const tickDataForConsensus: DerivTickData[] = candlesForConsensus.map((candle: any, i: number) => ({
+            symbol,
+            quote: candle.close,
+            epoch: candle.time ? Math.floor(candle.time) : Math.floor(Date.now() / 1000) - (candlesForConsensus.length - i) * 60,
+          }));
+          const consensusEntryId = `${entryId}_spike_bg_consensus`;
+          Promise.resolve().then(async () => {
+            try {
+              const consensus = await huggingFaceAI.analyzeMarketData(tickDataForConsensus, symbol);
+              const bgRequired = consensus.requiredConsensus ?? (sym.includes('CRASH') || sym.includes('BOOM') ? 50 : 70);
+              this.logAnalysis({
+                id: consensusEntryId,
+                timestamp: Date.now(),
+                symbol,
+                phase: 'huggingface',
+                status: consensus.consensusStrength >= bgRequired && consensus.finalDecision !== 'neutral' ? 'processing' : 'rejected',
+                aiConsensus: consensus.consensusStrength,
+                requiredConsensus: bgRequired,
+                aiDirection: consensus.finalDecision as 'up' | 'down' | 'neutral',
+                aiReasoning: consensus.reasoning,
+                participatingModels: consensus.participatingModels || 0,
+                decisionReason: `[Background] Consenso IA ${symbol}: ${consensus.consensusStrength.toFixed(1)}% → ${String(consensus.finalDecision).toUpperCase()}${antiContaminationNote}`
+              });
+            } catch { /* silencioso — falha não impede o sinal */ }
+          });
+        }
 
         // ── CAMINHO 1: SPIKE COM CERTEZA ABSOLUTA (confiança ≥85%) ──
         // Threshold elevado: só opera spike quando IA tem CERTEZA ABSOLUTA.
