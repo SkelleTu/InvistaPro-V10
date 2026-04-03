@@ -2516,16 +2516,16 @@ class MetaTraderBridge extends EventEmitter {
         }
 
         // ── CAMINHO 2: ZONA DE PERIGO — spike iminente mas sem certeza absoluta ──
-        // Imminência entre 65-84%: NÃO operar — risco de spike contra a continuidade
-        // e sem confiança suficiente para spike. Melhor esperar.
-        if (earlySpike.expected && earlySpike.imminencePercent >= 65) {
+        // Imminência entre 72-84%: NÃO operar — risco de spike muito elevado sem certeza.
+        // 65-71%: ainda permite continuidade com cautela (spike não confirmado).
+        if (earlySpike.expected && earlySpike.imminencePercent >= 72) {
           this.logAnalysis({
             id: `${entryId}_spike_danger`,
             timestamp: Date.now(),
             symbol,
             phase: 'spike',
             status: 'rejected',
-            decisionReason: `⚠️ ZONA DE PERIGO: iminência ${earlySpike.imminencePercent}% (65-84%) — sem certeza para spike, sem segurança para continuidade. Aguardando.`
+            decisionReason: `⚠️ ZONA DE PERIGO: iminência ${earlySpike.imminencePercent}% (72-84%) — sem certeza para spike, sem segurança para continuidade. Aguardando.`
           });
           console.log(`[MT5Bridge] ⚠️ ${symbol}: zona de perigo (iminência ${earlySpike.imminencePercent}%) — sem operação`);
           return null;
@@ -2568,18 +2568,19 @@ class MetaTraderBridge extends EventEmitter {
             && _girassolForGateB.levelCount >= 2;
 
           if (naturalAction === 'BUY' && marketData.length >= 8) {
-            // GATE A: Momentum descendente ativo — últimos 5 candles em queda contínua
-            const last5 = marketData.slice(-5).map((d: any) => d.close as number);
-            const dropPct = (last5[0] - last5[last5.length - 1]) / (last5[0] || 1);
-            const allDeclining = last5.every((c: number, i: number) => i === 0 || c <= last5[i - 1]);
-            if (allDeclining && dropPct > 0.0003) {
+            // GATE A: Momentum descendente ativo — últimos 7 candles em queda contínua
+            // (5 candles era muito restritivo — pullbacks normais em Crash são de 4-6 candles)
+            const last7 = marketData.slice(-7).map((d: any) => d.close as number);
+            const dropPct = (last7[0] - last7[last7.length - 1]) / (last7[0] || 1);
+            const allDeclining = last7.every((c: number, i: number) => i === 0 || c <= last7[i - 1]);
+            if (allDeclining && dropPct > 0.0005) {
               this.logAnalysis({
                 id: `${entryId}_active_descent`,
                 timestamp: Date.now(), symbol, phase: 'decision', status: 'rejected',
                 consecutiveLosses: this.consecutiveLosses,
-                decisionReason: `🔴 GATE MACRO: Crash em queda ativa — ${(dropPct * 100).toFixed(3)}% nos últimos 5 candles — aguardando confirmação de fundo antes de BUY`
+                decisionReason: `🔴 GATE MACRO: Crash em queda ativa — ${(dropPct * 100).toFixed(3)}% nos últimos 7 candles — aguardando confirmação de fundo antes de BUY`
               });
-              console.log(`[MT5Bridge] 🔴 ${symbol}: GATE MACRO — queda ativa (${(dropPct * 100).toFixed(3)}% em 5 barras) — BUY bloqueado até bounce confirmado`);
+              console.log(`[MT5Bridge] 🔴 ${symbol}: GATE MACRO — queda ativa (${(dropPct * 100).toFixed(3)}% em 7 barras) — BUY bloqueado até bounce confirmado`);
               return null;
             }
 
@@ -2689,10 +2690,10 @@ class MetaTraderBridge extends EventEmitter {
             if (ema20 <= ema50) { continuityScore += 1; reasonParts.push('EMA20≤EMA50 confirma baixa'); }
           }
 
-          // Penalizar se iminência de spike cresceu moderadamente (cautela)
-          if (earlySpike.imminencePercent >= 50) {
-            continuityScore -= 2;
-            reasonParts.push(`Iminência de spike ${earlySpike.imminencePercent}% — entrada reduzida`);
+          // Penalizar levemente se iminência de spike for elevada (cautela)
+          if (earlySpike.imminencePercent >= 62) {
+            continuityScore -= 1;
+            reasonParts.push(`Iminência de spike ${earlySpike.imminencePercent}% — cautela leve`);
           }
 
           const continuityConf = Math.min(0.82, Math.max(0.55, 0.60 + continuityScore * 0.06));
