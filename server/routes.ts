@@ -4313,6 +4313,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ error: 'Erro ao processar mensagem', details: err.message });
     }
   });
+
+  // Groq Whisper transcription endpoint
+  const audioUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
+  app.post('/api/ai-assistant/transcribe', isAuthenticated, audioUpload.single('audio'), async (req: any, res: any) => {
+    try {
+      const GROQ_API_KEY = process.env.GROQ_API_KEY;
+      if (!GROQ_API_KEY) return res.status(500).json({ error: 'GROQ_API_KEY not configured' });
+      if (!req.file) return res.status(400).json({ error: 'No audio file provided' });
+
+      const { default: fetch } = await import('node-fetch');
+      const { FormData, Blob } = await import('node-fetch') as any;
+
+      // Use native FormData for Node.js 18+
+      const formData = new (globalThis as any).FormData();
+      const audioBlob = new (globalThis as any).Blob([req.file.buffer], { type: req.file.mimetype || 'audio/webm' });
+      formData.append('file', audioBlob, 'audio.webm');
+      formData.append('model', 'whisper-large-v3');
+      formData.append('language', 'pt');
+      formData.append('response_format', 'json');
+
+      const response = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${GROQ_API_KEY}` },
+        body: formData,
+        signal: AbortSignal.timeout(30000),
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        console.error('[Whisper] Groq error:', errText);
+        return res.status(500).json({ error: 'Transcription failed', details: errText });
+      }
+
+      const result = await response.json() as any;
+      res.json({ text: result.text || '' });
+    } catch (err: any) {
+      console.error('[Whisper] Error:', err);
+      res.status(500).json({ error: 'Transcription error', details: err.message });
+    }
+  });
   // ========== END AI ASSISTANT ROUTES ==========
 
   const httpServer = createServer(app);
