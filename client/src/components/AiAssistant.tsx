@@ -1,7 +1,7 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import { Bot, X, Send, Minimize2, Maximize2, Sparkles, ChevronDown } from "lucide-react";
+import { Bot, X, Send, Minimize2, Maximize2, Sparkles, ChevronDown, Mic, MicOff, Volume2, VolumeX } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -17,6 +17,13 @@ interface Message {
 interface ChatHistory {
   role: "user" | "assistant";
   content: string;
+}
+
+declare global {
+  interface Window {
+    SpeechRecognition: any;
+    webkitSpeechRecognition: any;
+  }
 }
 
 function TypingIndicator() {
@@ -76,20 +83,99 @@ export default function AiAssistant() {
     {
       id: "welcome",
       role: "assistant",
-      content: "👋 Olá! Sou a IA da **InvistaPRO**.\n\nTenho acesso completo à sua conta — trades, saldo, configurações e tudo mais. Pode me perguntar qualquer coisa ou pedir ações como:\n\n• \"Qual meu resultado hoje?\"\n• \"Iniciar o robô\"\n• \"Como estão meus trades?\"",
+      content: "👋 Olá! Sou a IA da **InvistaPRO** — agora com LLaMA 3.3 70B.\n\nTenho acesso completo à sua conta. Pode me perguntar qualquer coisa ou usar o microfone 🎤 para falar comigo!\n\n• \"Qual meu resultado hoje?\"\n• \"Iniciar o robô\"\n• \"Como estão meus trades?\"",
       timestamp: new Date(),
     },
   ]);
   const [input, setInput] = useState("");
+  const [isListening, setIsListening] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [voiceEnabled, setVoiceEnabled] = useState(true);
+  const [hasVoiceSupport, setHasVoiceSupport] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const recognitionRef = useRef<any>(null);
   const hasNewMessage = useRef(false);
+
+  useEffect(() => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SpeechRecognition && window.speechSynthesis) {
+      setHasVoiceSupport(true);
+    }
+  }, []);
+
+  const speak = useCallback((text: string) => {
+    if (!voiceEnabled || !window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    const clean = text
+      .replace(/\*\*(.*?)\*\*/g, '$1')
+      .replace(/\*(.*?)\*/g, '$1')
+      .replace(/[#\-•]/g, '')
+      .replace(/\n+/g, '. ')
+      .replace(/:{1}\s*/g, ': ')
+      .trim()
+      .slice(0, 500);
+    const utterance = new SpeechSynthesisUtterance(clean);
+    utterance.lang = 'pt-BR';
+    utterance.rate = 1.05;
+    utterance.pitch = 1;
+    utterance.volume = 1;
+    const voices = window.speechSynthesis.getVoices();
+    const ptVoice = voices.find(v => v.lang.startsWith('pt') && v.name.toLowerCase().includes('google'))
+      || voices.find(v => v.lang.startsWith('pt'));
+    if (ptVoice) utterance.voice = ptVoice;
+    utterance.onstart = () => setIsSpeaking(true);
+    utterance.onend = () => setIsSpeaking(false);
+    utterance.onerror = () => setIsSpeaking(false);
+    window.speechSynthesis.speak(utterance);
+  }, [voiceEnabled]);
+
+  const stopSpeaking = useCallback(() => {
+    window.speechSynthesis?.cancel();
+    setIsSpeaking(false);
+  }, []);
+
+  const startListening = useCallback(() => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) return;
+    stopSpeaking();
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'pt-BR';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+    recognition.continuous = false;
+    recognition.onstart = () => setIsListening(true);
+    recognition.onend = () => {
+      setIsListening(false);
+      recognitionRef.current = null;
+    };
+    recognition.onerror = () => {
+      setIsListening(false);
+      recognitionRef.current = null;
+    };
+    recognition.onresult = (event: any) => {
+      const transcript = event.results[0]?.[0]?.transcript?.trim();
+      if (transcript) {
+        setInput(transcript);
+        setTimeout(() => {
+          sendMessage(transcript);
+        }, 100);
+      }
+    };
+    recognitionRef.current = recognition;
+    recognition.start();
+  }, [stopSpeaking]);
+
+  const stopListening = useCallback(() => {
+    recognitionRef.current?.stop();
+    setIsListening(false);
+  }, []);
 
   const chatMutation = useMutation({
     mutationFn: async (userMessage: string) => {
       const history: ChatHistory[] = messages
         .filter(m => m.id !== "welcome")
-        .slice(-8)
+        .slice(-10)
         .map(m => ({ role: m.role, content: m.content }));
 
       const res = await apiRequest("/api/ai-assistant/chat", {
@@ -107,6 +193,9 @@ export default function AiAssistant() {
       };
       setMessages(prev => [...prev, assistantMsg]);
       hasNewMessage.current = true;
+      if (voiceEnabled) {
+        speak(data.message || "");
+      }
     },
     onError: () => {
       const errorMsg: Message = {
@@ -118,6 +207,21 @@ export default function AiAssistant() {
       setMessages(prev => [...prev, errorMsg]);
     },
   });
+
+  const sendMessage = useCallback((text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed || chatMutation.isPending) return;
+    const userMsg: Message = {
+      id: Date.now().toString(),
+      role: "user",
+      content: trimmed,
+      timestamp: new Date(),
+    };
+    setMessages(prev => [...prev, userMsg]);
+    setInput("");
+    hasNewMessage.current = true;
+    chatMutation.mutate(trimmed);
+  }, [chatMutation]);
 
   useEffect(() => {
     if (scrollRef.current && (chatMutation.isPending || hasNewMessage.current)) {
@@ -132,20 +236,15 @@ export default function AiAssistant() {
     }
   }, [isOpen]);
 
-  const handleSend = () => {
-    const text = input.trim();
-    if (!text || chatMutation.isPending) return;
-
-    const userMsg: Message = {
-      id: Date.now().toString(),
-      role: "user",
-      content: text,
-      timestamp: new Date(),
+  useEffect(() => {
+    return () => {
+      recognitionRef.current?.stop();
+      window.speechSynthesis?.cancel();
     };
-    setMessages(prev => [...prev, userMsg]);
-    setInput("");
-    hasNewMessage.current = true;
-    chatMutation.mutate(text);
+  }, []);
+
+  const handleSend = () => {
+    sendMessage(input);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -153,6 +252,11 @@ export default function AiAssistant() {
       e.preventDefault();
       handleSend();
     }
+  };
+
+  const toggleVoice = () => {
+    if (isSpeaking) stopSpeaking();
+    setVoiceEnabled(p => !p);
   };
 
   const panelWidth = isExpanded ? "w-[480px]" : "w-[360px]";
@@ -177,10 +281,22 @@ export default function AiAssistant() {
               </div>
               <div>
                 <p className="text-white font-semibold text-sm leading-none">IA InvistaPRO</p>
-                <p className="text-white/70 text-xs mt-0.5">Assistente inteligente</p>
+                <p className="text-white/70 text-xs mt-0.5">LLaMA 3.3 · Groq</p>
               </div>
             </div>
             <div className="flex items-center gap-1">
+              {hasVoiceSupport && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={cn("h-7 w-7 hover:bg-white/20", isSpeaking ? "text-yellow-300" : "text-white/80 hover:text-white")}
+                  onClick={toggleVoice}
+                  title={voiceEnabled ? "Desativar voz" : "Ativar voz"}
+                  data-testid="ai-voice-toggle-btn"
+                >
+                  {voiceEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 size="icon"
@@ -214,15 +330,34 @@ export default function AiAssistant() {
 
           <div className="px-3 py-3 border-t border-border/50 shrink-0">
             <div className="flex items-end gap-2">
+              {hasVoiceSupport && (
+                <Button
+                  size="icon"
+                  variant="outline"
+                  onClick={isListening ? stopListening : startListening}
+                  disabled={chatMutation.isPending}
+                  title={isListening ? "Parar gravação" : "Falar com a IA"}
+                  data-testid="ai-mic-btn"
+                  className={cn(
+                    "h-10 w-10 shrink-0 rounded-xl border-border/60 transition-all",
+                    isListening
+                      ? "bg-red-500 border-red-500 text-white hover:bg-red-600 animate-pulse"
+                      : "hover:border-violet-400 hover:text-violet-600"
+                  )}
+                >
+                  {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                </Button>
+              )}
               <Textarea
                 ref={inputRef}
                 value={input}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Pergunte sobre trades, saldo, robô..."
+                placeholder={isListening ? "🎤 Ouvindo..." : "Pergunte sobre trades, saldo, robô..."}
                 className="resize-none min-h-[40px] max-h-[100px] text-sm rounded-xl border-border/60 focus-visible:ring-violet-500/50 bg-white text-black dark:bg-muted/40 dark:text-foreground placeholder:text-gray-400"
                 rows={1}
                 data-testid="ai-input"
+                readOnly={isListening}
               />
               <Button
                 size="icon"
@@ -235,7 +370,7 @@ export default function AiAssistant() {
               </Button>
             </div>
             <p className="text-xs text-muted-foreground/60 mt-1.5 text-center">
-              Enter para enviar · Shift+Enter nova linha
+              {hasVoiceSupport ? "🎤 Fale ou digite · Enter para enviar" : "Enter para enviar · Shift+Enter nova linha"}
             </p>
           </div>
         </div>

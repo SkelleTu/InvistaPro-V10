@@ -2,7 +2,7 @@ import fetch from 'node-fetch';
 import { dualStorage as storage } from '../storage-dual.js';
 import { autoTradingScheduler } from './auto-trading-scheduler';
 
-const HF_API_KEY = process.env.HUGGINGFACE_API_KEY;
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
@@ -15,69 +15,51 @@ export interface AssistantResponse {
   data?: any;
 }
 
-async function callHuggingFace(messages: ChatMessage[]): Promise<string> {
-  const models = [
-    'mistralai/Mistral-7B-Instruct-v0.3',
-    'HuggingFaceH4/zephyr-7b-beta',
-    'tiiuae/falcon-7b-instruct',
-  ];
-
-  const systemMsg = messages.find(m => m.role === 'system')?.content || '';
-  const conversation = messages.filter(m => m.role !== 'system');
-
-  let prompt = `<s>[INST] <<SYS>>\n${systemMsg}\n<</SYS>>\n\n`;
-  for (let i = 0; i < conversation.length; i++) {
-    const m = conversation[i];
-    if (m.role === 'user') {
-      prompt += `${m.content} [/INST] `;
-    } else {
-      prompt += `${m.content} </s><s>[INST] `;
-    }
+async function callGroq(messages: ChatMessage[]): Promise<string> {
+  if (!GROQ_API_KEY) {
+    throw new Error('GROQ_API_KEY not configured');
   }
+
+  const models = [
+    'llama-3.3-70b-versatile',
+    'llama3-70b-8192',
+    'llama3-8b-8192',
+  ];
 
   for (const model of models) {
     try {
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-      if (HF_API_KEY) {
-        headers['Authorization'] = `Bearer ${HF_API_KEY}`;
-      }
-
-      const response = await fetch(`https://api-inference.huggingface.co/models/${model}`, {
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
-        headers,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${GROQ_API_KEY}`,
+        },
         body: JSON.stringify({
-          inputs: prompt,
-          parameters: {
-            max_new_tokens: 400,
-            temperature: 0.7,
-            top_p: 0.9,
-            do_sample: true,
-            return_full_text: false,
-          },
+          model,
+          messages,
+          max_tokens: 600,
+          temperature: 0.7,
+          top_p: 0.9,
         }),
-        signal: AbortSignal.timeout(15000),
+        signal: AbortSignal.timeout(20000),
       });
 
-      if (!response.ok) continue;
-
-      const result = await response.json() as any;
-      let text = '';
-      if (Array.isArray(result) && result[0]?.generated_text) {
-        text = result[0].generated_text.trim();
-      } else if (result?.generated_text) {
-        text = result.generated_text.trim();
+      if (!response.ok) {
+        const err = await response.text();
+        console.warn(`[AI Assistant] Groq model ${model} error ${response.status}:`, err);
+        continue;
       }
 
-      if (text && text.length > 5) return text;
+      const result = await response.json() as any;
+      const text = result?.choices?.[0]?.message?.content?.trim();
+      if (text && text.length > 3) return text;
     } catch (err) {
-      console.warn(`[AI Assistant] Model ${model} error:`, err);
+      console.warn(`[AI Assistant] Groq model ${model} failed:`, err);
       continue;
     }
   }
 
-  throw new Error('All AI models unavailable');
+  throw new Error('Groq API unavailable');
 }
 
 async function buildPlatformContext(userId: string): Promise<string> {
@@ -240,22 +222,25 @@ SUAS CAPACIDADES:
 
 REGRAS:
 - Use SEMPRE os dados reais fornecidos acima
-- Fale em português do Brasil de forma clara e objetiva
-- Seja conciso mas completo
+- Fale em português do Brasil de forma clara, natural e amigável
+- Seja conciso mas completo — responda diretamente o que foi perguntado
 - Use emojis com moderação para facilitar a leitura
+- Converse de forma natural como um assistente prestativo
 - Se não souber algo, seja honesto`;
 
   const messages: ChatMessage[] = [
     { role: 'system', content: systemPrompt },
-    ...history.slice(-6),
+    ...history.slice(-8),
     { role: 'user', content: userMessage },
   ];
 
   let aiMessage: string;
   try {
-    aiMessage = await callHuggingFace(messages);
-    if (!aiMessage || aiMessage.length < 5) throw new Error('Empty response');
+    aiMessage = await callGroq(messages);
+    if (!aiMessage || aiMessage.length < 3) throw new Error('Empty response');
+    console.log('[AI Assistant] Groq response OK, length:', aiMessage.length);
   } catch (err) {
+    console.warn('[AI Assistant] Groq failed, using fallback:', err);
     aiMessage = generateFallbackResponse(userMessage, platformContext, actionTaken);
   }
 
@@ -292,8 +277,7 @@ function generateFallbackResponse(userMessage: string, context: string, actionTa
     const losses = getVal('Losses (período)');
     const winRate = getVal('Win rate');
     const lucro = getVal('Lucro/Prejuízo total');
-    const hoje = getVal('P&L hoje: R$');
-    return `📊 **Resumo das suas operações:**\n- ✅ Wins: ${wins}\n- ❌ Losses: ${losses}\n- 🎯 Win rate: ${winRate}\n- 💵 Resultado total: ${lucro}\n${hoje !== 'N/A' ? `- 📅 Resultado hoje: R$ ${hoje}` : ''}\n\nPara ver todos os detalhes, acesse a seção de Trading.`;
+    return `📊 **Resumo das suas operações:**\n- ✅ Wins: ${wins}\n- ❌ Losses: ${losses}\n- 🎯 Win rate: ${winRate}\n- 💵 Resultado total: ${lucro}\n\nPara ver todos os detalhes, acesse a seção de Trading.`;
   }
 
   if (lower.includes('robô') || lower.includes('bot') || lower.includes('status') || lower.includes('ativo') || lower.includes('parado')) {
@@ -304,19 +288,13 @@ function generateFallbackResponse(userMessage: string, context: string, actionTa
 
   if (lower.includes('config') || lower.includes('modo') || lower.includes('stake') || lower.includes('stop')) {
     const modo = getVal('Modo operação');
-    const stake = getVal('Stake por trade');
-    const sl = getVal('Stop loss');
-    const sg = getVal('Stop gain');
+    const stake = getVal('Stake');
     const martingale = getVal('Martingale ativo');
-    return `⚙️ **Suas configurações atuais:**\n- Modo: ${modo}\n- Stake: ${stake}\n- Stop Loss: ${sl}\n- Stop Gain: ${sg}\n- Martingale: ${martingale}\n\nPara alterar, acesse as configurações no painel de Trading.`;
-  }
-
-  if (lower.includes('ajuda') || lower.includes('help') || lower.includes('o que') || lower.includes('como')) {
-    return `👋 Olá! Sou a IA assistente da **InvistaPRO**.\n\nPosso te ajudar com:\n\n📊 **Trades e resultados** — "Qual meu resultado hoje?"\n💰 **Saldo** — "Qual meu saldo atual?"\n🤖 **Controle do robô** — "Inicia o robô" / "Para o robô"\n⚙️ **Configurações** — "Quais minhas configs?"\n📈 **Análise** — "Como está meu desempenho?"\n\nO que deseja saber?`;
+    return `⚙️ **Suas configurações atuais:**\n- Modo: ${modo}\n- Stake: ${stake}\n- Martingale: ${martingale}\n\nPara alterar, acesse as configurações no painel de Trading.`;
   }
 
   const statusRobo = getVal('Status do robô');
   const saldo = getVal('Saldo na plataforma');
   const winRate = getVal('Win rate');
-  return `Entendi! Aqui está um resumo rápido da sua plataforma:\n\n🤖 Robô: **${statusRobo}**\n💰 Saldo: **${saldo}**\n🎯 Win rate: **${winRate}**\n\nTenho acesso completo a todos os seus dados. Pode me perguntar qualquer coisa sobre suas operações, resultados, configurações ou pedir para eu controlar o robô!`;
+  return `Olá! Aqui está um resumo rápido da sua plataforma:\n\n🤖 Robô: **${statusRobo}**\n💰 Saldo: **${saldo}**\n🎯 Win rate: **${winRate}**\n\nTenho acesso completo a todos os seus dados. Pode me perguntar qualquer coisa!`;
 }
