@@ -1561,8 +1561,14 @@ class MetaTraderBridge extends EventEmitter {
   }
 
   /**
-   * Retorna o estado completo do Girassol armazenado para um símbolo, se fresco (< 90 segundos).
-   * Retorna null se não há dados ou estão expirados.
+   * Retorna o estado completo do Girassol armazenado para um símbolo.
+   *
+   * Política de cache com degradação gradual:
+   *  • 0–90s   → FRESCO: usa estado completo (levelCount real)
+   *  • 90s–5min → DEGRADADO: usa último estado com levelCount –1 (sinal ainda válido mas menos confiante)
+   *  • > 5min  → EXPIRADO: retorna null (EA offline por muito tempo, dados não confiáveis)
+   *
+   * Isso evita que o sistema fique "cego" por uma reconexão rápida do EA ou refresh de gráfico.
    */
   public getGirassolBias(symbol: string): {
     bias: 'BUY' | 'SELL' | 'NEUTRAL';
@@ -1572,18 +1578,36 @@ class MetaTraderBridge extends EventEmitter {
     fibKeyZone?: boolean;
     pullbackDepth?: number;
     extremoAtFib?: boolean;
+    isStale?: boolean;  // true = dados dentro de 90s–5min (degradados)
   } | null {
     const state = this.girassolStateCache.get(symbol);
     if (!state) return null;
-    if (Date.now() - state.timestamp > 90_000) return null; // expirado
+
+    const age = Date.now() - state.timestamp;
+    const FRESH_TTL   =  90_000; // 90 segundos — dados frescos do EA
+    const STALE_TTL   = 300_000; // 5 minutos  — dados degradados mas úteis
+
+    if (age > STALE_TTL) return null; // completamente expirado
+
+    const isStale = age > FRESH_TTL;
+    // Quando degradado: reduz levelCount em 1 para refletir menor confiança no sinal
+    const effectiveLevel = isStale
+      ? Math.max(1, state.levelCount - 1)
+      : state.levelCount;
+
+    if (isStale && state.bias !== 'NEUTRAL') {
+      console.log(`[MT5Bridge] 🌻⚠️ ${symbol}: Girassol DEGRADADO (${Math.round(age/1000)}s) — usando último estado ${state.bias} ${effectiveLevel}/3 (era ${state.levelCount}/3)`);
+    }
+
     return {
       bias: state.bias,
-      levelCount: state.levelCount,
+      levelCount: effectiveLevel,
       macroTrend: state.macroTrend,
       tradeMode: state.tradeMode,
       fibKeyZone: state.fibKeyZone,
       pullbackDepth: state.pullbackDepth,
       extremoAtFib: state.extremoAtFib,
+      isStale,
     };
   }
 
@@ -3139,11 +3163,12 @@ class MetaTraderBridge extends EventEmitter {
       // Se não há dados do Girassol MT5 (EA antigo ou sem indicador), calculamos
       // um equivalente via ZigZag + ADX + Supertrend usando os candles em cache.
       // Agora também calcula: macroTrend, tradeMode, fibKeyZone, pullbackDepth, extremoAtFib.
+      // ADX mínimo: 12 (era 20) — captura mercados em range leve sem ignorar sinais válidos.
       if (!this.getGirassolBias(symbol) && marketData.length >= 20) {
         try {
           const { computeSyntheticGirassol } = await import('./synthetic-girassol');
           const synth = computeSyntheticGirassol(marketData);
-          if (synth.bias !== 'NEUTRAL' || synth.adx >= 20) {
+          if (synth.bias !== 'NEUTRAL' || synth.adx >= 12) {
             this.setGirassolBias(symbol, synth.bias, synth.levelCount, {
               macroTrend: synth.macroTrend,
               tradeMode: synth.tradeMode,
