@@ -3520,24 +3520,47 @@ class MetaTraderBridge extends EventEmitter {
       // GATE 2: Duplo Topo / Duplo Fundo na bolinha_media
       // Aplica quando o EA enviou buffers reais da bolinha_media via signal-with-indicators.
       // Se há histórico mas o 2º pivô ainda não formou, aguardar.
+      //
+      // ⚡ EXCEÇÃO JUMP INDICES:
+      // Nos Jump indices, os jumps SEMPRE ocorrem a favor da força atual do mercado.
+      // O próprio jump É a confirmação direcional — não é ruído aleatório como em outros ativos.
+      // Portanto: para Jump, 1 pivô + Girassol 3/3 = confirmação suficiente (sem precisar de 2º pivô).
+      // Para todos os outros (Crash/Boom/Volatility), o duplo padrão permanece obrigatório.
       const pendingDir = aiDirection === 'up' ? 'BUY' as const : 'SELL' as const;
       const bolinhaHist = this.bolinhaMediaHistory.get(symbol) || [];
+      const isJumpSymbol = symbol.toUpperCase().includes('JUMP');
       if (bolinhaHist.length > 0) {
         const dp = this.checkBolinhaMediaDoublePattern(symbol, pendingDir);
         if (!dp.detected) {
-          this.logAnalysis({
-            id: `${entryId}_double_pattern`,
-            timestamp: Date.now(),
-            symbol,
-            phase: 'decision',
-            status: 'rejected',
-            decisionReason: `⏳ Duplo padrão incompleto: bolinha_media ${pendingDir} registrou 1º pivô — aguardando 2º pivô em nível similar para confirmar ${pendingDir === 'BUY' ? 'Duplo Fundo' : 'Duplo Topo'}`
-          });
-          console.log(`[MT5Bridge] ⏳ ${symbol}: GATE duplo padrão (bridge) — bolinha_media ${pendingDir} aguarda 2º pivô (${bolinhaHist.length} registros no histórico)`);
-          return null;
+          // Jump + Girassol 3/3: o jump já é a confirmação direcional — bypass do 2º pivô
+          const girassolFull = girassolLive && girassolLive.bias === pendingDir && girassolLive.levelCount >= 3;
+          if (isJumpSymbol && girassolFull) {
+            console.log(`[MT5Bridge] ⚡ ${symbol}: Jump Index — 1º pivô + Girassol 3/3 = confirmação suficiente (jump confirma direção de força atual). GATE duplo dispensado.`);
+            this.logAnalysis({
+              id: `${entryId}_double_pattern`,
+              timestamp: Date.now(),
+              symbol,
+              phase: 'decision',
+              status: 'processing',
+              decisionReason: `⚡ Jump Index: 1 pivô + Girassol 3/3 ${pendingDir} — jump confirma força ${pendingDir === 'BUY' ? 'COMPRADORA' : 'VENDEDORA'} atual. Duplo pivô dispensado.`
+            });
+            // Continua sem retornar null — sinal liberado
+          } else {
+            this.logAnalysis({
+              id: `${entryId}_double_pattern`,
+              timestamp: Date.now(),
+              symbol,
+              phase: 'decision',
+              status: 'rejected',
+              decisionReason: `⏳ Duplo padrão incompleto: bolinha_media ${pendingDir} registrou 1º pivô — aguardando 2º pivô em nível similar para confirmar ${pendingDir === 'BUY' ? 'Duplo Fundo' : 'Duplo Topo'}`
+            });
+            console.log(`[MT5Bridge] ⏳ ${symbol}: GATE duplo padrão (bridge) — bolinha_media ${pendingDir} aguarda 2º pivô (${bolinhaHist.length} registros no histórico)`);
+            return null;
+          }
+        } else {
+          const label = dp.patternType === 'double_top' ? 'DUPLO TOPO' : 'DUPLO FUNDO';
+          console.log(`[MT5Bridge] 🌻 ${symbol}: ${label} confirmado @ ${dp.pivotPrice.toFixed(5)} — sinal ${pendingDir} liberado no bridge`);
         }
-        const label = dp.patternType === 'double_top' ? 'DUPLO TOPO' : 'DUPLO FUNDO';
-        console.log(`[MT5Bridge] 🌻 ${symbol}: ${label} confirmado @ ${dp.pivotPrice.toFixed(5)} — sinal ${pendingDir} liberado no bridge`);
       }
 
       // GATE 3: Fibonacci regional — se preço está em zona oposta ao sinal, bloquear
