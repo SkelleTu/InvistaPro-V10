@@ -3049,11 +3049,31 @@ class MetaTraderBridge extends EventEmitter {
             reasonParts.push(`📐 Fibonacci zona-chave ${fibScore > 0 ? 'favorável' : 'de resistência'}`);
           }
 
+          // ── CAMADA 3.5: Macro Trend — direção geral do mercado ────────────
+          // Se o mercado macro está CONTRA a direção nativa (ex: Crash em mercado bearish),
+          // o risco de spike CONSECUTIVO durante a operação é mais elevado.
+          // O sistema exige confirmações mais fortes antes de entrar nesses cenários.
+          //   Macro ALINHADO à direção nativa  → +1 (movimento mais seguro e mais longo)
+          //   Macro SIDEWAYS                   →  0 (neutro)
+          //   Macro CONTRA a direção nativa    → -2 (spike consecutivo mais provável)
+          const macroTrend = girassolCtx?.macroTrend ?? 'SIDEWAYS';
+          let macroScore = 0;
+          if (naturalAction === 'BUY') {
+            // Crash BUY: mercado BULLISH macro = reforça direção nativa
+            if (macroTrend === 'BULLISH')      { macroScore =  1; reasonParts.push('📈 Macro BULLISH — reforça movimento nativo de alta'); }
+            else if (macroTrend === 'BEARISH') { macroScore = -2; reasonParts.push('📉 Macro BEARISH — risco elevado de spike consecutivo durante operação'); }
+            else                               { reasonParts.push('〰️ Macro SIDEWAYS — neutro'); }
+          } else {
+            // Boom SELL: mercado BEARISH macro = reforça direção nativa
+            if (macroTrend === 'BEARISH')      { macroScore =  1; reasonParts.push('📉 Macro BEARISH — reforça movimento nativo de baixa'); }
+            else if (macroTrend === 'BULLISH') { macroScore = -2; reasonParts.push('📈 Macro BULLISH — risco elevado de spike consecutivo durante operação'); }
+            else                               { reasonParts.push('〰️ Macro SIDEWAYS — neutro'); }
+          }
+
           // ── HARD BLOCK: Base total negativa = sem entrada, sem exceção ────
-          // Golden window NUNCA pode sobrescrever RSI sobrecomprado/sobrevendido
-          // nem Girassol oposto. Esses sinais significam que o mercado não está
-          // na direção nativa — não é hora de entrar.
-          const totalBase = technicalBase + girassolScore + fibScore;
+          // Golden window NUNCA pode sobrescrever RSI sobrecomprado/sobrevendido,
+          // Girassol oposto, ou macro fortemente contrário.
+          const totalBase = technicalBase + girassolScore + fibScore + macroScore;
           if (totalBase <= -2) {
             this.logAnalysis({
               id: `${entryId}_continuity_hard_block`,
@@ -3122,7 +3142,7 @@ class MetaTraderBridge extends EventEmitter {
                 decisionReason: `✅ CONTINUIDADE NATURAL: ${continuitySignal.action} ${symbol} | Score=${continuityScore} (base=${totalBase} window=${windowScore}) | ${reasonParts.join(' | ')} | Conf: ${(continuityConf * 100).toFixed(1)}%`
               });
               const windowTag = isMaxSetup ? '🟢🌻 SETUP MÁXIMO' : isGoldenWindow ? '🟢 JANELA DE OURO' : isRecoveryZone ? '🟡 RECUPERAÇÃO' : '⚪ NEUTRO';
-              console.log(`[MT5Bridge] 📈 CONTINUIDADE ${isCrash ? 'CRASH→BUY' : 'BOOM→SELL'}: ${symbol} | ${windowTag} | Conf: ${(continuityConf * 100).toFixed(1)}% | Score: ${continuityScore} (base=${totalBase} RSI/EMA=${technicalBase} Gir=${girassolScore} Fib=${fibScore} Win=${windowScore})`);
+              console.log(`[MT5Bridge] 📈 CONTINUIDADE ${isCrash ? 'CRASH→BUY' : 'BOOM→SELL'}: ${symbol} | ${windowTag} | Conf: ${(continuityConf * 100).toFixed(1)}% | Score: ${continuityScore} (base=${totalBase} RSI/EMA=${technicalBase} Gir=${girassolScore} Fib=${fibScore} Macro=${macroScore} Win=${windowScore})`);
               return continuitySignal;
             }
           }
@@ -5030,81 +5050,143 @@ class MetaTraderBridge extends EventEmitter {
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // PRIORIDADE 6.5 — GIRASSOL COMO SINAL DE SAÍDA (inteligente)
-    // O Girassol oposto à posição indica possível reversão — MAS o sistema
-    // não fecha imediatamente. Exige MÍNIMO DE LUCRO proporcional ao nível
-    // do Girassol antes de sair.
+    // PRIORIDADE 6.5 — GIRASSOL COMO SINAL DE SAÍDA (todos os ativos)
     //
-    //  NÍVEL 3/3 (extremo) + Zona Fib chave  → sair com $0.50+ ou 25% MFE
-    //  NÍVEL 3/3 (extremo) sem zona Fib      → sair com $1.50+ ou 40% MFE
-    //  NÍVEL 2/3 (médio)                     → sair com $2.50+ ou 55% MFE
-    //  NÍVEL 1/3 (fraco)                     → NÃO sair, apenas logar
+    // REGRA DE OURO CRASH/BOOM para fechamentos:
+    //  • Crash BUY / Boom SELL = movimento NATIVO do ativo
+    //  • O movimento nativo é mais forte LOGO APÓS um spike (iminência baixa)
+    //    → "Janela de ouro": NÃO fechar prematuramente neste momento
+    //    → Só fecha se Girassol for 3/3 @Fibonacci (sinal incontestável)
+    //  • Girassol oposto + iminência ALTA = spike adverso se aproximando → FECHAR
+    //  • Girassol oposto + iminência BAIXA = ainda na janela de ouro → aguardar
     //
-    //  PULLBACK mode: mais agressivo (sair mais cedo — movimento curto)
-    //  EXTREME_REVERSAL mode: mais paciente (movimento explosivo esperado)
-    //
-    //  Isso evita o "medo" de fechar com $0.01 quando o movimento
-    //  ainda tem muito mais potencial — especialmente em topos/fundos duplos.
+    // Thresholds de lucro mínimo para fechar por Girassol:
+    //  NÍVEL 3/3 + Fib extremo + Crash/Boom janela de ouro → NÃO fecha (só trailing)
+    //  NÍVEL 3/3 + Fib extremo + iminência > 40%           → $0.50+ ou 25% MFE
+    //  NÍVEL 3/3 sem Fib / iminência baixa                 → $1.50+ ou 40% MFE
+    //  NÍVEL 2/3                                           → $2.50+ ou 55% MFE (pullback: $1.50/45%)
+    //  NÍVEL 1/3                                           → NÃO fechar, só logar
     // ══════════════════════════════════════════════════════════════════
-    if (!this.isSpikeIndex(symbol)) {
+    {
       const girassolForExit = this.getGirassolBias(symbol);
       if (girassolForExit && girassolForExit.bias !== 'NEUTRAL' && profit > 0) {
-        const positionDir = position.type; // BUY ou SELL
+        const positionDir = position.type;
         const girassolOppositeToPosition =
           (positionDir === 'BUY'  && girassolForExit.bias === 'SELL') ||
           (positionDir === 'SELL' && girassolForExit.bias === 'BUY');
 
         if (girassolOppositeToPosition) {
           const exitTradeMode = girassolForExit.tradeMode ?? 'trend';
-          // Nível extremo = 3/3 OU (2/3 + extremo@fib)
           const isExtremoAtFib = girassolForExit.extremoAtFib === true || girassolForExit.fibKeyZone === true;
           const isExtreme = girassolForExit.levelCount >= 3 ||
             (girassolForExit.levelCount >= 2 && isExtremoAtFib);
 
-          // ── Calcular mínimo de lucro exigido para este sinal de saída ──
-          // Quanto maior o lucro atingido (MFE), mais difícil fechar com pouco
+          // ── Contexto de spike + macro para Crash/Boom ────────────────
+          // Para os ativos de spike, precisamos saber:
+          //  1. Iminência do próximo spike (janela de ouro = iminência baixa)
+          //  2. Macro trend — se contra a direção nativa, spike consecutivo é mais
+          //     provável e a janela de ouro fica mais CURTA (≤10% vs ≤20%)
+          let exitSpikeImminence = 50; // valor neutro para não-spike
+          const isCrashBoomExit = this.isSpikeIndex(symbol);
+          if (isCrashBoomExit) {
+            const spikeCtx = this.detectSpikePattern(marketData, symbol);
+            exitSpikeImminence = spikeCtx.imminencePercent;
+          }
+
+          // Detectar se posição está na direção nativa do ativo
+          const isCrashNativeBuy = symbol.toLowerCase().includes('crash') && positionDir === 'BUY';
+          const isBoomNativeSell = symbol.toLowerCase().includes('boom')  && positionDir === 'SELL';
+          const isNativeDirectionPos = isCrashNativeBuy || isBoomNativeSell;
+
+          // Macro trend da posição aberta — afeta tamanho da proteção da janela de ouro
+          const exitMacroTrend = girassolForExit.macroTrend ?? 'SIDEWAYS';
+          const isMacroAgainstNative =
+            (isNativeDirectionPos && isCrashNativeBuy  && exitMacroTrend === 'BEARISH') ||
+            (isNativeDirectionPos && isBoomNativeSell  && exitMacroTrend === 'BULLISH');
+
+          // Janela de ouro para manter posição:
+          //   Macro a favor (ou sideways): ≤20% iminência = golden window normal
+          //   Macro CONTRA direção nativa: ≤10% iminência = janela reduzida
+          //   (spike consecutivo mais provável quando macro vai contra o ativo)
+          const goldenWindowThreshold = isMacroAgainstNative ? 10 : 20;
+          const isGoldenWindowExit = isCrashBoomExit && exitSpikeImminence <= goldenWindowThreshold;
+          const isRecoveryZoneExit  = isCrashBoomExit && exitSpikeImminence <= 40;
+
+          if (isMacroAgainstNative && isCrashBoomExit) {
+            base.narrative += `⚠️ Macro ${exitMacroTrend} contra direção nativa — risco de spike consecutivo elevado. Janela de ouro reduzida (${goldenWindowThreshold}%). `;
+          }
+
           let minProfitForGirassolExit: number;
 
           if (girassolForExit.levelCount <= 1) {
-            // Nível 1/3 = sinal fraco — NÃO fechar ainda
+            // Sinal fraco — nunca fecha
             console.log(`[MONITOR] 🌻 Girassol ${girassolForExit.bias} 1/3 (fraco) vs ${positionDir} — aguardando confirmação | Lucro: +$${profit.toFixed(2)}`);
             base.narrative += `🌻 Girassol ${girassolForExit.bias} 1/3 — sinal fraco, aguardando. `;
-            // Não retorna — continua o monitoramento
+
           } else if (isExtreme) {
-            // Nível 3/3 ou 2/3+@Fib = sinal forte de reversão
-            // Exige $0.50 mínimo ou 25% do melhor lucro histórico
-            minProfitForGirassolExit = Math.max(0.50, ctx.maxFavorableExcursion * 0.25);
-            if (profit >= minProfitForGirassolExit) {
-              console.log(`[MONITOR] 🌻⭐ SAÍDA GIRASSOL EXTREMO #${position.ticket}: ${positionDir} vs ${girassolForExit.bias} (${girassolForExit.levelCount}/3)${isExtremoAtFib ? ' @Fib' : ''} | Lucro: +$${profit.toFixed(2)} ≥ mín $${minProfitForGirassolExit.toFixed(2)}`);
-              return {
-                ...base,
-                action: 'CLOSE_PROFIT',
-                urgency: 'critical',
-                reason: `🌻⭐ Girassol EXTREMO ${girassolForExit.bias} (${girassolForExit.levelCount}/3${isExtremoAtFib ? ' @Fib-chave' : ''}) confirma reversão | +$${profit.toFixed(2)}`,
-                narrative: `Girassol extremo ${girassolForExit.bias} ${isExtremoAtFib ? 'em zona Fibonacci chave ' : ''}indica reversão sólida. Posição ${positionDir} #${position.ticket} aberta há ${ageMinutes.toFixed(1)}min. Lucro: +$${profit.toFixed(2)} | Pico MFE: +$${ctx.maxFavorableExcursion.toFixed(2)} | MAE: $${ctx.maxAdverseExcursion.toFixed(2)}.`
-              };
-            }
-            base.narrative += `🌻⭐ Girassol extremo ${girassolForExit.bias} — aguardando mín $${minProfitForGirassolExit.toFixed(2)} (atual +$${profit.toFixed(2)}). `;
-          } else {
-            // Nível 2/3 = sinal moderado
-            // Para pullback: exige 45% do MFE ou $1.50 mín (pullback é curto, sair antes)
-            // Para trend/reversal: exige 60% do MFE ou $2.50 mín (movimento maior esperado)
-            if (exitTradeMode === 'pullback') {
-              minProfitForGirassolExit = Math.max(1.50, ctx.maxFavorableExcursion * 0.45);
+            // NÍVEL 3/3 ou 2/3+@Fib = sinal forte de reversão
+            if (isGoldenWindowExit && isNativeDirectionPos) {
+              // Janela de ouro + direção nativa: movimento nativo ainda no auge
+              // Só fecha 3/3@Fib se iminência for alta (spike adverso chegando)
+              if (isExtremoAtFib && exitSpikeImminence >= 62) {
+                minProfitForGirassolExit = Math.max(0.30, ctx.maxFavorableExcursion * 0.20);
+                if (profit >= minProfitForGirassolExit) {
+                  console.log(`[MONITOR] 🌻⭐⚡ SAÍDA URGENTE #${position.ticket}: ${positionDir} nativo | Girassol ${girassolForExit.bias} 3/3@Fib + spike iminente ${exitSpikeImminence}% | Lucro: +$${profit.toFixed(2)}`);
+                  return {
+                    ...base,
+                    action: 'CLOSE_PROFIT',
+                    urgency: 'critical',
+                    reason: `🌻⭐⚡ Girassol ${girassolForExit.bias} 3/3@Fib + spike ${exitSpikeImminence}% iminente — saída antes do spike adverso | +$${profit.toFixed(2)}`,
+                    narrative: `Girassol extremo oposto em Fibonacci E spike iminente. Saída antecipada para proteger lucro +$${profit.toFixed(2)} antes do spike adverso.`
+                  };
+                }
+              } else {
+                // Janela de ouro sem spike iminente → protege posição, deixa rodar
+                console.log(`[MONITOR] 🟢🌻 JANELA DE OURO EXIT: ${positionDir} nativo protegido (iminência ${exitSpikeImminence}%) — Girassol ${girassolForExit.bias} ${girassolForExit.levelCount}/3 mas movimento nativo no auge | Lucro: +$${profit.toFixed(2)}`);
+                base.narrative += `🟢 Janela de ouro — movimento nativo no auge, posição protegida apesar do Girassol ${girassolForExit.bias}. `;
+              }
             } else {
-              minProfitForGirassolExit = Math.max(2.50, ctx.maxFavorableExcursion * 0.60);
+              // Fora da janela de ouro: fecha normalmente com mínimo reduzido
+              minProfitForGirassolExit = isExtremoAtFib
+                ? Math.max(0.50, ctx.maxFavorableExcursion * 0.25)
+                : Math.max(1.50, ctx.maxFavorableExcursion * 0.40);
+              if (profit >= minProfitForGirassolExit) {
+                console.log(`[MONITOR] 🌻⭐ SAÍDA GIRASSOL EXTREMO #${position.ticket}: ${positionDir} vs ${girassolForExit.bias} (${girassolForExit.levelCount}/3)${isExtremoAtFib ? ' @Fib' : ''} | Iminência: ${exitSpikeImminence}% | Lucro: +$${profit.toFixed(2)} ≥ mín $${minProfitForGirassolExit.toFixed(2)}`);
+                return {
+                  ...base,
+                  action: 'CLOSE_PROFIT',
+                  urgency: 'critical',
+                  reason: `🌻⭐ Girassol EXTREMO ${girassolForExit.bias} (${girassolForExit.levelCount}/3${isExtremoAtFib ? ' @Fib-chave' : ''}) confirma reversão | +$${profit.toFixed(2)}`,
+                  narrative: `Girassol extremo ${girassolForExit.bias} ${isExtremoAtFib ? 'em zona Fibonacci chave ' : ''}indica reversão sólida. Posição ${positionDir} #${position.ticket} aberta há ${ageMinutes.toFixed(1)}min. Lucro: +$${profit.toFixed(2)} | MFE: +$${ctx.maxFavorableExcursion.toFixed(2)}.`
+                };
+              }
+              base.narrative += `🌻⭐ Girassol extremo ${girassolForExit.bias} — aguardando mín $${minProfitForGirassolExit.toFixed(2)} (atual +$${profit.toFixed(2)}). `;
             }
-            if (profit >= minProfitForGirassolExit) {
-              console.log(`[MONITOR] 🌻 SAÍDA GIRASSOL 2/3 #${position.ticket}: ${positionDir} vs ${girassolForExit.bias} | Modo: ${exitTradeMode} | Lucro: +$${profit.toFixed(2)} ≥ mín $${minProfitForGirassolExit.toFixed(2)}`);
-              return {
-                ...base,
-                action: 'CLOSE_PROFIT',
-                urgency: 'high',
-                reason: `🌻 Girassol ${girassolForExit.bias} (2/3 níveis) indica fim do movimento ${positionDir} | +$${profit.toFixed(2)}`,
-                narrative: `Girassol ${girassolForExit.bias} 2/3 indica reversão moderada (modo: ${exitTradeMode}). Posição ${positionDir} #${position.ticket} aberta há ${ageMinutes.toFixed(1)}min. Lucro: +$${profit.toFixed(2)} atingiu mínimo exigido $${minProfitForGirassolExit.toFixed(2)} | MFE: +$${ctx.maxFavorableExcursion.toFixed(2)}.`
-              };
+
+          } else {
+            // NÍVEL 2/3 = sinal moderado
+            if (isGoldenWindowExit && isNativeDirectionPos) {
+              // Na janela de ouro: não fecha com sinal moderado — movimento nativo forte
+              console.log(`[MONITOR] 🟢🌻 Janela de ouro protege: Girassol 2/3 vs ${positionDir} nativo mas iminência ${exitSpikeImminence}% (baixa) — mantendo posição | Lucro: +$${profit.toFixed(2)}`);
+              base.narrative += `🟡 Girassol 2/3 oposto mas janela de ouro ativa — aguardando. `;
+            } else {
+              if (exitTradeMode === 'pullback') {
+                minProfitForGirassolExit = Math.max(1.50, ctx.maxFavorableExcursion * 0.45);
+              } else {
+                minProfitForGirassolExit = Math.max(2.50, ctx.maxFavorableExcursion * 0.60);
+              }
+              if (profit >= minProfitForGirassolExit) {
+                console.log(`[MONITOR] 🌻 SAÍDA GIRASSOL 2/3 #${position.ticket}: ${positionDir} vs ${girassolForExit.bias} | Modo: ${exitTradeMode} | Iminência: ${exitSpikeImminence}% | Lucro: +$${profit.toFixed(2)} ≥ mín $${minProfitForGirassolExit.toFixed(2)}`);
+                return {
+                  ...base,
+                  action: 'CLOSE_PROFIT',
+                  urgency: 'high',
+                  reason: `🌻 Girassol ${girassolForExit.bias} (2/3 níveis) indica fim do movimento ${positionDir} | +$${profit.toFixed(2)}`,
+                  narrative: `Girassol ${girassolForExit.bias} 2/3 indica reversão moderada (modo: ${exitTradeMode}). Posição #${position.ticket} aberta há ${ageMinutes.toFixed(1)}min. Lucro: +$${profit.toFixed(2)} atingiu mínimo $${minProfitForGirassolExit.toFixed(2)} | MFE: +$${ctx.maxFavorableExcursion.toFixed(2)}.`
+                };
+              }
+              base.narrative += `🌻 Girassol ${girassolForExit.bias} 2/3 — aguardando mín $${minProfitForGirassolExit.toFixed(2)} (atual +$${profit.toFixed(2)}). `;
             }
-            base.narrative += `🌻 Girassol ${girassolForExit.bias} 2/3 — aguardando mín $${minProfitForGirassolExit.toFixed(2)} (atual +$${profit.toFixed(2)}). `;
           }
         }
       }
