@@ -3000,13 +3000,31 @@ class MetaTraderBridge extends EventEmitter {
             if (ema20 <= ema50) { continuityScore += 1; reasonParts.push('EMA20≤EMA50 confirma baixa'); }
           }
 
-          // Penalizar levemente se iminência de spike for elevada (cautela)
-          if (earlySpike.imminencePercent >= 62) {
+          // ── POST-SPIKE GOLDEN WINDOW ──────────────────────────────────────────
+          // Crash sempre sobe; Boom sempre cai. O único risco é um spike adverso.
+          // Logo após um spike, a probabilidade de outro spike consecutivo é mínima.
+          // Isso torna o pós-spike a janela de entrada mais segura e de maior certeza.
+          //   Iminência 0–20%  → acabou de ter spike → BÔNUS MÁXIMO +3 (janela de ouro)
+          //   Iminência 20–40% → recuperação inicial → BÔNUS +2 (janela favorável)
+          //   Iminência 40–62% → zona neutra → sem bônus nem penalidade
+          //   Iminência ≥ 62%  → spike próximo → PENALIDADE -1 (cautela)
+          if (earlySpike.imminencePercent <= 20) {
+            continuityScore += 3;
+            reasonParts.push(`🟢 JANELA DE OURO pós-spike (iminência ${earlySpike.imminencePercent.toFixed(0)}%) — spike consecutivo improvável, direção nativa quase certa`);
+          } else if (earlySpike.imminencePercent <= 40) {
+            continuityScore += 2;
+            reasonParts.push(`🟡 Fase de recuperação (iminência ${earlySpike.imminencePercent.toFixed(0)}%) — bom momento para entrada na direção nativa`);
+          } else if (earlySpike.imminencePercent >= 62) {
             continuityScore -= 1;
-            reasonParts.push(`Iminência de spike ${earlySpike.imminencePercent}% — cautela leve`);
+            reasonParts.push(`Iminência de spike ${earlySpike.imminencePercent.toFixed(0)}% — cautela leve`);
           }
 
-          const continuityConf = Math.min(0.82, Math.max(0.55, 0.60 + continuityScore * 0.06));
+          // Confiança ligeiramente maior na janela de ouro (até 0.87 vs 0.82 normal)
+          const isGoldenWindow = earlySpike.imminencePercent <= 20;
+          const continuityConf = Math.min(
+            isGoldenWindow ? 0.87 : 0.82,
+            Math.max(0.55, 0.60 + continuityScore * 0.06)
+          );
 
           if (continuityScore >= 1) {
             const continuitySignal = this.fuseSignals(
@@ -3027,7 +3045,8 @@ class MetaTraderBridge extends EventEmitter {
                 consecutiveLosses: this.consecutiveLosses,
                 decisionReason: `✅ CONTINUIDADE NATURAL: ${continuitySignal.action} ${symbol} | ${reasonParts.join(' | ')} | Confiança: ${(continuityConf * 100).toFixed(1)}% | Iminência spike: ${earlySpike.imminencePercent}%`
               });
-              console.log(`[MT5Bridge] 📈 CONTINUIDADE ${isCrash ? 'CRASH→BUY' : 'BOOM→SELL'}: ${symbol} | Conf: ${(continuityConf * 100).toFixed(1)}% | Spike ${earlySpike.imminencePercent}% imminente`);
+              const windowTag = isGoldenWindow ? '🟢 JANELA DE OURO' : earlySpike.imminencePercent <= 40 ? '🟡 RECUPERAÇÃO' : '⚪ NEUTRO';
+              console.log(`[MT5Bridge] 📈 CONTINUIDADE ${isCrash ? 'CRASH→BUY' : 'BOOM→SELL'}: ${symbol} | ${windowTag} | Conf: ${(continuityConf * 100).toFixed(1)}% | Iminência spike: ${earlySpike.imminencePercent.toFixed(0)}% | Score: ${continuityScore}`);
               return continuitySignal;
             }
           }
