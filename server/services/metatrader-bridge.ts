@@ -2984,46 +2984,125 @@ class MetaTraderBridge extends EventEmitter {
             }
           }
 
-          // Verificar se indicadores técnicos confirmam a entrada na direção natural
-          let continuityScore = 0;
+          // ═══════════════════════════════════════════════════════════════════
+          // CONTINUIDADE CRASH/BOOM — Validação em 4 camadas independentes
+          //
+          // REGRAS DE OURO do ativo:
+          //  • Crash sobe nativamente; único risco = spike de queda adverso
+          //  • Boom  cai  nativamente; único risco = spike de alta adverso
+          //  • Spike + Topo/Fundo Duplo + Girassol = setup de máxima certeza
+          //  • Girassol e Fibonacci são filtros obrigatórios, não opcionais
+          //  • Golden window é BÔNUS; nunca sobrescreve técnicos ruins
+          // ═══════════════════════════════════════════════════════════════════
           const reasonParts: string[] = [];
 
+          // ── CAMADA 1: Técnicos RSI + EMA ─────────────────────────────────
+          let technicalBase = 0;
           if (naturalAction === 'BUY') {
-            // Para Crash (BUY de continuidade): evitar entrar quando RSI sobrecomprado
-            if (rsi < rsiOverbought - 10) { continuityScore += 2; reasonParts.push(`RSI ${rsi.toFixed(1)} ok para BUY`); }
-            else if (rsi >= rsiOverbought) { continuityScore -= 3; reasonParts.push(`RSI ${rsi.toFixed(1)} sobrecomprado — aguardar`); }
-            if (ema20 >= ema50) { continuityScore += 1; reasonParts.push('EMA20≥EMA50 confirma alta'); }
+            if (rsi < rsiOverbought - 10)    { technicalBase += 2; reasonParts.push(`RSI ${rsi.toFixed(1)} ok para BUY`); }
+            else if (rsi >= rsiOverbought)   { technicalBase -= 3; reasonParts.push(`RSI ${rsi.toFixed(1)} sobrecomprado — aguardar`); }
+            if (ema20 >= ema50)              { technicalBase += 1; reasonParts.push('EMA20≥EMA50'); }
           } else {
-            // Para Boom (SELL de continuidade): evitar entrar quando RSI sobrevendido
-            if (rsi > rsiOversold + 10) { continuityScore += 2; reasonParts.push(`RSI ${rsi.toFixed(1)} ok para SELL`); }
-            else if (rsi <= rsiOversold) { continuityScore -= 3; reasonParts.push(`RSI ${rsi.toFixed(1)} sobrevendido — aguardar`); }
-            if (ema20 <= ema50) { continuityScore += 1; reasonParts.push('EMA20≤EMA50 confirma baixa'); }
+            if (rsi > rsiOversold + 10)      { technicalBase += 2; reasonParts.push(`RSI ${rsi.toFixed(1)} ok para SELL`); }
+            else if (rsi <= rsiOversold)     { technicalBase -= 3; reasonParts.push(`RSI ${rsi.toFixed(1)} sobrevendido — aguardar`); }
+            if (ema20 <= ema50)              { technicalBase += 1; reasonParts.push('EMA20≤EMA50'); }
           }
 
-          // ── POST-SPIKE GOLDEN WINDOW ──────────────────────────────────────────
-          // Crash sempre sobe; Boom sempre cai. O único risco é um spike adverso.
-          // Logo após um spike, a probabilidade de outro spike consecutivo é mínima.
-          // Isso torna o pós-spike a janela de entrada mais segura e de maior certeza.
-          //   Iminência 0–20%  → acabou de ter spike → BÔNUS MÁXIMO +3 (janela de ouro)
-          //   Iminência 20–40% → recuperação inicial → BÔNUS +2 (janela favorável)
-          //   Iminência 40–62% → zona neutra → sem bônus nem penalidade
-          //   Iminência ≥ 62%  → spike próximo → PENALIDADE -1 (cautela)
-          if (earlySpike.imminencePercent <= 20) {
-            continuityScore += 3;
-            reasonParts.push(`🟢 JANELA DE OURO pós-spike (iminência ${earlySpike.imminencePercent.toFixed(0)}%) — spike consecutivo improvável, direção nativa quase certa`);
-          } else if (earlySpike.imminencePercent <= 40) {
-            continuityScore += 2;
-            reasonParts.push(`🟡 Fase de recuperação (iminência ${earlySpike.imminencePercent.toFixed(0)}%) — bom momento para entrada na direção nativa`);
+          // ── CAMADA 2: Girassol — valida se mercado está na direção nativa ─
+          // Girassol alinhado = mercado já empurrando na direção nativa ✅
+          // Girassol oposto   = mercado CONTRA a direção nativa ⛔
+          // extremoAtFib      = Girassol em extremidade Fibonacci = setup premium
+          const girassolCtx = _girassolForGateB; // já calculado acima
+          let girassolScore = 0;
+          if (girassolCtx) {
+            const isAligned  = girassolCtx.bias === naturalAction;
+            const isOpposing = girassolCtx.bias !== 'NEUTRAL' && !isAligned;
+            if (isAligned) {
+              girassolScore = girassolCtx.levelCount >= 3 ? 3
+                            : girassolCtx.levelCount >= 2 ? 2 : 1;
+              const fibTag = girassolCtx.extremoAtFib ? ' 🎯+Fibonacci extremo' : '';
+              const staleTag = girassolCtx.isStale ? ' [degradado]' : '';
+              reasonParts.push(`🌻 Girassol ${girassolCtx.bias} ${girassolCtx.levelCount}/3${fibTag}${staleTag} — mercado na direção nativa`);
+            } else if (isOpposing) {
+              girassolScore = -2;
+              reasonParts.push(`🌻 Girassol ${girassolCtx.bias} opõe direção nativa — mercado ainda não virou`);
+            } else {
+              reasonParts.push('🌻 Girassol NEUTRO — sem bônus/penalidade');
+            }
+          } else {
+            reasonParts.push('🌻 Girassol sem dados — sem bônus');
+          }
+
+          // ── CAMADA 3: Fibonacci — zona favorável ou de resistência ────────
+          // extremoAtFib: Girassol disparou em nível Fibonacci chave = máxima precisão
+          let fibScore = 0;
+          if (girassolCtx?.extremoAtFib) {
+            if (girassolCtx.bias === naturalAction) {
+              fibScore = 2; // Girassol em extremidade Fibonacci alinhado = setup premium
+              reasonParts.push('📐 Girassol em extremidade Fibonacci — precisão máxima');
+            } else if (girassolCtx.bias === 'NEUTRAL') {
+              fibScore = 1;
+              reasonParts.push('📐 Fibonacci extremo detectado — zona de reversão');
+            }
+          } else if (girassolCtx?.fibKeyZone) {
+            fibScore = girassolCtx.bias === naturalAction ? 1 : -1;
+            reasonParts.push(`📐 Fibonacci zona-chave ${fibScore > 0 ? 'favorável' : 'de resistência'}`);
+          }
+
+          // ── HARD BLOCK: Base total negativa = sem entrada, sem exceção ────
+          // Golden window NUNCA pode sobrescrever RSI sobrecomprado/sobrevendido
+          // nem Girassol oposto. Esses sinais significam que o mercado não está
+          // na direção nativa — não é hora de entrar.
+          const totalBase = technicalBase + girassolScore + fibScore;
+          if (totalBase <= -2) {
+            this.logAnalysis({
+              id: `${entryId}_continuity_hard_block`,
+              timestamp: Date.now(), symbol, phase: 'decision', status: 'rejected',
+              consecutiveLosses: this.consecutiveLosses,
+              decisionReason: `🔴 BLOQUEIO TÉCNICO: base=${totalBase} (RSI/EMA=${technicalBase}, Girassol=${girassolScore}, Fib=${fibScore}) — golden window não pode sobrescrever condições ruins | ${reasonParts.join(' | ')}`
+            });
+            console.log(`[MT5Bridge] 🔴 ${symbol}: bloqueio técnico (base=${totalBase}) — golden window não override | ${reasonParts.join(', ')}`);
+            return null;
+          }
+
+          // ── CAMADA 4: Golden Window pós-spike (BÔNUS, nunca override) ─────
+          // Crash/Boom: imediatamente após spike = menor risco de spike consecutivo.
+          // Spike de Topo/Fundo Duplo COM Girassol = setup de máxima certeza no ativo.
+          //   imminência 0–20%  + Fundo/Topo Duplo + Girassol = +5 🟢🌻 setup máximo
+          //   imminência 0–20%  sem estrutura dupla              = +3 🟢 janela de ouro
+          //   imminência 20–40%                                  = +2 🟡 fase de recuperação
+          //   imminência 40–62%                                  =  0 ⚪ zona neutra
+          //   imminência ≥ 62%                                   = -1 cautela (spike próximo)
+          const isGoldenWindow   = earlySpike.imminencePercent <= 20;
+          const isRecoveryZone   = earlySpike.imminencePercent <= 40;
+          const hasDoubleStruct  = girassolCtx !== null
+                                    && girassolCtx.bias === naturalAction
+                                    && (girassolCtx.levelCount >= 2);
+          let windowScore = 0;
+          let setupLabel  = '';
+          if (isGoldenWindow && hasDoubleStruct) {
+            windowScore = 5;
+            setupLabel  = `🟢🌻 SETUP MÁXIMO — ${naturalAction === 'BUY' ? 'Fundo Duplo' : 'Topo Duplo'} + Girassol pós-spike (iminência ${earlySpike.imminencePercent.toFixed(0)}%)`;
+            reasonParts.push(setupLabel);
+          } else if (isGoldenWindow) {
+            windowScore = 3;
+            setupLabel  = `🟢 JANELA DE OURO (iminência ${earlySpike.imminencePercent.toFixed(0)}%) — spike consecutivo improvável`;
+            reasonParts.push(setupLabel);
+          } else if (isRecoveryZone) {
+            windowScore = 2;
+            setupLabel  = `🟡 Fase de recuperação (iminência ${earlySpike.imminencePercent.toFixed(0)}%)`;
+            reasonParts.push(setupLabel);
           } else if (earlySpike.imminencePercent >= 62) {
-            continuityScore -= 1;
-            reasonParts.push(`Iminência de spike ${earlySpike.imminencePercent.toFixed(0)}% — cautela leve`);
+            windowScore = -1;
+            reasonParts.push(`Iminência ${earlySpike.imminencePercent.toFixed(0)}% — cautela (spike próximo)`);
           }
 
-          // Confiança ligeiramente maior na janela de ouro (até 0.87 vs 0.82 normal)
-          const isGoldenWindow = earlySpike.imminencePercent <= 20;
+          const continuityScore = totalBase + windowScore;
+          const isMaxSetup = isGoldenWindow && hasDoubleStruct;
           const continuityConf = Math.min(
+            isMaxSetup    ? 0.92 :
             isGoldenWindow ? 0.87 : 0.82,
-            Math.max(0.55, 0.60 + continuityScore * 0.06)
+            Math.max(0.55, 0.60 + continuityScore * 0.05)
           );
 
           if (continuityScore >= 1) {
@@ -3031,36 +3110,30 @@ class MetaTraderBridge extends EventEmitter {
               symbol,
               [{ action: naturalAction, confidence: continuityConf, source: 'continuity_natural_direction' }],
               marketData,
-              `CONTINUIDADE ${isCrash ? 'CRASH→BUY' : 'BOOM→SELL'}: ${reasonParts.join(' | ')} | Spike ${earlySpike.imminencePercent}% imminente`,
+              `CONTINUIDADE ${isCrash ? 'CRASH→BUY' : 'BOOM→SELL'}: ${reasonParts.join(' | ')}`,
               continuityConf
             );
             if (continuitySignal && continuitySignal.action !== 'HOLD') {
               this.logAnalysis({
                 id: `${entryId}_continuity`,
-                timestamp: Date.now(),
-                symbol,
-                phase: 'decision',
-                status: 'approved',
+                timestamp: Date.now(), symbol, phase: 'decision', status: 'approved',
                 finalDecision: continuitySignal.action as 'BUY' | 'SELL' | 'HOLD',
                 consecutiveLosses: this.consecutiveLosses,
-                decisionReason: `✅ CONTINUIDADE NATURAL: ${continuitySignal.action} ${symbol} | ${reasonParts.join(' | ')} | Confiança: ${(continuityConf * 100).toFixed(1)}% | Iminência spike: ${earlySpike.imminencePercent}%`
+                decisionReason: `✅ CONTINUIDADE NATURAL: ${continuitySignal.action} ${symbol} | Score=${continuityScore} (base=${totalBase} window=${windowScore}) | ${reasonParts.join(' | ')} | Conf: ${(continuityConf * 100).toFixed(1)}%`
               });
-              const windowTag = isGoldenWindow ? '🟢 JANELA DE OURO' : earlySpike.imminencePercent <= 40 ? '🟡 RECUPERAÇÃO' : '⚪ NEUTRO';
-              console.log(`[MT5Bridge] 📈 CONTINUIDADE ${isCrash ? 'CRASH→BUY' : 'BOOM→SELL'}: ${symbol} | ${windowTag} | Conf: ${(continuityConf * 100).toFixed(1)}% | Iminência spike: ${earlySpike.imminencePercent.toFixed(0)}% | Score: ${continuityScore}`);
+              const windowTag = isMaxSetup ? '🟢🌻 SETUP MÁXIMO' : isGoldenWindow ? '🟢 JANELA DE OURO' : isRecoveryZone ? '🟡 RECUPERAÇÃO' : '⚪ NEUTRO';
+              console.log(`[MT5Bridge] 📈 CONTINUIDADE ${isCrash ? 'CRASH→BUY' : 'BOOM→SELL'}: ${symbol} | ${windowTag} | Conf: ${(continuityConf * 100).toFixed(1)}% | Score: ${continuityScore} (base=${totalBase} RSI/EMA=${technicalBase} Gir=${girassolScore} Fib=${fibScore} Win=${windowScore})`);
               return continuitySignal;
             }
           }
 
           this.logAnalysis({
             id: `${entryId}_continuity_skip`,
-            timestamp: Date.now(),
-            symbol,
-            phase: 'decision',
-            status: 'rejected',
+            timestamp: Date.now(), symbol, phase: 'decision', status: 'rejected',
             consecutiveLosses: this.consecutiveLosses,
-            decisionReason: `⏳ CONTINUIDADE ${isCrash ? 'CRASH' : 'BOOM'}: score insuficiente (${continuityScore}) — ${reasonParts.join(' | ')} | Aguardando melhor entrada`
+            decisionReason: `⏳ CONTINUIDADE ${isCrash ? 'CRASH' : 'BOOM'}: score insuficiente (${continuityScore} = base ${totalBase} + window ${windowScore}) — ${reasonParts.join(' | ')}`
           });
-          console.log(`[MT5Bridge] ⏳ ${symbol}: continuidade bloqueada (score ${continuityScore}) — ${reasonParts.join(', ')}`);
+          console.log(`[MT5Bridge] ⏳ ${symbol}: continuidade bloqueada (score=${continuityScore} base=${totalBase}) — ${reasonParts.join(', ')}`);
           return null;
         }
       }
