@@ -3134,15 +3134,64 @@ class MetaTraderBridge extends EventEmitter {
               continuityConf
             );
             if (continuitySignal && continuitySignal.action !== 'HOLD') {
+              // ── TP/SL escalado pela qualidade do setup ──────────────────────
+              // A continuidade pós-spike é a operação de MAIOR expectativa do ciclo.
+              // Scalp (TP=2.5×ATR) desperdiça potencial em setups premium.
+              //
+              //  Setup máximo  (golden + double struct + Girassol): TP = 5.0× ATR | SL = 1.0× ATR  → R:R 1:5
+              //  Janela de ouro (sem double struct):                TP = 3.5× ATR | SL = 0.9× ATR  → R:R 1:3.9
+              //  Zona de recuperação (iminência 20-40%):            TP = 2.5× ATR | SL = 0.8× ATR  → R:R 1:3.1
+              //  Continuidade padrão (sem janela):                  TP = 2.0× ATR | SL = 0.8× ATR  → R:R 1:2.5
+              //
+              // SL mais estreito em setups menores = sair rápido se movimento não ocorrer.
+              // SL mais largo em setup máximo = dar espaço para o grande movimento se desenvolver.
+              const entryPx = continuitySignal.entryPrice;
+              const atrCont = continuitySignal.indicators?.atr || entryPx * 0.001;
+              const pipSz   = this.getPipSize(symbol, entryPx);
+              const isContinBuy = continuitySignal.action === 'BUY';
+
+              let tpMult: number;
+              let slMult: number;
+              let setupTag: string;
+
+              if (isMaxSetup) {
+                tpMult   = 5.0; slMult = 1.0;
+                setupTag = '🌟 SETUP MÁXIMO TP×5.0 SL×1.0';
+              } else if (isGoldenWindow) {
+                tpMult   = 3.5; slMult = 0.9;
+                setupTag = '🟢 JANELA DE OURO TP×3.5 SL×0.9';
+              } else if (isRecoveryZone) {
+                tpMult   = 2.5; slMult = 0.8;
+                setupTag = '🟡 RECUPERAÇÃO TP×2.5 SL×0.8';
+              } else {
+                tpMult   = 2.0; slMult = 0.8;
+                setupTag = '⚪ NEUTRO TP×2.0 SL×0.8';
+              }
+
+              // Macro contra a direção nativa → reduz TP ligeiramente (exit mais cedo, risco de spike consecutivo)
+              if (macroScore < 0) {
+                tpMult   = Math.max(tpMult * 0.75, 2.0);
+                slMult   = Math.max(slMult * 0.90, 0.6);
+                setupTag += ` | ⚠️ Macro contra: TP reduzido →×${tpMult.toFixed(2)}`;
+              }
+
+              const slDist = atrCont * slMult;
+              const tpDist = atrCont * tpMult;
+
+              continuitySignal.stopLoss        = isContinBuy ? entryPx - slDist : entryPx + slDist;
+              continuitySignal.takeProfit      = isContinBuy ? entryPx + tpDist : entryPx - tpDist;
+              continuitySignal.stopLossPips    = Math.round(slDist / pipSz);
+              continuitySignal.takeProfitPips  = Math.round(tpDist / pipSz);
+
               this.logAnalysis({
                 id: `${entryId}_continuity`,
                 timestamp: Date.now(), symbol, phase: 'decision', status: 'approved',
                 finalDecision: continuitySignal.action as 'BUY' | 'SELL' | 'HOLD',
                 consecutiveLosses: this.consecutiveLosses,
-                decisionReason: `✅ CONTINUIDADE NATURAL: ${continuitySignal.action} ${symbol} | Score=${continuityScore} (base=${totalBase} window=${windowScore}) | ${reasonParts.join(' | ')} | Conf: ${(continuityConf * 100).toFixed(1)}%`
+                decisionReason: `✅ CONTINUIDADE NATURAL: ${continuitySignal.action} ${symbol} | Score=${continuityScore} (base=${totalBase} window=${windowScore}) | ${setupTag} | SL=${continuitySignal.stopLossPips}pips TP=${continuitySignal.takeProfitPips}pips | ${reasonParts.join(' | ')} | Conf: ${(continuityConf * 100).toFixed(1)}%`
               });
               const windowTag = isMaxSetup ? '🟢🌻 SETUP MÁXIMO' : isGoldenWindow ? '🟢 JANELA DE OURO' : isRecoveryZone ? '🟡 RECUPERAÇÃO' : '⚪ NEUTRO';
-              console.log(`[MT5Bridge] 📈 CONTINUIDADE ${isCrash ? 'CRASH→BUY' : 'BOOM→SELL'}: ${symbol} | ${windowTag} | Conf: ${(continuityConf * 100).toFixed(1)}% | Score: ${continuityScore} (base=${totalBase} RSI/EMA=${technicalBase} Gir=${girassolScore} Fib=${fibScore} Macro=${macroScore} Win=${windowScore})`);
+              console.log(`[MT5Bridge] 📈 CONTINUIDADE ${isCrash ? 'CRASH→BUY' : 'BOOM→SELL'}: ${symbol} | ${windowTag} | ${setupTag} | SL=${continuitySignal.stopLossPips}pips TP=${continuitySignal.takeProfitPips}pips (R:R 1:${(tpMult/slMult).toFixed(1)}) | Conf: ${(continuityConf * 100).toFixed(1)}% | Score: ${continuityScore} (RSI/EMA=${technicalBase} Gir=${girassolScore} Fib=${fibScore} Macro=${macroScore} Win=${windowScore})`);
               return continuitySignal;
             }
           }
