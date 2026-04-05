@@ -2866,11 +2866,19 @@ export class AutoTradingScheduler {
           {
             const rsiVal  = aiConsensus.rsi  as number | undefined;
             const macdVal = aiConsensus.macd as number | undefined;
+            const bbVal   = aiConsensus.bbPosition as number | undefined;
             if (safeDirection === 'up' && rsiVal !== undefined && macdVal !== undefined) {
               if (rsiVal < 40 && macdVal < 0) {
                 console.warn(`⛔ [${operationId}] ACCU UP BLOQUEADO (dupla baixa): RSI=${rsiVal.toFixed(1)}<40 E MACD=${macdVal.toFixed(6)}<0 em ${selectedSymbol} — pressão descendente confirmada, knockout imediato provável.`);
                 this.setPhase('AGUARDANDO', `⛔ ACCU bloqueado: RSI+MACD ambos bearish em ${selectedSymbol}`, 'warning');
                 return { success: false, error: `ACCU UP bloqueado: RSI=${rsiVal.toFixed(1)} (<40) + MACD=${macdVal.toFixed(6)} (<0) — dupla confirmação de baixa, risco de knockout imediato.` };
+              }
+              // 🛡️ RSI EXTREMO: sobrecomprado severo (RSI > 80) → reversão iminente → knockout alto para ACCU UP
+              if (rsiVal > 80) {
+                const bbOver = bbVal !== undefined && bbVal > 1.0;
+                console.warn(`⛔ [${operationId}] ACCU UP BLOQUEADO (sobrecomprado extremo): RSI=${rsiVal.toFixed(1)}>80${bbOver ? ` | BB=${(bbVal! * 100).toFixed(0)}%>100%` : ''} em ${selectedSymbol} — reversão descendente iminente, knockout imediato provável.`);
+                this.setPhase('AGUARDANDO', `⛔ ACCU bloqueado: RSI sobrecomprado extremo (${rsiVal.toFixed(0)}) em ${selectedSymbol}`, 'warning');
+                return { success: false, error: `ACCU UP bloqueado: RSI=${rsiVal.toFixed(1)} (>80) — sobrecomprado extremo, alta probabilidade de reversão e knockout.` };
               }
             }
             if (safeDirection === 'down' && rsiVal !== undefined && macdVal !== undefined) {
@@ -2878,6 +2886,13 @@ export class AutoTradingScheduler {
                 console.warn(`⛔ [${operationId}] ACCU DOWN BLOQUEADO (dupla alta): RSI=${rsiVal.toFixed(1)}>60 E MACD=${macdVal.toFixed(6)}>0 em ${selectedSymbol} — pressão ascendente confirmada, knockout imediato provável.`);
                 this.setPhase('AGUARDANDO', `⛔ ACCU bloqueado: RSI+MACD ambos bullish em ${selectedSymbol}`, 'warning');
                 return { success: false, error: `ACCU DOWN bloqueado: RSI=${rsiVal.toFixed(1)} (>60) + MACD=${macdVal.toFixed(6)} (>0) — dupla confirmação de alta, risco de knockout imediato.` };
+              }
+              // 🛡️ RSI EXTREMO: sobrevendido severo (RSI < 20) → reversão iminente → knockout alto para ACCU DOWN
+              if (rsiVal < 20) {
+                const bbUnder = bbVal !== undefined && bbVal < 0.0;
+                console.warn(`⛔ [${operationId}] ACCU DOWN BLOQUEADO (sobrevendido extremo): RSI=${rsiVal.toFixed(1)}<20${bbUnder ? ` | BB=${(bbVal! * 100).toFixed(0)}%<0%` : ''} em ${selectedSymbol} — reversão ascendente iminente, knockout imediato provável.`);
+                this.setPhase('AGUARDANDO', `⛔ ACCU bloqueado: RSI sobrevendido extremo (${rsiVal.toFixed(0)}) em ${selectedSymbol}`, 'warning');
+                return { success: false, error: `ACCU DOWN bloqueado: RSI=${rsiVal.toFixed(1)} (<20) — sobrevendido extremo, alta probabilidade de reversão e knockout.` };
               }
             }
           }
@@ -3924,6 +3939,7 @@ export class AutoTradingScheduler {
         success: true,
         symbol: best!.symbol,
         aiConsensus: best!.aiConsensus,
+        aiRawScore: best!.aiRawScore,
         totalAnalyzed: allSymbolsData.length,
         top5Symbols: top5Symbols
       };
