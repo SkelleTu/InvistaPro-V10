@@ -14,11 +14,19 @@
  *
  * LÓGICA DE CLASSIFICAÇÃO DE TRADE (aplicada em conjunto com o bridge):
  *  - macroTrend  : tendência maior (lookback 100 barras) — poder direcional do mercado
- *  - tradeMode   : 'trend' | 'pullback' | 'extreme_reversal'
+ *  - tradeMode   : 'trend' | 'pullback_entry' | 'extreme_reversal' | 'counter_trend'
+ *
+ *      REGRA FUNDAMENTAL: Mercado em alta → só BUY. Mercado em baixa → só SELL.
+ *      O melhor momento de comprar numa alta é na retração do preço até Fibonacci.
+ *
  *      trend            = sinal segue a tendência macro → TP/SL padrão
- *      pullback         = sinal contra a tendência macro → TP/SL MENORES (scalp/pullback)
- *      extreme_reversal = Girassol Extremo em zona Fibonacci 50%/61.8% na direção macro
- *                         → TP MAIOR (reversão explosiva esperada)
+ *      pullback_entry   = sinal NA DIREÇÃO DO TREND, com preço em zona Fib 50%/61.8%
+ *                         → ENTRADA PREMIUM (pullback até suporte, retomada esperada)
+ *                         → TP MAIOR (mais espaço desde o melhor ponto de entrada)
+ *      extreme_reversal = Girassol Extremo (nível 1) em zona Fib 50%/61.8% + direção macro
+ *                         → MELHOR SETUP POSSÍVEL → TP MÁXIMO
+ *      counter_trend    = sinal CONTRA a tendência macro → BLOQUEADO SEMPRE
+ *                         (ex: SELL num mercado BULLISH — nunca operar)
  *  - fibKeyZone  : preço tocando 50% ou 61.8% de retração — zona de reversão de alta prob.
  *  - pullbackDepth: profundidade do pullback em % da onda macro (0=início, 1=100% retração)
  */
@@ -38,7 +46,7 @@ export interface SyntheticGirassolResult {
   supertrend: 'BUY' | 'SELL' | 'NEUTRAL';
   // ── Classificação de trade (novos campos) ──
   macroTrend: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
-  tradeMode: 'trend' | 'pullback' | 'extreme_reversal';
+  tradeMode: 'trend' | 'pullback_entry' | 'extreme_reversal' | 'counter_trend';
   fibKeyZone: boolean;
   pullbackDepth: number;  // 0.0 – 1.0 (0.5 = 50% retração, 0.618 = 61.8%)
   extremoAtFib: boolean;  // Girassol Extremo (nível 1) disparado em 50%/61.8%
@@ -413,7 +421,7 @@ export function computeSyntheticGirassol(rawCandles: any[]): SyntheticGirassolRe
   const extremoFired = level1.signal !== 'NEUTRAL' && level1.bar <= 15;
   const extremoAtFib = extremoFired && fibKeyZone;
 
-  let tradeMode: 'trend' | 'pullback' | 'extreme_reversal' = 'trend';
+  let tradeMode: 'trend' | 'pullback_entry' | 'extreme_reversal' | 'counter_trend' = 'trend';
 
   if (bias === 'NEUTRAL' || macroTrend === 'SIDEWAYS') {
     tradeMode = 'trend';
@@ -422,26 +430,34 @@ export function computeSyntheticGirassol(rawCandles: any[]): SyntheticGirassolRe
     const macroBullish = macroTrend === 'BULLISH';
 
     if (biasBullish === macroBullish) {
-      // Sinal na direção da tendência macro
+      // Sinal NA DIREÇÃO da tendência macro — única direção permitida
       if (extremoAtFib) {
-        // Girassol Extremo bateu no Fibonacci 50%/61.8% e voltou na direção do trend → MELHOR SETUP
+        // Girassol Extremo em Fib 50%/61.8% na direção do trend → MELHOR SETUP POSSÍVEL
         tradeMode = 'extreme_reversal';
+      } else if (fibKeyZone) {
+        // Preço recuou até zona Fib (50%/61.8%) e Girassol confirma retomada do trend
+        // → Entrada premium: compramos no pullback, na direção do mercado
+        tradeMode = 'pullback_entry';
       } else {
         tradeMode = 'trend';
       }
     } else {
-      // Sinal CONTRA a tendência macro = pullback
-      // (ex: Girassol diz SELL enquanto mercado é BULLISH → scalp de pullback)
-      tradeMode = 'pullback';
+      // Sinal CONTRA a tendência macro → NUNCA operar
+      // Mercado em alta → só BUY. Mercado em baixa → só SELL.
+      // O sinal oposto indica que o preço está em pullback — aguardar o Girassol
+      // confirmar a retomada NA DIREÇÃO DO TREND para entrar.
+      tradeMode = 'counter_trend';
     }
   }
 
   // Enriquecer descrição com classificação
   const modeLabel = tradeMode === 'extreme_reversal'
-    ? '🚀 REVERSÃO EXTREMA (Girassol Extremo em Fib 50%/61.8%)'
-    : tradeMode === 'pullback'
-      ? `⬇ PULLBACK (contra tendência ${macroTrend} — alvo/stop MENOR)`
-      : `→ TENDÊNCIA (favor ${macroTrend})`;
+    ? '🚀 MELHOR SETUP: Girassol Extremo em Fib 50%/61.8% + direção do trend'
+    : tradeMode === 'pullback_entry'
+      ? `⭐ ENTRADA PREMIUM: preço recuou até Fib 50%/61.8%, Girassol confirma retomada (${macroTrend})`
+      : tradeMode === 'counter_trend'
+        ? `🚫 CONTRA-TENDÊNCIA BLOQUEADO: sinal contra ${macroTrend} — aguardar retomada`
+        : `→ TENDÊNCIA (favor ${macroTrend})`;
 
   description += ` | ${modeLabel} | Macro: ${macroTrend} | PullbackDepth: ${(pullbackDepth * 100).toFixed(0)}%${fibKeyZone ? ' ⭐ ZONA FIBO-CHAVE' : ''}`;
 

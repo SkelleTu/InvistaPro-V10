@@ -1391,7 +1391,7 @@ class MetaTraderBridge extends EventEmitter {
     timestamp: number;
     // Campos de classificação de trade (preenchidos pelo sintético ou EA)
     macroTrend?: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
-    tradeMode?: 'trend' | 'pullback' | 'extreme_reversal';
+    tradeMode?: 'trend' | 'pullback_entry' | 'extreme_reversal' | 'counter_trend';
     fibKeyZone?: boolean;
     pullbackDepth?: number;
     extremoAtFib?: boolean;
@@ -1493,7 +1493,7 @@ class MetaTraderBridge extends EventEmitter {
     action: 'BUY' | 'SELL',
     entryPrice: number,
     fibLevels?: Array<{ level: string; price: number }>,
-    tradeMode?: 'trend' | 'pullback' | 'extreme_reversal'
+    tradeMode?: 'trend' | 'pullback_entry' | 'extreme_reversal' | 'counter_trend'
   ): number {
     const lookback = Math.min(candles.length, 50);
     const recent   = candles.slice(-lookback);
@@ -1504,9 +1504,14 @@ class MetaTraderBridge extends EventEmitter {
 
     if (microRange <= 0 || entryPrice <= 0) return 0;
 
-    // Percentual do range usado como alvo, conforme classificação do trade
-    const rangePct = tradeMode === 'extreme_reversal' ? 0.60
-                   : tradeMode === 'pullback'         ? 0.25
+    // Percentual do range usado como alvo, conforme classificação do trade:
+    //  extreme_reversal : 65% — melhor setup possível, movimento explosivo esperado
+    //  pullback_entry   : 55% — entrada no pullback Fib → mais espaço até o topo
+    //  trend            : 45% — sinal na direção do trend, padrão
+    //  counter_trend    : bloqueado antes de chegar aqui; 0.20 como fallback de segurança
+    const rangePct = tradeMode === 'extreme_reversal' ? 0.65
+                   : tradeMode === 'pullback_entry'   ? 0.55
+                   : tradeMode === 'counter_trend'    ? 0.20
                    :                                   0.45; // trend ou padrão
 
     const rawTP = action === 'BUY'
@@ -1544,7 +1549,7 @@ class MetaTraderBridge extends EventEmitter {
     levelCount: number,
     extra?: {
       macroTrend?: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
-      tradeMode?: 'trend' | 'pullback' | 'extreme_reversal';
+      tradeMode?: 'trend' | 'pullback_entry' | 'extreme_reversal' | 'counter_trend';
       fibKeyZone?: boolean;
       pullbackDepth?: number;
       extremoAtFib?: boolean;
@@ -1574,7 +1579,7 @@ class MetaTraderBridge extends EventEmitter {
     bias: 'BUY' | 'SELL' | 'NEUTRAL';
     levelCount: number;
     macroTrend?: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
-    tradeMode?: 'trend' | 'pullback' | 'extreme_reversal';
+    tradeMode?: 'trend' | 'pullback_entry' | 'extreme_reversal' | 'counter_trend';
     fibKeyZone?: boolean;
     pullbackDepth?: number;
     extremoAtFib?: boolean;
@@ -2997,21 +3002,36 @@ class MetaTraderBridge extends EventEmitter {
           const reasonParts: string[] = [];
 
           // ── CAMADA 1: Técnicos RSI + EMA ─────────────────────────────────
+          // AJUSTE PARA CRASH/BOOM:
+          //   Crash BUY  : RSI alto (ex: 80-100) é NORMAL — tendência de alta entre spikes
+          //   Boom  SELL : RSI baixo (ex: 0-20) é NORMAL — tendência de queda entre spikes
+          //   Penalidade extrema (-3) → reduzida para (-1) para não bloquear entradas legítimas
           let technicalBase = 0;
           if (naturalAction === 'BUY') {
-            if (rsi < rsiOverbought - 10)    { technicalBase += 2; reasonParts.push(`RSI ${rsi.toFixed(1)} ok para BUY`); }
-            else if (rsi >= rsiOverbought)   { technicalBase -= 3; reasonParts.push(`RSI ${rsi.toFixed(1)} sobrecomprado — aguardar`); }
-            if (ema20 >= ema50)              { technicalBase += 1; reasonParts.push('EMA20≥EMA50'); }
+            if (rsi < rsiOverbought - 10) {
+              technicalBase += 2; reasonParts.push(`RSI ${rsi.toFixed(1)} ok para BUY`);
+            } else if (rsi >= rsiOverbought) {
+              technicalBase -= isCrash ? 1 : 3;
+              reasonParts.push(`RSI ${rsi.toFixed(1)} sobrecomprado${isCrash ? ' (normal em Crash — penalidade reduzida)' : ' — aguardar'}`);
+            }
+            if (ema20 >= ema50) { technicalBase += 1; reasonParts.push('EMA20≥EMA50'); }
           } else {
-            if (rsi > rsiOversold + 10)      { technicalBase += 2; reasonParts.push(`RSI ${rsi.toFixed(1)} ok para SELL`); }
-            else if (rsi <= rsiOversold)     { technicalBase -= 3; reasonParts.push(`RSI ${rsi.toFixed(1)} sobrevendido — aguardar`); }
-            if (ema20 <= ema50)              { technicalBase += 1; reasonParts.push('EMA20≤EMA50'); }
+            if (rsi > rsiOversold + 10) {
+              technicalBase += 2; reasonParts.push(`RSI ${rsi.toFixed(1)} ok para SELL`);
+            } else if (rsi <= rsiOversold) {
+              technicalBase -= !isCrash ? 1 : 3;
+              reasonParts.push(`RSI ${rsi.toFixed(1)} sobrevendido${!isCrash ? ' (normal em Boom — penalidade reduzida)' : ' — aguardar'}`);
+            }
+            if (ema20 <= ema50) { technicalBase += 1; reasonParts.push('EMA20≤EMA50'); }
           }
 
           // ── CAMADA 2: Girassol — valida se mercado está na direção nativa ─
           // Girassol alinhado = mercado já empurrando na direção nativa ✅
           // Girassol oposto   = mercado CONTRA a direção nativa ⛔
           // extremoAtFib      = Girassol em extremidade Fibonacci = setup premium
+          //
+          // AJUSTE CRASH/BOOM: Girassol oposto ao continuity = top/fundo local (oscilação normal)
+          // Penalidade reduzida de -2 para -1. Macro BEARISH/BULLISH ainda bloqueia completamente.
           const girassolCtx = _girassolForGateB; // já calculado acima
           let girassolScore = 0;
           if (girassolCtx) {
@@ -3024,8 +3044,8 @@ class MetaTraderBridge extends EventEmitter {
               const staleTag = girassolCtx.isStale ? ' [degradado]' : '';
               reasonParts.push(`🌻 Girassol ${girassolCtx.bias} ${girassolCtx.levelCount}/3${fibTag}${staleTag} — mercado na direção nativa`);
             } else if (isOpposing) {
-              girassolScore = -2;
-              reasonParts.push(`🌻 Girassol ${girassolCtx.bias} opõe direção nativa — mercado ainda não virou`);
+              girassolScore = -1; // Crash/Boom: top/fundo local é oscilação normal
+              reasonParts.push(`🌻 Girassol ${girassolCtx.bias} opõe direção nativa (top/fundo local — aguardar confirmação)`);
             } else {
               reasonParts.push('🌻 Girassol NEUTRO — sem bônus/penalidade');
             }
@@ -3338,7 +3358,8 @@ class MetaTraderBridge extends EventEmitter {
               extremoAtFib: synth.extremoAtFib,
             });
             const modeTag = synth.tradeMode === 'extreme_reversal' ? '🚀 REVERSÃO EXTREMA'
-                          : synth.tradeMode === 'pullback'         ? '⬇ PULLBACK'
+                          : synth.tradeMode === 'pullback_entry'  ? '⭐ ENTRADA PREMIUM (Fib)'
+                          : synth.tradeMode === 'counter_trend'   ? '🚫 CONTRA-TENDÊNCIA'
                           :                                          '→ TREND';
             console.log(`[MT5Bridge] 🌻⚙️ Girassol Sintético (auto) ${symbol}: ${synth.bias} (${synth.levelCount}/3) | ${modeTag} | Macro: ${synth.macroTrend} | ADX=${synth.adx.toFixed(1)} (${synth.trendStrength}) | Supertrend=${synth.supertrend}${synth.fibKeyZone ? ' ⭐ ZONA FIBO-CHAVE' : ''}${synth.extremoAtFib ? ' 🎯 EXTREMO@FIB!' : ''}`);
           }
@@ -3538,51 +3559,65 @@ class MetaTraderBridge extends EventEmitter {
       // Detecta o "poder direcional do mercado" (tendência macro) e classifica
       // o sinal atual em uma das três categorias:
       //
-      //  extreme_reversal: Girassol Extremo (nível 1) disparou em zona Fibonacci
-      //    50%/61.8% na direção do trend macro → setup de mais alta qualidade.
-      //    → Consenso IA reduzido adicionalmente (mercado VAI voltar com força)
-      //    → TP maior (reversão explosiva esperada)
-      //    → Boost extra de consenso +15%
+      //  ══════════════════════════════════════════════════════════════════
+      //  REGRA FUNDAMENTAL DE DIREÇÃO:
+      //  Mercado em alta → só BUY. Mercado em baixa → só SELL.
+      //  O melhor momento de comprar em alta é no pullback até Fibonacci.
+      //  ══════════════════════════════════════════════════════════════════
       //
-      //  trend: Sinal segue a tendência macro → comportamento padrão
+      //  counter_trend    : sinal CONTRA a tendência macro → BLOQUEADO SEMPRE
+      //                     Nunca operar contra a direção do mercado.
       //
-      //  pullback: Sinal CONTRA a tendência macro → scalp/correção
-      //    → Consenso IA AUMENTADO (+10% de cautela) — move secundário é incerto
-      //    → TP menor, SL menor
-      //    → NUNCA operar pullback profundo além de 70% (risco de reversão total)
+      //  extreme_reversal : Girassol Extremo em Fib 50%/61.8% + direção macro
+      //                     → MELHOR SETUP → Consenso +15%, threshold −10%, TP ×1.50
+      //
+      //  pullback_entry   : preço recuou até Fib 50%/61.8%, Girassol confirma retomada
+      //                     → ENTRADA PREMIUM → Consenso +8%, threshold −5%, TP ×1.25
+      //
+      //  trend            : sinal segue a tendência macro → comportamento padrão
       // ══════════════════════════════════════════════════════════════════
       const tradeMode = girassolLive?.tradeMode ?? 'trend';
       const macroTrend = girassolLive?.macroTrend ?? 'SIDEWAYS';
       const pullbackDepth = girassolLive?.pullbackDepth ?? 0;
 
-      if (tradeMode === 'extreme_reversal' && girassolLive?.extremoAtFib) {
+      if (tradeMode === 'counter_trend') {
+        // BLOQUEIO TOTAL: sinal contra a tendência macro — nunca operar
+        // Para Boom/Crash: a direção nativa é ainda mais importante.
+        //   Boom tem alta nativa + spikes de QUEDA → entrar só na retomada de alta (BUY)
+        //   Crash tem queda nativa + spikes de ALTA → entrar só na retomada de queda (SELL)
+        const symUp = symbol.toUpperCase();
+        const isBoomSym  = symUp.includes('BOOM');
+        const isCrashSym = symUp.includes('CRASH');
+        let nativeHint = '';
+        if (isBoomSym)       nativeHint = ` | Boom: direção nativa é ALTA — só BUY após spike de queda`;
+        else if (isCrashSym) nativeHint = ` | Crash: direção nativa é QUEDA — só SELL após spike de alta`;
+
+        this.logAnalysis({
+          id: `${entryId}_counter_trend_blocked`,
+          timestamp: Date.now(),
+          symbol,
+          phase: 'decision',
+          status: 'rejected',
+          consecutiveLosses: this.consecutiveLosses,
+          decisionReason: `🚫 CONTRA-TENDÊNCIA BLOQUEADO: sinal ${girassolLive?.bias} oposto à tendência macro ${macroTrend}. Regra fundamental: mercado em ${macroTrend === 'BULLISH' ? 'alta → só BUY' : 'baixa → só SELL'}.${nativeHint} Aguardar Girassol confirmar retomada na direção certa.`
+        });
+        console.log(`[MT5Bridge] 🚫 ${symbol}: CONTRA-TENDÊNCIA BLOQUEADO | Macro: ${macroTrend} | Sinal: ${girassolLive?.bias} | PullbackDepth: ${(pullbackDepth * 100).toFixed(0)}%${nativeHint}`);
+        return null;
+      } else if (tradeMode === 'extreme_reversal' && girassolLive?.extremoAtFib) {
         // Melhor setup possível: Girassol Extremo no Fibonacci + direção macro
         const prevConsensus = aiConsensus;
         aiConsensus = Math.min(97, aiConsensus + 15);
-        effectiveMinConsensus = Math.max(30, effectiveMinConsensus - 10); // facilita ainda mais
-        aiReasoning = `${aiReasoning} | 🚀 REVERSÃO EXTREMA: Girassol Extremo em Fib 50%/61.8% confirma retomada da tendência ${macroTrend} — consenso ${prevConsensus.toFixed(1)}% → ${aiConsensus.toFixed(1)}%`;
-        console.log(`[MT5Bridge] 🚀 ${symbol}: REVERSÃO EXTREMA — Girassol Extremo em zona Fib-chave | Macro: ${macroTrend} | Consenso +15%: ${prevConsensus.toFixed(1)}% → ${aiConsensus.toFixed(1)}% | Threshold: ${effectiveMinConsensus}%`);
-      } else if (tradeMode === 'pullback') {
-        // Operação de pullback: move contra o trend macro → mais cautela
-        if (pullbackDepth > 0.70) {
-          // Pullback >70% do range macro = reversão total, não pullback → BLOQUEAR
-          this.logAnalysis({
-            id: `${entryId}_pullback_deep`,
-            timestamp: Date.now(),
-            symbol,
-            phase: 'decision',
-            status: 'rejected',
-            consecutiveLosses: this.consecutiveLosses,
-            decisionReason: `🚫 PULLBACK PROFUNDO (${(pullbackDepth * 100).toFixed(0)}% > 70%) — profundidade excessiva, risco de reversão total. Aguardar confirmação de novo trend.`
-          });
-          console.log(`[MT5Bridge] 🚫 ${symbol}: Pullback bloqueado — profundidade ${(pullbackDepth * 100).toFixed(0)}% > 70% (reversão total provável)`);
-          return null;
-        }
-        // Pullback dentro do limite: aumentar threshold de consenso (+10% de cautela)
-        const prevThreshold = effectiveMinConsensus;
-        effectiveMinConsensus = Math.min(this.MIN_AI_CONSENSUS, effectiveMinConsensus + 10);
-        aiReasoning = `${aiReasoning} | ⬇ PULLBACK ${(pullbackDepth * 100).toFixed(0)}% contra tendência ${macroTrend} — alvo/stop menores, threshold +10% cautela`;
-        console.log(`[MT5Bridge] ⬇ ${symbol}: PULLBACK ${(pullbackDepth * 100).toFixed(0)}% | Macro: ${macroTrend} | Threshold cautela: ${prevThreshold}% → ${effectiveMinConsensus}%`);
+        effectiveMinConsensus = Math.max(30, effectiveMinConsensus - 10);
+        aiReasoning = `${aiReasoning} | 🚀 MELHOR SETUP: Girassol Extremo em Fib 50%/61.8% + Macro ${macroTrend} — entrada no fundo do pullback, retomada explosiva esperada | Consenso ${prevConsensus.toFixed(1)}% → ${aiConsensus.toFixed(1)}%`;
+        console.log(`[MT5Bridge] 🚀 ${symbol}: MELHOR SETUP — Girassol Extremo em Fib 50%/61.8% + Macro ${macroTrend} | Consenso +15%: ${prevConsensus.toFixed(1)}% → ${aiConsensus.toFixed(1)}% | Threshold: ${effectiveMinConsensus}%`);
+      } else if (tradeMode === 'pullback_entry') {
+        // Entrada premium: preço recuou até Fib 50%/61.8%, Girassol confirma retomada
+        // → Melhor ponto de entrada em trend, TP maior porque compramos no suporte
+        const prevConsensus = aiConsensus;
+        aiConsensus = Math.min(95, aiConsensus + 8);
+        effectiveMinConsensus = Math.max(35, effectiveMinConsensus - 5);
+        aiReasoning = `${aiReasoning} | ⭐ ENTRADA PREMIUM: preço recuou até Fib 50%/61.8%, Girassol confirma retomada de ${macroTrend} — comprando no suporte, alvos maiores | Consenso ${prevConsensus.toFixed(1)}% → ${aiConsensus.toFixed(1)}%`;
+        console.log(`[MT5Bridge] ⭐ ${symbol}: ENTRADA PREMIUM — preço no pullback Fib | Macro: ${macroTrend} | PullbackDepth: ${(pullbackDepth * 100).toFixed(0)}% | Consenso +8%: ${prevConsensus.toFixed(1)}% → ${aiConsensus.toFixed(1)}%`);
       } else if (tradeMode === 'trend' && macroTrend !== 'SIDEWAYS') {
         aiReasoning = `${aiReasoning} | → TREND ${macroTrend}: sinal na direção do poder direcional do mercado`;
       }
@@ -3797,32 +3832,58 @@ class MetaTraderBridge extends EventEmitter {
         : marketData;
       const signal = this.fuseSignals(symbol, signals, marketDataForFuse, aiReasoning, finalConfidence);
 
-      // ── Ajuste de TP/SL por modo de trade (pullback / trend / extreme_reversal) ──
+      // ── Ajuste de TP/SL por modo de trade e perfil do ativo ──
       // Após fuseSignals() calcular o TP/SL padrão, aplica escala adicional
       // baseada na classificação do trade para garantir alvos racionais.
+      //
+      // REGRA POR ATIVO:
+      //  Boom (alta nativa + spikes de queda): comprar após spike, TP no próximo topo
+      //  Crash (queda nativa + spikes de alta): vender após spike, TP no próximo fundo
+      //  Jump/outros: segue Fibonacci e tendência macro detectada
       if (signal.action !== 'HOLD' && !aiOnlyMode) {
         const entryPx  = signal.entryPrice ?? marketData[marketData.length - 1]?.close;
         const slDist   = Math.abs(signal.stopLoss - entryPx);
         const tpDist   = Math.abs(signal.takeProfit - entryPx);
         const isBuy    = signal.action === 'BUY';
 
-        if (tradeMode === 'pullback' && slDist > 0 && tpDist > 0) {
-          // Pullback: comprimir TP para 50% do padrão, SL para 60%
-          const newSlDist = slDist * 0.60;
-          const newTpDist = tpDist * 0.50;
-          signal.stopLoss    = isBuy ? entryPx - newSlDist : entryPx + newSlDist;
-          signal.takeProfit  = isBuy ? entryPx + newTpDist : entryPx - newTpDist;
-          signal.stopLossPips   = Math.round(newSlDist / this.getPipSize(symbol, entryPx));
+        const symUpper  = symbol.toUpperCase();
+        const isBoomAsset  = symUpper.includes('BOOM');
+        const isCrashAsset = symUpper.includes('CRASH');
+        const isJumpAsset  = symUpper.includes('JUMP');
+
+        // Para Boom/Crash, o pullback É o spike — a retomada após o spike é a entrada
+        // natural, então o TP deve respeitar o comportamento nativo do ativo.
+        // Boom: após spike de queda → BUY até novo topo → TP mais amplo (ativo sobe nativamente)
+        // Crash: após spike de alta → SELL até novo fundo → TP mais amplo (ativo cai nativamente)
+        const nativeAssetBoost = (isBoomAsset && isBuy) || (isCrashAsset && !isBuy)
+          ? 1.20  // operando na direção nativa do ativo → +20% no TP
+          : 1.00; // Jump ou direção não-nativa → sem boost extra de ativo
+
+        if (tradeMode === 'pullback_entry' && slDist > 0 && tpDist > 0) {
+          // Entrada premium: preço no pullback Fib → mais espaço desde o suporte
+          // TP×1.25 padrão, +boost de ativo se Boom/Crash na direção certa
+          const tpMult = 1.25 * nativeAssetBoost;
+          const newTpDist = tpDist * tpMult;
+          signal.takeProfit     = isBuy ? entryPx + newTpDist : entryPx - newTpDist;
           signal.takeProfitPips = Math.round(newTpDist / this.getPipSize(symbol, entryPx));
-          signal.reason = `[PULLBACK ${(pullbackDepth * 100).toFixed(0)}% vs ${macroTrend}] ${signal.reason}`;
-          console.log(`[MT5Bridge] ⬇ ${symbol}: TP/SL PULLBACK comprimidos — SL×0.60, TP×0.50 | Profundidade: ${(pullbackDepth * 100).toFixed(0)}% | Macro: ${macroTrend}`);
+          signal.reason = `[⭐ ENTRADA PREMIUM Fib ${macroTrend} | TP×${tpMult.toFixed(2)}] ${signal.reason}`;
+          console.log(`[MT5Bridge] ⭐ ${symbol}: ENTRADA PREMIUM — TP×${tpMult.toFixed(2)} (base×1.25 ${nativeAssetBoost > 1 ? `+ boost nativo ${isBoomAsset ? 'BOOM' : 'CRASH'}×${nativeAssetBoost}` : ''}) | Macro: ${macroTrend} | Fib: ${(pullbackDepth * 100).toFixed(0)}%`);
         } else if (tradeMode === 'extreme_reversal' && slDist > 0 && tpDist > 0) {
-          // Reversão extrema: expandir TP para 130% do padrão (maior alvo esperado)
-          const newTpDist = tpDist * 1.30;
-          signal.takeProfit  = isBuy ? entryPx + newTpDist : entryPx - newTpDist;
+          // Melhor setup possível: Girassol Extremo em Fib + direção macro
+          // TP×1.50 padrão, +boost de ativo se Boom/Crash na direção certa
+          const tpMult = 1.50 * nativeAssetBoost;
+          const newTpDist = tpDist * tpMult;
+          signal.takeProfit     = isBuy ? entryPx + newTpDist : entryPx - newTpDist;
           signal.takeProfitPips = Math.round(newTpDist / this.getPipSize(symbol, entryPx));
-          signal.reason = `[REVERSÃO EXTREMA Fib ${macroTrend}] ${signal.reason}`;
-          console.log(`[MT5Bridge] 🚀 ${symbol}: TP EXPANDIDO para REVERSÃO EXTREMA — TP×1.30 | Macro: ${macroTrend} | Extremo@Fib: ${girassolLive?.extremoAtFib}`);
+          signal.reason = `[🚀 MELHOR SETUP Fib 50/61.8% ${macroTrend} | TP×${tpMult.toFixed(2)}] ${signal.reason}`;
+          console.log(`[MT5Bridge] 🚀 ${symbol}: MELHOR SETUP — TP×${tpMult.toFixed(2)} (base×1.50 ${nativeAssetBoost > 1 ? `+ boost nativo ${isBoomAsset ? 'BOOM' : 'CRASH'}×${nativeAssetBoost}` : ''}) | Macro: ${macroTrend} | Extremo@Fib: ${girassolLive?.extremoAtFib}`);
+        } else if (tradeMode === 'trend' && nativeAssetBoost > 1 && slDist > 0 && tpDist > 0) {
+          // Trend normal mas na direção nativa do ativo (Boom/Crash) → boost moderado
+          const newTpDist = tpDist * 1.15;
+          signal.takeProfit     = isBuy ? entryPx + newTpDist : entryPx - newTpDist;
+          signal.takeProfitPips = Math.round(newTpDist / this.getPipSize(symbol, entryPx));
+          signal.reason = `[→ TREND ${macroTrend} direção nativa | TP×1.15] ${signal.reason}`;
+          console.log(`[MT5Bridge] → ${symbol}: TREND na direção nativa ${isBoomAsset ? 'BOOM(BUY)' : 'CRASH(SELL)'} — TP×1.15`);
         }
       }
 
@@ -5219,10 +5280,15 @@ class MetaTraderBridge extends EventEmitter {
               console.log(`[MONITOR] 🟢🌻 Janela de ouro protege: Girassol 2/3 vs ${positionDir} nativo mas iminência ${exitSpikeImminence}% (baixa) — mantendo posição | Lucro: +$${profit.toFixed(2)}`);
               base.narrative += `🟡 Girassol 2/3 oposto mas janela de ouro ativa — aguardando. `;
             } else {
-              if (exitTradeMode === 'pullback') {
-                minProfitForGirassolExit = Math.max(1.50, ctx.maxFavorableExcursion * 0.45);
-              } else {
+              if (exitTradeMode === 'extreme_reversal') {
+                // Melhor setup — aguardar mais antes de sair
+                minProfitForGirassolExit = Math.max(3.50, ctx.maxFavorableExcursion * 0.70);
+              } else if (exitTradeMode === 'pullback_entry') {
+                // Entrada premium (pullback Fib) — aguardar mais, estamos no melhor preço
                 minProfitForGirassolExit = Math.max(2.50, ctx.maxFavorableExcursion * 0.60);
+              } else {
+                // Trend normal ou desconhecido — padrão
+                minProfitForGirassolExit = Math.max(2.00, ctx.maxFavorableExcursion * 0.55);
               }
               if (profit >= minProfitForGirassolExit) {
                 console.log(`[MONITOR] 🌻 SAÍDA GIRASSOL 2/3 #${position.ticket}: ${positionDir} vs ${girassolForExit.bias} | Modo: ${exitTradeMode} | Iminência: ${exitSpikeImminence}% | Lucro: +$${profit.toFixed(2)} ≥ mín $${minProfitForGirassolExit.toFixed(2)}`);
