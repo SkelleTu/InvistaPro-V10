@@ -17,6 +17,7 @@ import Frenetico9TokensPanel from "@/components/frenetico-9tokens-panel";
 import LearningDashboard from "@/components/learning-dashboard";
 import TradingConfigPanel from "@/components/trading-config-panel";
 import ModulosPanel from "@/components/modulos-panel";
+import ModalityModuleSelector from "@/components/modality-module-selector";
 import { 
   TrendingUp, 
   TrendingDown, 
@@ -2745,6 +2746,8 @@ export default function TradingSystemPage() {
                                       </div>
                                       <p className="text-xs text-muted-foreground leading-relaxed">{modality.aiStrategy}</p>
                                     </div>
+                                    {/* Seleção de Módulos (slots de cópia simultânea) */}
+                                    <ModalityModuleSelector modalityId={modality.id} />
                                   </div>
                                 )}
 
