@@ -50,7 +50,7 @@ export default function ModalityModuleSelector({ modalityId }: Props) {
 
   const { data: savedConfigs = [], isLoading } = useQuery<ModuleSlotConfig[]>({
     queryKey: ["/api/trading/module-configs", modalityId],
-    queryFn: () => apiRequest(`/api/trading/module-configs/${modalityId}`).then(r => r.json()),
+    queryFn: () => apiRequest(`/api/trading/module-configs/${modalityId}`).then(r => r.json()).then((d: any) => Array.isArray(d) ? d : (d?.slotConfigs ?? [])),
   });
 
   const savedKey = JSON.stringify(savedConfigs);

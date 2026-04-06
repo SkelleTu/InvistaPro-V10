@@ -2699,7 +2699,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // GET /api/trading/module-configs — retorna todas as configs de módulos por modalidade
   app.get('/api/trading/module-configs', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
     const userId = req.user.id;
-    const configs = await storage.getModalityModuleConfigs(userId);
+    const configs = await dbStorage.getModalityModuleConfigs(userId);
     const result: Record<string, any> = {};
     for (const c of configs) {
       try { result[c.modality] = JSON.parse(c.slotConfigs); } catch { result[c.modality] = []; }
@@ -2711,7 +2711,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/trading/module-configs/:modality', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
     const userId = req.user.id;
     const { modality } = req.params;
-    const config = await storage.getModalityModuleConfig(userId, modality);
+    const config = await dbStorage.getModalityModuleConfig(userId, modality);
     const slotConfigs = config ? JSON.parse(config.slotConfigs) : [];
     res.json({ modality, slotConfigs });
   }));
@@ -2722,7 +2722,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const { modality } = req.params;
     const { slotConfigs } = req.body;
     if (!Array.isArray(slotConfigs)) return res.status(400).json({ message: 'slotConfigs deve ser um array' });
-    const saved = await storage.upsertModalityModuleConfig(userId, modality, slotConfigs);
+    const saved = await dbStorage.upsertModalityModuleConfig(userId, modality, slotConfigs);
     res.json({ success: true, modality, slotConfigs: JSON.parse(saved.slotConfigs) });
   }));
 
@@ -2755,7 +2755,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
 
     // Verificar se há módulos configurados
-    const config = await storage.getModalityModuleConfig(userId, modality);
+    const config = await dbStorage.getModalityModuleConfig(userId, modality);
     const slotConfigs = config ? JSON.parse(config.slotConfigs) : [];
     const activeModules = slotConfigs.filter((s: any) => s.enabled);
     if (activeModules.length === 0) {
@@ -2788,8 +2788,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // GET /api/trading/module-overview — visão geral de todos os slots
   app.get('/api/trading/module-overview', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
     const userId = req.user.id;
-    const allTokens = await storage.getAllDerivTokens(userId);
-    const allModuleConfigs = await storage.getModalityModuleConfigs(userId);
+    const allTokens = await dbStorage.getAllDerivTokens(userId);
+    const allModuleConfigs = await dbStorage.getModalityModuleConfigs(userId);
 
     // Construir mapa de quais modalidades cada slot serve
     const slotModalityMap: Record<number, string[]> = {};
