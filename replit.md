@@ -1,5 +1,17 @@
 # InvestaPRO - Sistema de Renda Variável + MetaTrader Integration
 
+## ✅ ABA BLOQUEIO IMPLEMENTADA — Abril 2026
+
+### Tab "Bloqueio" (ativos bloqueados) — `client/src/pages/trading-system.tsx`
+- **TabsContent `value="blocked"`** adicionado após o tab de Módulos
+- **Lista atual de bloqueios**: badges vermelhos clicáveis (clique = remover bloqueio)
+- **Campo de texto** com suporte a Enter para adicionar símbolos personalizados
+- **Botão "Bloquear"** com leitura de input via `data-testid`
+- **Grid de atalhos**: 15 símbolos Deriv comuns (R_10→R_100, 1HZ, JD) com toggle visual
+- **Contador de bloqueios**, "Limpar tudo", e "Salvar Bloqueios" com mutation ao backend
+- **Aviso visual** de impacto imediato (AlertTriangle amber)
+- Estado gerenciado via `blockedAssetsList` (useState) já existente no componente
+
 ## 🎰 GATE DE EV + BURST GUARD CORRIGIDO — Março 2026
 
 ### Melhorias no Sistema DIGITMATCH:

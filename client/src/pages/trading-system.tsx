@@ -16,6 +16,7 @@ import DerivTokenSettings from "@/components/deriv-token-settings";
 import Frenetico9TokensPanel from "@/components/frenetico-9tokens-panel";
 import LearningDashboard from "@/components/learning-dashboard";
 import TradingConfigPanel from "@/components/trading-config-panel";
+import ModulosPanel from "@/components/modulos-panel";
 import { 
   TrendingUp, 
   TrendingDown, 
@@ -1708,6 +1709,9 @@ export default function TradingSystemPage() {
             <TabsList className="flex w-max min-w-full gap-0">
               <TabsTrigger value="dashboard" className="flex-1 min-w-[80px] text-xs sm:text-sm">Dashboard</TabsTrigger>
               <TabsTrigger value="config" className="flex-1 min-w-[90px] text-xs sm:text-sm">Configurações</TabsTrigger>
+              <TabsTrigger value="modulos" className="flex-1 min-w-[80px] text-xs sm:text-sm" data-testid="tab-modulos">
+                <span className="flex items-center gap-1">⚡ Módulos</span>
+              </TabsTrigger>
               <TabsTrigger value="blocked" className="flex-1 min-w-[75px] text-xs sm:text-sm">Bloqueio</TabsTrigger>
               <TabsTrigger value="operations" className="flex-1 min-w-[80px] text-xs sm:text-sm">Operações</TabsTrigger>
               <TabsTrigger value="ai-analysis" className="flex-1 min-w-[90px] text-xs sm:text-sm">IA e Análises</TabsTrigger>
@@ -3805,6 +3809,139 @@ export default function TradingSystemPage() {
                       <Infinity className="h-4 w-4 mr-2" />
                       Sem Limites — Operação Contínua
                     </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Módulos Tab — Sistema de Cópia Simultânea */}
+          <TabsContent value="modulos" className="space-y-6">
+            <ModulosPanel />
+          </TabsContent>
+
+          {/* Bloqueio Tab — Ativos bloqueados */}
+          <TabsContent value="blocked" className="space-y-6">
+            <Card className="border-red-200 dark:border-red-900/50">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-red-700 dark:text-red-300">
+                  <XCircle className="h-5 w-5" />
+                  Ativos Bloqueados
+                </CardTitle>
+                <CardDescription>
+                  Ativos nesta lista são excluídos de todas as operações automáticas. Use para evitar símbolos com histórico ruim ou em manutenção.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Lista atual */}
+                <div>
+                  <Label className="text-sm font-semibold mb-2 block">Ativos bloqueados atualmente</Label>
+                  {blockedAssetsList.length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-border p-6 text-center text-muted-foreground text-sm">
+                      Nenhum ativo bloqueado — o sistema está livre para operar em todos os símbolos disponíveis.
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      {blockedAssetsList.map(sym => (
+                        <Badge key={sym} variant="destructive" className="flex items-center gap-1 px-2 py-1 cursor-pointer"
+                          onClick={() => setBlockedAssetsList(prev => prev.filter(s => s !== sym))}
+                          data-testid={`blocked-asset-${sym}`}>
+                          <XCircle className="w-3 h-3" />
+                          {sym}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Adicionar ativo */}
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Ex: R_100, JD50, 1HZ100V..."
+                    className="flex-1"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        const val = (e.target as HTMLInputElement).value.trim().toUpperCase();
+                        if (val && !blockedAssetsList.includes(val)) {
+                          setBlockedAssetsList(prev => [...prev, val]);
+                          (e.target as HTMLInputElement).value = '';
+                        }
+                      }
+                    }}
+                    data-testid="input-block-asset"
+                  />
+                  <Button
+                    variant="outline"
+                    className="border-red-500/50 text-red-400 hover:bg-red-500/10"
+                    onClick={() => {
+                      const input = document.querySelector('[data-testid="input-block-asset"]') as HTMLInputElement;
+                      const val = input?.value?.trim().toUpperCase();
+                      if (val && !blockedAssetsList.includes(val)) {
+                        setBlockedAssetsList(prev => [...prev, val]);
+                        if (input) input.value = '';
+                      }
+                    }}
+                    data-testid="btn-add-blocked-asset"
+                  >
+                    <XCircle className="w-4 h-4 mr-1" />
+                    Bloquear
+                  </Button>
+                </div>
+
+                {/* Sugestões de ativos comuns */}
+                <div>
+                  <Label className="text-xs text-muted-foreground mb-1.5 block">Ativos disponíveis para bloquear:</Label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {['R_10', 'R_25', 'R_50', 'R_75', 'R_100', '1HZ10V', '1HZ25V', '1HZ50V', '1HZ75V', '1HZ100V', 'JD10', 'JD25', 'JD50', 'JD75', 'JD100'].map(sym => (
+                      <button
+                        key={sym}
+                        className={`text-xs px-2 py-1 rounded-full border transition-all ${blockedAssetsList.includes(sym) ? 'bg-red-500/20 border-red-500/50 text-red-300' : 'border-border hover:border-muted-foreground/50 text-muted-foreground hover:text-foreground'}`}
+                        onClick={() => {
+                          if (blockedAssetsList.includes(sym)) {
+                            setBlockedAssetsList(prev => prev.filter(s => s !== sym));
+                          } else {
+                            setBlockedAssetsList(prev => [...prev, sym]);
+                          }
+                        }}
+                        data-testid={`toggle-block-${sym}`}
+                      >
+                        {blockedAssetsList.includes(sym) ? '🚫' : '+'} {sym}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <Separator />
+
+                {/* Salvar */}
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-muted-foreground">
+                    {blockedAssetsList.length} ativo{blockedAssetsList.length !== 1 ? 's' : ''} bloqueado{blockedAssetsList.length !== 1 ? 's' : ''}
+                  </p>
+                  <div className="flex gap-2">
+                    <Button variant="ghost" size="sm" onClick={() => setBlockedAssetsList([])} data-testid="btn-clear-blocked">
+                      Limpar tudo
+                    </Button>
+                    <Button
+                      size="sm"
+                      className="bg-red-600 hover:bg-red-700 text-white"
+                      onClick={() => saveBlockedAssetsMutation.mutate(blockedAssetsList)}
+                      disabled={saveBlockedAssetsMutation.isPending}
+                      data-testid="btn-save-blocked"
+                    >
+                      {saveBlockedAssetsMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : <CheckCircle2 className="w-3.5 h-3.5 mr-1" />}
+                      Salvar Bloqueios
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3">
+                  <div className="flex items-start gap-2 text-xs">
+                    <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 flex-shrink-0" />
+                    <div className="text-muted-foreground">
+                      <strong className="text-foreground">Impacto imediato:</strong> Os ativos bloqueados são excluídos na próxima análise de ciclo.
+                      O sistema automático nunca operará em ativos desta lista enquanto o bloqueio estiver ativo.
+                    </div>
                   </div>
                 </div>
               </CardContent>

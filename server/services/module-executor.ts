@@ -333,23 +333,105 @@ export async function checkRajadaConditions(userId: string, modality: string): P
         },
       };
     } else if (RISE_FALL_MODALITIES.has(modality)) {
-      // Para Rise/Fall: volatilidade + trend alignment
-      const score = Math.floor(Math.random() * 30 + 55); // placeholder — real: usar supremeAnalyzer
-      return {
-        ready: score >= 60,
-        score,
-        reason: score >= 60 ? 'Tendência alinhada para operação' : 'Aguardando sinal mais forte de tendência',
-        details: { trendScore: score },
-      };
+      // Para Rise/Fall: usar SupremeMarketAnalyzer — convergência de timeframes + oportunidade
+      try {
+        const { supremeAnalyzer } = await import('./supreme-market-analyzer');
+
+        const symbol = 'R_100';
+        const analysis = supremeAnalyzer.getLatestAnalysis(symbol);
+
+        if (!analysis) {
+          return { ready: false, score: 0, reason: 'Aguardando dados de mercado (supremeAnalyzer ainda inicializando)', details: {} };
+        }
+
+        // Convergência de timeframes: alta convergência = sinal forte
+        const convergenceScore = analysis.multiTimeframe.convergence; // 0-100
+
+        // Oportunidade global: score já calculado pelo motor
+        const opportunityScore = analysis.opportunityScore; // 0-100
+
+        // Regime favorável para Rise/Fall: strong_trend ou weak_trend
+        const regimeFavorable = ['strong_trend', 'weak_trend'].includes(analysis.regime);
+        const regimeBonus = regimeFavorable ? 15 : -10;
+
+        // Direção definida (não sideways)
+        const hasDirection = analysis.multiTimeframe.dominantTrend !== 'sideways';
+        const directionBonus = hasDirection ? 10 : -5;
+
+        const overallScore = Math.min(100, Math.max(0,
+          Math.round((convergenceScore * 0.45) + (opportunityScore * 0.45) + regimeBonus + directionBonus)
+        ));
+
+        const ready = overallScore >= 60;
+        return {
+          ready,
+          score: overallScore,
+          reason: ready
+            ? `Tendência alinhada — Convergência: ${Math.round(convergenceScore)}% | Oportunidade: ${Math.round(opportunityScore)}% | Regime: ${analysis.regime}`
+            : `Aguardando alinhamento (score ${overallScore}/100 | mín 60) — Regime: ${analysis.regime}`,
+          details: {
+            convergenceScore: Math.round(convergenceScore),
+            opportunityScore: Math.round(opportunityScore),
+            regime: analysis.regime,
+            dominantTrend: analysis.multiTimeframe.dominantTrend,
+            regimeFavorable,
+          },
+        };
+      } catch (e: any) {
+        return { ready: false, score: 0, reason: `Erro ao analisar Rise/Fall: ${e?.message}`, details: {} };
+      }
     } else if (modality === 'accumulator') {
-      // Para acumulador: baixa volatilidade + crescimento estável
-      const score = Math.floor(Math.random() * 25 + 60);
-      return {
-        ready: score >= 65,
-        score,
-        reason: score >= 65 ? 'Volatilidade adequada para acumulador' : 'Volatilidade elevada — aguardando janela segura',
-        details: { volatilityScore: score },
-      };
+      // Para acumulador: baixa volatilidade + regime ranging/calm + Hurst ~0.5
+      try {
+        const { supremeAnalyzer } = await import('./supreme-market-analyzer');
+
+        const symbol = 'R_100';
+        const analysis = supremeAnalyzer.getLatestAnalysis(symbol);
+
+        if (!analysis) {
+          return { ready: false, score: 0, reason: 'Aguardando dados de mercado (supremeAnalyzer ainda inicializando)', details: {} };
+        }
+
+        // Regime ideal para acumulador: ranging ou calm
+        const regimeIdeal = ['ranging', 'calm'].includes(analysis.regime);
+        const regimeScore = regimeIdeal ? 85 : analysis.regime === 'weak_trend' ? 60 : 30;
+
+        // Volatilidade: zScore baixo = boa janela para acumulador (preço estável)
+        const zVol = Math.abs(analysis.statistics.zScoreVolatility);
+        const volatilityScore = zVol < 0.5 ? 90 : zVol < 1.0 ? 75 : zVol < 2.0 ? 55 : 25;
+
+        // Hurst: ~0.5 = random walk = ideal para acumulador sobreviver muitos ticks
+        const hurst = analysis.statistics.hurstExponent;
+        const hurstScore = Math.abs(hurst - 0.5) < 0.15 ? 80 : Math.abs(hurst - 0.5) < 0.25 ? 60 : 40;
+
+        // Risk level from adaptive params
+        const accuRisk = analysis.adaptiveParams?.accumulator?.riskLevel;
+        const riskBonus = accuRisk === 'low' ? 10 : accuRisk === 'medium' ? 0 : -15;
+
+        const overallScore = Math.min(100, Math.max(0,
+          Math.round((regimeScore * 0.40) + (volatilityScore * 0.35) + (hurstScore * 0.25) + riskBonus)
+        ));
+
+        const ready = overallScore >= 65;
+        return {
+          ready,
+          score: overallScore,
+          reason: ready
+            ? `Volatilidade adequada — Regime: ${analysis.regime} | zVol: ${zVol.toFixed(2)} | Hurst: ${hurst.toFixed(2)} | Risco: ${accuRisk || 'N/A'}`
+            : `Condições desfavoráveis para acumulador (score ${overallScore}/100 | mín 65) — Regime: ${analysis.regime}`,
+          details: {
+            regime: analysis.regime,
+            regimeScore: Math.round(regimeScore),
+            volatilityScore: Math.round(volatilityScore),
+            hurstScore: Math.round(hurstScore),
+            zScoreVolatility: Number(zVol.toFixed(3)),
+            hurstExponent: Number(hurst.toFixed(3)),
+            accuRisk: accuRisk || 'N/A',
+          },
+        };
+      } catch (e: any) {
+        return { ready: false, score: 0, reason: `Erro ao analisar Acumulador: ${e?.message}`, details: {} };
+      }
     }
 
     return { ready: false, score: 0, reason: 'Modalidade não reconhecida', details: {} };
