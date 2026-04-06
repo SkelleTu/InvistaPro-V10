@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -11,7 +11,8 @@ import {
   Zap, Key, Trash2, RefreshCw, PlayCircle,
   CheckCircle2, AlertCircle, Loader2, Eye, EyeOff,
   TrendingUp, DollarSign, Flame, Snowflake, Circle,
-  BarChart2, History, Target, Layers, Settings, Link, Minus, Plus
+  BarChart2, History, Target, Layers, Settings, Link, Minus, Plus,
+  Clock, XCircle, Crosshair
 } from "lucide-react";
 
 type StakeMode = "uniform" | "kelly" | "aggressive";
@@ -189,6 +190,31 @@ export default function Frenetico9TokensPanel({ syncedDigitCount, syncedStakeMod
     try { localStorage.setItem("burst_own_config", String(val)); } catch {}
   }
 
+  // ── Estado de espera inteligente da Rajada ──────────────────────────────────
+  const [isWaiting, setIsWaiting] = useState(false);
+  const [waitingStatus, setWaitingStatus] = useState<{
+    reason: string;
+    alignmentScore: number;
+    hotDigitCount: number;
+    entryQuality: string;
+    checks: number;
+    symbol: string;
+  } | null>(null);
+  const waitIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const waitingFiringRef = useRef(false);
+
+  const stopWaiting = useCallback(() => {
+    if (waitIntervalRef.current) {
+      clearInterval(waitIntervalRef.current);
+      waitIntervalRef.current = null;
+    }
+    setIsWaiting(false);
+    setWaitingStatus(null);
+    waitingFiringRef.current = false;
+  }, []);
+
+  useEffect(() => () => stopWaiting(), [stopWaiting]);
+
   const { data: slotsData, isLoading, refetch } = useQuery<{ slots: SlotInfo[]; totalConfigured: number }>({
     queryKey: ["/api/trading/deriv-tokens/slots"],
     refetchInterval: 10000,
@@ -275,20 +301,81 @@ export default function Frenetico9TokensPanel({ syncedDigitCount, syncedStakeMod
       return res.json();
     },
     onSuccess: (data) => {
+      stopWaiting();
       const stats = data.burstStats;
       const evSign = stats?.expectedProfit >= 0 ? "+" : "";
       const modeLabel = effectiveStakeMode === 'kelly' ? 'KELLY (IA)' : 'UNIFORME';
-      toast({
-        title: `⚡ Rajada ${modeLabel}! ${data.openedContracts}/${data.totalSlots} contratos`,
-        description: `${data.targetSymbol} · $${stats?.totalStaked?.toFixed(2)} investido · EV: ${evSign}$${stats?.expectedProfit?.toFixed(2)} (${stats?.expectedROI?.toFixed(1)}% ROI) · ${data.burstDurationMs}ms`,
-      });
+      if (data.blockedByEVGate) {
+        toast({
+          title: "⏳ Momento ainda não ideal",
+          description: data.evGateReason ?? "Distribuição de dígitos ainda uniforme — aguardando skew.",
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: `⚡ Rajada ${modeLabel} disparada! ${data.openedContracts}/${data.totalSlots} contratos`,
+          description: `${data.targetSymbol} · $${stats?.totalStaked?.toFixed(2)} investido · EV: ${evSign}$${stats?.expectedProfit?.toFixed(2)} (${stats?.expectedROI?.toFixed(1)}% ROI) · ${data.burstDurationMs}ms`,
+        });
+      }
       queryClient.invalidateQueries({ queryKey: ["/api/trading/frenetico-9tokens/history"] });
       refetchPreview();
     },
     onError: (err: any) => {
+      stopWaiting();
       toast({ title: "Erro na rajada", description: err.message, variant: "destructive" });
     },
   });
+
+  // ── Espera inteligente: monitora condições e dispara quando o momento chegar ─
+  const startSmartWaiting = useCallback(() => {
+    if (isWaiting) {
+      stopWaiting();
+      return;
+    }
+    setIsWaiting(true);
+    waitingFiringRef.current = false;
+    let checks = 0;
+
+    const poll = async () => {
+      if (waitingFiringRef.current) return;
+      try {
+        const res = await fetch(
+          `/api/trading/frenetico-9tokens/conditions?nDigits=${effectiveDigitCount}`,
+          { credentials: "include" }
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        checks++;
+        setWaitingStatus({
+          reason: data.reason,
+          alignmentScore: data.alignmentScore ?? 0,
+          hotDigitCount: data.hotDigitCount ?? 0,
+          entryQuality: data.entryQuality ?? "wait",
+          checks,
+          symbol: data.symbol ?? "—",
+        });
+
+        if (data.ready && !waitingFiringRef.current) {
+          waitingFiringRef.current = true;
+          if (waitIntervalRef.current) {
+            clearInterval(waitIntervalRef.current);
+            waitIntervalRef.current = null;
+          }
+          setIsWaiting(false);
+          toast({
+            title: "🎯 Momento ideal detectado! Disparando rajada...",
+            description: data.reason,
+          });
+          burstMutation.mutate();
+        }
+      } catch {
+        // silencioso — tenta de novo na próxima iteração
+      }
+    };
+
+    poll();
+    waitIntervalRef.current = setInterval(poll, 3000);
+  }, [isWaiting, stopWaiting, effectiveDigitCount, burstMutation, toast]);
 
   const configuredSlots = slotsData?.slots ?? [];
   const getSlotInfo = (idx: number) => configuredSlots.find(s => s.slotIndex === idx);
@@ -371,17 +458,23 @@ export default function Frenetico9TokensPanel({ syncedDigitCount, syncedStakeMod
                   <Target className="w-3.5 h-3.5" />
                   <span className="flex-1">Projeção para próxima rajada ({effectiveStakeMode})</span>
                   <Button
-                    onClick={() => burstMutation.mutate()}
+                    onClick={startSmartWaiting}
                     disabled={burstMutation.isPending || totalConfigured === 0}
-                    className="h-6 px-2.5 text-[10px] bg-violet-600 hover:bg-violet-700 text-white font-semibold ml-auto"
+                    className={`h-6 px-2.5 text-[10px] font-semibold ml-auto transition-all ${
+                      isWaiting
+                        ? "bg-amber-500 hover:bg-red-600 text-white"
+                        : "bg-violet-600 hover:bg-violet-700 text-white"
+                    }`}
                     data-testid="btn-fire-burst-projection"
                   >
                     {burstMutation.isPending ? (
                       <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                    ) : isWaiting ? (
+                      <XCircle className="w-3 h-3 mr-1" />
                     ) : (
-                      <PlayCircle className="w-3 h-3 mr-1" />
+                      <Crosshair className="w-3 h-3 mr-1" />
                     )}
-                    Rajada Manual
+                    {isWaiting ? "Cancelar" : "Rajada Inteligente"}
                   </Button>
                 </div>
                 <div className="grid grid-cols-4 gap-2">
@@ -772,6 +865,46 @@ export default function Frenetico9TokensPanel({ syncedDigitCount, syncedStakeMod
         {/* Barra de ação */}
         {totalConfigured > 0 && (
           <div className="space-y-3 pt-2 border-t border-border/30">
+
+            {/* Painel de status de espera */}
+            {(isWaiting || burstMutation.isPending) && waitingStatus && (
+              <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 space-y-2">
+                <div className="flex items-center gap-2 text-xs font-semibold text-amber-400">
+                  <Clock className="w-3.5 h-3.5 animate-pulse" />
+                  <span>Em Andamento — Aguardando momento ideal</span>
+                  <span className="ml-auto text-[10px] text-amber-400/70 font-normal">{waitingStatus.symbol} · {waitingStatus.checks} verificações</span>
+                </div>
+                <div className="text-[10px] text-amber-300/80 leading-relaxed">{waitingStatus.reason}</div>
+                <div className="flex items-center gap-3 text-[10px]">
+                  <div className="flex items-center gap-1">
+                    <span className="text-muted-foreground">Alinhamento:</span>
+                    <span className={`font-bold ${waitingStatus.alignmentScore >= 70 ? 'text-green-400' : waitingStatus.alignmentScore >= 40 ? 'text-yellow-400' : 'text-red-400'}`}>
+                      {waitingStatus.alignmentScore.toFixed(0)}%
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="text-muted-foreground">Dígitos quentes:</span>
+                    <span className={`font-bold ${waitingStatus.hotDigitCount >= 2 ? 'text-orange-400' : 'text-muted-foreground'}`}>
+                      {waitingStatus.hotDigitCount}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="text-muted-foreground">Qualidade:</span>
+                    <Badge variant="outline" className={`text-[9px] h-4 px-1 ${
+                      waitingStatus.entryQuality === 'strong' ? 'text-green-400 border-green-500/40' :
+                      waitingStatus.entryQuality === 'moderate' ? 'text-yellow-400 border-yellow-500/40' :
+                      waitingStatus.entryQuality === 'weak' ? 'text-orange-400 border-orange-500/40' :
+                      'text-red-400 border-red-500/40'
+                    }`}>
+                      {waitingStatus.entryQuality === 'strong' ? '🟢 forte' :
+                       waitingStatus.entryQuality === 'moderate' ? '🟡 moderado' :
+                       waitingStatus.entryQuality === 'weak' ? '🟠 fraco' : '🔴 aguardando'}
+                    </Badge>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div className="flex items-center gap-3">
               <div className="flex-1 text-xs text-muted-foreground">
                 <span className="text-violet-400 font-semibold">{effectiveDigitCount}×</span> dígitos mais quentes ·{" "}
@@ -779,18 +912,24 @@ export default function Frenetico9TokensPanel({ syncedDigitCount, syncedStakeMod
                 <span className="text-violet-400 font-semibold">{effectiveStakeMode === 'kelly' ? 'Kelly IA' : 'Uniforme'}</span>
               </div>
               <Button
-                onClick={() => burstMutation.mutate()}
+                onClick={startSmartWaiting}
                 disabled={burstMutation.isPending || totalConfigured === 0}
-                className="h-8 bg-violet-600 hover:bg-violet-700 text-white font-semibold"
+                className={`h-8 font-semibold transition-all ${
+                  isWaiting
+                    ? "bg-amber-500 hover:bg-red-600 text-white animate-pulse"
+                    : "bg-violet-600 hover:bg-violet-700 text-white"
+                }`}
                 data-testid="btn-fire-burst"
               >
                 {burstMutation.isPending ? (
                   <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                ) : isWaiting ? (
+                  <XCircle className="w-4 h-4 mr-2" />
                 ) : (
-                  <PlayCircle className="w-4 h-4 mr-2" />
+                  <Crosshair className="w-4 h-4 mr-2" />
                 )}
-                Rajada Manual
-                <ModeIcon className="w-3.5 h-3.5 ml-1.5 opacity-70" />
+                {isWaiting ? "Cancelar Espera" : "Rajada Inteligente"}
+                {!isWaiting && <ModeIcon className="w-3.5 h-3.5 ml-1.5 opacity-70" />}
               </Button>
               <Button
                 variant="ghost"

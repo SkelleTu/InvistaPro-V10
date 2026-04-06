@@ -2482,6 +2482,62 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json(result);
   }));
 
+  // GET /api/trading/frenetico-9tokens/conditions — verifica se momento é propício para rajada (sem disparar)
+  app.get('/api/trading/frenetico-9tokens/conditions', isAuthenticated, asyncErrorHandler(async (req: any, res: any) => {
+    const { nDigits = '10' } = req.query as any;
+    const n = Math.min(10, Math.max(1, parseInt(nDigits) || 10));
+
+    const { digitFrequencyAnalyzer } = await import('./services/digit-frequency-analyzer');
+    const { digitPatternEngine } = await import('./services/digit-pattern-engine');
+    const { selectBestAsset } = await import('./services/frenetico-9tokens');
+
+    const targetSymbol = selectBestAsset();
+    const PAYOUT = 8.5;
+
+    const evGate = digitFrequencyAnalyzer.computeEVGate(targetSymbol, PAYOUT, n);
+    const alignment = digitPatternEngine.getEntryAlignmentScore(targetSymbol);
+    const singleSignal = digitFrequencyAnalyzer.getSingleMatchEntrySignal(targetSymbol, PAYOUT);
+
+    // Condições para disparar:
+    // 1. EV matematicamente positivo (Σf² > 1/P), OU
+    // 2. Alinhamento Markov+Freq forte (≥70%), OU
+    // 3. Alinhamento moderado (≥40%) com pelo menos 2 dígitos acima do limiar EV
+    const evPositive = evGate.isPositiveEV;
+    const alignmentStrong = alignment.entryQuality === 'strong';
+    const alignmentModerateWithHotDigits = alignment.entryQuality === 'moderate' && evGate.hotDigitCount >= 2;
+    const singleStrongSignal = singleSignal.shouldEnter && singleSignal.trendUp;
+
+    const ready = evPositive || alignmentStrong || alignmentModerateWithHotDigits || singleStrongSignal;
+
+    let reason: string;
+    if (ready) {
+      if (evPositive) reason = `✅ EV positivo (Σf²=${evGate.freqSumSq.toFixed(4)} > limiar ${evGate.evThreshold.toFixed(4)}) · ${evGate.hotDigitCount} dígitos quentes`;
+      else if (alignmentStrong) reason = `✅ Alinhamento Markov forte (${alignment.alignmentScore.toFixed(0)}%) · dígitos [${alignment.topAlignedDigits.join(',')}]`;
+      else if (alignmentModerateWithHotDigits) reason = `✅ Alinhamento moderado (${alignment.alignmentScore.toFixed(0)}%) + ${evGate.hotDigitCount} dígitos acima do limiar`;
+      else reason = `✅ Sinal único forte: dígito ${singleSignal.digit} (${(singleSignal.frequency*100).toFixed(1)}% · trend↑)`;
+    } else {
+      const evStr = `Σf²=${evGate.freqSumSq.toFixed(4)} < ${evGate.evThreshold.toFixed(4)}`;
+      const alStr = `alinhamento=${alignment.alignmentScore.toFixed(0)}% (${alignment.entryQuality})`;
+      const hotStr = `dígitos quentes=${evGate.hotDigitCount}`;
+      reason = `⏳ Aguardando: ${evStr} · ${alStr} · ${hotStr}`;
+    }
+
+    res.json({
+      ready,
+      symbol: targetSymbol,
+      evScore: evGate.evScore,
+      freqSumSq: evGate.freqSumSq,
+      isPositiveEV: evPositive,
+      hotDigitCount: evGate.hotDigitCount,
+      alignmentScore: alignment.alignmentScore,
+      entryQuality: alignment.entryQuality,
+      topAlignedDigits: alignment.topAlignedDigits,
+      singleDigitReady: singleSignal.shouldEnter,
+      singleDigit: singleSignal.digit,
+      reason,
+    });
+  }));
+
   // GET /api/trading/frenetico-9tokens/history — histórico de rajadas
   app.get('/api/trading/frenetico-9tokens/history', isAuthenticated, asyncErrorHandler(async (req: any, res: any) => {
     if (!req.user?.id) return res.status(401).json({ message: 'Não autenticado' });
