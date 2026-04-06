@@ -2747,7 +2747,9 @@ export default function TradingSystemPage() {
                                       <p className="text-xs text-muted-foreground leading-relaxed">{modality.aiStrategy}</p>
                                     </div>
                                     {/* Seleção de Módulos (slots de cópia simultânea) */}
-                                    <ModalityModuleSelector modalityId={modality.id} />
+                                    <div onClick={(e) => e.stopPropagation()}>
+                                      <ModalityModuleSelector modalityId={modality.id} />
+                                    </div>
                                   </div>
                                 )}
 
