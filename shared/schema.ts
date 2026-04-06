@@ -847,3 +847,25 @@ export type InsertLearningRecord = z.infer<typeof insertLearningRecordSchema>;
 export type ModelLearningState = typeof modelLearningState.$inferSelect;
 export type InsertModelLearningState = z.infer<typeof insertModelLearningStateSchema>;
 
+// ── Módulos de Cópia Simultânea por Modalidade ──────────────────────────────
+// Armazena quais slots (tokens) participam de cada modalidade e suas configs de stake
+export const modalityModuleConfigs = sqliteTable('modality_module_configs', {
+  id: text('id').primaryKey().default(sql`(hex(randomblob(16)))`),
+  userId: text('user_id').notNull().references(() => users.id),
+  modality: text('modality').notNull(), // ex: 'digit_matches', 'rise', 'accumulator'
+  // JSON array de { slotIndex: number, enabled: boolean, stakeMode: 'ai'|'fixed'|'manual', fixedStake: number }
+  slotConfigs: text('slot_configs').notNull().default('[]'),
+  updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const insertModalityModuleConfigSchema = createInsertSchema(modalityModuleConfigs).omit({ id: true, updatedAt: true });
+export type ModalityModuleConfig = typeof modalityModuleConfigs.$inferSelect;
+export type InsertModalityModuleConfig = z.infer<typeof insertModalityModuleConfigSchema>;
+
+export interface ModuleSlotConfig {
+  slotIndex: number;
+  enabled: boolean;
+  stakeMode: 'ai' | 'fixed' | 'manual';
+  fixedStake: number;
+}
+

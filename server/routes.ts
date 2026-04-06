@@ -2694,6 +2694,162 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   }));
 
+  // =========================== MÓDULOS DE CÓPIA SIMULTÂNEA ===========================
+
+  // GET /api/trading/module-configs — retorna todas as configs de módulos por modalidade
+  app.get('/api/trading/module-configs', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+    const userId = req.user.id;
+    const configs = await storage.getModalityModuleConfigs(userId);
+    const result: Record<string, any> = {};
+    for (const c of configs) {
+      try { result[c.modality] = JSON.parse(c.slotConfigs); } catch { result[c.modality] = []; }
+    }
+    res.json({ configs: result });
+  }));
+
+  // GET /api/trading/module-configs/:modality — config de módulos de uma modalidade
+  app.get('/api/trading/module-configs/:modality', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+    const userId = req.user.id;
+    const { modality } = req.params;
+    const config = await storage.getModalityModuleConfig(userId, modality);
+    const slotConfigs = config ? JSON.parse(config.slotConfigs) : [];
+    res.json({ modality, slotConfigs });
+  }));
+
+  // PUT /api/trading/module-configs/:modality — salva config de módulos de uma modalidade
+  app.put('/api/trading/module-configs/:modality', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+    const userId = req.user.id;
+    const { modality } = req.params;
+    const { slotConfigs } = req.body;
+    if (!Array.isArray(slotConfigs)) return res.status(400).json({ message: 'slotConfigs deve ser um array' });
+    const saved = await storage.upsertModalityModuleConfig(userId, modality, slotConfigs);
+    res.json({ success: true, modality, slotConfigs: JSON.parse(saved.slotConfigs) });
+  }));
+
+  // GET /api/trading/module-configs/:modality/rajada-conditions — condições para rajada da modalidade
+  app.get('/api/trading/module-configs/:modality/rajada-conditions', isAuthenticated, asyncErrorHandler(async (req: any, res: any) => {
+    const { modality } = req.params;
+    const userId = req.user.id;
+    const { checkRajadaConditions } = await import('./services/module-executor');
+    const conditions = await checkRajadaConditions(userId, modality);
+    res.json(conditions);
+  }));
+
+  // POST /api/trading/module-configs/:modality/rajada — dispara rajada manual para uma modalidade
+  app.post('/api/trading/module-configs/:modality/rajada', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+    const userId = req.user.id;
+    const { modality } = req.params;
+    const { symbol, aiStake = 0.35, contractType, duration, barrier, growthRate } = req.body;
+
+    // Verificar condições antes de disparar
+    const { checkRajadaConditions, executeModulesTrade, recordModuleExecution } = await import('./services/module-executor');
+    const conditions = await checkRajadaConditions(userId, modality);
+    if (!conditions.ready && !req.body.forceOverride) {
+      return res.json({
+        success: false,
+        blocked: true,
+        reason: conditions.reason,
+        score: conditions.score,
+        details: conditions.details,
+      });
+    }
+
+    // Verificar se há módulos configurados
+    const config = await storage.getModalityModuleConfig(userId, modality);
+    const slotConfigs = config ? JSON.parse(config.slotConfigs) : [];
+    const activeModules = slotConfigs.filter((s: any) => s.enabled);
+    if (activeModules.length === 0) {
+      return res.status(400).json({ success: false, message: 'Nenhum módulo ativo para esta modalidade' });
+    }
+
+    const result = await executeModulesTrade({
+      userId,
+      modality,
+      contractType: contractType || 'DIGITMATCH',
+      symbol: symbol || 'R_100',
+      aiStake: parseFloat(aiStake) || 0.35,
+      duration: duration ? parseInt(duration) : undefined,
+      barrier,
+      growthRate: growthRate ? parseFloat(growthRate) : undefined,
+    });
+
+    recordModuleExecution(userId, modality, result);
+    res.json({ success: true, result, conditions });
+  }));
+
+  // GET /api/trading/module-configs/history — histórico de execuções de módulos
+  app.get('/api/trading/module-configs/history', isAuthenticated, asyncErrorHandler(async (req: any, res: any) => {
+    const userId = req.user.id;
+    const { moduleExecutionHistory } = await import('./services/module-executor');
+    const history = moduleExecutionHistory.get(userId) || [];
+    res.json({ history });
+  }));
+
+  // GET /api/trading/module-overview — visão geral de todos os slots
+  app.get('/api/trading/module-overview', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+    const userId = req.user.id;
+    const allTokens = await storage.getAllDerivTokens(userId);
+    const allModuleConfigs = await storage.getModalityModuleConfigs(userId);
+
+    // Construir mapa de quais modalidades cada slot serve
+    const slotModalityMap: Record<number, string[]> = {};
+    for (const mc of allModuleConfigs) {
+      try {
+        const slots = JSON.parse(mc.slotConfigs) as Array<{ slotIndex: number; enabled: boolean }>;
+        for (const s of slots) {
+          if (s.enabled) {
+            if (!slotModalityMap[s.slotIndex]) slotModalityMap[s.slotIndex] = [];
+            slotModalityMap[s.slotIndex].push(mc.modality);
+          }
+        }
+      } catch {}
+    }
+
+    // Buscar saldos dos slots
+    const { getSlotBalances } = await import('./services/frenetico-9tokens');
+    const slotTokens = allTokens
+      .filter(t => t.slotIndex !== null && t.slotIndex !== undefined && t.isActive)
+      .map(t => ({ slotIndex: t.slotIndex as number, token: t.token, accountType: t.accountType as 'demo' | 'real' }));
+
+    let balances: Record<number, any> = {};
+    try {
+      const balanceResults = await getSlotBalances(userId, slotTokens);
+      for (const b of balanceResults) {
+        balances[b.slotIndex] = b;
+      }
+    } catch {}
+
+    // Histórico de execuções por slot
+    const { moduleExecutionHistory } = await import('./services/module-executor');
+    const history = moduleExecutionHistory.get(userId) || [];
+
+    const slotStats: Record<number, { wins: number; losses: number; totalPnl: number }> = {};
+    for (const h of history) {
+      for (const r of h.result.results) {
+        if (!slotStats[r.slotIndex]) slotStats[r.slotIndex] = { wins: 0, losses: 0, totalPnl: 0 };
+      }
+    }
+
+    const overview = Array.from({ length: 10 }, (_, i) => {
+      const token = allTokens.find(t => t.slotIndex === i && t.isActive);
+      const bal = balances[i];
+      const modalities = slotModalityMap[i] || [];
+      const stats = slotStats[i] || { wins: 0, losses: 0, totalPnl: 0 };
+      return {
+        slotIndex: i,
+        hasToken: !!token,
+        accountType: token?.accountType || null,
+        balance: bal?.balance || null,
+        currency: bal?.currency || 'USD',
+        activeModalities: modalities,
+        isActive: modalities.length > 0,
+        stats,
+      };
+    });
+
+    res.json({ overview, configuredCount: slotTokens.length });
+  }));
+
   // =========================== TRADE CONFIGURATION ===========================
 
   app.post('/api/trading/config', isAuthenticated, isTradingAuthorized, async (req, res) => {

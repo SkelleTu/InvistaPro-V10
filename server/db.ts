@@ -728,6 +728,17 @@ export function initializeDatabase() {
       )
     `);
 
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS modality_module_configs (
+        id TEXT PRIMARY KEY DEFAULT (hex(randomblob(16))),
+        user_id TEXT NOT NULL REFERENCES users(id),
+        modality TEXT NOT NULL,
+        slot_configs TEXT NOT NULL DEFAULT '[]',
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, modality)
+      )
+    `);
+
     console.log('✅ Banco de dados local inicializado com sucesso!');
     console.log('🛡️ Sistema de resiliência e auto-restart configurado!');
     console.log(`📍 Local do arquivo: ${dbPath}`);

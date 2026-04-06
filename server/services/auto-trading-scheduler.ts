@@ -3184,6 +3184,33 @@ export class AutoTradingScheduler {
           });
           console.log(`🔭 [MONITOR] Iniciado para contrato ${contract.contract_id} (${contractTypeForMonitor}) em ${selectedSymbol}`);
 
+          // 🔥 MÓDULOS DE CÓPIA SIMULTÂNEA — disparar em paralelo, sem bloquear o fluxo principal
+          try {
+            import('./module-executor').then(({ executeModulesTrade, recordModuleExecution }) => {
+              const moduleParams = {
+                userId: config.userId,
+                modality: selectedModality,
+                contractType: contractTypeForMonitor,
+                symbol: selectedSymbol,
+                aiStake: tradeParams.amount,
+                duration: tradeParams.duration,
+                durationUnit: tradeParams.duration_unit || 't',
+                barrier: tradeParams.barrier,
+                growthRate: tradeParams.growth_rate,
+              };
+              executeModulesTrade(moduleParams).then(result => {
+                if (result.totalModules > 0) {
+                  console.log(`🔥 [MÓDULOS] ${selectedModality} | ${result.succeeded}/${result.totalModules} módulos executados | ${result.executionDurationMs}ms`);
+                  recordModuleExecution(config.userId, selectedModality, result);
+                }
+              }).catch(e => {
+                console.warn(`⚠️ [MÓDULOS] Erro ao executar módulos para ${selectedModality}:`, e?.message);
+              });
+            });
+          } catch (modErr: any) {
+            console.warn(`⚠️ [MÓDULOS] Falha ao importar executor:`, modErr?.message);
+          }
+
           // 🧠 REGISTRAR CONTEXTO DE APRENDIZADO: captura o que cada modelo previu
           try {
             const pricesArr: number[] = priceHistory.slice(-30);

@@ -248,6 +248,17 @@ export class DualStorage implements IStorage {
     return this.write(() => this.turso!.deleteDerivTokenBySlot(uid, slotIndex), () => this.sqlite.deleteDerivTokenBySlot(uid, slotIndex), 'deleteDerivTokenBySlot');
   }
 
+  // ─── Módulos de Cópia Simultânea por Modalidade ───────────────────────────
+  async getModalityModuleConfigs(uid: string) {
+    return this.sqlite.getModalityModuleConfigs(uid);
+  }
+  async getModalityModuleConfig(uid: string, modality: string) {
+    return this.sqlite.getModalityModuleConfig(uid, modality);
+  }
+  async upsertModalityModuleConfig(uid: string, modality: string, slotConfigs: import('@shared/schema').ModuleSlotConfig[]) {
+    return this.sqlite.upsertModalityModuleConfig(uid, modality, slotConfigs);
+  }
+
   // ─── Configurações de Trade ───────────────────────────────────────────────
 
   async createTradeConfig(c: InsertTradeConfiguration) { return this.write(() => this.turso!.createTradeConfig(c), () => this.sqlite.createTradeConfig(c), 'createTradeConfig'); }

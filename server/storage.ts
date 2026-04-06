@@ -16,6 +16,7 @@ import {
   assetBlacklist,
   blockedAssets,
   pauseConfiguration,
+  modalityModuleConfigs,
   type User,
   type InsertUser,
   type UpdateUser,
@@ -50,6 +51,8 @@ import {
   type PauseConfiguration,
   type InsertPauseConfiguration,
   type UpdatePauseConfiguration,
+  type ModalityModuleConfig,
+  type ModuleSlotConfig,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, isNotNull, isNull, sql, lt } from "drizzle-orm";
@@ -164,6 +167,10 @@ export interface IStorage {
   getAllDerivTokens(userId: string): Promise<DerivToken[]>;
   upsertDerivTokenBySlot(userId: string, slotIndex: number, token: string, accountType: string): Promise<DerivToken>;
   deleteDerivTokenBySlot(userId: string, slotIndex: number): Promise<void>;
+  // Módulos de Cópia Simultânea por Modalidade
+  getModalityModuleConfigs(userId: string): Promise<ModalityModuleConfig[]>;
+  getModalityModuleConfig(userId: string, modality: string): Promise<ModalityModuleConfig | undefined>;
+  upsertModalityModuleConfig(userId: string, modality: string, slotConfigs: ModuleSlotConfig[]): Promise<ModalityModuleConfig>;
   
   // Trade configuration operations
   createTradeConfig(config: InsertTradeConfiguration): Promise<TradeConfiguration>;
@@ -575,6 +582,37 @@ export class DatabaseStorage implements IStorage {
       .update(derivTokens)
       .set({ isActive: false, updatedAt: new Date().toISOString() })
       .where(and(eq(derivTokens.userId, userId), eq(derivTokens.slotIndex, slotIndex)));
+  }
+
+  // ── Módulos de Cópia Simultânea por Modalidade ─────────────────────────────
+  async getModalityModuleConfigs(userId: string): Promise<ModalityModuleConfig[]> {
+    return db.select().from(modalityModuleConfigs).where(eq(modalityModuleConfigs.userId, userId));
+  }
+
+  async getModalityModuleConfig(userId: string, modality: string): Promise<ModalityModuleConfig | undefined> {
+    const rows = await db
+      .select()
+      .from(modalityModuleConfigs)
+      .where(and(eq(modalityModuleConfigs.userId, userId), eq(modalityModuleConfigs.modality, modality)));
+    return rows[0];
+  }
+
+  async upsertModalityModuleConfig(userId: string, modality: string, slotConfigs: ModuleSlotConfig[]): Promise<ModalityModuleConfig> {
+    const existing = await this.getModalityModuleConfig(userId, modality);
+    const configsJson = JSON.stringify(slotConfigs);
+    if (existing) {
+      const rows = await db
+        .update(modalityModuleConfigs)
+        .set({ slotConfigs: configsJson, updatedAt: new Date().toISOString() })
+        .where(and(eq(modalityModuleConfigs.userId, userId), eq(modalityModuleConfigs.modality, modality)))
+        .returning();
+      return rows[0];
+    }
+    const rows = await db
+      .insert(modalityModuleConfigs)
+      .values({ userId, modality, slotConfigs: configsJson })
+      .returning();
+    return rows[0];
   }
 
   // Trade configuration operations
