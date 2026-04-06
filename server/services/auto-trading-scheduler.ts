@@ -1410,9 +1410,32 @@ export class AutoTradingScheduler {
       const aiRawConsensus = (bestSymbolResult as any).aiRawScore ?? bestSymbolResult.aiConsensus?.consensusStrength ?? 0;
       const aiDirectionalConsensus = aiRawConsensus;
 
-      if (aiDirectionalDecision === 'neutral') {
+      // ══════════════════════════════════════════════════════════════════════════
+      // ⚡ DETECÇÃO ANTECIPADA: setup exclusivo de dígitos
+      // Contratos de dígito apostam no VALOR DO ÚLTIMO DÍGITO do preço, NÃO na direção.
+      // Para eles, o consenso de IA (sobe/desce) é IRRELEVANTE — o edge vem de
+      // desvios estatísticos na distribuição de frequência de dígitos.
+      // Gates de direção e consenso de IA são bypassados para setups digit-only.
+      // ══════════════════════════════════════════════════════════════════════════
+      const _DIGIT_KEYS_EARLY = new Set(['digit_differs','digit_matches','digit_even','digit_odd','digit_over','digit_under']);
+      let isEarlyDigitOnlySetup = false;
+      try {
+        const _rawMods = config.selectedModalities;
+        if (_rawMods) {
+          const _parsedMods = (() => { try { return JSON.parse(_rawMods); } catch { return _rawMods.split(',').map((s: string) => s.trim()).filter(Boolean); } })();
+          isEarlyDigitOnlySetup = Array.isArray(_parsedMods) && _parsedMods.length > 0 &&
+            !_parsedMods.includes('__auto__') && _parsedMods.every((m: string) => _DIGIT_KEYS_EARLY.has(m));
+        }
+      } catch {}
+      if (isEarlyDigitOnlySetup) {
+        console.log(`⚡ [${operationId}] Setup exclusivo de dígitos detectado — gates de consenso de IA bypassados. Edge real avaliado por frequência de dígito.`);
+      }
+
+      if (aiDirectionalDecision === 'neutral' && !isEarlyDigitOnlySetup) {
         console.log(`⛔ [${operationId}] SINAL NEUTRO BLOQUEADO: IAs sem consenso direcional — aguardando mercado dar direção clara (up/down).`);
         return { success: false, error: 'IAs com sinal neutro — sem edge direcional. Aguardando próximo ciclo.' };
+      } else if (aiDirectionalDecision === 'neutral' && isEarlyDigitOnlySetup) {
+        console.log(`↕️ [${operationId}] Sinal neutro ignorado (setup digit-only): direção irrelevante para contratos de dígito.`);
       }
 
       // ══════════════════════════════════════════════════════════════════════════
@@ -1420,10 +1443,11 @@ export class AutoTradingScheduler {
       // Sintéticos aleatórios (R_*, 1HZ*): 54% | Crash/Boom/Jump: 56%
       // Forex: 59% | B3 Brasil: 64%
       // Thresholds recalibrados para o range real do consenso bruto das IAs.
+      // BYPASS: setups exclusivos de dígito não usam este gate — veja gates específicos abaixo.
       // ══════════════════════════════════════════════════════════════════════════
       const assetProfile = classifyAsset(selectedSymbol);
       const MIN_DIRECTIONAL_CONSENSUS = getGateThreshold(selectedSymbol);
-      if (aiDirectionalConsensus < MIN_DIRECTIONAL_CONSENSUS) {
+      if (aiDirectionalConsensus < MIN_DIRECTIONAL_CONSENSUS && !isEarlyDigitOnlySetup) {
         console.log(`⛔ [${operationId}] SINAL FRACO BLOQUEADO: ${aiDirectionalDecision?.toUpperCase()} ${selectedSymbol} [${assetProfile.categoryLabel}] | consenso-bruto=${aiDirectionalConsensus.toFixed(1)}% < ${MIN_DIRECTIONAL_CONSENSUS}% mínimo — aguardando sinal mais forte.`);
         return { success: false, error: `Consenso ${aiDirectionalConsensus.toFixed(1)}% insuficiente (mín ${MIN_DIRECTIONAL_CONSENSUS}% para ${assetProfile.categoryLabel}) — entrada bloqueada para proteção do capital.` };
       }
@@ -1804,9 +1828,12 @@ export class AutoTradingScheduler {
 
       // 🧠 VERIFICAR QUALIDADE DO SINAL DO ANALISADOR DE DÍGITOS
       // Apenas relevante se o usuário selecionou alguma modalidade de dígitos
+      // Edge mínimo 1.5%: dígito frio com frequência ≤ 8.5% (vs 10% esperado).
+      // Edge = 0% significa distribuição uniforme = nenhuma vantagem estatística real.
+      const MIN_DIFF_EDGE_EARLY = 1.5; // % de vantagem mínima acima do random (10%)
       const digitQuality = digitFrequencyAnalyzer.getBestBarrier(selectedSymbol);
       const digitConfidenceOk = digitQuality.confidence >= 50;
-      const digitEdgePositive = digitQuality.edge > 0;
+      const digitEdgePositive = digitQuality.edge >= MIN_DIFF_EDGE_EARLY;
       const digitSignalGood = digitConfidenceOk && digitEdgePositive;
 
       // ⚡ MODO MULTI-DÍGITO DIGIT MATCHES: verificar quantos dígitos simultâneos estão configurados
@@ -2235,23 +2262,27 @@ export class AutoTradingScheduler {
           }
         }
 
-        // 🎯 FILTRO DE QUALIDADE — DIGIT DIFFERS: só opera com consenso ≥75%
-        // O motor de Markov deve ter confiança real antes de selecionar o dígito barreira.
-        // Com range real de 50-80% do consenso, exigir 75% garante que estamos no topo
-        // da distribuição — sinais onde o edge estatístico é real, não aleatório.
-        const DIGIT_DIFFERS_MIN_CONSENSUS = 75;
-        if (compatibleModalities.includes('digit_differs') && aiConsensus.consensusStrength < DIGIT_DIFFERS_MIN_CONSENSUS) {
-          const withoutDD = compatibleModalities.filter(m => m !== 'digit_differs');
-          if (withoutDD.length === 0) {
-            // Só tem Digit Differs e o consenso é baixo → aguardar sinal mais forte
-            console.log(`🔒 [${operationId}] Digit Differs bloqueado: consenso ${aiConsensus.consensusStrength.toFixed(1)}% < ${DIGIT_DIFFERS_MIN_CONSENSUS}% mínimo exigido. Sem alternativa — aguardando consenso excepcional.`);
-            return { success: false, reason: 'digit_differs_low_consensus' };
+        // 🎯 FILTRO DE QUALIDADE — DIGIT DIFFERS: gate baseado em FREQUÊNCIA DE DÍGITO, NÃO consenso de IA
+        // A IA prevê direção de preço (sobe/desce) — irrelevante para apostas de dígito.
+        // Edge real = desvio estatístico: dígito frio (frequência < 10%) → vantagem para DIFFERS.
+        // Exige edge ≥ 1.5% (dígito mais frio com frequência ≤ 8.5%) e confiança ≥ 40%.
+        const MIN_DIFF_EDGE_GATE = 1.5; // vantagem estatística mínima sobre o random (10%)
+        const MIN_DIFF_CONF_GATE = 40;  // confiança mínima (% de ticks coletados vs janela ideal)
+        if (compatibleModalities.includes('digit_differs')) {
+          const diffBarrier = digitFrequencyAnalyzer.getBestBarrier(selectedSymbol);
+          const diffEdgeOk = diffBarrier.edge >= MIN_DIFF_EDGE_GATE;
+          const diffConfOk = diffBarrier.confidence >= MIN_DIFF_CONF_GATE;
+          if (!diffEdgeOk || !diffConfOk) {
+            const withoutDD = compatibleModalities.filter(m => m !== 'digit_differs');
+            if (withoutDD.length === 0) {
+              console.log(`🔒 [${operationId}] Digit Differs bloqueado: edge=${diffBarrier.edge.toFixed(1)}%${!diffEdgeOk ? ` < ${MIN_DIFF_EDGE_GATE}% mínimo` : ' ✓'} | conf=${diffBarrier.confidence.toFixed(0)}%${!diffConfOk ? ` < ${MIN_DIFF_CONF_GATE}% mínimo` : ' ✓'} — aguardando dígito frio com vantagem estatística real.`);
+              return { success: false, error: `Digit Differs: edge ${diffBarrier.edge.toFixed(1)}% insuficiente (mín ${MIN_DIFF_EDGE_GATE}%) — distribuição muito uniforme. Aguardando skew estatístico.` };
+            }
+            console.log(`🔒 [${operationId}] Digit Differs: edge=${diffBarrier.edge.toFixed(1)}% conf=${diffBarrier.confidence.toFixed(0)}% insuficientes → alternativa: ${withoutDD.join(', ')}`);
+            compatibleModalities.splice(0, compatibleModalities.length, ...withoutDD);
+          } else {
+            console.log(`✅ [${operationId}] Digit Differs AUTORIZADO: barreira=${diffBarrier.barrier} edge=+${diffBarrier.edge.toFixed(1)}% (≥${MIN_DIFF_EDGE_GATE}%) winRate=${diffBarrier.winRate.toFixed(1)}% conf=${diffBarrier.confidence.toFixed(0)}% — vantagem estatística confirmada.`);
           }
-          // Tem outra modalidade (ex: Accumulator) → usar ela neste ciclo
-          console.log(`🔒 [${operationId}] Digit Differs requer consenso ≥${DIGIT_DIFFERS_MIN_CONSENSUS}% (atual: ${aiConsensus.consensusStrength.toFixed(1)}%) → usando ${withoutDD.join(', ')} neste ciclo`);
-          compatibleModalities.splice(0, compatibleModalities.length, ...withoutDD);
-        } else if (compatibleModalities.includes('digit_differs') && aiConsensus.consensusStrength >= DIGIT_DIFFERS_MIN_CONSENSUS) {
-          console.log(`✅ [${operationId}] Digit Differs AUTORIZADO: consenso ${aiConsensus.consensusStrength.toFixed(1)}% ≥ ${DIGIT_DIFFERS_MIN_CONSENSUS}% — edge confirmado`);
         }
 
         // 🧠 SUPREME MARKET ANALYZER: Selecionar modalidade por inteligência, não por rotação de tempo
@@ -2312,8 +2343,8 @@ export class AutoTradingScheduler {
           'vanilla_call':      65,  'vanilla_put':       65,
           'ends_between':      65,  'ends_outside':      68,
           'stays_between':     65,  'goes_outside':      68,
-          'digit_differs':     90,
-          'digit_matches':     55,
+          'digit_differs':     0,   // Gate de frequência aplicado separadamente — consenso de IA irrelevante para dígito
+          'digit_matches':     0,   // Gate de EV matemático aplicado separadamente — consenso de IA irrelevante para dígito
           'digit_even':        55,  'digit_odd':         55,
           'digit_over':        58,  'digit_under':       58,
         };
@@ -2367,10 +2398,18 @@ export class AutoTradingScheduler {
           }
           // 🎯 DIGITMATCH padrão: usar dígito MAIS QUENTE com análise multi-janela + tendência
           if (contractType === 'DIGITMATCH') {
-            const matchBarrier = digitFrequencyAnalyzer.getBestBarrierForMatches(selectedSymbol);
-            barrier = matchBarrier.barrier;
-            const trendLabel = matchBarrier.trendDiff > 1 ? '↑↑ esquentando' : matchBarrier.trendDiff < -1 ? '↓ esfriando' : '→ estável';
-            console.log(`🎯 [DIGITMATCH] ${selectedSymbol}: barreira=${barrier} | score=+${matchBarrier.score.toFixed(1)}% | tendência=${trendLabel} | conf=${matchBarrier.confidence.toFixed(0)}%`);
+            // 🎯 GATE DE EV — DIGITMATCH ÚNICO (1 dígito): só opera quando dígito é quente o suficiente
+            // Matemática: EV = frequência × payout − 1 > 0 → frequência > 1/payout = 11.76% para 8.5x
+            // `getSingleMatchEntrySignal` verifica: freq > breakeven AND tendência positiva de aquecimento.
+            // Se EV negativo: bloquear entry e aguardar o próximo ciclo.
+            const singleMatchSignal = digitFrequencyAnalyzer.getSingleMatchEntrySignal(selectedSymbol, 8.5);
+            console.log(`🎯 [DIGITMATCH GATE] ${singleMatchSignal.reason}`);
+            if (!singleMatchSignal.shouldEnter) {
+              return { success: false, error: `Digit Matches: ${singleMatchSignal.reason}` };
+            }
+            // Usar o dígito quente já calculado pelo sinal (em vez de re-calcular)
+            barrier = singleMatchSignal.digit.toString();
+            console.log(`✅ [DIGITMATCH] ${selectedSymbol}: barreira=${barrier} | freq=${(singleMatchSignal.frequency*100).toFixed(1)}% | EV margin=+${singleMatchSignal.evMargin.toFixed(1)}% | conf=${singleMatchSignal.confidence.toFixed(0)}% | tendência=${singleMatchSignal.trendUp ? '↑ esquentando' : '→ estável'}`);
           }
           if (!needsBarrier) barrier = undefined;
 
@@ -2409,17 +2448,21 @@ export class AutoTradingScheduler {
             console.log(`🎰 [EV GATE AUTÔNOMO] ${burstEVGate.reason}`);
             console.log(`🧭 [ALINHAMENTO IA] ${burstAlignment.combinedInsight}`);
 
-            // BLOQUEIO: sem EV positivo E alinhamento fraco → aguardar
-            const autonomousBlocked = !burstEVGate.isPositiveEV && burstAlignment.entryQuality === 'wait';
+            // BLOQUEIO RIGOROSO: EV negativo OU confiança insuficiente → NÃO disparar.
+            // Antes: bloqueava apenas quando AMBOS (EV negativo E alignment='wait') — muito permissivo.
+            // Corrigido: usa burstEVGate.entryAllowed (exige EV+ E hotDigits suficientes E conf≥40%).
+            // Exceção: alinhamento forte de Markov pode authorizar mesmo com EV levemente negativo.
+            const autonomousBlocked = !burstEVGate.entryAllowed && burstAlignment.entryQuality !== 'strong';
             if (autonomousBlocked) {
               console.warn(
-                `🚫 [EV GATE] DIGITMATCH BLOQUEADO — distribuição uniforme + Markov discordante.\n` +
-                `   Σ(f²)=${burstEVGate.freqSumSq.toFixed(4)} < limiar ${burstEVGate.evThreshold.toFixed(4)} | ` +
-                `alinhamento=${burstAlignment.alignmentScore.toFixed(0)}% | ` +
+                `🚫 [EV GATE] DIGITMATCH BURST BLOQUEADO — EV insuficiente.\n` +
+                `   Σ(f²)=${burstEVGate.freqSumSq.toFixed(4)} (limiar ${burstEVGate.evThreshold.toFixed(4)}) | ` +
+                `dígitos quentes=${burstEVGate.hotDigitCount} | conf=${burstAlignment.alignmentScore.toFixed(0)}% | ` +
                 `qualidade=${burstAlignment.entryQuality}\n` +
+                `   ${burstEVGate.reason}\n` +
                 `   Aguardando assimetria estatística real para entrar.`
               );
-              return { success: false, error: `DIGITMATCH bloqueado pelo Gate de EV: distribuição uniforme (Σf²=${burstEVGate.freqSumSq.toFixed(4)}, limiar=${burstEVGate.evThreshold.toFixed(4)}). Aguardando skew.` };
+              return { success: false, error: `DIGITMATCH burst bloqueado: ${burstEVGate.reason}` };
             }
 
             // ── KELLY×10: HABILITADO CONDICIONALMENTE quando EV é positivo ──
