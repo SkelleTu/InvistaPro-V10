@@ -755,11 +755,11 @@ export class HuggingFaceAIService {
       
       // Gera prompt especializado baseado no tipo de modelo
       const prompt = model.type === 'crypto'
-        ? this.buildCryptoPrompt(tickData, symbol)
+        ? ((this as any).buildCryptoPrompt ?? this.buildCompactDNA).call(this, tickData, symbol)
         : model.type === 'zero-shot'
-        ? this.buildTechnicalPatternPrompt(tickData, symbol)
+        ? ((this as any).buildTechnicalPatternPrompt ?? this.buildCompactDNA).call(this, tickData, symbol)
         : model.type === 'tone'
-        ? this.buildTonePrompt(tickData, symbol)
+        ? ((this as any).buildTonePrompt ?? this.buildCompactDNA).call(this, tickData, symbol)
         : this.buildCompactDNA(tickData, symbol);
       
       console.log(`🧬 [${model.name}] Prompt especializado (${prompt.length} chars): ${prompt.substring(0, 120)}...`);

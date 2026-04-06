@@ -340,7 +340,7 @@ app.use((req, res, next) => {
         try {
           const savedRecovery = await storage.getSystemHeartbeat('recovery_tracker');
           if (savedRecovery?.metadata) {
-            const recoveryState = JSON.parse(savedRecovery.metadata);
+            const recoveryState = JSON.parse(savedRecovery.metadata as string);
             realStatsTracker.restoreRecoveryState(recoveryState);
           }
         } catch (recoveryErr: any) {

@@ -53,7 +53,7 @@ export default function InvestmentPieChart({ data }: InvestmentPieChartProps) {
           color: theme === 'fluent' ? '#323130' : 'hsl(var(--foreground))',
           font: { 
             size: theme === 'fluent' ? 14 : 12,
-            weight: theme === 'fluent' ? 'bold' : 'normal',
+            weight: (theme === 'fluent' ? 'bold' : 'normal') as 'bold' | 'normal',
             family: theme === 'fluent' ? 'Segoe UI, Arial' : 'Inter'
           },
           padding: theme === 'fluent' ? 20 : 15,
@@ -70,7 +70,7 @@ export default function InvestmentPieChart({ data }: InvestmentPieChartProps) {
         cornerRadius: theme === 'fluent' ? 0 : 6,
         titleFont: {
           size: 14,
-          weight: '600',
+          weight: 'bold' as const,
           family: theme === 'fluent' ? 'Segoe UI' : 'Inter'
         },
         bodyFont: {

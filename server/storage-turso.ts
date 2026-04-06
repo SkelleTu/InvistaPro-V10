@@ -543,14 +543,15 @@ export class TursoStorage implements IStorage {
     return await getDb().select().from(marketData).orderBy(desc(marketData.lastUpdate));
   }
 
-  async getTradingStats(userId: string): Promise<{ totalTrades: number; wonTrades: number; lostTrades: number; totalProfit: number; winRate: number }> {
+  async getTradingStats(userId: string): Promise<{ totalTrades: number; wonTrades: number; lostTrades: number; expiredTrades: number; totalProfit: number; winRate: number }> {
     const operations = await getDb().select().from(tradeOperations).where(eq(tradeOperations.userId, userId));
-    const completedTrades = operations.filter(op => op.status !== 'pending' && op.profit !== null && op.profit !== undefined);
+    const expiredTrades = operations.filter(op => op.status === 'expired' || op.status === 'closed').length;
+    const completedTrades = operations.filter(op => op.status !== 'pending' && op.status !== 'active' && op.profit !== null && op.profit !== undefined);
     const wonTrades = completedTrades.filter(op => (op.profit || 0) > 0).length;
     const lostTrades = completedTrades.filter(op => (op.profit || 0) < 0).length;
     const totalProfit = completedTrades.reduce((sum, op) => sum + (op.profit || 0), 0);
     const winRate = completedTrades.length > 0 ? (wonTrades / completedTrades.length) * 100 : 0;
-    return { totalTrades: operations.length, wonTrades, lostTrades, totalProfit, winRate: Math.round(winRate * 100) / 100 };
+    return { totalTrades: operations.length, wonTrades, lostTrades, expiredTrades, totalProfit, winRate: Math.round(winRate * 100) / 100 };
   }
 
   async getActiveTradesCount(userId: string): Promise<number> {
@@ -993,7 +994,7 @@ export class TursoStorage implements IStorage {
 
     const del = async (table: any, condition: any, name: string) => {
       try {
-        const rows = await getDb().delete(table).where(condition).returning();
+        const rows = (await getDb().delete(table).where(condition).returning()) as any[];
         tablesCleared.push(name);
         rowsDeleted += rows.length;
       } catch {}
@@ -1019,6 +1020,15 @@ export class TursoStorage implements IStorage {
     } catch {}
 
     return { tablesCleared, rowsDeleted };
+  }
+
+  async getModalityModuleConfigs(_userId: string): Promise<any[]> { return []; }
+  async getModalityModuleConfig(_userId: string, _modality: string): Promise<any> { return undefined; }
+  async upsertModalityModuleConfig(_userId: string, _modality: string, _slotConfigs: any[]): Promise<any> { return {}; }
+  async updateRiskSettings(_userId: string, _settings: any): Promise<void> {}
+  async expireOldPendingTrades(_olderThanMinutes?: number): Promise<number> { return 0; }
+  async clearTabData(_userId: string, _tab: string): Promise<{ cleared: string[]; rowsDeleted: number }> {
+    return { cleared: [], rowsDeleted: 0 };
   }
 }
 

@@ -189,7 +189,7 @@ function ModalityModuleCard({ modality, slots, config, onSave, isSaving }: Modal
 
   const { data: conditions, isLoading: conditionsLoading, refetch: refetchConditions } = useQuery<RajadaCondition>({
     queryKey: ['/api/trading/module-configs', modality.id, 'rajada-conditions'],
-    queryFn: () => apiRequest(`/api/trading/module-configs/${modality.id}/rajada-conditions`),
+    queryFn: () => apiRequest(`/api/trading/module-configs/${modality.id}/rajada-conditions`).then(r => r.json()),
     refetchInterval: 15000,
     enabled: expanded && enabledCount > 0,
   });
@@ -447,13 +447,13 @@ export default function ModulosPanel() {
 
   const { data: overview, isLoading: overviewLoading, refetch: refetchOverview } = useQuery<ModuleOverview>({
     queryKey: ['/api/trading/module-overview'],
-    queryFn: () => apiRequest('/api/trading/module-overview'),
+    queryFn: () => apiRequest('/api/trading/module-overview').then(r => r.json()),
     refetchInterval: 30000,
   });
 
   const { data: allConfigs, isLoading: configsLoading } = useQuery<ModalityConfig[]>({
     queryKey: ['/api/trading/module-configs'],
-    queryFn: () => apiRequest('/api/trading/module-configs'),
+    queryFn: () => apiRequest('/api/trading/module-configs').then(r => r.json()),
   });
 
   const saveConfigMutation = useMutation({

@@ -10,7 +10,7 @@ export default function PortfolioOverview() {
   const { user } = useAuth();
   const { theme } = useTheme();
 
-  const { data: dashboardData } = useQuery({
+  const { data: dashboardData } = useQuery<any>({
     queryKey: ["/api/dashboard/variable-income"],
     enabled: !!user,
   });
@@ -43,7 +43,7 @@ export default function PortfolioOverview() {
 
   // Gerar dados para os gráficos do tema fluent
   const generateChartData = () => {
-    const currentBalance = parseFloat(user?.saldo || "0");
+    const currentBalance = user?.saldo ?? 0;
     const currentYieldValue = parseFloat((currentYield as any)?.rendimento || "0");
     const totalInvested = currentBalance - currentYieldValue;
     

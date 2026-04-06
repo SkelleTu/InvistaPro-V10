@@ -353,7 +353,7 @@ export class DigitFrequencyAnalyzer {
 
   getAllAnalyses(): DigitAnalysisResult[] {
     const results: DigitAnalysisResult[] = [];
-    for (const symbol of this.states.keys()) {
+    for (const symbol of Array.from(this.states.keys())) {
       const r = this.analyzeSymbolMultiWindow(symbol);
       if (r) results.push(r);
     }
@@ -513,6 +513,19 @@ export class DigitFrequencyAnalyzer {
   hasData(symbol: string): boolean {
     const s = this.states.get(symbol);
     return !!(s && s.recentDigits.length >= this.MIN_TICKS_FOR_CONFIDENCE);
+  }
+
+  getFrequencyData(symbol: string): { frequencies: Record<number, number>; totalTicks: number } | null {
+    const state = this.states.get(symbol);
+    if (!state || state.recentDigits.length < this.MIN_TICKS_FOR_CONFIDENCE) return null;
+    const window = state.recentDigits.slice(-this.PRIMARY_WINDOW);
+    const total = window.length;
+    if (total === 0) return null;
+    const counts = new Array(10).fill(0);
+    for (const d of window) counts[d]++;
+    const frequencies: Record<number, number> = {};
+    for (let d = 0; d < 10; d++) frequencies[d] = counts[d] / total;
+    return { frequencies, totalTicks: total };
   }
 }
 

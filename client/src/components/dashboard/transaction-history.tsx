@@ -6,7 +6,7 @@ import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
 export default function TransactionHistory() {
-  const { data: movements = [], isLoading } = useQuery({
+  const { data: movements = [], isLoading } = useQuery<any[]>({
     queryKey: ["/api/movements"],
   });
 

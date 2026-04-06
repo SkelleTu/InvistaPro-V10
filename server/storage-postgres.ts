@@ -500,7 +500,7 @@ export class PostgresStorage implements IStorage {
 
   async getTradeOperationByDerivContractId(derivContractId: string): Promise<TradeOperation | null> {
     try {
-      const ops = await neon
+      const ops = await db
         .select()
         .from(pgSchema.tradeOperations)
         .where(eq(pgSchema.tradeOperations.derivContractId, derivContractId))
@@ -859,6 +859,28 @@ export class PostgresStorage implements IStorage {
   }
 
   async updatePausedNowStatus(userId: string, isPausedNow: boolean): Promise<void> {}
+
+  async getAllDerivTokens(_userId: string): Promise<DerivToken[]> { return []; }
+  async upsertDerivTokenBySlot(_userId: string, _slotIndex: number, _token: string, _accountType: string): Promise<DerivToken> { throw new Error('Not implemented in PostgresStorage'); }
+  async deleteDerivTokenBySlot(_userId: string, _slotIndex: number): Promise<void> {}
+
+  async getModalityModuleConfigs(_userId: string): Promise<any[]> { return []; }
+  async getModalityModuleConfig(_userId: string, _modality: string): Promise<any> { return undefined; }
+  async upsertModalityModuleConfig(_userId: string, _modality: string, _slotConfigs: any[]): Promise<any> { return {}; }
+
+  async updateRiskSettings(_userId: string, _settings: any): Promise<void> {}
+
+  async isUserBlockedAsset(_userId: string, _symbol: string, _tradeMode: string): Promise<boolean> { return false; }
+
+  async expireOldPendingTrades(_olderThanMinutes?: number): Promise<number> { return 0; }
+
+  async resetAllTradingData(_userId: string): Promise<{ tablesCleared: string[]; rowsDeleted: number }> {
+    return { tablesCleared: [], rowsDeleted: 0 };
+  }
+
+  async clearTabData(_userId: string, _tab: string): Promise<{ cleared: string[]; rowsDeleted: number }> {
+    return { cleared: [], rowsDeleted: 0 };
+  }
 }
 
 export const postgresStorage = new PostgresStorage();

@@ -131,7 +131,7 @@ export class DerivAPIService extends EventEmitter {
   private lastTickCache: Map<string, { quote: number; epoch: number; receivedAt: number }> = new Map();
   private readonly TICK_CACHE_MAX_AGE_MS = 3000; // 3 segundos
 
-  constructor() {
+  constructor(_name?: string) {
     super();
     
     // Configurar listeners para error recovery

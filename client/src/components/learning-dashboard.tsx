@@ -93,7 +93,7 @@ export default function LearningDashboard() {
   });
 
   const symbols = stats?.modelsStats
-    ? [...new Set(stats.modelsStats.map(s => s.symbol))].sort()
+    ? Array.from(new Set(stats.modelsStats.map(s => s.symbol))).sort()
     : [];
 
   const filteredModels = stats?.modelsStats

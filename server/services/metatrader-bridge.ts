@@ -2500,7 +2500,7 @@ class MetaTraderBridge extends EventEmitter {
     // limpar posições fantasma que bloqueiam novos sinais (fechadas via SL/TP sem notificação)
     if (typeof accountData.openPositionsCount === 'number' && accountData.openPositionsCount === 0 && this.openPositions.size > 0) {
       console.log(`[MT5Bridge] 🧹 Heartbeat: EA reportou 0 posições, mas servidor tem ${this.openPositions.size} — limpando posições fantasma`);
-      for (const [ticket] of this.openPositions) {
+      for (const [ticket] of Array.from(this.openPositions.entries())) {
         this.removePositionFromDB(ticket);
       }
       this.openPositions.clear();
@@ -2595,7 +2595,7 @@ class MetaTraderBridge extends EventEmitter {
     // Auto-limpar posições fantasma (fechadas via SL/TP sem notificação) com mais de 2 horas
     const MAX_POSITION_AGE_MS = 2 * 60 * 60 * 1000; // 2 horas
     const nowMs = Date.now();
-    for (const [ticket, pos] of this.openPositions) {
+    for (const [ticket, pos] of Array.from(this.openPositions.entries())) {
       const ageMs = nowMs - (pos.openTime * 1000);
       if (ageMs > MAX_POSITION_AGE_MS) {
         console.log(`[MT5Bridge] 🧹 Auto-limpeza: posição #${ticket} ${pos.symbol} removida (${(ageMs / 3600000).toFixed(1)}h sem fechar — provável SL/TP silencioso)`);
@@ -2832,7 +2832,7 @@ class MetaTraderBridge extends EventEmitter {
             id: `${entryId}_spike_danger`,
             timestamp: Date.now(),
             symbol,
-            phase: 'spike',
+            phase: 'spike' as any,
             status: 'rejected',
             decisionReason: `⚠️ ZONA DE PERIGO: iminência ${earlySpike.imminencePercent}% (72-84%) — sem certeza para spike, sem segurança para continuidade. Aguardando.`
           });
@@ -3165,7 +3165,7 @@ class MetaTraderBridge extends EventEmitter {
               //
               // SL mais estreito em setups menores = sair rápido se movimento não ocorrer.
               // SL mais largo em setup máximo = dar espaço para o grande movimento se desenvolver.
-              const entryPx = continuitySignal.entryPrice;
+              const entryPx = continuitySignal.entryPrice ?? 0;
               const atrCont = continuitySignal.indicators?.atr || entryPx * 0.001;
               const pipSz   = this.getPipSize(symbol, entryPx);
               const isContinBuy = continuitySignal.action === 'BUY';
@@ -3198,8 +3198,8 @@ class MetaTraderBridge extends EventEmitter {
               const slDist = atrCont * slMult;
               const tpDist = atrCont * tpMult;
 
-              continuitySignal.stopLoss        = isContinBuy ? entryPx - slDist : entryPx + slDist;
-              continuitySignal.takeProfit      = isContinBuy ? entryPx + tpDist : entryPx - tpDist;
+              continuitySignal.stopLoss        = isContinBuy ? (entryPx || 0) - slDist : (entryPx || 0) + slDist;
+              continuitySignal.takeProfit      = isContinBuy ? (entryPx || 0) + tpDist : (entryPx || 0) - tpDist;
               continuitySignal.stopLossPips    = Math.round(slDist / pipSz);
               continuitySignal.takeProfitPips  = Math.round(tpDist / pipSz);
 
@@ -4152,7 +4152,7 @@ class MetaTraderBridge extends EventEmitter {
         parts.push(`${beh.confirmation === 'continuation' ? '→ CONTINUIDADE' : '← REVERSÃO'} (${Math.max(beh.continuationScore, beh.reversalScore)}%)`);
       }
     }
-    if (indicators.fibonacci?.nestedZones?.length > 0) {
+    if (indicators.fibonacci?.nestedZones && indicators.fibonacci.nestedZones.length > 0) {
       const nz = indicators.fibonacci.nestedZones[0];
       if (nz.nearestNestedLevel) {
         parts.push(`Nano-Fib ${nz.nearestNestedLevel.level} em [${nz.parentLevel1}–${nz.parentLevel2}] ${nz.parentLayer}`);
@@ -4448,7 +4448,7 @@ class MetaTraderBridge extends EventEmitter {
 
   getPendingSignal(symbol?: string): MT5Signal | null {
     const now = Date.now();
-    for (const [id, signal] of this.pendingSignals) {
+    for (const [id, signal] of Array.from(this.pendingSignals.entries())) {
       if (signal.expiresAt < now) {
         this.pendingSignals.delete(id);
         continue;
@@ -4782,7 +4782,7 @@ class MetaTraderBridge extends EventEmitter {
     } else {
       const closest = nearestLevels[0];
       const multiLayer = layersPresent > 1;
-      const layerNames = [...new Set(nearestLevels.map(l => l.layer))].join(' + ');
+      const layerNames = Array.from(new Set(nearestLevels.map(l => l.layer))).join(' + ');
       confluenceNarrative = `⚡ ZONA FIBONACCI ATIVA: nível ${closest.level} (${closest.layer}) em ${closest.price.toFixed(5)} — distância ${(closest.distancePct * 10).toFixed(1)}‰.`;
       if (multiLayer) {
         confluenceNarrative += ` CONFLUÊNCIA ${layersPresent} CAMADAS (${layerNames}) — zona de altíssima probabilidade.`;
@@ -5388,7 +5388,7 @@ class MetaTraderBridge extends EventEmitter {
     const isBoom  = sym.includes('BOOM');
 
     if (!isCrash && !isBoom) {
-      return { expected: false, direction: null, confidence: 0, candlesSinceLastSpike: 0, avgCandleInterval: 0, imminencePercent: 0, momentumConfirms: false, lastSpikeSize: 0 };
+      return { expected: false, direction: null, confidence: 0, candlesSinceLastSpike: 0, avgCandleInterval: 0, imminencePercent: 0, momentumConfirms: false, lastSpikeSize: 0, preEntryWindow: false, entryTimingScore: 0, ticksUntilSpikeEstimate: 0 };
     }
 
     const closes = marketData.map(d => d.close);

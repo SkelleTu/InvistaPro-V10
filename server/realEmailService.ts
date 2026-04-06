@@ -37,7 +37,7 @@ class InvestProRealEmailService implements RealEmailService {
   private setupTransporter(): void {
     try {
       // Configuração para Gmail e outros provedores SMTP gratuitos
-      this.transporter = nodemailer.createTransporter({
+      this.transporter = nodemailer.createTransport({
         host: 'smtp.gmail.com',
         port: 587,
         secure: false,

@@ -81,7 +81,7 @@ export async function setupAuth(app: Express) {
     const user = {};
     updateUserSession(user, tokens);
     await upsertUser(tokens.claims());
-    verified(null, user);
+    verified(null, user as any);
   };
 
   for (const domain of process.env

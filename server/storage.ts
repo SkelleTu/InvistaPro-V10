@@ -351,6 +351,28 @@ export class DatabaseStorage implements IStorage {
     return user;
   }
 
+  async upsertUser(userData: { id: string; email?: string; firstName?: string; lastName?: string; profileImageUrl?: string }): Promise<void> {
+    const existing = await this.getUser(userData.id);
+    if (!existing) {
+      try {
+        await db.insert(users).values({
+          id: userData.id,
+          email: userData.email || `${userData.id}@replit.user`,
+          nomeCompleto: [userData.firstName, userData.lastName].filter(Boolean).join(' ') || userData.id,
+          cpf: userData.id,
+          telefone: '00000000000',
+          passwordHash: '',
+          endereco: '',
+          cidade: '',
+          estado: '',
+          cep: '',
+          chavePix: '',
+          tipoChavePix: 'cpf',
+        } as any);
+      } catch { /* ignore duplicate inserts */ }
+    }
+  }
+
   async approveAccount(userId: string, approvedBy: string): Promise<User> {
     const [user] = await db
       .update(users)
@@ -1170,9 +1192,9 @@ export class DatabaseStorage implements IStorage {
           openingBalance: dailyData.openingBalance?.toString() || '0',
           currentBalance: dailyData.currentBalance?.toString() || '0',
           dailyPnL: dailyData.dailyPnL?.toString() || '0',
-          totalOperations: dailyData.totalOperations || 0,
-          winOperations: dailyData.winOperations || 0,
-          lossOperations: dailyData.lossOperations || 0,
+          totalTrades: (dailyData as any).totalTrades ?? (dailyData as any).totalOperations ?? 0,
+          wonTrades: (dailyData as any).wonTrades ?? (dailyData as any).winOperations ?? 0,
+          lostTrades: (dailyData as any).lostTrades ?? (dailyData as any).lossOperations ?? 0,
           conservativeOperations: dailyData.conservativeOperations || 0,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -1967,11 +1989,9 @@ export class DatabaseStorage implements IStorage {
 
     const del = async (table: any, condition: any, name: string) => {
       try {
-        const rows = await db.delete(table).where(condition).returning();
-        if (rows.length > 0 || true) {
-          tablesCleared.push(name);
-          rowsDeleted += rows.length;
-        }
+        const rows = (await db.delete(table).where(condition).returning()) as any[];
+        tablesCleared.push(name);
+        rowsDeleted += rows.length;
       } catch {}
     };
 
@@ -1984,13 +2004,13 @@ export class DatabaseStorage implements IStorage {
 
     // Sessões e WebSockets — limpar tudo (são temporários de qualquer forma)
     try {
-      const sessions = await db.delete(activeTradingSessions).returning();
+      const sessions = (await db.delete(activeTradingSessions).returning()) as any[];
       tablesCleared.push('active_trading_sessions');
       rowsDeleted += sessions.length;
     } catch {}
 
     try {
-      const wsSubs = await db.delete(activeWebSocketSubscriptions).returning();
+      const wsSubs = (await db.delete(activeWebSocketSubscriptions).returning()) as any[];
       tablesCleared.push('active_websocket_subscriptions');
       rowsDeleted += wsSubs.length;
     } catch {}
@@ -2008,7 +2028,7 @@ export class DatabaseStorage implements IStorage {
 
     const del = async (table: any, condition: any, name: string) => {
       try {
-        const rows = await db.delete(table).where(condition).returning();
+        const rows = (await db.delete(table).where(condition).returning()) as any[];
         cleared.push(name);
         rowsDeleted += rows.length;
       } catch {}

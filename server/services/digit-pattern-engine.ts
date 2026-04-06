@@ -394,12 +394,12 @@ class DigitPatternEngine {
     const topFreq = new Set(sortedByFreq.slice(0, 3).map(x => x.d));
 
     // Overlap: quantos dígitos estão no top-3 de ambos
-    const overlap = [...topMarkov].filter(d => topFreq.has(d)).length;
+    const overlap = Array.from(topMarkov).filter(d => topFreq.has(d)).length;
     const overlapScore = (overlap / 3) * 100; // 0, 33, 66, 100
 
     // Momento: os dígitos top-Markov também têm momentum positivo?
     const momentumScores = prediction.momentumScores;
-    const topMarkovMomentum = [...topMarkov].map(d => momentumScores[d]);
+    const topMarkovMomentum = Array.from(topMarkov).map(d => momentumScores[d]);
     const avgMomentum = topMarkovMomentum.reduce((s, v) => s + v, 0) / 3;
     const momentumBonus = Math.max(0, (avgMomentum - 0.5) * 40); // -20 a +20
 
@@ -415,7 +415,7 @@ class DigitPatternEngine {
     else entryQuality = 'wait';
 
     // Dígitos alinhados: top de ambos os sinais
-    const topAlignedDigits = [...topMarkov].filter(d => topFreq.has(d));
+    const topAlignedDigits = Array.from(topMarkov).filter(d => topFreq.has(d));
     if (topAlignedDigits.length === 0) {
       // fallback: top-2 do composto
       topAlignedDigits.push(...sortedByComposite.slice(0, 2).map(x => x.d));
@@ -491,6 +491,13 @@ class DigitPatternEngine {
 
   hasData(symbol: string): boolean {
     return (this.recentDigitsCache.get(symbol)?.length ?? 0) >= 30;
+  }
+
+  getLastPrediction(symbol: string): { confidence: number; dominantDigit: number } | null {
+    const digits = this.recentDigitsCache.get(symbol);
+    if (!digits || digits.length < 30) return null;
+    const result = this.getPredictionScores(symbol);
+    return { confidence: result.confidence / 100, dominantDigit: result.dominantDigit };
   }
 }
 

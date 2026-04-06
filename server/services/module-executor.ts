@@ -166,7 +166,7 @@ export async function executeModulesTrade(params: ModuleExecutionParams): Promis
       // Executar o contrato baseado no tipo de modalidade
       if (['DIGITDIFF', 'DIGITMATCH', 'DIGITOVER', 'DIGITUNDER', 'DIGITEVEN', 'DIGITODD'].includes(params.contractType)) {
         contract = await api.buyGenericDigitContract({
-          contract_type: params.contractType,
+          contract_type: params.contractType as 'DIGITDIFF' | 'DIGITMATCH' | 'DIGITEVEN' | 'DIGITODD' | 'DIGITOVER' | 'DIGITUNDER',
           symbol: params.symbol,
           amount: stake,
           duration: params.duration || 1,

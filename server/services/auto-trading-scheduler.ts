@@ -609,7 +609,7 @@ export class AutoTradingScheduler {
       const baseSymbols = digitdiffSymbols.length > 0
         ? digitdiffSymbols
         : ['R_10', 'R_25', 'R_50', 'R_75', 'R_100']; // Fallback - sempre suportados
-      const symbolsToUse = [...new Set([...baseSymbols, ...crashBoomSymbols])];
+      const symbolsToUse = Array.from(new Set([...baseSymbols, ...crashBoomSymbols]));
       
       console.log(`🎯 [INIT] Usando ${symbolsToUse.length} símbolos para coleta (DigitDiff + Crash/Boom)`);
       console.log(`🎯 [INIT] Símbolos: ${symbolsToUse.join(', ')}`);
@@ -1107,9 +1107,9 @@ export class AutoTradingScheduler {
         // Salvar resultado para tracking (será processado async)
         this.trackTradeOutcome(userId, result, config);
       } else {
-        const rejectReason = (result.error ?? result.reason ?? 'sem detalhes').toString().substring(0, 80);
+        const rejectReason = (result.error ?? (result as any).reason ?? 'sem detalhes').toString().substring(0, 80);
         this.setPhase('AGUARDANDO', `⚠️ Operação adiada: ${rejectReason}`, 'warning');
-        console.log(`⚠️ [${operationId}] Trade adiado: ${result.error ?? result.reason} - Sessão mantida ativa`);
+        console.log(`⚠️ [${operationId}] Trade adiado: ${result.error ?? (result as any).reason} - Sessão mantida ativa`);
       }
       
       return result;
@@ -2071,7 +2071,7 @@ export class AutoTradingScheduler {
 
         if (!isAutoModalityMode && activeModalities.length === 0) {
           console.log(`⛔ [${operationId}] Nenhuma modalidade selecionada pelo usuário — operação cancelada.`);
-          return { success: false, reason: 'no_modalities' };
+          return { success: false, reason: 'no_modalities' } as any;
         }
 
         if (isAutoModalityMode) {
@@ -2185,7 +2185,7 @@ export class AutoTradingScheduler {
 
         const ALL_SUPPORTED = new Set([
           ...Object.keys(DIGIT_TYPES),
-          ...RISFALL_TYPES,
+          ...Array.from(RISFALL_TYPES),
           ...Object.keys(HIGHER_LOWER_TYPES),  // higher, lower → CALLE/PUTE
           ...Object.keys(IN_OUT_TYPES),
           ...Object.keys(TOUCH_TYPES),
@@ -2240,7 +2240,7 @@ export class AutoTradingScheduler {
         let compatibleModalities: string[];
         if (isAutoModalityMode) {
           // Pool completo: todas as modalidades que o símbolo suporta
-          compatibleModalities = [...symbolCompatible].filter(m => ALL_SUPPORTED.has(m));
+          compatibleModalities = Array.from(symbolCompatible).filter(m => ALL_SUPPORTED.has(m));
           console.log(`🤖 [${operationId}] MODO AUTOMÁTICO — pool de modalidades para ${selectedSymbol}: [${compatibleModalities.join(', ')}]`);
         } else {
           compatibleModalities = activeModalities.filter(m => ALL_SUPPORTED.has(m) && symbolCompatible.has(m));
@@ -2252,7 +2252,7 @@ export class AutoTradingScheduler {
             const unknown = activeModalities.filter(m => !ALL_SUPPORTED.has(m));
             console.log(`⛔ [${operationId}] Modalidades selecionadas (${activeModalities.join(', ')}) incompatíveis com ${selectedSymbol}${knownUnsupported.length ? ` [incompatíveis: ${knownUnsupported.join(', ')}]` : ''}${unknown.length ? ` [desconhecidas: ${unknown.join(', ')}]` : ''} — operação cancelada.`);
           }
-          return { success: false, reason: 'no_compatible_modalities' };
+          return { success: false, reason: 'no_compatible_modalities' } as any;
         }
 
         if (!isAutoModalityMode) {
@@ -2880,7 +2880,7 @@ export class AutoTradingScheduler {
           const macdNotCalculated = aiConsensus.macd      === undefined || aiConsensus.macd     === null;
           const bbNotCalculated   = aiConsensus.bbPosition === undefined || aiConsensus.bbPosition === null;
           const regimeUnknown  = !aiConsensus.marketRegime || aiConsensus.marketRegime === 'unknown';
-          const supremeUnknown = !supremeAnalysis || supremeAnalysis.regime === 'unknown' || supremeAnalysis.regime === 'neutral';
+          const supremeUnknown = !supremeAnalysis || (supremeAnalysis.regime as string) === 'unknown' || (supremeAnalysis.regime as string) === 'neutral';
           const indicatorsAllDefault = rsiNotCalculated && macdNotCalculated && bbNotCalculated;
 
           // 🔴 BLOQUEIO TOTAL: Se os três indicadores nunca foram calculados (undefined),
@@ -3024,7 +3024,7 @@ export class AutoTradingScheduler {
                   const modeLabel = isAiFreq ? `IA+${hintLevel}→${effectiveLevel}` : effectiveLevel;
                   console.log(`⏭️ [${operationId}] Frequência ACCU ${rateKey}% [${modeLabel}] → ciclo pulado (slot ${slot}/${maxW})`);
                   this.setPhase('AGUARDANDO', `⏭️ Frequência ${effectiveLevel} — ACCU ${rateKey}% aguardando próximo ciclo`, 'info');
-                  return { success: false, reason: `accu_frequency_skip_${rateKey}pct` };
+                  return { success: false, reason: `accu_frequency_skip_${rateKey}pct` } as any;
                 }
               }
             }
@@ -3237,9 +3237,9 @@ export class AutoTradingScheduler {
                 symbol: selectedSymbol,
                 aiStake: tradeParams.amount,
                 duration: tradeParams.duration,
-                durationUnit: tradeParams.duration_unit || 't',
+                durationUnit: (tradeParams as any).duration_unit || 't',
                 barrier: tradeParams.barrier,
-                growthRate: tradeParams.growth_rate,
+                growthRate: (tradeParams as any).growth_rate,
               };
               executeModulesTrade(moduleParams).then(result => {
                 if (result.totalModules > 0) {
@@ -3560,7 +3560,7 @@ export class AutoTradingScheduler {
         const supported = _isCrashBoomSym(sym)
           ? [..._RF_K]
           : (_COMPAT[sym] ?? [..._DIGIT_K, ..._RF_K]);
-        return [...modalityFilter].some(m => supported.includes(m));
+        return Array.from(modalityFilter).some(m => supported.includes(m));
       };
       
       // 🔥 EXPANSÃO MASSIVA: Usar TODOS os 120+ ativos disponíveis na Deriv
@@ -3750,8 +3750,8 @@ export class AutoTradingScheduler {
           let bbPosition = 0.5; // 0=abaixo da inferior, 0.5=meio, 1=acima da superior
           if (techPrices.length >= 20) {
             const slice20 = techPrices.slice(-20);
-            const mean = slice20.reduce((a, b) => a + b, 0) / 20;
-            const std = Math.sqrt(slice20.reduce((s, p) => s + (p - mean) ** 2, 0) / 20);
+            const mean = slice20.reduce((a: number, b: number) => a + b, 0) / 20;
+            const std = Math.sqrt(slice20.reduce((s: number, p: number) => s + (p - mean) ** 2, 0) / 20);
             const upper = mean + 2 * std, lower = mean - 2 * std;
             const lastPrice = techPrices[techPrices.length - 1];
             bbPosition = std > 0 ? (lastPrice - lower) / (upper - lower) : 0.5;
@@ -4012,7 +4012,7 @@ export class AutoTradingScheduler {
         aiRawScore: best!.aiRawScore,
         totalAnalyzed: allSymbolsData.length,
         top5Symbols: top5Symbols
-      };
+      } as any;
     } catch (error) {
       console.error(`❌ [${operationId}] Erro na análise de todos símbolos:`, error);
       return { 
@@ -4535,7 +4535,7 @@ export class AutoTradingScheduler {
       const hurst = supreme.statistics.hurstExponent;
       const entropy = supreme.statistics.shannonEntropy;
 
-      if (regime === 'trending') {
+      if ((regime as string) === 'trending') {
         // Tendência forte: mais ticks para capturar momentum
         regimeAdj = hurst > 0.6 ? +3 : +2;
         regimeReason = `trending (hurst=${hurst.toFixed(2)}) → +${regimeAdj}`;

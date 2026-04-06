@@ -64,7 +64,7 @@ interface TradeContext {
 interface TradeResult {
   contractId: string;
   symbol: string;
-  status: 'won' | 'lost' | 'sold';
+  status: 'won' | 'lost' | 'sold' | 'open';
   profit: number;
   buyPrice: number;
   contractType: string;
@@ -81,6 +81,7 @@ interface ModelStats {
   learningRate: number;
   recentTrend: number;
   recentHistory: number[];
+  gradientMomentum?: number;
 }
 
 class PersistentLearningEngine {
@@ -225,15 +226,15 @@ class PersistentLearningEngine {
         modelWeightsSnapshot: await this.getCurrentWeightsSnapshot(result.symbol),
         marketContext: context.marketContext,
         technicalIndicators: context.technicalIndicators,
-        outcome: result.status,
+        outcome: result.status as 'won' | 'lost' | 'sold',
         profit: result.profit,
-        buyPrice: result.buyPrice,
+        buyPrice: result.buyPrice ?? 0,
         reward,
         updatedWeights,
         dominantModel,
         confidenceAtEntry: context.overallConfidence,
         cumulativeAccuracy,
-      });
+      } as any);
 
       const emoji = result.status === 'won' ? '✅' : result.status === 'lost' ? '❌' : '💰';
       console.log(`\n${emoji} [LEARNING] Trade ${result.contractId} processado | Recompensa: ${reward.toFixed(3)}`);

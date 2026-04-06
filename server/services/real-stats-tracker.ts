@@ -449,7 +449,7 @@ class RealStatsTracker {
     if (!contractId) return false;
     const now = Date.now();
     // Limpar entradas antigas do mapa
-    for (const [id, ts] of this.processedContracts) {
+    for (const [id, ts] of Array.from(this.processedContracts)) {
       if (now - ts > this.PROCESSED_CONTRACT_TTL_MS) {
         this.processedContracts.delete(id);
       }

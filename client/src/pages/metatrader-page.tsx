@@ -294,8 +294,8 @@ export default function MetaTraderPage() {
     if (status?.latestAIConsensus !== undefined && status.latestAIConsensus > 0) setStableAIConsensus(status.latestAIConsensus);
     if (status?.latestAIDirection !== undefined) setStableAIDirection(status.latestAIDirection);
     if (status?.latestAnalysisSymbol !== undefined) setStableAnalysisSymbol(status.latestAnalysisSymbol);
-    if (status?.latestRequiredConsensus !== undefined && status.latestRequiredConsensus > 0) setStableRequiredConsensus(status.latestRequiredConsensus);
-  }, [status?.latestAIConsensus, status?.latestAIDirection, status?.latestAnalysisSymbol, status?.latestRequiredConsensus]);
+    if ((status as any)?.latestRequiredConsensus !== undefined && (status as any).latestRequiredConsensus > 0) setStableRequiredConsensus((status as any).latestRequiredConsensus);
+  }, [status?.latestAIConsensus, status?.latestAIDirection, status?.latestAnalysisSymbol, (status as any)?.latestRequiredConsensus]);
 
   // Contador de segundos desde última atualização
   useEffect(() => {
@@ -336,7 +336,7 @@ export default function MetaTraderPage() {
 
   const updateConfigMutation = useMutation({
     mutationFn: async (updates: Partial<MT5Config>) => {
-      return await apiRequest('POST', '/api/mt5/config', updates);
+      return await apiRequest('/api/mt5/config', { method: 'POST', body: JSON.stringify(updates) });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/mt5/config'] });
@@ -351,7 +351,7 @@ export default function MetaTraderPage() {
 
   const generateSignalMutation = useMutation({
     mutationFn: async (symbol: string) => {
-      return await apiRequest('POST', '/api/mt5/signal/generate', { symbol });
+      return await apiRequest('/api/mt5/signal/generate', { method: 'POST', body: JSON.stringify({ symbol }) });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/mt5/signal'] });
@@ -362,7 +362,7 @@ export default function MetaTraderPage() {
 
   const resetSessionMutation = useMutation({
     mutationFn: async () => {
-      return await apiRequest('POST', '/api/mt5/reset-session', {});
+      return await apiRequest('/api/mt5/reset-session', { method: 'POST', body: JSON.stringify({}) });
     },
     onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ['/api/mt5/status'] });
@@ -1128,50 +1128,54 @@ export default function MetaTraderPage() {
                   </div>
 
                   {/* Linha de sistemas especializados */}
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                  {(() => {
+                    const latestExt = aiAnalysis.latest as any;
+                    return (
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
                     {/* Quantum */}
-                    {aiAnalysis.latest.quantumPrediction !== undefined && (
+                    {latestExt.quantumPrediction !== undefined && (
                       <div className="bg-background/60 rounded-lg p-2.5 border">
                         <p className="text-muted-foreground mb-1 flex items-center gap-1"><Zap className="h-3 w-3 text-purple-400"/>Sistema Quântico</p>
-                        <p className={`font-bold ${aiAnalysis.latest.quantumPrediction === 'up' ? 'text-green-400' : aiAnalysis.latest.quantumPrediction === 'down' ? 'text-red-400' : 'text-yellow-400'}`}>
-                          {aiAnalysis.latest.quantumPrediction === 'up' ? '↑ COMPRA' : aiAnalysis.latest.quantumPrediction === 'down' ? '↓ VENDA' : '— NEUTRO'}
+                        <p className={`font-bold ${latestExt.quantumPrediction === 'up' ? 'text-green-400' : latestExt.quantumPrediction === 'down' ? 'text-red-400' : 'text-yellow-400'}`}>
+                          {latestExt.quantumPrediction === 'up' ? '↑ COMPRA' : latestExt.quantumPrediction === 'down' ? '↓ VENDA' : '— NEUTRO'}
                         </p>
-                        {aiAnalysis.latest.quantumConfidence !== undefined && (
-                          <Progress value={aiAnalysis.latest.quantumConfidence * 100} className="h-1 mt-1 [&>div]:bg-purple-500" />
+                        {latestExt.quantumConfidence !== undefined && (
+                          <Progress value={latestExt.quantumConfidence * 100} className="h-1 mt-1 [&>div]:bg-purple-500" />
                         )}
                       </div>
                     )}
                     {/* Microscopic */}
-                    {aiAnalysis.latest.microscopicPrediction !== undefined && (
+                    {latestExt.microscopicPrediction !== undefined && (
                       <div className="bg-background/60 rounded-lg p-2.5 border">
                         <p className="text-muted-foreground mb-1 flex items-center gap-1"><Gauge className="h-3 w-3 text-blue-400"/>Microscópico</p>
-                        <p className={`font-bold ${aiAnalysis.latest.microscopicPrediction === 'up' ? 'text-green-400' : aiAnalysis.latest.microscopicPrediction === 'down' ? 'text-red-400' : 'text-yellow-400'}`}>
-                          {aiAnalysis.latest.microscopicPrediction === 'up' ? '↑ COMPRA' : aiAnalysis.latest.microscopicPrediction === 'down' ? '↓ VENDA' : '— NEUTRO'}
+                        <p className={`font-bold ${latestExt.microscopicPrediction === 'up' ? 'text-green-400' : latestExt.microscopicPrediction === 'down' ? 'text-red-400' : 'text-yellow-400'}`}>
+                          {latestExt.microscopicPrediction === 'up' ? '↑ COMPRA' : latestExt.microscopicPrediction === 'down' ? '↓ VENDA' : '— NEUTRO'}
                         </p>
-                        {aiAnalysis.latest.microscopicConfidence !== undefined && (
-                          <Progress value={aiAnalysis.latest.microscopicConfidence * 100} className="h-1 mt-1 [&>div]:bg-blue-500" />
+                        {latestExt.microscopicConfidence !== undefined && (
+                          <Progress value={latestExt.microscopicConfidence * 100} className="h-1 mt-1 [&>div]:bg-blue-500" />
                         )}
                       </div>
                     )}
                     {/* Volatilidade */}
-                    {aiAnalysis.latest.volatility !== undefined && (
+                    {latestExt.volatility !== undefined && (
                       <div className="bg-background/60 rounded-lg p-2.5 border">
                         <p className="text-muted-foreground mb-1 flex items-center gap-1"><Activity className="h-3 w-3 text-orange-400"/>Volatilidade</p>
-                        <p className="font-bold">{(aiAnalysis.latest.volatility * 100).toFixed(2)}%</p>
-                        <p className="text-muted-foreground">{aiAnalysis.latest.marketRegime || '—'}</p>
+                        <p className="font-bold">{(latestExt.volatility * 100).toFixed(2)}%</p>
+                        <p className="text-muted-foreground">{latestExt.marketRegime || '—'}</p>
                       </div>
                     )}
                     {/* Consenso geral */}
                     <div className={`rounded-lg p-2.5 border ${
-                      aiAnalysis.latest.aiConsensus >= (aiAnalysis.latest.requiredConsensus ?? 70) ? 'border-green-500/50 bg-green-500/5' : 'border-red-500/30 bg-red-500/5'
+                      aiAnalysis.latest.aiConsensus >= (latestExt.requiredConsensus ?? 70) ? 'border-green-500/50 bg-green-500/5' : 'border-red-500/30 bg-red-500/5'
                     }`}>
                       <p className="text-muted-foreground mb-1 flex items-center gap-1"><CheckCircle2 className="h-3 w-3"/>Consenso Final</p>
-                      <p className={`font-black text-lg ${aiAnalysis.latest.aiConsensus >= (aiAnalysis.latest.requiredConsensus ?? 70) ? 'text-green-400' : 'text-red-400'}`}>
+                      <p className={`font-black text-lg ${aiAnalysis.latest.aiConsensus >= (latestExt.requiredConsensus ?? 70) ? 'text-green-400' : 'text-red-400'}`}>
                         {aiAnalysis.latest.aiConsensus?.toFixed(1)}%
                       </p>
-                      <p className="text-muted-foreground">mín: {aiAnalysis.latest.requiredConsensus ?? 70}%</p>
+                      <p className="text-muted-foreground">mín: {latestExt.requiredConsensus ?? 70}%</p>
                     </div>
                   </div>
+                  );})()}
 
                   {/* Narrativa completa */}
                   {aiAnalysis.latest.decisionReason && (

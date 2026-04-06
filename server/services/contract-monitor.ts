@@ -750,7 +750,7 @@ class UniversalContractMonitor extends EventEmitter {
    * Usado pelo scheduler para BLOQUEAR a abertura de um segundo contrato no mesmo ativo.
    */
   hasActiveContractOnSymbol(symbol: string): boolean {
-    for (const [, state] of this.monitored) {
+    for (const [, state] of Array.from(this.monitored.entries())) {
       if (state.input.symbol === symbol && !state.isSold && !state.isExpired) {
         return true;
       }
@@ -764,7 +764,7 @@ class UniversalContractMonitor extends EventEmitter {
    */
   getOpenContractCount(): number {
     let count = 0;
-    for (const [, state] of this.monitored) {
+    for (const [, state] of Array.from(this.monitored.entries())) {
       if (!state.isSold && !state.isExpired) count++;
     }
     return count;
@@ -774,7 +774,7 @@ class UniversalContractMonitor extends EventEmitter {
    * Retorna o ID do contrato ativo no símbolo informado (para log).
    */
   getActiveContractIdOnSymbol(symbol: string): number | undefined {
-    for (const [contractId, state] of this.monitored) {
+    for (const [contractId, state] of Array.from(this.monitored.entries())) {
       if (state.input.symbol === symbol && !state.isSold && !state.isExpired) {
         return contractId;
       }

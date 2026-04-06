@@ -639,7 +639,7 @@ export async function closeAllSlotConnections(userId: string): Promise<void> {
   const userPool = connectionPool.get(userId);
   if (!userPool) return;
 
-  for (const [slotIndex, api] of userPool.entries()) {
+  for (const [slotIndex, api] of Array.from(userPool.entries())) {
     try {
       await api.disconnect();
       console.log(`🔌 [FRENÉTICO-10T] Slot ${slotIndex} desconectado`);
