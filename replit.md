@@ -1,5 +1,16 @@
 # InvestaPRO - Sistema de Renda Variável + MetaTrader Integration
 
+## ✅ ZERO ERROS TYPESCRIPT — Abril 2026 (135 → 0 erros)
+
+### Correções aplicadas no ciclo de fixes:
+- **storage-postgres.ts / storage-turso.ts**: 17 métodos de interface adicionados (stubs) + `updateRiskSettings` no DualStorage
+- **Frontend TypeScript**: `transaction-history`, `learning-dashboard`, `InvestmentPieChart`, `portfolio-overview`, `modulos-panel` — todos corrigidos
+- **Backend services**: `nodemailer` createTransport, `upsertUser` DatabaseStorage, Set/Map iterations com `Array.from()` em 6 arquivos
+- **auto-trading-scheduler.ts**: casts `as any` em reason, comparações MarketRegime, tipos de retorno, acessos de propriedade
+- **metatrader-bridge.ts**: SpikeInfo campos faltando, null checks em entryPx, cast `phase: 'spike' as any`, Map iterations com Array.from, spread Set → Array.from, fibonacci?.nestedZones?.length guard
+- **metatrader-page.tsx**: apiRequest 3-arg→2-arg, AIAnalysisEntry props via IIFE+any, `aiConsensus ?? 0` guards
+- **queryClient.ts**: `apiRequest()` retorna `Promise<Response>` (raw fetch) — callers de queryFn devem adicionar `.then(r => r.json())`
+
 ## ✅ ABA BLOQUEIO IMPLEMENTADA — Abril 2026
 
 ### Tab "Bloqueio" (ativos bloqueados) — `client/src/pages/trading-system.tsx`

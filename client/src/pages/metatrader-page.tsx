@@ -1166,10 +1166,10 @@ export default function MetaTraderPage() {
                     )}
                     {/* Consenso geral */}
                     <div className={`rounded-lg p-2.5 border ${
-                      aiAnalysis.latest.aiConsensus >= (latestExt.requiredConsensus ?? 70) ? 'border-green-500/50 bg-green-500/5' : 'border-red-500/30 bg-red-500/5'
+                      (aiAnalysis.latest.aiConsensus ?? 0) >= (latestExt.requiredConsensus ?? 70) ? 'border-green-500/50 bg-green-500/5' : 'border-red-500/30 bg-red-500/5'
                     }`}>
                       <p className="text-muted-foreground mb-1 flex items-center gap-1"><CheckCircle2 className="h-3 w-3"/>Consenso Final</p>
-                      <p className={`font-black text-lg ${aiAnalysis.latest.aiConsensus >= (latestExt.requiredConsensus ?? 70) ? 'text-green-400' : 'text-red-400'}`}>
+                      <p className={`font-black text-lg ${(aiAnalysis.latest.aiConsensus ?? 0) >= (latestExt.requiredConsensus ?? 70) ? 'text-green-400' : 'text-red-400'}`}>
                         {aiAnalysis.latest.aiConsensus?.toFixed(1)}%
                       </p>
                       <p className="text-muted-foreground">mín: {latestExt.requiredConsensus ?? 70}%</p>
