@@ -281,28 +281,35 @@ app.use((req, res, next) => {
   // Middleware avançado de error handling (deve ser o último middleware)
   app.use(globalErrorHandler);
 
-  // importantly only setup vite in development and after
-  // setting up all the other routes so the catch-all route
-  // doesn't interfere with the other routes
-  if (app.get("env") === "development") {
-    await setupVite(app, server);
-  } else {
-    serveStatic(app);
-  }
-
   // ALWAYS serve the app on the port specified in the environment variable PORT
   // Other ports are firewalled. Default to 5000 if not specified.
   // this serves both the API and the client.
   // It is the only port that is not firewalled.
   const port = parseInt(process.env.PORT || '5000', 10);
   console.log(`🚀 [DEBUG] Iniciando servidor na porta ${port}...`);
-  server.listen({
-    port,
-    host: "0.0.0.0",
-    reusePort: true,
-  }, async () => {
-    log(`serving on port ${port}`);
-    
+
+  // Abrir a porta ANTES de configurar o Vite para não ultrapassar o timeout de startup
+  await new Promise<void>((resolve) => {
+    server.listen({
+      port,
+      host: "0.0.0.0",
+      reusePort: true,
+    }, () => { resolve(); });
+  });
+  log(`serving on port ${port}`);
+
+  // Configurar Vite/static APÓS a porta estar aberta (não bloqueia startup)
+  // importantly only setup vite in development and after
+  // setting up all the other routes so the catch-all route
+  // doesn't interfere with the other routes
+  if (app.get("env") === "development") {
+    setupVite(app, server).catch((e: any) => console.warn('⚠️ Vite setup error:', e));
+  } else {
+    serveStatic(app);
+  }
+
+  // Executar inicializações pós-listen de forma assíncrona
+  (async () => {
     // 🇧🇷 INICIAR MONITORAMENTO DE NOTICIÁRIO BRASILEIRO
     try {
       brazilNewsService.startAutoUpdate();
@@ -397,5 +404,5 @@ app.use((req, res, next) => {
     log('');
     log('🚀 Para 100% de uptime: CONFIGURE PING EXTERNO obrigatório!');
     log('='.repeat(80) + '\n');
-  });
+  })();
 })();

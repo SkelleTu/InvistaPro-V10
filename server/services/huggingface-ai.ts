@@ -573,7 +573,7 @@ export class HuggingFaceAIService {
 
       // Não inflar o consenso — mantemos o valor real das IAs
       // O threshold de recovery é exposto separadamente via requiredConsensus
-      const adjustedConsensus = finalConsensus;
+      let adjustedConsensus = finalConsensus;
       const requiredConsensusValue = Math.round(recoveryThreshold * 100);
 
       // ═══════════════════════════════════════════════════════════════════
@@ -628,6 +628,26 @@ export class HuggingFaceAIService {
 
       console.log(`📊 [CONSENSUS] Concordância entre sistemas: ${(agreementRatio * 100).toFixed(0)}% | Conf média: ${weightedConf.toFixed(0)}% | Consenso final: ${finalConsensus}%`);
       console.log(`🎯 [PER-MODEL] ${perModelAnalyses.map(a => `${a.modelName.split(' ')[0]}:${a.prediction}(${a.confidence}%)`).join(' | ')}`);
+
+      // ═══════════════════════════════════════════════════════════════════
+      // RECALCULAR CONSENSO BASEADO NOS 10 MODELOS REAIS (visíveis no PER-MODEL log)
+      // Antes o consenso vinha de apenas 3 sistemas internos, criando um gap
+      // entre o que era exibido (80% de acordo nos modelos) e o que era usado (37%).
+      // Agora o consenso reflete fielmente os votos dos 10 modelos para TODAS as modalidades.
+      // ═══════════════════════════════════════════════════════════════════
+      if (perModelAnalyses.length > 0) {
+        const pmDir = contextInjectedDir; // direção final após boosts de Crash/Boom e contexto externo
+        const pmAgreeing = perModelAnalyses.filter(a => a.prediction === pmDir);
+        const pmAgreePct = (pmAgreeing.length / perModelAnalyses.length) * 100;
+        const pmConfAvg  = pmAgreeing.length > 0
+          ? pmAgreeing.reduce((s, a) => s + a.confidence, 0) / pmAgreeing.length
+          : weightedConf;
+        // Consenso = 60% baseado em votos dos modelos + 40% na confiança média deles
+        const pmConsensus = Math.round(Math.min(95, pmAgreePct * 0.6 + pmConfAvg * 0.4));
+        // Preservar boosts externos (Crash/Boom, Girassol): usa o máximo
+        adjustedConsensus = Math.max(pmConsensus, adjustedConsensus);
+        console.log(`🔄 [CONSENSUS RECALC] ${pmDir.toUpperCase()} | Modelos: ${pmAgreeing.length}/${perModelAnalyses.length} concordam (${pmAgreePct.toFixed(0)}%) | Conf=${pmConfAvg.toFixed(0)}% | Consenso per-model=${pmConsensus}% | Final=${adjustedConsensus}%`);
+      }
 
       // Calcular volatilidade dos ticks para popular o campo
       const tickPrices = tickData.map(t => t.quote);
