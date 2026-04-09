@@ -453,7 +453,14 @@ export default function ModulosPanel() {
 
   const { data: allConfigs, isLoading: configsLoading } = useQuery<ModalityConfig[]>({
     queryKey: ['/api/trading/module-configs'],
-    queryFn: () => apiRequest('/api/trading/module-configs').then(r => r.json()),
+    queryFn: () => apiRequest('/api/trading/module-configs').then(r => r.json()).then((data: any) => {
+      const raw = data?.configs ?? data;
+      if (Array.isArray(raw)) return raw as ModalityConfig[];
+      return Object.entries(raw || {}).map(([modality, slotConfigs]) => ({
+        modality,
+        slotConfigs: typeof slotConfigs === 'string' ? slotConfigs : JSON.stringify(slotConfigs),
+      }));
+    }),
   });
 
   const saveConfigMutation = useMutation({
