@@ -2830,8 +2830,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     }
 
+    // Token principal (slotIndex IS NULL) serve como fallback para qualquer slot sem token específico
+    const mainToken = allTokens.find(t => t.slotIndex === null && t.isActive);
+
     const overview = Array.from({ length: 10 }, (_, i) => {
-      const token = allTokens.find(t => t.slotIndex === i && t.isActive);
+      const slotToken = allTokens.find(t => t.slotIndex === i && t.isActive);
+      const token = slotToken ?? mainToken;
       const bal = balances[i];
       const modalities = slotModalityMap[i] || [];
       const stats = slotStats[i] || { wins: 0, losses: 0, totalPnl: 0 };
