@@ -893,7 +893,8 @@ export class AutoTradingScheduler {
     const { rate: levGrowth, reason: levGrowthReason } = this.selectAccumulatorGrowthRate(levVolatility, best.consensus, levAllowedRates);
 
     // Ler ticks por taxa configurados pelo usuário no card de modalidades
-    let levTicksByGrowth: Record<number, number> = { 0.01: 10, 0.02: 7, 0.03: 5, 0.04: 4, 0.05: 3 };
+    const LEV_TICKS_DEFAULT: Record<number, number> = { 0.01: 10, 0.02: 7, 0.03: 5, 0.04: 4, 0.05: 3 };
+    let levTicksByGrowth: Record<number, number> = { ...LEV_TICKS_DEFAULT };
     try {
       if ((config as any).accuTicksPerRate) {
         const parsed = JSON.parse((config as any).accuTicksPerRate);
@@ -902,19 +903,23 @@ export class AutoTradingScheduler {
           for (const [k, v] of Object.entries(parsed)) {
             const rateKey = Number(k) / 100;
             const tickVal = Math.round(Number(v));
-            if (rateKey > 0 && rateKey <= 0.05 && tickVal >= 1 && tickVal <= 30) {
+            // Aceita positivo (fixo) ou negativo (IA dinâmico com máximo |n|)
+            if (rateKey > 0 && rateKey <= 0.05 && ((tickVal >= 1 && tickVal <= 30) || (tickVal >= -30 && tickVal <= -1))) {
               converted[rateKey] = tickVal;
             }
           }
           if (Object.keys(converted).length > 0) {
-            levTicksByGrowth = converted;
+            // MERGE com defaults — não sobrescreve taxas não configuradas
+            levTicksByGrowth = { ...LEV_TICKS_DEFAULT, ...converted };
             console.log(`🎯 [LEVERAGE] Ticks por taxa carregados da configuração do usuário:`, JSON.stringify(converted));
           }
         }
       }
     } catch {}
 
-    const levTargetTicks = levTicksByGrowth[levGrowth] ?? 3;
+    // Fallback usa default por taxa, não um valor fixo de 3
+    const levRawTicks = levTicksByGrowth[levGrowth] ?? LEV_TICKS_DEFAULT[levGrowth] ?? 5;
+    const levTargetTicks = levRawTicks < 0 ? Math.abs(levRawTicks) : levRawTicks;
 
     const levOpId = `LEVERAGE_${now}_${best.symbol}`;
     console.log(`🚀🚀 [LEVERAGE FIRE] Ativo: ${best.symbol} | Regime: ${best.regime} | Score: ${best.consensus.toFixed(1)} | Hurst: ${best.hurst.toFixed(3)} | Stake: $${leverageStake} (${(this.LEVERAGE_STAKE_PCT * 100).toFixed(0)}% de $${bankBalance.toFixed(2)}) | Ativos alinhados: ${exceptional.length} | growth=${(levGrowth*100).toFixed(0)}% (${levGrowthReason}) | ticks=${levTargetTicks}`);
@@ -2099,7 +2104,8 @@ export class AutoTradingScheduler {
         } catch {}
 
         // Ler ticks por taxa do ACCU configurados pelo usuário
-        let userAccuTicksPerRate: Record<number, number> = { 0.01: 10, 0.02: 7, 0.03: 5, 0.04: 4, 0.05: 3 };
+        const ACCU_TICKS_DEFAULT: Record<number, number> = { 0.01: 10, 0.02: 7, 0.03: 5, 0.04: 4, 0.05: 3 };
+        let userAccuTicksPerRate: Record<number, number> = { ...ACCU_TICKS_DEFAULT };
         try {
           if ((config as any).accuTicksPerRate) {
             const parsed = JSON.parse((config as any).accuTicksPerRate);
@@ -2113,7 +2119,8 @@ export class AutoTradingScheduler {
                   converted[rateKey] = tickVal;
                 }
               }
-              if (Object.keys(converted).length > 0) userAccuTicksPerRate = converted;
+              // MERGE com defaults — rates não configuradas pelo usuário mantêm o default correto
+              if (Object.keys(converted).length > 0) userAccuTicksPerRate = { ...ACCU_TICKS_DEFAULT, ...converted };
             }
           }
         } catch {}
@@ -3038,7 +3045,10 @@ export class AutoTradingScheduler {
             //   4% growth →  4 ticks → ~16.9% lucro
             //   5% growth →  3 ticks → ~15.8% lucro
             const minTicksByGrowthRate: Record<number, number> = userAccuTicksPerRate;
-            const configuredTicks = minTicksByGrowthRate[adaptiveGrowth] ?? 3;
+            // Fallback usa o default correto por taxa (nunca um valor fixo arbitrário)
+            const configuredTicks = minTicksByGrowthRate[adaptiveGrowth] ?? ACCU_TICKS_DEFAULT[adaptiveGrowth] ?? 5;
+            const ticksSource = minTicksByGrowthRate[adaptiveGrowth] !== undefined ? '⚙️ USER CONFIG' : '📋 DEFAULT';
+            console.log(`🎯 [ACCU TICKS] Growth=${(adaptiveGrowth*100).toFixed(0)}% → ticks=${Math.abs(configuredTicks)} ${configuredTicks < 0 ? '(IA dinâmico)' : '(fixo)'} [${ticksSource}]`);
             // Negativo = IA dinâmico com máximo |N|; Positivo = fixo em N ticks
             let accuTicks: number;
             if (configuredTicks < 0) {
