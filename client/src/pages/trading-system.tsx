@@ -955,25 +955,25 @@ export default function TradingSystemPage() {
   const { data: accountInfo } = useQuery<AccountInfo>({
     queryKey: ["/api/trading/account-info"],
     enabled: hasAccess,
-    refetchInterval: 2000, // Atualiza a cada 2 segundos
+    refetchInterval: 5000, // Dados de conta mudam raramente
   });
 
   const { data: tradeConfig } = useQuery<TradeConfig>({
     queryKey: ["/api/trading/config"],
     enabled: hasAccess,
-    refetchInterval: 2000, // Atualiza a cada 2 segundos
+    refetchInterval: 10000, // Config muda raramente — 10s é suficiente
   });
 
   const { data: tradeStats } = useQuery<TradeStats>({
     queryKey: ["/api/trading/stats"],
     enabled: hasAccess,
-    refetchInterval: 1000, // Atualiza a cada 1 segundo para estatísticas
+    refetchInterval: 4000, // Resumo de stats — 4s é suficiente
   });
 
   const { data: recentOperationsRaw = [] } = useQuery<TradeOperation[]>({
     queryKey: ["/api/trading/operations"],
     enabled: hasAccess,
-    refetchInterval: 1000, // Atualiza a cada 1 segundo para ver novas operações
+    refetchInterval: 2000, // Operações ativas — mantém 2s para responsividade
   });
   const recentOperations: TradeOperation[] = Array.isArray(recentOperationsRaw)
     ? recentOperationsRaw
@@ -982,13 +982,13 @@ export default function TradingSystemPage() {
   const { data: aiLogs = [] } = useQuery<AILog[]>({
     queryKey: ["/api/trading/ai-logs"],
     enabled: hasAccess,
-    refetchInterval: 2000,
+    refetchInterval: 5000, // Logs de IA — 5s suficiente
   });
 
   const { data: liveAnalysisData } = useQuery<{ contracts: any[]; ts: number }>({
     queryKey: ["/api/trading/live-analysis"],
     enabled: hasAccess,
-    refetchInterval: 1000,
+    refetchInterval: 2000, // Microscópio — 2s para responsividade sem sobrecarregar
   });
   const liveContracts = liveAnalysisData?.contracts ?? [];
 
@@ -996,19 +996,19 @@ export default function TradingSystemPage() {
   const { data: realTimeData } = useQuery({
     queryKey: ["/api/trading/realtime-data"],
     enabled: hasAccess && !!user,
-    refetchInterval: 1000, // Atualização a cada segundo para dados em tempo real
+    refetchInterval: 3000, // Dados em tempo real — 3s é suficiente
   });
 
   const { data: aiAnalysis } = useQuery({
     queryKey: ["/api/trading/ai-analysis"],
     enabled: hasAccess,
-    refetchInterval: 5000, // Atualização a cada 5 segundos para análises de IA cooperativa
+    refetchInterval: 8000, // Análises de IA — 8s (processamento pesado no backend)
   });
 
   const { data: liveBalance } = useQuery({
     queryKey: ["/api/trading/live-balance"],
     enabled: hasAccess,
-    refetchInterval: 2000, // Saldo atualizado a cada 2 segundos
+    refetchInterval: 4000, // Saldo — 4s suficiente
   });
 
   // Cotação USD/BRL em tempo real
@@ -1019,31 +1019,31 @@ export default function TradingSystemPage() {
 
   const { data: monitorData } = useQuery({
     queryKey: ["/api/monitor/status"],
-    refetchInterval: 1000,
+    refetchInterval: 3000, // Monitor — 3s para não travar
     enabled: hasAccess,
   });
 
   const { data: mt5Status } = useQuery({
     queryKey: ["/api/mt5/status"],
-    refetchInterval: 3000,
+    refetchInterval: 15000, // MT5 raramente muda — 15s
     enabled: hasAccess,
   });
 
   const { data: mt5Positions } = useQuery({
     queryKey: ["/api/mt5/positions"],
-    refetchInterval: 3000,
+    refetchInterval: 10000, // Posições MT5 — 10s
     enabled: hasAccess,
   });
 
   const { data: mt5Trades } = useQuery({
     queryKey: ["/api/mt5/trades"],
-    refetchInterval: 5000,
+    refetchInterval: 15000, // Trades MT5 — 15s
     enabled: hasAccess,
   });
 
   const { data: mt5Signal } = useQuery({
     queryKey: ["/api/mt5/signal"],
-    refetchInterval: 10000,
+    refetchInterval: 20000, // Sinal MT5 — 20s
     enabled: hasAccess,
   });
 
@@ -1051,7 +1051,7 @@ export default function TradingSystemPage() {
   const { data: aiThresholdStats } = useQuery({
     queryKey: ["/api/auto-trading/ai-threshold-stats"],
     enabled: hasAccess,
-    refetchInterval: 3000, // Atualização a cada 3 segundos
+    refetchInterval: 8000, // Threshold stats — 8s (cálculo pesado)
   });
 
   useEffect(() => { latestStats.current = tradeStats; }, [tradeStats]);
@@ -1101,7 +1101,7 @@ export default function TradingSystemPage() {
   const { data: schedulerStatus } = useQuery({
     queryKey: ["/api/auto-trading/status"],
     enabled: hasAccess,
-    refetchInterval: 2000, // Atualização a cada 2 segundos
+    refetchInterval: 4000, // 4s — status do scheduler não precisa ser instantâneo
   });
 
   // Keep-Alive: polling do status de pings (externos + pull interno)
@@ -1422,7 +1422,7 @@ export default function TradingSystemPage() {
 
   const { data: keepAliveStatus } = useQuery<any>({
     queryKey: ["/api/status"],
-    refetchInterval: 3000,
+    refetchInterval: 10000, // Keep-alive — 10s suficiente para detectar ping externo
   });
 
   // Animar botão ao receber push externo
