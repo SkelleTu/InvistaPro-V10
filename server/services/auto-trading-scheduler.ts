@@ -2957,25 +2957,75 @@ export class AutoTradingScheduler {
           }
 
           // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-          // 🛡️ FILTRO 0C — CONSENSO TÉCNICO REAL (excluindo boost de notícias)
-          // Índices sintéticos aleatórios (R_10, R_25, R_50) são gerados por RNG
-          // auditado — nenhuma análise técnica ou notícia externa prediz o próximo
-          // tick. Entrar em ACCU apenas porque o noticiário empurrou o consenso de
-          // 49% → 60% é equivalente a entrar sem sinal. Exige-se consenso interno
-          // das IAs ≥ 52% ANTES da injeção de contexto externo.
+          // 🛡️ FILTRO 0C — SINAL DE CALMA DO MERCADO (microestrutura física)
+          //
+          // Para ACCU, a questão central NÃO é prever UP/DOWN a longo prazo, mas
+          // identificar se o tick ATUAL está num momento de calma onde a barreira
+          // de knockout não será atingida. O mercado emite esses sinais fisicamente:
+          //   • tickSizeAnomaly    → último tick foi um spike violento (3× média)
+          //   • zScoreVolatility   → volatilidade atual vs baseline histórico
+          //   • reversalProbability→ probabilidade de reversão (streak longo = reversão provável)
+          //   • tickClusterDir     → direção do micro-trend atual dos últimos N ticks
+          //   • autocorrelation    → positivo = ticks continuam na mesma dir (bom para ACCU)
+          //
+          // Modelos NLP (FinBERT, RoBERTa) são treinados em texto — não em física de
+          // ticks. Para ACCU, os sinais físicos de microestrutura são os corretos.
           // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
           {
-            const isSyntheticRNG = /^(R_10|R_25|R_50|R_75|R_100)$/.test(selectedSymbol);
-            // huggingFacePrediction reflete o consenso dos modelos ANTES da injeção de contexto externo
-            const rawAIConsensus = aiConsensus.consensusStrength ?? 0;
-            // Se todos os modelos retornaram "neutral" (nenhum concordou com a direção), o
-            // consenso interno real é ≤ 50% — a decisão está sendo sustentada apenas pelo noticiário
-            const allNeutral = aiConsensus.analyses?.length > 0
-              && aiConsensus.analyses.every(a => a.prediction === 'neutral');
-            if (isSyntheticRNG && allNeutral) {
-              console.warn(`⛔ [${operationId}] ACCU BLOQUEADO (sintético aleatório sem sinal real): ${selectedSymbol} — TODOS os modelos retornaram 'neutral'. Consenso acima do threshold sustentado apenas por contexto externo (notícias). Impossível prever direção de RNG com noticiário.`);
-              this.setPhase('AGUARDANDO', `⛔ ACCU bloqueado: ${selectedSymbol} sem sinal direcional das IAs (todos neutros)`, 'warning');
-              return { success: false, error: `ACCU bloqueado: ${selectedSymbol} é índice RNG e 100% dos modelos de IA retornaram 'neutral' — consenso acima do threshold é artificial (notícias), não há sinal técnico real.` };
+            const micro = supremeAnalysis?.microstructure;
+            const stats = supremeAnalysis?.statistics;
+
+            if (micro && stats) {
+              const tickAnomaly     = micro.tickSizeAnomaly;
+              const zVol            = stats.zScoreVolatility;
+              const reversalProb    = micro.reversalProbability;
+              const clusterDir      = micro.tickClusterDirection;
+              const clusterStreak   = micro.tickClusterStreak;
+              const autocorr        = stats.autocorrelation;
+              const avgTick         = micro.avgTickSize;
+
+              // ── BLOQUEIO 1: Spike violento de tick ────────────────────────
+              // O último tick foi 3× maior que a média → alta probabilidade de
+              // que a barreira de knockout seja atingida nos próximos ticks.
+              if (tickAnomaly) {
+                console.warn(`⛔ [${operationId}] ACCU BLOQUEADO (spike de tick): último tick ${(micro.avgTickSize * 3).toFixed(5)} — 3× maior que a média de ${avgTick.toFixed(5)} em ${selectedSymbol}. Período de violência de tick detectado.`);
+                this.setPhase('AGUARDANDO', `⛔ ACCU bloqueado: spike de tick violento em ${selectedSymbol}`, 'warning');
+                return { success: false, error: `ACCU bloqueado: tickSizeAnomaly — último tick 3× acima da média, alta probabilidade de knockout imediato.` };
+              }
+
+              // ── BLOQUEIO 2: Volatilidade anômala (burst) ──────────────────
+              // Z-score > 2.5 significa que a volatilidade atual está 2.5 desvios
+              // acima da baseline histórica — mercado em "modo de explosão".
+              if (zVol > 2.5) {
+                console.warn(`⛔ [${operationId}] ACCU BLOQUEADO (volatilidade em burst): zScore=${zVol.toFixed(2)}>2.5 em ${selectedSymbol} — período de alta volatilidade anômala, knockout provável.`);
+                this.setPhase('AGUARDANDO', `⛔ ACCU bloqueado: burst de volatilidade (z=${zVol.toFixed(1)}) em ${selectedSymbol}`, 'warning');
+                return { success: false, error: `ACCU bloqueado: zScoreVolatility=${zVol.toFixed(2)} (>2.5) — burst de volatilidade, barreira muito próxima de ser atingida.` };
+              }
+
+              // ── BLOQUEIO 3: Alta probabilidade de reversão ────────────────
+              // Streak longo (≥ 12 ticks na mesma direção) = reversão iminente.
+              // Para ACCU, entrar no pico de um streak é entrar no pior momento.
+              if (reversalProb > 72 && clusterStreak >= 12) {
+                console.warn(`⛔ [${operationId}] ACCU BLOQUEADO (reversão iminente): streak=${clusterStreak} ticks ${clusterDir.toUpperCase()} | reversalProb=${reversalProb.toFixed(0)}%>72% em ${selectedSymbol} — overshoot de micro-trend, reversão prestes a ocorrer.`);
+                this.setPhase('AGUARDANDO', `⛔ ACCU bloqueado: reversão iminente (streak=${clusterStreak}) em ${selectedSymbol}`, 'warning');
+                return { success: false, error: `ACCU bloqueado: streak de ${clusterStreak} ticks ${clusterDir} + reversalProb=${reversalProb}% — entrar agora é entrar no pico da micro-tendência, knockout imediato.` };
+              }
+
+              // ── ALINHAMENTO: Usar micro-trend para confirmar/ajustar direção ─
+              // Se o tickClusterDirection contradiz fortemente a direção escolhida
+              // pelas IAs E a autocorrelação é positiva (ticks tendem a continuar),
+              // o mercado está fisicamente indo na direção oposta — ajustar.
+              const strongCluster = clusterStreak >= 4 && autocorr > 0.1;
+              if (strongCluster && clusterDir !== 'mixed' && clusterDir !== safeDirection) {
+                console.warn(`⚠️ [${operationId}] ACCU DIREÇÃO AJUSTADA pela microestrutura: IAs dizem ${safeDirection.toUpperCase()} mas micro-trend é ${clusterDir.toUpperCase()} (streak=${clusterStreak} ticks | autocorr=${autocorr.toFixed(3)}>0.1). Mercado fisicamente favorece ${clusterDir.toUpperCase()}.`);
+                // Ajustar direção para o micro-trend físico — mais confiável para ACCU
+                safeDirection = clusterDir as 'up' | 'down';
+              }
+
+              console.log(`✅ [${operationId}] ACCU calma OK: spike=${tickAnomaly} | zVol=${zVol.toFixed(2)} | streak=${clusterStreak}(${clusterDir}) | reversalProb=${reversalProb.toFixed(0)}% | autocorr=${autocorr.toFixed(3)} | Dir final: ${safeDirection.toUpperCase()}`);
+            } else {
+              // Sem dados de microestrutura → usar apenas os filtros físicos anteriores
+              console.log(`⚠️ [${operationId}] ACCU: dados de microestrutura indisponíveis — prosseguindo com filtros RSI/MACD apenas.`);
             }
           }
 
