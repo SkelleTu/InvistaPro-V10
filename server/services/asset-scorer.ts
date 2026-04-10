@@ -293,8 +293,12 @@ export class AssetScorer {
     else if (hurstExponent < 0.35)  regimeScore = Math.max(0, regimeScore - 15);
 
     // Penalidade por alta entropia (mercado imprevisível)
-    if (shannonEntropy > 3.0) regimeScore = Math.max(0, regimeScore - 15);
-    else if (shannonEntropy < 2.0) regimeScore = Math.min(100, regimeScore + 10);
+    // ATENÇÃO: shannonEntropy é normalizado em [0, 1] (0=previsível total | 1=caos total)
+    // Thresholds corrigidos para a faixa real (bug anterior usava > 3.0 e < 2.0,
+    // o que fazia a penalidade nunca disparar e o bônus sempre disparar).
+    if (shannonEntropy > 0.80)      regimeScore = Math.max(0, regimeScore - 25); // caos extremo → grande penalidade
+    else if (shannonEntropy > 0.65) regimeScore = Math.max(0, regimeScore - 12); // entropia elevada → penalidade moderada
+    else if (shannonEntropy < 0.40) regimeScore = Math.min(100, regimeScore + 10); // mercado previsível → bônus
 
     return this.dim('Regime ACCU', regimeScore, WEIGHTS.mathematical,
       `Hurst=${hurstExponent.toFixed(2)} | Entropia=${shannonEntropy.toFixed(2)} | Regime=${marketRegime}`);

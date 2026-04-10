@@ -2909,6 +2909,77 @@ export class AutoTradingScheduler {
           }
 
           // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+          // 🛡️ FILTRO 0A — ENTROPIA DE SHANNON (caos do mercado)
+          // Entropia normalizada 0–1 (0=previsível | 1=caos total).
+          // ACCU com barreira apertada (2% growth) é destruído por movimentos erráticos.
+          // Knockout no 1º tick ocorre principalmente em mercados de alta entropia.
+          // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+          {
+            const rawEntropy = supremeAnalysis?.statistics?.shannonEntropy;
+            if (rawEntropy !== undefined) {
+              if (rawEntropy > 0.82) {
+                console.warn(`⛔ [${operationId}] ACCU BLOQUEADO (entropia extrema): Shannon Entropy=${rawEntropy.toFixed(3)}>0.82 em ${selectedSymbol} — mercado caótico, probabilidade de knockout no 1º tick muito alta.`);
+                this.setPhase('AGUARDANDO', `⛔ ACCU bloqueado: entropia extrema (${(rawEntropy*100).toFixed(0)}%) em ${selectedSymbol}`, 'warning');
+                return { success: false, error: `ACCU bloqueado: Entropia=${rawEntropy.toFixed(3)} (>0.82) — mercado em estado caótico, risco de knockout imediato inaceitável.` };
+              } else if (rawEntropy > 0.72) {
+                console.warn(`⚠️ [${operationId}] ACCU ALERTA (entropia elevada): Shannon Entropy=${rawEntropy.toFixed(3)}>0.72 em ${selectedSymbol} — risco de knockout elevado, prosseguindo com filtros adicionais.`);
+              } else {
+                console.log(`✅ [${operationId}] ACCU entropia OK: Shannon Entropy=${rawEntropy.toFixed(3)} ≤0.72 em ${selectedSymbol} — mercado suficientemente previsível.`);
+              }
+            }
+          }
+
+          // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+          // 🛡️ FILTRO 0B — EXPOENTE DE HURST (estrutura do mercado)
+          // Hurst < 0.4 = mean-reverting severo: o preço oscila constantemente
+          // em torno da média, exatamente o padrão que causa knockout em ACCU.
+          // Hurst ~0.5 = random walk: sem vantagem de qualquer direção.
+          // ACCU só é seguro com Hurst > 0.5 (trending) ou mercado confirmado calmo.
+          // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+          {
+            const rawHurst = supremeAnalysis?.statistics?.hurstExponent;
+            const rawEntropy2 = supremeAnalysis?.statistics?.shannonEntropy;
+            if (rawHurst !== undefined) {
+              // Hurst extremamente baixo + qualquer nível de entropia = bloqueio
+              if (rawHurst < 0.30) {
+                console.warn(`⛔ [${operationId}] ACCU BLOQUEADO (Hurst crítico): Hurst=${rawHurst.toFixed(3)}<0.30 em ${selectedSymbol} — mercado fortemente mean-reverting, knockout garantido em múltiplos ticks.`);
+                this.setPhase('AGUARDANDO', `⛔ ACCU bloqueado: Hurst crítico (${rawHurst.toFixed(2)}) em ${selectedSymbol}`, 'warning');
+                return { success: false, error: `ACCU bloqueado: Hurst=${rawHurst.toFixed(3)} (<0.30) — mercado strongly mean-reverting, ACCU com qualquer direção sofrerá knockout.` };
+              }
+              // Hurst abaixo de 0.40 + entropia elevada = bloqueio combinado
+              if (rawHurst < 0.40 && rawEntropy2 !== undefined && rawEntropy2 > 0.65) {
+                console.warn(`⛔ [${operationId}] ACCU BLOQUEADO (Hurst+Entropia): Hurst=${rawHurst.toFixed(3)}<0.40 + Entropia=${rawEntropy2.toFixed(3)}>0.65 em ${selectedSymbol} — mercado mean-reverting em ambiente caótico.`);
+                this.setPhase('AGUARDANDO', `⛔ ACCU bloqueado: Hurst baixo + entropia alta em ${selectedSymbol}`, 'warning');
+                return { success: false, error: `ACCU bloqueado: Hurst=${rawHurst.toFixed(3)} (<0.40) + Entropia=${rawEntropy2.toFixed(3)} (>0.65) — combinação letal para ACCU.` };
+              }
+              console.log(`✅ [${operationId}] ACCU Hurst OK: Hurst=${rawHurst.toFixed(3)} em ${selectedSymbol} — estrutura de mercado aceitável para ACCU.`);
+            }
+          }
+
+          // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+          // 🛡️ FILTRO 0C — CONSENSO TÉCNICO REAL (excluindo boost de notícias)
+          // Índices sintéticos aleatórios (R_10, R_25, R_50) são gerados por RNG
+          // auditado — nenhuma análise técnica ou notícia externa prediz o próximo
+          // tick. Entrar em ACCU apenas porque o noticiário empurrou o consenso de
+          // 49% → 60% é equivalente a entrar sem sinal. Exige-se consenso interno
+          // das IAs ≥ 52% ANTES da injeção de contexto externo.
+          // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+          {
+            const isSyntheticRNG = /^(R_10|R_25|R_50|R_75|R_100)$/.test(selectedSymbol);
+            // huggingFacePrediction reflete o consenso dos modelos ANTES da injeção de contexto externo
+            const rawAIConsensus = aiConsensus.consensusStrength ?? 0;
+            // Se todos os modelos retornaram "neutral" (nenhum concordou com a direção), o
+            // consenso interno real é ≤ 50% — a decisão está sendo sustentada apenas pelo noticiário
+            const allNeutral = aiConsensus.analyses?.length > 0
+              && aiConsensus.analyses.every(a => a.prediction === 'neutral');
+            if (isSyntheticRNG && allNeutral) {
+              console.warn(`⛔ [${operationId}] ACCU BLOQUEADO (sintético aleatório sem sinal real): ${selectedSymbol} — TODOS os modelos retornaram 'neutral'. Consenso acima do threshold sustentado apenas por contexto externo (notícias). Impossível prever direção de RNG com noticiário.`);
+              this.setPhase('AGUARDANDO', `⛔ ACCU bloqueado: ${selectedSymbol} sem sinal direcional das IAs (todos neutros)`, 'warning');
+              return { success: false, error: `ACCU bloqueado: ${selectedSymbol} é índice RNG e 100% dos modelos de IA retornaram 'neutral' — consenso acima do threshold é artificial (notícias), não há sinal técnico real.` };
+            }
+          }
+
+          // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
           // 🛡️ FILTRO 1 — DUPLA CONFIRMAÇÃO BEARISH: RSI < 40 + MACD negativo
           // Quando ambos indicam pressão de baixa, um ACCU UP enfrenta knockout imediato.
           // Raiz do loss forense em 02/04/2026: RSI=34.69 + MACD=-0.079 + ACCU UP → derrubado em 25s.
