@@ -73,7 +73,9 @@ export interface SupremeAnalysis {
     tickClusterStreak: number;         // ticks consecutivos na mesma direção
     tickClusterDirection: 'up' | 'down' | 'mixed';
     avgTickSize: number;               // tamanho médio de tick
-    tickSizeAnomaly: boolean;          // tick atual anormalmente grande
+    lastTickSize: number;              // tamanho do último tick (absoluto)
+    maxRecentTickSize: number;         // máximo dos últimos 10 ticks (detecção de spikes)
+    tickSizeAnomaly: boolean;          // tick atual anormalmente grande (≥2× média)
     reversalProbability: number;       // 0–100: prob de reversão iminente
   };
 
@@ -530,7 +532,11 @@ export class SupremeMarketAnalyzer extends EventEmitter {
 
     const avgTickSize = tickSizes.reduce((a, b) => a + b, 0) / tickSizes.length || 0;
     const lastTickSize = tickSizes[tickSizes.length - 1] || 0;
-    const tickSizeAnomaly = lastTickSize > avgTickSize * 3;
+    // Máximo dos últimos 10 ticks — detecta spikes recentes mesmo que o último seja normal
+    const recentTen = tickSizes.slice(-10);
+    const maxRecentTickSize = recentTen.length > 0 ? Math.max(...recentTen) : 0;
+    // Threshold: ≥2× média (era 3×) — mais conservador para proteger ACCU 1-tick de knockout
+    const tickSizeAnomaly = lastTickSize > avgTickSize * 2;
 
     // Probabilidade de reversão: streak longo aumenta probabilidade
     const reversalProbability = Math.min(95, 50 + streak * 3);
@@ -539,6 +545,8 @@ export class SupremeMarketAnalyzer extends EventEmitter {
       tickClusterStreak: streak,
       tickClusterDirection: streakDir,
       avgTickSize,
+      lastTickSize,
+      maxRecentTickSize,
       tickSizeAnomaly,
       reversalProbability,
     };

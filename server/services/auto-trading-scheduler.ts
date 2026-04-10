@@ -2983,23 +2983,34 @@ export class AutoTradingScheduler {
               const clusterStreak   = micro.tickClusterStreak;
               const autocorr        = stats.autocorrelation;
               const avgTick         = micro.avgTickSize;
+              const lastTick        = micro.lastTickSize;
+              const maxRecentTick   = micro.maxRecentTickSize;
 
               // ── BLOQUEIO 1: Spike violento de tick ────────────────────────
-              // O último tick foi 3× maior que a média → alta probabilidade de
-              // que a barreira de knockout seja atingida nos próximos ticks.
+              // O último tick foi ≥2× maior que a média (threshold reduzido de 3× para 2×)
+              // → alta probabilidade de knockout no tick imediato seguinte.
               if (tickAnomaly) {
-                console.warn(`⛔ [${operationId}] ACCU BLOQUEADO (spike de tick): último tick ${(micro.avgTickSize * 3).toFixed(5)} — 3× maior que a média de ${avgTick.toFixed(5)} em ${selectedSymbol}. Período de violência de tick detectado.`);
-                this.setPhase('AGUARDANDO', `⛔ ACCU bloqueado: spike de tick violento em ${selectedSymbol}`, 'warning');
-                return { success: false, error: `ACCU bloqueado: tickSizeAnomaly — último tick 3× acima da média, alta probabilidade de knockout imediato.` };
+                console.warn(`⛔ [${operationId}] ACCU BLOQUEADO (spike de tick): último tick=${lastTick.toFixed(5)} ≥2× a média de ${avgTick.toFixed(5)} em ${selectedSymbol}. Mercado em violência de tick — knockout no 1º tick.`);
+                this.setPhase('AGUARDANDO', `⛔ ACCU bloqueado: spike de tick (≥2× média) em ${selectedSymbol}`, 'warning');
+                return { success: false, error: `ACCU bloqueado: tickSizeAnomaly — último tick ≥2× acima da média, alta probabilidade de knockout imediato.` };
+              }
+
+              // ── BLOQUEIO 1B: Spike recente nos últimos 10 ticks ───────────
+              // Mesmo que o ÚLTIMO tick seja normal, se qualquer dos 10 anteriores
+              // foi ≥2.5× a média, o mercado está em regime de spikes — não entrar.
+              if (maxRecentTick > avgTick * 2.5) {
+                console.warn(`⛔ [${operationId}] ACCU BLOQUEADO (spike recente): max dos últimos 10 ticks=${maxRecentTick.toFixed(5)} ≥2.5× a média de ${avgTick.toFixed(5)} em ${selectedSymbol} — regime de spikes ativo, risco de knockout imediato.`);
+                this.setPhase('AGUARDANDO', `⛔ ACCU bloqueado: spike recente nos últimos 10 ticks em ${selectedSymbol}`, 'warning');
+                return { success: false, error: `ACCU bloqueado: maxRecentTickSize=${maxRecentTick.toFixed(5)} (≥2.5× média) — spike recente indica mercado violento, knockout no 1º tick.` };
               }
 
               // ── BLOQUEIO 2: Volatilidade anômala (burst) ──────────────────
-              // Z-score > 2.5 significa que a volatilidade atual está 2.5 desvios
-              // acima da baseline histórica — mercado em "modo de explosão".
-              if (zVol > 2.5) {
-                console.warn(`⛔ [${operationId}] ACCU BLOQUEADO (volatilidade em burst): zScore=${zVol.toFixed(2)}>2.5 em ${selectedSymbol} — período de alta volatilidade anômala, knockout provável.`);
+              // Z-score > 2.0 (reduzido de 2.5) significa volatilidade atual
+              // 2 desvios acima da baseline — mercado em modo de explosão.
+              if (zVol > 2.0) {
+                console.warn(`⛔ [${operationId}] ACCU BLOQUEADO (volatilidade em burst): zScore=${zVol.toFixed(2)}>2.0 em ${selectedSymbol} — período de alta volatilidade anômala, knockout provável.`);
                 this.setPhase('AGUARDANDO', `⛔ ACCU bloqueado: burst de volatilidade (z=${zVol.toFixed(1)}) em ${selectedSymbol}`, 'warning');
-                return { success: false, error: `ACCU bloqueado: zScoreVolatility=${zVol.toFixed(2)} (>2.5) — burst de volatilidade, barreira muito próxima de ser atingida.` };
+                return { success: false, error: `ACCU bloqueado: zScoreVolatility=${zVol.toFixed(2)} (>2.0) — burst de volatilidade, barreira muito próxima de ser atingida.` };
               }
 
               // ── BLOQUEIO 3: Alta probabilidade de reversão ────────────────
@@ -3018,11 +3029,10 @@ export class AutoTradingScheduler {
               const strongCluster = clusterStreak >= 4 && autocorr > 0.1;
               if (strongCluster && clusterDir !== 'mixed' && clusterDir !== safeDirection) {
                 console.warn(`⚠️ [${operationId}] ACCU DIREÇÃO AJUSTADA pela microestrutura: IAs dizem ${safeDirection.toUpperCase()} mas micro-trend é ${clusterDir.toUpperCase()} (streak=${clusterStreak} ticks | autocorr=${autocorr.toFixed(3)}>0.1). Mercado fisicamente favorece ${clusterDir.toUpperCase()}.`);
-                // Ajustar direção para o micro-trend físico — mais confiável para ACCU
                 safeDirection = clusterDir as 'up' | 'down';
               }
 
-              console.log(`✅ [${operationId}] ACCU calma OK: spike=${tickAnomaly} | zVol=${zVol.toFixed(2)} | streak=${clusterStreak}(${clusterDir}) | reversalProb=${reversalProb.toFixed(0)}% | autocorr=${autocorr.toFixed(3)} | Dir final: ${safeDirection.toUpperCase()}`);
+              console.log(`✅ [${operationId}] ACCU calma OK: spike=${tickAnomaly} | lastTick=${lastTick.toFixed(5)} | maxRecent=${maxRecentTick.toFixed(5)} | avg=${avgTick.toFixed(5)} | zVol=${zVol.toFixed(2)} | streak=${clusterStreak}(${clusterDir}) | reversalProb=${reversalProb.toFixed(0)}% | autocorr=${autocorr.toFixed(3)} | Dir final: ${safeDirection.toUpperCase()}`);
             } else {
               // Sem dados de microestrutura → usar apenas os filtros físicos anteriores
               console.log(`⚠️ [${operationId}] ACCU: dados de microestrutura indisponíveis — prosseguindo com filtros RSI/MACD apenas.`);
@@ -3127,6 +3137,63 @@ export class AutoTradingScheduler {
               const { rate, reason } = this.selectAccumulatorGrowthRate(mktVol, consensus, allowedAccuGrowthRates);
               adaptiveGrowth = rate;
               growthModeLabel = `IA (${reason})`;
+            }
+
+            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            // 🛡️ FILTRO 0D — TAMANHO DE TICK vs DISTÂNCIA DA BARREIRA (físico)
+            //
+            // Este é o filtro mais crítico para evitar loss em operações de 1 tick:
+            // o mercado emite o tamanho do tick atual — se esse tamanho for grande
+            // em relação à distância da barreira de knockout, entrar é fisicamente
+            // impossível de ser seguro, independente de qualquer IA.
+            //
+            // Estimativa da distância da barreira ACCU por taxa de crescimento:
+            //   1% growth → barreira ≈ ±0.5% do preço atual
+            //   2% growth → barreira ≈ ±1.0% do preço atual
+            //   3% growth → barreira ≈ ±1.5% do preço atual
+            //   4% growth → barreira ≈ ±2.0% do preço atual
+            //   5% growth → barreira ≈ ±2.5% do preço atual
+            //
+            // Regra: avgTick deve ser < 30% da barreira (margem de segurança 3:1)
+            //        lastTick deve ser < 50% da barreira (margem mínima 2:1)
+            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            {
+              const microD = supremeAnalysis?.microstructure;
+              if (microD && microD.avgTickSize > 0) {
+                try {
+                  const priceForBarrier = await derivAPI.getCurrentPrice(selectedSymbol);
+                  if (priceForBarrier && priceForBarrier > 0) {
+                    // Distância estimada da barreira em unidades de preço
+                    const estimatedBarrierPct = adaptiveGrowth * 50; // e.g. 0.01*50 = 0.5%
+                    const estimatedBarrierDist = priceForBarrier * (estimatedBarrierPct / 100);
+
+                    const avgTickPct  = (microD.avgTickSize / priceForBarrier) * 100;
+                    const lastTickPct = (microD.lastTickSize / priceForBarrier) * 100;
+
+                    console.log(`🔬 [${operationId}] ACCU BARREIRA-FÍSICA: preço=${priceForBarrier} | growth=${(adaptiveGrowth*100).toFixed(0)}% | barrierDist≈${estimatedBarrierDist.toFixed(5)} (${estimatedBarrierPct.toFixed(2)}%) | avgTick=${microD.avgTickSize.toFixed(5)} (${avgTickPct.toFixed(4)}%) | lastTick=${microD.lastTickSize.toFixed(5)} (${lastTickPct.toFixed(4)}%)`);
+
+                    // Bloqueio: tick médio > 30% da distância da barreira
+                    // (a cada tick "normal" o preço move 30%+ em direção ao knockout)
+                    if (microD.avgTickSize > estimatedBarrierDist * 0.30) {
+                      console.warn(`⛔ [${operationId}] ACCU BLOQUEADO (tick vs barreira): avgTick=${microD.avgTickSize.toFixed(5)} > 30% da barreiraDist=${estimatedBarrierDist.toFixed(5)} | growth=${(adaptiveGrowth*100).toFixed(0)}% em ${selectedSymbol} — ticks muito grandes para a barreira, knockout em poucos ticks.`);
+                      this.setPhase('AGUARDANDO', `⛔ ACCU bloqueado: ticks (${avgTickPct.toFixed(3)}%) > 30% da barreira (${estimatedBarrierPct.toFixed(2)}%) em ${selectedSymbol}`, 'warning');
+                      return { success: false, error: `ACCU bloqueado: avgTickSize (${avgTickPct.toFixed(3)}% do preço) > 30% da distância da barreira estimada (${estimatedBarrierPct.toFixed(2)}%) — ticks fisicamente grandes demais para ${(adaptiveGrowth*100).toFixed(0)}% growth.` };
+                    }
+
+                    // Bloqueio: último tick > 50% da distância da barreira
+                    // (o tick mais recente sozinho já cobre metade do caminho até o knockout)
+                    if (microD.lastTickSize > estimatedBarrierDist * 0.50) {
+                      console.warn(`⛔ [${operationId}] ACCU BLOQUEADO (último tick vs barreira): lastTick=${microD.lastTickSize.toFixed(5)} > 50% da barreiraDist=${estimatedBarrierDist.toFixed(5)} | growth=${(adaptiveGrowth*100).toFixed(0)}% em ${selectedSymbol} — último tick cobriu 50%+ da barreira.`);
+                      this.setPhase('AGUARDANDO', `⛔ ACCU bloqueado: último tick (${lastTickPct.toFixed(3)}%) > 50% da barreira em ${selectedSymbol}`, 'warning');
+                      return { success: false, error: `ACCU bloqueado: lastTickSize (${lastTickPct.toFixed(3)}% do preço) > 50% da distância da barreira estimada — último tick muito grande, risco de knockout no próximo tick.` };
+                    }
+
+                    console.log(`✅ [${operationId}] ACCU barreira-física OK: avgTick=${avgTickPct.toFixed(4)}% < 30% de ${estimatedBarrierPct.toFixed(2)}% | lastTick=${lastTickPct.toFixed(4)}% < 50% de ${estimatedBarrierPct.toFixed(2)}% — ticks seguros vs barreira.`);
+                  }
+                } catch (priceErr) {
+                  console.warn(`⚠️ [${operationId}] ACCU FILTRO 0D: não foi possível obter preço atual para verificação de barreira — prosseguindo sem este filtro.`);
+                }
+              }
             }
 
             // ─── FREQUÊNCIA POR TAXA (ACCU) ────────────────────────────────────────────
