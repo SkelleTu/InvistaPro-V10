@@ -2910,49 +2910,64 @@ export class AutoTradingScheduler {
 
           // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
           // 🛡️ FILTRO 0A — ENTROPIA DE SHANNON (caos do mercado)
-          // Entropia normalizada 0–1 (0=previsível | 1=caos total).
-          // ACCU com barreira apertada (2% growth) é destruído por movimentos erráticos.
-          // Knockout no 1º tick ocorre principalmente em mercados de alta entropia.
+          //
+          // IMPORTANTE: Índices sintéticos Volatility (R_10, R_25, R_50, R_75, R_100)
+          // são geradores RNG — têm entropia natural de 0.85–0.95. Isso é NORMAL e
+          // não indica perigo de knockout. O filtro físico real é o FILTRO 0D
+          // (tamanho de tick vs distância da barreira).
+          //
+          // Hard block apenas em caos genuinamente extremo (>0.97) que indica
+          // estrutura de dados corrompida ou ativo em colapso de liquidez.
           // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
           {
             const rawEntropy = supremeAnalysis?.statistics?.shannonEntropy;
             if (rawEntropy !== undefined) {
-              if (rawEntropy > 0.82) {
-                console.warn(`⛔ [${operationId}] ACCU BLOQUEADO (entropia extrema): Shannon Entropy=${rawEntropy.toFixed(3)}>0.82 em ${selectedSymbol} — mercado caótico, probabilidade de knockout no 1º tick muito alta.`);
-                this.setPhase('AGUARDANDO', `⛔ ACCU bloqueado: entropia extrema (${(rawEntropy*100).toFixed(0)}%) em ${selectedSymbol}`, 'warning');
-                return { success: false, error: `ACCU bloqueado: Entropia=${rawEntropy.toFixed(3)} (>0.82) — mercado em estado caótico, risco de knockout imediato inaceitável.` };
-              } else if (rawEntropy > 0.72) {
-                console.warn(`⚠️ [${operationId}] ACCU ALERTA (entropia elevada): Shannon Entropy=${rawEntropy.toFixed(3)}>0.72 em ${selectedSymbol} — risco de knockout elevado, prosseguindo com filtros adicionais.`);
+              if (rawEntropy > 0.97) {
+                console.warn(`⛔ [${operationId}] ACCU BLOQUEADO (entropia absolutamente máxima): Shannon Entropy=${rawEntropy.toFixed(3)}>0.97 em ${selectedSymbol} — possível corrupção de dados ou colapso de liquidez.`);
+                this.setPhase('AGUARDANDO', `⛔ ACCU bloqueado: entropia máxima (${(rawEntropy*100).toFixed(0)}%) em ${selectedSymbol}`, 'warning');
+                return { success: false, error: `ACCU bloqueado: Entropia=${rawEntropy.toFixed(3)} (>0.97) — caos absoluto detectado.` };
+              } else if (rawEntropy > 0.93) {
+                console.warn(`⚠️ [${operationId}] ACCU ALERTA (entropia muito elevada): Shannon Entropy=${rawEntropy.toFixed(3)}>0.93 em ${selectedSymbol} — verificando demais filtros físicos.`);
+              } else if (rawEntropy > 0.85) {
+                console.log(`📊 [${operationId}] ACCU entropia sintética normal: Shannon Entropy=${rawEntropy.toFixed(3)} em ${selectedSymbol} — índice RNG (esperado). Filtro 0D valida segurança via tick size.`);
               } else {
-                console.log(`✅ [${operationId}] ACCU entropia OK: Shannon Entropy=${rawEntropy.toFixed(3)} ≤0.72 em ${selectedSymbol} — mercado suficientemente previsível.`);
+                console.log(`✅ [${operationId}] ACCU entropia OK: Shannon Entropy=${rawEntropy.toFixed(3)} em ${selectedSymbol} — mercado previsível.`);
               }
             }
           }
 
           // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
           // 🛡️ FILTRO 0B — EXPOENTE DE HURST (estrutura do mercado)
-          // Hurst < 0.4 = mean-reverting severo: o preço oscila constantemente
-          // em torno da média, exatamente o padrão que causa knockout em ACCU.
-          // Hurst ~0.5 = random walk: sem vantagem de qualquer direção.
-          // ACCU só é seguro com Hurst > 0.5 (trending) ou mercado confirmado calmo.
+          //
+          // IMPORTANTE: Índices sintéticos Volatility têm Hurst natural de 0.10–0.25
+          // por serem RNG. Isso NÃO significa que ACCU é impossível — significa que
+          // não há tendência direcional, mas o tick size pode ser pequeno o suficiente
+          // para a barreira. O FILTRO 0D (tick vs barreira) é a verificação real.
+          //
+          // Hard block apenas para Hurst < 0.08 (anomalia de cálculo/corrupção).
+          // Combinação: apenas bloqueia se Hurst < 0.10 E entropia > 0.96.
           // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
           {
             const rawHurst = supremeAnalysis?.statistics?.hurstExponent;
             const rawEntropy2 = supremeAnalysis?.statistics?.shannonEntropy;
             if (rawHurst !== undefined) {
-              // Hurst extremamente baixo + qualquer nível de entropia = bloqueio
-              if (rawHurst < 0.30) {
-                console.warn(`⛔ [${operationId}] ACCU BLOQUEADO (Hurst crítico): Hurst=${rawHurst.toFixed(3)}<0.30 em ${selectedSymbol} — mercado fortemente mean-reverting, knockout garantido em múltiplos ticks.`);
-                this.setPhase('AGUARDANDO', `⛔ ACCU bloqueado: Hurst crítico (${rawHurst.toFixed(2)}) em ${selectedSymbol}`, 'warning');
-                return { success: false, error: `ACCU bloqueado: Hurst=${rawHurst.toFixed(3)} (<0.30) — mercado strongly mean-reverting, ACCU com qualquer direção sofrerá knockout.` };
+              // Hurst abaixo de 0.08 = anomalia de cálculo (quase impossível em dados reais)
+              if (rawHurst < 0.08) {
+                console.warn(`⛔ [${operationId}] ACCU BLOQUEADO (Hurst anômalo): Hurst=${rawHurst.toFixed(3)}<0.08 em ${selectedSymbol} — possível erro de cálculo ou dados insuficientes.`);
+                this.setPhase('AGUARDANDO', `⛔ ACCU bloqueado: Hurst anômalo (${rawHurst.toFixed(3)}) em ${selectedSymbol}`, 'warning');
+                return { success: false, error: `ACCU bloqueado: Hurst=${rawHurst.toFixed(3)} (<0.08) — valor anômalo, possível corrupção de dados.` };
               }
-              // Hurst abaixo de 0.40 + entropia elevada = bloqueio combinado
-              if (rawHurst < 0.40 && rawEntropy2 !== undefined && rawEntropy2 > 0.65) {
-                console.warn(`⛔ [${operationId}] ACCU BLOQUEADO (Hurst+Entropia): Hurst=${rawHurst.toFixed(3)}<0.40 + Entropia=${rawEntropy2.toFixed(3)}>0.65 em ${selectedSymbol} — mercado mean-reverting em ambiente caótico.`);
-                this.setPhase('AGUARDANDO', `⛔ ACCU bloqueado: Hurst baixo + entropia alta em ${selectedSymbol}`, 'warning');
-                return { success: false, error: `ACCU bloqueado: Hurst=${rawHurst.toFixed(3)} (<0.40) + Entropia=${rawEntropy2.toFixed(3)} (>0.65) — combinação letal para ACCU.` };
+              // Combinação extrema: Hurst muito baixo + entropia quase máxima
+              if (rawHurst < 0.10 && rawEntropy2 !== undefined && rawEntropy2 > 0.96) {
+                console.warn(`⛔ [${operationId}] ACCU BLOQUEADO (Hurst+Entropia extremos): Hurst=${rawHurst.toFixed(3)}<0.10 + Entropia=${rawEntropy2.toFixed(3)}>0.96 em ${selectedSymbol} — caos combinado extremo.`);
+                this.setPhase('AGUARDANDO', `⛔ ACCU bloqueado: Hurst+Entropia extremos em ${selectedSymbol}`, 'warning');
+                return { success: false, error: `ACCU bloqueado: Hurst=${rawHurst.toFixed(3)} + Entropia=${rawEntropy2.toFixed(3)} — caos extremo combinado.` };
               }
-              console.log(`✅ [${operationId}] ACCU Hurst OK: Hurst=${rawHurst.toFixed(3)} em ${selectedSymbol} — estrutura de mercado aceitável para ACCU.`);
+              if (rawHurst < 0.20) {
+                console.log(`📊 [${operationId}] ACCU Hurst sintético normal: Hurst=${rawHurst.toFixed(3)} em ${selectedSymbol} — índice RNG (esperado). Filtro 0D valida via tick size.`);
+              } else {
+                console.log(`✅ [${operationId}] ACCU Hurst OK: Hurst=${rawHurst.toFixed(3)} em ${selectedSymbol} — estrutura aceitável.`);
+              }
             }
           }
 
