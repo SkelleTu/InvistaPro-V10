@@ -3450,6 +3450,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const now = new Date();
       let cutoff: Date;
       switch (period) {
+        case '30s': cutoff = new Date(now.getTime() - 30 * 1000); break;
+        case '1m':  cutoff = new Date(now.getTime() - 1 * 60 * 1000); break;
+        case '5m':  cutoff = new Date(now.getTime() - 5 * 60 * 1000); break;
+        case '15m': cutoff = new Date(now.getTime() - 15 * 60 * 1000); break;
+        case '30m': cutoff = new Date(now.getTime() - 30 * 60 * 1000); break;
         case '1h':  cutoff = new Date(now.getTime() - 1 * 60 * 60 * 1000); break;
         case '24h': cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000); break;
         case '7d':  cutoff = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000); break;

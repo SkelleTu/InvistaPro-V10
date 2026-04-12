@@ -970,7 +970,12 @@ export default function TradingSystemPage() {
     refetchInterval: 4000, // Resumo de stats — 4s é suficiente
   });
 
-  const [profitPeriod, setProfitPeriod] = useState<'1h' | '24h' | '7d' | '30d' | '1y'>('24h');
+  type ProfitPeriod = '30s' | '1m' | '5m' | '15m' | '30m' | '1h' | '24h' | '7d' | '30d' | '1y';
+  const PERIOD_OPTIONS: [ProfitPeriod, string][] = [
+    ['30s','30s'], ['1m','1min'], ['5m','5min'], ['15m','15min'], ['30m','30min'],
+    ['1h','1h'], ['24h','Dia'], ['7d','7d'], ['30d','Mês'], ['1y','Ano'],
+  ];
+  const [profitPeriod, setProfitPeriod] = useState<ProfitPeriod>('24h');
   const { data: profitData } = useQuery<{ period: string; totalProfit: number; wins: number; losses: number; totalOps: number }>({
     queryKey: ["/api/trading/profit-period", profitPeriod],
     queryFn: () => fetch(`/api/trading/profit-period?period=${profitPeriod}`, { credentials: 'include' }).then(r => r.json()),
@@ -2093,8 +2098,27 @@ export default function TradingSystemPage() {
               </div>
             </Card>
 
+            {/* Filtro de período compartilhado */}
+            <div className="flex items-center gap-2 flex-wrap" data-testid="period-filter-bar">
+              <span className="text-xs text-muted-foreground font-medium whitespace-nowrap">Período:</span>
+              {PERIOD_OPTIONS.map(([val, label]) => (
+                <button
+                  key={val}
+                  data-testid={`btn-period-${val}`}
+                  onClick={() => setProfitPeriod(val)}
+                  className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                    profitPeriod === val
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
             {/* Cards de estatísticas - Linha 1 */}
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
               <Card data-testid="card-balance">
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                   <CardTitle className="text-sm font-medium">Saldo Atual</CardTitle>
@@ -2131,28 +2155,12 @@ export default function TradingSystemPage() {
               {/* Card de Lucro por Período */}
               <Card data-testid="card-profit-period">
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Lucro</CardTitle>
+                  <CardTitle className="text-sm font-medium">
+                    Lucro <span className="text-muted-foreground font-normal">({PERIOD_OPTIONS.find(([v]) => v === profitPeriod)?.[1]})</span>
+                  </CardTitle>
                   <TrendingUp className="h-4 w-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
-                  {/* Filtros de período */}
-                  <div className="flex gap-1 mb-2 flex-wrap">
-                    {([['1h','1h'], ['24h','Dia'], ['7d','7d'], ['30d','Mês'], ['1y','Ano']] as [typeof profitPeriod, string][]).map(([val, label]) => (
-                      <button
-                        key={val}
-                        data-testid={`btn-profit-period-${val}`}
-                        onClick={() => setProfitPeriod(val)}
-                        className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${
-                          profitPeriod === val
-                            ? 'bg-primary text-primary-foreground'
-                            : 'bg-muted text-muted-foreground hover:bg-muted/80'
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                  {/* Valor em USD */}
                   <div
                     className={`text-2xl font-bold transition-all duration-500 ${
                       (profitData?.totalProfit ?? 0) >= 0
@@ -2165,7 +2173,6 @@ export default function TradingSystemPage() {
                       ? `${(profitData.totalProfit ?? 0) >= 0 ? '+' : ''}$${Math.abs(profitData.totalProfit ?? 0).toFixed(2)}`
                       : '--'}
                   </div>
-                  {/* Valor em BRL */}
                   {(() => {
                     const profit = profitData?.totalProfit;
                     const brl = profit != null ? formatBRL(profit) : null;
@@ -2178,38 +2185,46 @@ export default function TradingSystemPage() {
                       </p>
                     ) : null;
                   })()}
-                  <p className="text-xs text-muted-foreground mt-1" data-testid="text-profit-ops">
-                    {profitData ? `${profitData.wins}✓ ${profitData.losses}✗ de ${profitData.totalOps} ops` : 'Carregando...'}
+                  <p className="text-xs text-muted-foreground mt-1" data-testid="text-profit-ops-summary">
+                    {profitData ? `${profitData.wins}✓ ${profitData.losses}✗` : 'Carregando...'}
                   </p>
                 </CardContent>
               </Card>
 
               <Card data-testid="card-operations">
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Total de Operações</CardTitle>
+                  <CardTitle className="text-sm font-medium">
+                    Operações <span className="text-muted-foreground font-normal">({PERIOD_OPTIONS.find(([v]) => v === profitPeriod)?.[1]})</span>
+                  </CardTitle>
                   <Activity className="h-4 w-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold" data-testid="text-total-operations">
-                    {tradeStats?.totalTrades || 0}
+                    {profitData !== undefined ? profitData.totalOps : '--'}
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Operações realizadas
+                    {profitData ? `${profitData.wins} ganhos · ${profitData.losses} perdas` : 'Total histórico: ' + (tradeStats?.totalTrades || 0)}
                   </p>
                 </CardContent>
               </Card>
 
               <Card data-testid="card-winrate">
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Taxa de Acerto</CardTitle>
+                  <CardTitle className="text-sm font-medium">
+                    Taxa de Acerto <span className="text-muted-foreground font-normal">({PERIOD_OPTIONS.find(([v]) => v === profitPeriod)?.[1]})</span>
+                  </CardTitle>
                   <Target className="h-4 w-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold" data-testid="text-winrate">
-                    {tradeStats?.winRate ? `${tradeStats.winRate}%` : '0%'}
+                    {profitData !== undefined && profitData.totalOps > 0
+                      ? `${((profitData.wins / profitData.totalOps) * 100).toFixed(1)}%`
+                      : profitData?.totalOps === 0 ? '0%' : (tradeStats?.winRate ? `${tradeStats.winRate}%` : '0%')}
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    {tradeStats?.wonTrades || 0} vitórias de {tradeStats?.totalTrades || 0}
+                    {profitData
+                      ? `${profitData.wins} vitórias de ${profitData.totalOps}`
+                      : `${tradeStats?.wonTrades || 0} de ${tradeStats?.totalTrades || 0}`}
                   </p>
                 </CardContent>
               </Card>
