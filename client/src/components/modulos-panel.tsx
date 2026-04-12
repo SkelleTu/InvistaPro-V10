@@ -451,6 +451,26 @@ export default function ModulosPanel() {
     refetchInterval: 30000,
   });
 
+  const cleanupMutation = useMutation({
+    mutationFn: () => apiRequest('/api/trading/module-configs/cleanup', { method: 'POST' }).then(r => r.json()),
+    onSuccess: (data: any) => {
+      if (data.cleaned > 0) {
+        toast({
+          title: '🧹 Configs limpas automaticamente',
+          description: `${data.cleaned} modalidade(s) inativa(s) tiveram seus slots desabilitados`,
+        });
+        queryClient.invalidateQueries({ queryKey: ['/api/trading/module-configs'] });
+        queryClient.invalidateQueries({ queryKey: ['/api/trading/module-overview'] });
+        refetchOverview();
+      }
+    },
+  });
+
+  // Auto-limpeza ao montar o painel
+  useEffect(() => {
+    cleanupMutation.mutate();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const { data: allConfigs, isLoading: configsLoading } = useQuery<ModalityConfig[]>({
     queryKey: ['/api/trading/module-configs'],
     queryFn: () => apiRequest('/api/trading/module-configs').then(r => r.json()).then((data: any) => {
@@ -529,10 +549,26 @@ export default function ModulosPanel() {
             Amplifique cada decisão da IA disparando o mesmo contrato em múltiplos módulos simultaneamente
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => refetchOverview()} data-testid="btn-refresh-overview">
-          <RefreshCw className="w-3.5 h-3.5 mr-1" />
-          Atualizar
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => cleanupMutation.mutate()}
+            disabled={cleanupMutation.isPending}
+            data-testid="btn-cleanup-modules"
+            className="border-amber-500/40 text-amber-400 hover:bg-amber-500/10"
+            title="Desabilita slots de modalidades não ativas na sua configuração"
+          >
+            {cleanupMutation.isPending
+              ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+              : <XCircle className="w-3.5 h-3.5 mr-1" />}
+            Limpar inativas
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => refetchOverview()} data-testid="btn-refresh-overview">
+            <RefreshCw className="w-3.5 h-3.5 mr-1" />
+            Atualizar
+          </Button>
+        </div>
       </div>
 
       {/* Camada 1: Painel Central de Módulos */}

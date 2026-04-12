@@ -2726,6 +2726,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json({ success: true, modality, slotConfigs: JSON.parse(saved.slotConfigs) });
   }));
 
+  // POST /api/trading/module-configs/cleanup — desabilita slots de modalidades não ativas
+  app.post('/api/trading/module-configs/cleanup', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+    const userId = req.user.id;
+
+    // Buscar modalidades ativas do usuário
+    const tradeConfig = await dbStorage.getUserTradeConfig(userId);
+    let activeModalities: string[] = [];
+    if (tradeConfig?.selectedModalities) {
+      try {
+        const parsed = JSON.parse(tradeConfig.selectedModalities);
+        activeModalities = Array.isArray(parsed) ? parsed : tradeConfig.selectedModalities.split(',').map((s: string) => s.trim()).filter(Boolean);
+      } catch {
+        activeModalities = tradeConfig.selectedModalities.split(',').map((s: string) => s.trim()).filter(Boolean);
+      }
+    }
+
+    // Buscar todas as configs de módulo do usuário
+    const allConfigs = await dbStorage.getModalityModuleConfigs(userId);
+    let cleaned = 0;
+
+    for (const cfg of allConfigs) {
+      // Se a modalidade não está na lista ativa, desabilitar todos os slots
+      if (!activeModalities.includes(cfg.modality)) {
+        let slots: any[] = [];
+        try { slots = JSON.parse(cfg.slotConfigs); } catch { slots = []; }
+        const anyEnabled = slots.some((s: any) => s.enabled);
+        if (anyEnabled) {
+          const disabledSlots = slots.map((s: any) => ({ ...s, enabled: false }));
+          await dbStorage.upsertModalityModuleConfig(userId, cfg.modality, disabledSlots);
+          cleaned++;
+        }
+      }
+    }
+
+    res.json({ success: true, cleaned, activeModalities, message: `${cleaned} configurações de modalidades inativas foram limpas` });
+  }));
+
   // GET /api/trading/module-configs/:modality/rajada-conditions — condições para rajada da modalidade
   app.get('/api/trading/module-configs/:modality/rajada-conditions', isAuthenticated, asyncErrorHandler(async (req: any, res: any) => {
     const { modality } = req.params;
