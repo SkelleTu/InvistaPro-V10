@@ -3439,6 +3439,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // =========================== LUCRO POR PERÍODO ===========================
+
+  app.get('/api/trading/profit-period', isAuthenticated, isTradingAuthorized, async (req, res) => {
+    try {
+      if (!req.user?.id) return res.status(401).json({ message: 'Usuário não autenticado' });
+      const userId = req.user.id;
+      const period = (req.query.period as string) || '24h';
+
+      const now = new Date();
+      let cutoff: Date;
+      switch (period) {
+        case '1h':  cutoff = new Date(now.getTime() - 1 * 60 * 60 * 1000); break;
+        case '24h': cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000); break;
+        case '7d':  cutoff = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000); break;
+        case '30d': cutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000); break;
+        case '1y':  cutoff = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000); break;
+        default:    cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      }
+
+      const allOps = await dbStorage.getUserTradeOperations(userId);
+      const filtered = allOps.filter((op: any) => {
+        const d = op.createdAt ? new Date(op.createdAt) : null;
+        return d && d >= cutoff && op.status !== 'pending' && op.profit !== null && op.profit !== undefined;
+      });
+
+      const totalProfit = filtered.reduce((sum: number, op: any) => sum + (Number(op.profit) || 0), 0);
+      const wins = filtered.filter((op: any) => (Number(op.profit) || 0) > 0).length;
+      const losses = filtered.filter((op: any) => (Number(op.profit) || 0) < 0).length;
+      const totalOps = filtered.length;
+
+      res.json({ period, totalProfit: Math.round(totalProfit * 100) / 100, wins, losses, totalOps });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ message: 'Erro ao calcular lucro por período', error: msg });
+    }
+  });
+
   // =========================== AI LOGS ===========================
 
   app.get('/api/trading/ai-logs', isAuthenticated, isTradingAuthorized, async (req, res) => {

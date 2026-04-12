@@ -970,6 +970,14 @@ export default function TradingSystemPage() {
     refetchInterval: 4000, // Resumo de stats — 4s é suficiente
   });
 
+  const [profitPeriod, setProfitPeriod] = useState<'1h' | '24h' | '7d' | '30d' | '1y'>('24h');
+  const { data: profitData } = useQuery<{ period: string; totalProfit: number; wins: number; losses: number; totalOps: number }>({
+    queryKey: ["/api/trading/profit-period", profitPeriod],
+    queryFn: () => fetch(`/api/trading/profit-period?period=${profitPeriod}`, { credentials: 'include' }).then(r => r.json()),
+    enabled: hasAccess,
+    refetchInterval: 5000,
+  });
+
   const { data: recentOperationsRaw = [] } = useQuery<TradeOperation[]>({
     queryKey: ["/api/trading/operations"],
     enabled: hasAccess,
@@ -2116,6 +2124,62 @@ export default function TradingSystemPage() {
                     {usdBrlRate && (
                       <span className="text-blue-500 ml-2">USD/BRL: {usdBrlRate.toFixed(2)}</span>
                     )}
+                  </p>
+                </CardContent>
+              </Card>
+
+              {/* Card de Lucro por Período */}
+              <Card data-testid="card-profit-period">
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Lucro</CardTitle>
+                  <TrendingUp className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  {/* Filtros de período */}
+                  <div className="flex gap-1 mb-2 flex-wrap">
+                    {([['1h','1h'], ['24h','Dia'], ['7d','7d'], ['30d','Mês'], ['1y','Ano']] as [typeof profitPeriod, string][]).map(([val, label]) => (
+                      <button
+                        key={val}
+                        data-testid={`btn-profit-period-${val}`}
+                        onClick={() => setProfitPeriod(val)}
+                        className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${
+                          profitPeriod === val
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  {/* Valor em USD */}
+                  <div
+                    className={`text-2xl font-bold transition-all duration-500 ${
+                      (profitData?.totalProfit ?? 0) >= 0
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : 'text-red-600 dark:text-red-400'
+                    }`}
+                    data-testid="text-profit-usd"
+                  >
+                    {profitData !== undefined
+                      ? `${(profitData.totalProfit ?? 0) >= 0 ? '+' : ''}$${Math.abs(profitData.totalProfit ?? 0).toFixed(2)}`
+                      : '--'}
+                  </div>
+                  {/* Valor em BRL */}
+                  {(() => {
+                    const profit = profitData?.totalProfit;
+                    const brl = profit != null ? formatBRL(profit) : null;
+                    return brl ? (
+                      <p
+                        className={`text-sm font-medium ${(profit ?? 0) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}
+                        data-testid="text-profit-brl"
+                      >
+                        {(profit ?? 0) >= 0 ? '' : '-'}{brl.startsWith('-') ? brl.slice(1) : brl}
+                      </p>
+                    ) : null;
+                  })()}
+                  <p className="text-xs text-muted-foreground mt-1" data-testid="text-profit-ops">
+                    {profitData ? `${profitData.wins}✓ ${profitData.losses}✗ de ${profitData.totalOps} ops` : 'Carregando...'}
                   </p>
                 </CardContent>
               </Card>
