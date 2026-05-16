@@ -1,5 +1,5 @@
 import { spawn, ChildProcess, execSync, spawnSync } from 'child_process';
-import { existsSync } from 'fs';
+import { existsSync, readdirSync, statSync } from 'fs';
 import path from 'path';
 
 const DISPLAY = ':99';
@@ -104,9 +104,8 @@ class VirtualDesktopService {
   private findUploadedMT5Exe(): string | null {
     const uploadDir = path.resolve(process.cwd(), 'mt5-uploaded');
     if (!existsSync(uploadDir)) return null;
-    const { readdirSync, statSync } = require('fs');
     const candidates = ['terminal64.exe', 'terminal.exe', 'metatrader5.exe', 'mt5.exe'];
-    function walk(d: string): string | null {
+    const walk = (d: string): string | null => {
       let entries: string[];
       try { entries = readdirSync(d); } catch { return null; }
       for (const entry of entries) {
@@ -118,7 +117,7 @@ class VirtualDesktopService {
         } catch {}
       }
       return null;
-    }
+    };
     return walk(uploadDir);
   }
 
@@ -213,11 +212,11 @@ class VirtualDesktopService {
         this.mt5Uploaded = true;
         this.mt5UploadedExe = uploadedExe;
         this.log(`📦 MT5 encontrado via upload: ${uploadedExe}`);
-        this.log('🚀 Iniciando MT5 do upload automaticamente...');
-        setTimeout(() => this.launchExe(uploadedExe), 3000);
+        this.log('🍷 Inicializando Wine antes de abrir MT5...');
+        setTimeout(() => this.initWineThenLaunch(uploadedExe), 2000);
       } else if (this.mt5Installed) {
-        this.log('✅ MT5 detectado na instalação — iniciando...');
-        setTimeout(() => this.launchMT5(), 3000);
+        this.log('✅ MT5 detectado na instalação — inicializando Wine...');
+        setTimeout(() => this.initWineThenLaunch(null), 2000);
       } else {
         this.log('🍷 Inicializando Wine (wineboot --init)...');
         setTimeout(() => this.initWinePrefix(), 2000);
@@ -229,6 +228,43 @@ class VirtualDesktopService {
       this.errorMsg = err.message || String(err);
       this.log(`❌ Erro fatal: ${this.errorMsg}`);
       return { success: false, error: this.errorMsg };
+    }
+  }
+
+  // Initialize Wine prefix, then launch the given exe (or MT5 from install)
+  private async initWineThenLaunch(exeToLaunch: string | null): Promise<void> {
+    const bins = getBins();
+    const winePrefix = this.getWinePrefix();
+    const winePrefixExists = existsSync(path.join(winePrefix, 'system.reg'));
+
+    if (winePrefixExists) {
+      this.log('🍷 Wine prefix já inicializado — abrindo MT5 diretamente...');
+    } else {
+      this.log('🍷 Inicializando Wine prefix pela primeira vez (wineboot --init)...');
+      await new Promise<void>((resolve) => {
+        const proc = spawn(bins.wineboot, ['--init'], {
+          env: this.getWineEnv(),
+          detached: false,
+        });
+        proc.stderr?.on('data', (d: Buffer) => {
+          const msg = d.toString().trim();
+          if (msg && !msg.includes('fixme:') && !msg.includes('warn:') && !msg.includes('err:winediag')) {
+            this.log(`[wineboot] ${msg}`);
+          }
+        });
+        proc.on('exit', (code) => { this.log(`[wineboot] concluído (${code})`); resolve(); });
+        proc.on('error', (e) => { this.log(`[wineboot error] ${e.message}`); resolve(); });
+        setTimeout(() => resolve(), 45000);
+      });
+      this.wineReady = true;
+      this.log('✅ Wine prefix pronto!');
+      await this.delay(1000);
+    }
+
+    if (exeToLaunch) {
+      await this.launchExe(exeToLaunch);
+    } else {
+      await this.launchMT5();
     }
   }
 
@@ -503,10 +539,14 @@ class VirtualDesktopService {
       await this.delay(500);
     }
 
+    // MT5 deve ser executado a partir do próprio diretório para encontrar DLLs/recursos
+    const exeDir = path.dirname(exePath);
     this.log(`🚀 Executando: ${exePath}`);
+    this.log(`📂 Diretório de trabalho: ${exeDir}`);
 
     const proc = spawn(bins.wine, [exePath], {
       env: this.getWineEnv(),
+      cwd: exeDir,
       detached: false,
     });
 
@@ -521,8 +561,14 @@ class VirtualDesktopService {
       }
     });
     proc.on('error', (e) => { this.log(`[wine error] ${e.message}`); });
-    proc.on('exit', (code) => {
-      this.log(`[wine] processo encerrado — código ${code}`);
+    proc.on('exit', (code, signal) => {
+      if (code !== null) {
+        this.log(`[wine] processo encerrado — código ${code}`);
+      } else if (signal) {
+        this.log(`[wine] processo morto por sinal: ${signal}`);
+      } else {
+        this.log(`[wine] processo encerrado (sem código/sinal)`);
+      }
       this.wineProc = null;
     });
 
