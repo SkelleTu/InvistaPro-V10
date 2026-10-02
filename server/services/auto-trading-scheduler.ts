@@ -2379,7 +2379,7 @@ export class AutoTradingScheduler {
         let resolvedTradeType = 'digitdiff';
         let accuTargetTicks: number | undefined = undefined; // ⚡ ACCU: ticks alvo para auto-sell
 
-        const safeDirection: "up" | "down" = 
+        let safeDirection: "up" | "down" = 
           (aiConsensus.finalDecision === 'up' || aiConsensus.finalDecision === 'down')
             ? aiConsensus.finalDecision as "up" | "down"
             : ((aiConsensus.upScore || 0) >= (aiConsensus.downScore || 0) ? 'up' : 'down');
