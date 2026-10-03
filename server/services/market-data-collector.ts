@@ -27,6 +27,9 @@ export class MarketDataCollector extends EventEmitter {
   private static readonly FALLBACK_SYMBOLS = [
     'R_10', 'R_25', 'R_50', 'R_75', 'R_100',
   ];
+
+  // Limite rígido para produção no Render Free. Nunca abrir centenas/milhares de streams.
+  private static readonly MAX_STREAM_SYMBOLS = 5;
   
   // 🚫 BLOQUEADO 100%: Ativos causadores de loss - NUNCA serão operados
   // Cobre tanto o formato "(1s)" quanto o formato de API "1HZ*" (são os mesmos ativos)
@@ -310,10 +313,11 @@ export class MarketDataCollector extends EventEmitter {
     try {
       let supportedSymbols = symbols;
       
-      // Se não passar símbolos, descobrir automaticamente
+      // PRODUÇÃO: não descobrir/subscrever todos os ativos da Deriv.
+      // A descoberta anterior podia gerar milhares de consultas/subscrições e saturar memória.
       if (!supportedSymbols || supportedSymbols.length === 0) {
-        console.log('🔍 [FNACIA] Nenhum símbolo passado - descobrindo dinamicamente...');
-        supportedSymbols = await this.discoverAndLoadAllAssets();
+        supportedSymbols = [...MarketDataCollector.FALLBACK_SYMBOLS];
+        console.log(`🛡️ [FNACIA] Coleta limitada a ${supportedSymbols.length} ativos-alvo para proteger o Render Free`);
       } else {
         // Atualizar lista interna com os símbolos passados (se não estiver vazia)
         if (supportedSymbols.length > 0) {
@@ -328,7 +332,13 @@ export class MarketDataCollector extends EventEmitter {
         this.DIGITDIFF_SUPPORTED_SYMBOLS = supportedSymbols;
       }
       
-      console.log(`🚀 [FNACIA] Iniciando coleta para ${supportedSymbols.length} ativos descobertos dinamicamente...`);
+      // Deduplicar, bloquear 1s e aplicar teto rígido antes de abrir qualquer stream.
+      supportedSymbols = Array.from(new Set(supportedSymbols))
+        .filter(symbol => !MarketDataCollector.BLOCKED_SYMBOLS_PATTERN.test(symbol))
+        .slice(0, MarketDataCollector.MAX_STREAM_SYMBOLS);
+
+      this.DIGITDIFF_SUPPORTED_SYMBOLS = supportedSymbols;
+      console.log(`🚀 [FNACIA] Iniciando coleta controlada para ${supportedSymbols.length} ativos...`);
       
       // Mostrar primeiros 10 e contar o resto
       const firstTen = supportedSymbols.slice(0, 10).join(', ');
@@ -352,7 +362,7 @@ export class MarketDataCollector extends EventEmitter {
 
       this.isCollecting = true;
       console.log(`✅ [FNACIA] Coleta ativa para ${supportedSymbols.length} ativos descobertos dinamicamente`);
-      console.log(`💰 [FNACIA] EXPANSÃO COMPLETA: Sistema carregando TODOS os ativos da Deriv!`);
+      console.log(`🛡️ [FNACIA] Modo protegido: máximo ${MarketDataCollector.MAX_STREAM_SYMBOLS} streams simultâneos`);
       
     } catch (error) {
       console.error('❌ [FNACIA] Erro ao iniciar coleta:', error);
