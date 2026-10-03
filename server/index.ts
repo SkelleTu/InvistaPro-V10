@@ -169,6 +169,9 @@ app.use((req, res, next) => {
     console.error("❌ [BOOT] Banco local não pôde ser inicializado; servidor HTTP continuará ativo:", dbError?.message || dbError);
   }
   
+  app.locals.serviceReady = true;
+  console.log("✅ [BOOT] Serviço HTTP/rotas/banco local prontos para o Render.");
+
   // 🗄️ EXECUTAR MIGRAÇÃO POSTGRESQL - SUPORTE A QUALQUER BANCO (REPLIT, SUPABASE, ETC)
   console.log('🗄️ Verificando sincronização com PostgreSQL...');
   const hasPostgres = process.env.DATABASE_URL && (process.env.DATABASE_URL.startsWith('postgresql://') || process.env.DATABASE_URL.startsWith('postgres://'));
@@ -359,8 +362,6 @@ app.use((req, res, next) => {
     // Scheduler, coleta Deriv e sincronização só podem ser ativados por ação manual
     // de um usuário autenticado. Isso impede processos órfãos e tempestades de dados.
     console.log('🛑 [TRADING] Boot concluído com trading DESATIVADO. Aguardando login + ativação manual.');
-    app.locals.serviceReady = true;
-    console.log('✅ [BOOT] Serviço marcado como READY.');
     
     // 🔍 KEEP-ALIVE: Ping externo via URL pública a cada 2 minutos
     // Replit hiberna após ~5 min sem tráfego externo — 2 min garante margem segura
