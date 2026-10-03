@@ -1,4 +1,5 @@
 import express, { type Request, Response, NextFunction } from "express";
+import { createServer } from "http";
 import cookieParser from "cookie-parser";
 import net from "net";
 import path from "path";
@@ -97,17 +98,36 @@ app.use((req, res, next) => {
 
       log(logLine);
     }
+  // REGRA CRÍTICA DE PRODUÇÃO:
+  // O servidor HTTP precisa abrir ANTES de qualquer inicialização pesada.
+  // O Render pode reiniciar uma instância que demora para aceitar a porta.
+  // Por isso /health é registrado primeiro e o servidor é criado/listening agora.
+  app.get('/health', (_req, res) => {
+    res.status(200).send('OK');
   });
 
-  next();
-});
+  const server = createServer(app);
+  const port = parseInt(process.env.PORT || '5000', 10);
+  console.log(`🚀 [BOOT] Abrindo servidor HTTP imediatamente na porta ${port}...`);
 
-(async () => {
-  // REGRA CRÍTICA DE PRODUÇÃO:
-  // O servidor HTTP precisa abrir a porta imediatamente. Inicializações opcionais
-  // como banco, migrações, Deriv, WhatsApp, backups e supervisores nunca podem
-  // impedir o Render de detectar a aplicação como online.
-  const server = await registerRoutes(app);
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen({
+      port,
+      host: "0.0.0.0",
+    }, () => { resolve(); });
+  });
+
+  log(`serving on port ${port}`);
+  console.log('✅ [BOOT] Servidor HTTP online ANTES do registro das rotas. Continuando inicializações...');
+
+  // Registrar as rotas somente depois que a porta já está aberta.
+  // Isso evita que imports, banco, Deriv e outros serviços atrasem o health check do Render.
+  try {
+    await registerRoutes(app, server);
+  } catch (routeError: any) {
+    console.error('❌ [BOOT] Falha ao registrar rotas após abrir a porta:', routeError);
+  }
 
   // Servir arquivos públicos antes do handler global de erros.
   const rootPublicPath = path.resolve(process.cwd(), 'public');
@@ -116,24 +136,13 @@ app.use((req, res, next) => {
   // Middleware avançado de error handling.
   app.use(globalErrorHandler);
 
-  const port = parseInt(process.env.PORT || '5000', 10);
-  console.log(`🚀 [BOOT] Abrindo servidor HTTP imediatamente na porta ${port}...`);
-
-  await new Promise<void>((resolve) => {
-    server.listen({
-      port,
-      host: "0.0.0.0",
-      reusePort: true,
-    }, () => { resolve(); });
-  });
-
-  log(`serving on port ${port}`);
-  console.log('✅ [BOOT] Servidor HTTP online. Continuando inicializações em segundo plano...');
-
   // Configurar Vite/static somente depois que a porta já estiver aberta.
   if (app.get("env") === "development") {
-    setupVite(app, server).catch((e: any) => console.warn('⚠️ Vite setup error:', e));
+    setupVite(app, server).catch((e: any) => console.warn("⚠️ Vite setup error:", e));
   } else {
+    serveStatic(app);
+  }
+ } else {
     serveStatic(app);
   }
 
