@@ -125,6 +125,14 @@ app.use((req, res, next) => {
   log(`serving on port ${port}`);
   console.log('✅ [BOOT] Servidor HTTP online ANTES do registro das rotas. Continuando inicializações...');
 
+  // O frontend estático também precisa estar montado antes das inicializações pesadas.
+  // Assim / e /assets continuam respondendo mesmo se algum módulo de backend demorar.
+  if (app.get("env") === "development") {
+    setupVite(app, server).catch((e: any) => console.warn("⚠️ Vite setup error:", e));
+  } else {
+    serveStatic(app);
+  }
+
   // Registrar as rotas somente depois que a porta já está aberta.
   // Isso evita que imports, banco, Deriv e outros serviços atrasem o health check do Render.
   try {
@@ -139,13 +147,6 @@ app.use((req, res, next) => {
 
   // Middleware avançado de error handling.
   app.use(globalErrorHandler);
-
-  // Configurar Vite/static somente depois que a porta já estiver aberta.
-  if (app.get("env") === "development") {
-    setupVite(app, server).catch((e: any) => console.warn("⚠️ Vite setup error:", e));
-  } else {
-    serveStatic(app);
-  }
 
   // Validação de criptografia não deve bloquear o boot do servidor.
   if (!validateEncryption()) {
