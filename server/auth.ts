@@ -2,6 +2,7 @@ import passport from "passport";
 import { Strategy as LocalStrategy } from "passport-local";
 import { Express } from "express";
 import session from "express-session";
+import crypto from "crypto";
 import { scrypt, randomBytes, timingSafeEqual } from "crypto";
 import { promisify } from "util";
 import { storage } from "./storage";
@@ -47,9 +48,10 @@ export function generateVerificationCode(): string {
 }
 
 export function setupAuth(app: Express) {
-  const sessionSecret = process.env.SESSION_SECRET;
-  if (!sessionSecret) {
-    throw new Error("SESSION_SECRET must be configured before the application can start.");
+  // Evita queda total do processo se o Render iniciar antes das secrets.
+  const sessionSecret = process.env.SESSION_SECRET?.trim() || crypto.randomBytes(32).toString("hex");
+  if (!process.env.SESSION_SECRET) {
+    console.warn("⚠️ SESSION_SECRET não configurada; usando segredo efêmero desta instância.");
   }
 
   // Session store persistente em SQLite — sobrevive a restarts do servidor
