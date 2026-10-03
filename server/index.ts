@@ -69,38 +69,16 @@ const waitForEncryption = async () => {
 
 console.log('🔍 Inicializando sistema avançado de error tracking...');
 console.log('🔥 Configurando handlers globais para exceções não tratadas...');
+process.on('unhandledRejection', (reason: any) => {
+  console.error(JSON.stringify({ diagnostic: true, event: 'UNHANDLED_REJECTION', timestamp: new Date().toISOString(),
+    error: reason instanceof Error ? { name: reason.name, message: reason.message, stack: reason.stack } : String(reason) }));
+});
+process.on('uncaughtException', (error: Error) => {
+  console.error(JSON.stringify({ diagnostic: true, event: 'UNCAUGHT_EXCEPTION', timestamp: new Date().toISOString(),
+    error: { name: error.name, message: error.message, stack: error.stack } }));
+});
 // Os handlers globais já foram configurados automaticamente no constructor do errorTracker
 app.use(requestLogger);
-
-app.use((req, res, next) => {
-  const start = Date.now();
-  const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
-
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
-  };
-
-  res.on("finish", () => {
-    const duration = Date.now() - start;
-    if (path.startsWith("/api")) {
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-      }
-
-      if (logLine.length > 80) {
-        logLine = logLine.slice(0, 79) + "…";
-      }
-
-      log(logLine);
-    }
-  });
-
-  next();
-});
 
 (async () => {
   // Validação bloqueante da ENCRYPTION_KEY antes de tudo
