@@ -1861,6 +1861,59 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
   });
 
+  // =========================== TRADING MANUAL / SEGURANÇA ===========================
+  // Login NÃO inicia trading. O usuário precisa ativar manualmente.
+  app.post('/api/trading/scheduler/start', isAuthenticated, isTradingAuthorized, async (req: any, res) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: 'Usuário não autenticado' });
+
+      autoTradingScheduler.armUserTrading(String(userId));
+      await autoTradingScheduler.startScheduler();
+
+      res.json({
+        success: true,
+        active: true,
+        message: 'Trading ativado manualmente para o usuário autenticado.',
+        userId: String(userId),
+        armedUsers: autoTradingScheduler.getArmedUserIds(),
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error('❌ Erro ao ativar trading manualmente:', error);
+      res.status(500).json({ success: false, message: 'Não foi possível ativar o trading.' });
+    }
+  });
+
+  app.post('/api/trading/scheduler/stop', isAuthenticated, isTradingAuthorized, async (req: any, res) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ message: 'Usuário não autenticado' });
+
+      await autoTradingScheduler.disarmUserTrading(String(userId));
+
+      res.json({
+        success: true,
+        active: autoTradingScheduler.getSchedulerStatus().isRunning,
+        message: 'Trading desativado manualmente para o usuário.',
+        armedUsers: autoTradingScheduler.getArmedUserIds(),
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error('❌ Erro ao desativar trading manualmente:', error);
+      res.status(500).json({ success: false, message: 'Não foi possível desativar o trading.' });
+    }
+  });
+
+  app.get('/api/trading/scheduler/status', isAuthenticated, isTradingAuthorized, async (req: any, res) => {
+    res.json({
+      success: true,
+      status: autoTradingScheduler.getSchedulerStatus(),
+      armedUsers: autoTradingScheduler.getArmedUserIds(),
+      timestamp: new Date().toISOString(),
+    });
+  });
+
   // Health check endpoint ULTRA-ROBUSTO para keep-alive 24/7
   // Este endpoint garante que o sistema nunca hiberne
   app.get('/api/health', async (req, res) => {
