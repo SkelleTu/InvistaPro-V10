@@ -47,7 +47,13 @@ class ReplitAutonomousEmailService implements AutonomousEmailService {
     this.serverPort = 5001; // Porta separada para o servidor de email
     this.emailDomain = this.generateEmailDomain();
     this.ensureDirectoryExists();
-    this.startEmailServer();
+    // Render expõe apenas uma porta pública por Web Service. O servidor de email
+    // autônomo era aberto em 5001 e fazia o Render trocar a porta primária,
+    // derrubando o serviço principal com 502. Ele continua disponível no
+    // ambiente de desenvolvimento, mas nunca abre uma segunda porta em produção.
+    if (process.env.NODE_ENV !== "production") {
+      this.startEmailServer();
+    }
   }
 
   generateEmailDomain(): string {
