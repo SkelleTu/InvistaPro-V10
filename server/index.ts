@@ -81,6 +81,66 @@ process.on('uncaughtException', (error: Error) => {
 app.use(requestLogger);
 
 (async () => {
+  // Render-safe startup: open the HTTP listener before non-critical initialization.
+  // Database migrations and external services must not block the public port.
+  const server = await registerRoutes(app);
+
+  // WebSocket proxy for noVNC virtual desktop
+  server.on('upgrade', (req, socket, head) => {
+    if (req.url && req.url.startsWith('/api/desktop/vnc-ws')) {
+      const target = net.connect(6080, 'localhost', () => {
+        const reqLine = `${req.method} ${req.url} HTTP/${req.httpVersion}\r\n`;
+        const headers = [];
+        for (let i = 0; i < req.rawHeaders.length; i += 2) {
+          headers.push(`${req.rawHeaders[i]}: ${req.rawHeaders[i + 1]}`);
+        }
+        target.write(reqLine + headers.join('\r\n') + '\r\n\r\n');
+        if (head && head.length > 0) target.write(head);
+        socket.pipe(target);
+        target.pipe(socket);
+      });
+      target.on('error', () => socket.destroy());
+      socket.on('error', () => target.destroy());
+    }
+  });
+
+  // Serve arquivos estáticos da pasta public/ raiz (vnc-viewer.html, novnc/, etc.)
+  const rootPublicPath = path.resolve(process.cwd(), 'public');
+  app.use(express.static(rootPublicPath));
+
+  // Middleware avançado de error handling (deve ser o último middleware)
+  app.use(globalErrorHandler);
+
+  // ALWAYS serve the app on the port specified in the environment variable PORT
+  // Other ports are firewalled. Default to 5000 if not specified.
+  // this serves both the API and the client.
+  // It is the only port that is not firewalled.
+  const port = parseInt(process.env.PORT || '5000', 10);
+  console.log(`🚀 [STARTUP] Abrindo listener HTTP imediatamente na porta ${port}...`);
+  console.log(`🚀 [DEBUG] Iniciando servidor na porta ${port}...`);
+
+  // Abrir a porta ANTES de configurar o Vite para não ultrapassar o timeout de startup
+  await new Promise<void>((resolve) => {
+    server.listen({
+      port,
+      host: "0.0.0.0",
+      reusePort: true,
+    }, () => { resolve(); });
+  });
+  log(`serving on port ${port}`);
+  console.log('✅ [STARTUP] Listener HTTP ativo; inicializações pesadas seguem em background.');
+
+  // Configurar Vite/static APÓS a porta estar aberta (não bloqueia startup)
+  // importantly only setup vite in development and after
+  // setting up all the other routes so the catch-all route
+  // doesn't interfere with the other routes
+  if (app.get("env") === "development") {
+    setupVite(app, server).catch((e: any) => console.warn('⚠️ Vite setup error:', e));
+  } else {
+    serveStatic(app);
+  }
+
+
   // Validação bloqueante da ENCRYPTION_KEY antes de tudo
   if (!validateEncryption()) {
     await waitForEncryption();
@@ -231,61 +291,6 @@ app.use(requestLogger);
     }
   };
   
-  const server = await registerRoutes(app);
-
-  // WebSocket proxy for noVNC virtual desktop
-  server.on('upgrade', (req, socket, head) => {
-    if (req.url && req.url.startsWith('/api/desktop/vnc-ws')) {
-      const target = net.connect(6080, 'localhost', () => {
-        const reqLine = `${req.method} ${req.url} HTTP/${req.httpVersion}\r\n`;
-        const headers = [];
-        for (let i = 0; i < req.rawHeaders.length; i += 2) {
-          headers.push(`${req.rawHeaders[i]}: ${req.rawHeaders[i + 1]}`);
-        }
-        target.write(reqLine + headers.join('\r\n') + '\r\n\r\n');
-        if (head && head.length > 0) target.write(head);
-        socket.pipe(target);
-        target.pipe(socket);
-      });
-      target.on('error', () => socket.destroy());
-      socket.on('error', () => target.destroy());
-    }
-  });
-
-  // Serve arquivos estáticos da pasta public/ raiz (vnc-viewer.html, novnc/, etc.)
-  const rootPublicPath = path.resolve(process.cwd(), 'public');
-  app.use(express.static(rootPublicPath));
-
-  // Middleware avançado de error handling (deve ser o último middleware)
-  app.use(globalErrorHandler);
-
-  // ALWAYS serve the app on the port specified in the environment variable PORT
-  // Other ports are firewalled. Default to 5000 if not specified.
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
-  const port = parseInt(process.env.PORT || '5000', 10);
-  console.log(`🚀 [DEBUG] Iniciando servidor na porta ${port}...`);
-
-  // Abrir a porta ANTES de configurar o Vite para não ultrapassar o timeout de startup
-  await new Promise<void>((resolve) => {
-    server.listen({
-      port,
-      host: "0.0.0.0",
-      reusePort: true,
-    }, () => { resolve(); });
-  });
-  log(`serving on port ${port}`);
-
-  // Configurar Vite/static APÓS a porta estar aberta (não bloqueia startup)
-  // importantly only setup vite in development and after
-  // setting up all the other routes so the catch-all route
-  // doesn't interfere with the other routes
-  if (app.get("env") === "development") {
-    setupVite(app, server).catch((e: any) => console.warn('⚠️ Vite setup error:', e));
-  } else {
-    serveStatic(app);
-  }
-
   // Executar inicializações pós-listen de forma assíncrona
   (async () => {
     // 🇧🇷 INICIAR MONITORAMENTO DE NOTICIÁRIO BRASILEIRO
