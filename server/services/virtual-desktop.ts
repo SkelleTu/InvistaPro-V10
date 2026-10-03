@@ -158,6 +158,16 @@ class VirtualDesktopService {
   }
 
   async start(): Promise<{ success: boolean; error?: string }> {
+    if (
+      process.env.NODE_ENV === 'production' &&
+      process.env.ENABLE_VIRTUAL_DESKTOP !== 'true'
+    ) {
+      return {
+        success: false,
+        error: 'Virtual desktop is disabled in production. Enable it explicitly to use Xvfb/Wine/VNC.',
+      };
+    }
+
     if (this.status === 'running' || this.status === 'starting') {
       return { success: true };
     }

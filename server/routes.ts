@@ -18,6 +18,7 @@ import QRCode from "qrcode";
 import multer from "multer";
 import path from "path";
 import crypto from "crypto";
+import { mkdirSync } from "fs";
 import kycRoutes from "./routes/kyc";
 import adminRoutes from "./routes/admin";
 import monitorRoutes from "./routes/monitor-routes";
@@ -110,6 +111,20 @@ function calculateCRC16(data: string): string {
 }
 
 export async function registerRoutes(app: Express, existingServer?: Server): Promise<Server> {
+  const isTradingAuthorized = (req: any, res: any, next: any) => {
+    const userEmail = req.user?.email;
+    const envAdminEmail = process.env.ADMIN_EMAIL;
+    const isAuthorized = isAuthorizedEmail(userEmail) ||
+      (envAdminEmail && userEmail?.toLowerCase() === envAdminEmail.toLowerCase());
+
+    if (!req.user || !userEmail || !isAuthorized) {
+      return res.status(403).json({ message: ACCESS_DENIED_MESSAGE });
+    }
+    next();
+  };
+
+  mkdirSync(path.resolve(process.cwd(), "uploads", "documents"), { recursive: true });
+
   // API de Trading
   app.get("/api/trading/assets", isAuthenticated, async (req, res) => {
     const { mode } = req.query;
@@ -205,7 +220,9 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   // =========================== KEEP-ALIVE SYSTEM 24/7 ===========================
   
   // Iniciar sistema de keep-alive
-  keepAliveSystem.start();
+  if (process.env.NODE_ENV !== "production") {
+    keepAliveSystem.start();
+  }
 
   // Endpoint de ping simples (para serviços externos como cron-job.org, UptimeRobot)
   app.get('/api/ping', (req, res) => {
@@ -445,7 +462,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   // Configure multer for file uploads
   const fileStorage = multer.diskStorage({
     destination: function (req, file, cb) {
-      cb(null, 'uploads/documents/')
+      cb(null, path.resolve(process.cwd(), 'uploads', 'documents'))
     },
     filename: function (req, file, cb) {
       const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9)
@@ -1917,6 +1934,13 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   // Health check endpoint ULTRA-ROBUSTO para keep-alive 24/7
   // Este endpoint garante que o sistema nunca hiberne
   app.get('/api/health', async (req, res) => {
+    if (app.locals.serviceReady !== true) {
+      return res.status(503).json({
+        status: 'not_ready',
+        timestamp: new Date().toISOString(),
+      });
+    }
+
     try {
       // Informações detalhadas do sistema para monitoramento
       const autoTradingStats = autoTradingScheduler.getSessionStats();
@@ -2020,23 +2044,6 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   // =================== TRADING SYSTEM ROUTES ===================
 
   // Using centralized access control imported at top
-
-  // Middleware to check trading access (only for authorized users)
-  const isTradingAuthorized = (req: any, res: any, next: any) => {
-    const userEmail = req.user?.email;
-    const envAdminEmail = process.env.ADMIN_EMAIL;
-    
-    // Check if authorized via predefined list OR via ADMIN_EMAIL env variable
-    const isAuthorized = isAuthorizedEmail(userEmail) || 
-                         (envAdminEmail && userEmail?.toLowerCase() === envAdminEmail.toLowerCase());
-    
-    if (!req.user || !userEmail || !isAuthorized) {
-      return res.status(403).json({ 
-        message: ACCESS_DENIED_MESSAGE
-      });
-    }
-    next();
-  };
 
   // =========================== DERIV TOKEN MANAGEMENT ===========================
   

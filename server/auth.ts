@@ -47,6 +47,11 @@ export function generateVerificationCode(): string {
 }
 
 export function setupAuth(app: Express) {
+  const sessionSecret = process.env.SESSION_SECRET;
+  if (!sessionSecret) {
+    throw new Error("SESSION_SECRET must be configured before the application can start.");
+  }
+
   // Session store persistente em SQLite — sobrevive a restarts do servidor
   const sessionStore = new SqliteSessionStore();
 
@@ -56,7 +61,7 @@ export function setupAuth(app: Express) {
   const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 
   const sessionSettings: session.SessionOptions = {
-    secret: process.env.SESSION_SECRET || "change-this-in-production",
+    secret: sessionSecret,
     resave: false,
     saveUninitialized: false, // Não cria sessão para visitantes não logados
     rolling: true,            // Renova o cookie a cada requisição (mantém vivo enquanto usa)

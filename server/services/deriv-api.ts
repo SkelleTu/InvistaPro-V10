@@ -1673,11 +1673,14 @@ export class DerivAPIService extends EventEmitter {
     
     console.log(`🔄 Tentativa de reconexão ${this.reconnectAttempts} em ${Math.round(delay/1000)}s (ilimitado)`);
 
-    setTimeout(() => {
+    const reconnectTimer = setTimeout(() => {
       if (this.apiToken) {
-        this.connect(this.apiToken, this.accountType);
+        this.connect(this.apiToken, this.accountType).catch((error) => {
+          console.warn('⚠️ Reconexão Deriv falhou; o serviço continuará ativo:', error?.message || error);
+        });
       }
     }, delay);
+    reconnectTimer.unref?.();
   }
 
   private generateRequestId(): number {

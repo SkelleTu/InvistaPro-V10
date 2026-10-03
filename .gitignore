@@ -8,6 +8,7 @@ database/
 database-backups/
 
 # Sensitive files - never commit secrets
+invista-pro-secrets.txt
 **/CREDENCIAIS*.txt
 **/DOCUMENT*CREDENCIAIS*.txt
 server/config/password-recovery/*.txt

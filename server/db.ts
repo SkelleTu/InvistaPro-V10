@@ -27,11 +27,10 @@ try {
   console.log('✅ SQLite configurado com modo ultra-conservativo para evitar disk I/O errors');
 } catch (error) {
   console.error('❌ Erro ao configurar SQLite:', error);
-  // Tentar recriar banco do zero se houver erro
-  sqlite.close();
-  fs.unlinkSync(dbPath);
-  const newSqlite = new Database(dbPath);
-  module.exports.sqlite = newSqlite;
+  throw new Error(
+    'Failed to configure SQLite. The existing database file was left untouched.',
+    { cause: error }
+  );
 }
 
 // Criar instância do Drizzle

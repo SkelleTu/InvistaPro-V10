@@ -18,10 +18,19 @@ class InvestProWhatsAppService implements WhatsAppService {
   private adminPhoneNumber: string;
   private logPath: string;
   private useSimulationMode: boolean = false;
+  private readonly enabled: boolean;
 
   constructor() {
+    this.enabled = process.env.NODE_ENV !== 'production' ||
+      process.env.ENABLE_WHATSAPP_SERVICE === 'true';
     this.adminPhoneNumber = process.env.ADMIN_WHATSAPP_NUMBER || '5511999999999'; // Número do administrador
     this.logPath = path.join(process.cwd(), 'server', 'whatsapp-logs.json');
+
+    if (!this.enabled) {
+      this.connectionStatus = 'Desativado nesta implantação';
+      return;
+    }
+
     this.ensureLogFileExists();
     this.setupWhatsAppClient();
   }
@@ -121,6 +130,8 @@ class InvestProWhatsAppService implements WhatsAppService {
   }
 
   public async sendNewUserNotification(userData: any): Promise<boolean> {
+    if (!this.enabled) return false;
+
     const message = this.formatNewUserMessage(userData);
     
     if (this.useSimulationMode || !this.isClientReady) {
@@ -166,6 +177,8 @@ class InvestProWhatsAppService implements WhatsAppService {
   }
 
   public async sendDocumentUploadNotification(userData: any, documentType: string): Promise<boolean> {
+    if (!this.enabled) return false;
+
     const message = this.formatDocumentUploadMessage(userData, documentType);
     
     if (this.useSimulationMode || !this.isClientReady) {

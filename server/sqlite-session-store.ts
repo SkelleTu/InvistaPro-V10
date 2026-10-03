@@ -1,5 +1,6 @@
 import session from "express-session";
 import Database from "better-sqlite3";
+import fs from "fs";
 import path from "path";
 
 const DB_PATH = path.join(process.cwd(), "database", "sessions.db");
@@ -17,6 +18,7 @@ export class SqliteSessionStore extends session.Store {
 
   constructor() {
     super();
+    fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
     this.db = new Database(DB_PATH);
     this.db.pragma("journal_mode = WAL");
     this.db.pragma("synchronous = NORMAL");
