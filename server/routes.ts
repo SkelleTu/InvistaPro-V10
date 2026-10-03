@@ -49,6 +49,7 @@ import { contractMonitor } from './services/contract-monitor';
 import { asyncErrorHandler } from './middleware/error-handler';
 import { tpmSystem } from './services/tpm-system';
 import { getRegistryInfo } from './services/url-registry';
+import { forensicObservability } from './services/forensic-observability';
 
 // PIX payload generator compatível com Santander
 function generatePixPayload(data: {
@@ -260,6 +261,60 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/health', (req, res) => {
     res.status(200).send('OK');
   });
+
+  // =========================== FORENSIC OBSERVABILITY ===========================
+  // Diagnostic data is sanitized and restricted to authenticated administrators.
+  const requireForensicAdmin = (req: any, res: any, next: any) => {
+    if (!req.user?.isAdmin) {
+      return res.status(403).json({ success: false, error: 'forbidden' });
+    }
+    next();
+  };
+
+  app.get('/api/forensics/status', isAuthenticated, requireForensicAdmin, (_req, res) => {
+    res.json(forensicObservability.getSnapshot());
+  });
+
+  app.get('/api/forensics/events', isAuthenticated, requireForensicAdmin, (req, res) => {
+    const limit = Number(req.query.limit || 200);
+    res.json({
+      success: true,
+      events: forensicObservability.getRecent(Number.isFinite(limit) ? limit : 200),
+    });
+  });
+
+  app.get('/api/forensics/stream', isAuthenticated, requireForensicAdmin, (req, res) => {
+    res.status(200);
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders?.();
+
+    const send = (event: any) => {
+      res.write('event: forensic\\n');
+      res.write('data: ' + JSON.stringify(event) + '\\n\\n');
+    };
+
+    send({
+      type: 'stream.connected',
+      timestamp: new Date().toISOString(),
+      snapshot: forensicObservability.getSnapshot(),
+    });
+
+    const unsubscribe = forensicObservability.subscribe(send);
+    const heartbeat = setInterval(() => {
+      res.write(': heartbeat\\n\\n');
+    }, 15000);
+
+    req.on('close', () => {
+      clearInterval(heartbeat);
+      unsubscribe();
+      res.end();
+    });
+  });
+
+  // =========================== END FORENSIC OBSERVABILITY ===========================
+
 
   app.get('/api/health', (req, res) => {
     res.json({ status: 'healthy', timestamp: new Date().toISOString() });
