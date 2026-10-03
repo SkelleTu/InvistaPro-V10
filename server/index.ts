@@ -22,11 +22,15 @@ import { realStatsTracker } from "./services/real-stats-tracker";
 import { runPostgresMigration } from "./migrate-postgres";
 import { initUrlRegistry } from "./services/url-registry";
 import { brazilNewsService } from "./services/brazil-news-service";
+import { forensicObservability } from "./services/forensic-observability";
+import { forensicRequestMiddleware } from "./middleware/forensic-observability";
 
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.use(cookieParser());
+
+// Forensic observability is deliberately installed before application routes.\n// It captures request lifecycle data without exposing secrets or request bodies.\napp.use(forensicRequestMiddleware);
 
 // Sistema avançado de error tracking
 // Validação crítica da ENCRYPTION_KEY no boot do servidor (com retry para Replit)
@@ -100,6 +104,13 @@ app.use((req, res, next) => {
   });
 
   next();
+});
+
+process.on("uncaughtException", (error) => {
+  forensicObservability.error(error, { level: "CRITICAL", type: "process.uncaughtException", component: "process" });
+});
+process.on("unhandledRejection", (reason) => {
+  forensicObservability.error(reason, { level: "CRITICAL", type: "process.unhandledRejection", component: "process" });
 });
 
 (async () => {
