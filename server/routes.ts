@@ -109,7 +109,7 @@ function calculateCRC16(data: string): string {
   return crc.toString(16).padStart(4, '0').toUpperCase();
 }
 
-export async function registerRoutes(app: Express): Promise<Server> {
+export async function registerRoutes(app: Express, existingServer?: Server): Promise<Server> {
   // API de Trading
   app.get("/api/trading/assets", isAuthenticated, async (req, res) => {
     const { mode } = req.query;
@@ -4650,6 +4650,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
   // ========== END AI ASSISTANT ROUTES ==========
 
-  const httpServer = createServer(app);
+  const httpServer = existingServer ?? createServer(app);
   return httpServer;
 }
