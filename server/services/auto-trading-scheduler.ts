@@ -692,6 +692,9 @@ export class AutoTradingScheduler {
         
         if (activeConfigs.length === 0) {
           console.log(`⚠️ [${operationId}] Nenhuma configuração ativa encontrada - operações NÃO serão executadas`);
+          // Evita busy-loop quando não há sessões ativas.
+          // O loop contínuo volta após 5s, preservando CPU, banco e WebSocket.
+          this.loopSleepUntil = Date.now() + 5000;
           return;
         }
       }
