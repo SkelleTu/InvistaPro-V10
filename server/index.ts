@@ -103,9 +103,43 @@ app.use((req, res, next) => {
 });
 
 (async () => {
-  // Validação bloqueante da ENCRYPTION_KEY antes de tudo
+  // REGRA CRÍTICA DE PRODUÇÃO:
+  // O servidor HTTP precisa abrir a porta imediatamente. Inicializações opcionais
+  // como banco, migrações, Deriv, WhatsApp, backups e supervisores nunca podem
+  // impedir o Render de detectar a aplicação como online.
+  const server = await registerRoutes(app);
+
+  // Servir arquivos públicos antes do handler global de erros.
+  const rootPublicPath = path.resolve(process.cwd(), 'public');
+  app.use(express.static(rootPublicPath));
+
+  // Middleware avançado de error handling.
+  app.use(globalErrorHandler);
+
+  const port = parseInt(process.env.PORT || '5000', 10);
+  console.log(`🚀 [BOOT] Abrindo servidor HTTP imediatamente na porta ${port}...`);
+
+  await new Promise<void>((resolve) => {
+    server.listen({
+      port,
+      host: "0.0.0.0",
+      reusePort: true,
+    }, () => { resolve(); });
+  });
+
+  log(`serving on port ${port}`);
+  console.log('✅ [BOOT] Servidor HTTP online. Continuando inicializações em segundo plano...');
+
+  // Configurar Vite/static somente depois que a porta já estiver aberta.
+  if (app.get("env") === "development") {
+    setupVite(app, server).catch((e: any) => console.warn('⚠️ Vite setup error:', e));
+  } else {
+    serveStatic(app);
+  }
+
+  // Validação de criptografia não deve bloquear o boot do servidor.
   if (!validateEncryption()) {
-    await waitForEncryption();
+    console.warn('⚠️ [BOOT] ENCRYPTION_KEY ainda não está disponível/validada. O servidor continuará online e os recursos que dependem dela poderão aguardar a configuração.');
   }
   
   // Inicializar banco de dados local
@@ -170,9 +204,11 @@ app.use((req, res, next) => {
   console.log('   📁 Backups salvos em: database-backups/');
   console.log('   🗑️ Mantendo últimos 30 backups');
   
-  // Inicializar ResilienceSupervisor antes de tudo
-  console.log('🛡️ Inicializando ResilienceSupervisor...');
-  await resilienceSupervisor.start();
+  // Inicializar ResilienceSupervisor sem bloquear o servidor HTTP.
+  console.log('🛡️ Inicializando ResilienceSupervisor em segundo plano...');
+  resilienceSupervisor.start().catch((error: any) => {
+    console.warn('⚠️ ResilienceSupervisor não iniciou corretamente:', error?.message || error);
+  });
   
   // Conectar eventos de restart aos componentes
   resilienceSupervisor.on('restart_scheduler', async () => {
@@ -253,8 +289,6 @@ app.use((req, res, next) => {
     }
   };
   
-  const server = await registerRoutes(app);
-
   // WebSocket proxy for noVNC virtual desktop
   server.on('upgrade', (req, socket, head) => {
     if (req.url && req.url.startsWith('/api/desktop/vnc-ws')) {
@@ -273,40 +307,6 @@ app.use((req, res, next) => {
       socket.on('error', () => target.destroy());
     }
   });
-
-  // Serve arquivos estáticos da pasta public/ raiz (vnc-viewer.html, novnc/, etc.)
-  const rootPublicPath = path.resolve(process.cwd(), 'public');
-  app.use(express.static(rootPublicPath));
-
-  // Middleware avançado de error handling (deve ser o último middleware)
-  app.use(globalErrorHandler);
-
-  // ALWAYS serve the app on the port specified in the environment variable PORT
-  // Other ports are firewalled. Default to 5000 if not specified.
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
-  const port = parseInt(process.env.PORT || '5000', 10);
-  console.log(`🚀 [DEBUG] Iniciando servidor na porta ${port}...`);
-
-  // Abrir a porta ANTES de configurar o Vite para não ultrapassar o timeout de startup
-  await new Promise<void>((resolve) => {
-    server.listen({
-      port,
-      host: "0.0.0.0",
-      reusePort: true,
-    }, () => { resolve(); });
-  });
-  log(`serving on port ${port}`);
-
-  // Configurar Vite/static APÓS a porta estar aberta (não bloqueia startup)
-  // importantly only setup vite in development and after
-  // setting up all the other routes so the catch-all route
-  // doesn't interfere with the other routes
-  if (app.get("env") === "development") {
-    setupVite(app, server).catch((e: any) => console.warn('⚠️ Vite setup error:', e));
-  } else {
-    serveStatic(app);
-  }
 
   // Executar inicializações pós-listen de forma assíncrona
   (async () => {
