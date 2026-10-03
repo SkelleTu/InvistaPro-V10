@@ -21,6 +21,7 @@ import crypto from "crypto";
 import kycRoutes from "./routes/kyc";
 import adminRoutes from "./routes/admin";
 import monitorRoutes from "./routes/monitor-routes";
+import forensicRoutes from "./routes/forensic-routes";
 import learningRoutes from "./routes/learning-routes";
 import metaTraderRoutes from "./routes/metatrader-routes";
 import fetch from "node-fetch";
@@ -1792,6 +1793,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Monitor Universal de Contratos IA
   app.use('/api/monitor', monitorRoutes);
+
+  // Sistema Forense de Diagnóstico e Correção
+  app.use('/api/forensics', forensicRoutes);
 
   // Motor de Aprendizado Persistente Real
   app.use('/api/learning', learningRoutes);
