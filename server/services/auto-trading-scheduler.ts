@@ -284,27 +284,27 @@ export class AutoTradingScheduler {
     console.log('   • Limite por sessão: 1000 operações');
     console.log('   • Limite diário: 5000 operações');
     
-    // Iniciar setup assíncrono e rastrear com Promise
-    this.setupPromise = this.setupAnaliseNaturalSystem();
+    // SEGURANÇA: o scheduler é LAZY. Nenhum processo de trading, coleta de mercado,
+    // conexão pública Deriv ou motor contínuo pode iniciar apenas porque o servidor subiu.
+    // A ativação acontece somente por uma ação autenticada e manual do usuário.
+    this.setupPromise = Promise.resolve();
+    this.isInitialized = false;
     
-    // Recuperar sessões ativas após crash
-    this.recoverActiveSessions();
+    // Recuperar sessões NÃO é permitido no boot. Sessões antigas ficam inativas até
+    // o usuário autenticar e ativar manualmente o trading.
+    this.activeSessions.clear();
     
-    // Adicionar listener para shutdown gracioso
     process.on('SIGTERM', () => this.emergencyStopAll());
     process.on('SIGINT', () => this.emergencyStopAll());
     
-    // Iniciar heartbeat para ResilienceSupervisor
+    // Heartbeat leve apenas para diagnóstico. Não inicia trading.
     this.startSupervisorHeartbeat();
 
-    // 🧠 MOTOR SUPREMO DE ANÁLISE: iniciar análise de mercado em 10 dimensões
-    supremeAnalyzer.start();
-    console.log('🧠 [SUPREME] Motor de Análise Suprema ativado — 10 dimensões simultâneas');
+    // Motores pesados são iniciados somente em startScheduler(), após ativação manual.
+    console.log('🛑 [TRADING] Scheduler criado em modo INATIVO. Nenhum trading será iniciado automaticamente.');
 
-    // 🧠 MOTOR DE APRENDIZADO PERSISTENTE: escutar resultados de contratos
-    persistentLearningEngine.initialize().catch(e =>
-      console.error('❌ [LEARNING] Falha na inicialização do motor de aprendizado:', e)
-    );
+    // 🧠 MOTOR DE APRENDIZADO PERSISTENTE: escutar resultados de contratos somente após ativação
+    
     contractMonitor.on('contract_closed', async (data: any) => {
       try {
         await persistentLearningEngine.processTradeResult({
@@ -537,7 +537,8 @@ export class AutoTradingScheduler {
   }
 
   private async setupAnaliseNaturalSystem(): Promise<void> {
-    console.log('🚀 Iniciando Sistema Análise natural continua de IA - Análise Microscópica Contínua...');
+    console.log('🚀 [TRADING] Inicializando componentes após ativação manual...');
+
     
     // Inicializar coleta contínua de dados da Deriv
     await this.initializeMarketDataCollection();
@@ -5041,11 +5042,20 @@ export class AutoTradingScheduler {
     };
   }
 
-  stopScheduler(): void {
-    if (this.continuousLoopActive) {
-      this.continuousLoopActive = false;
-      console.log('🛑 Auto Trading Scheduler parado');
-    }
+  async stopScheduler(): Promise<void> {
+    this.continuousLoopActive = false;
+    this.schedulerRunning = false;
+    this.activeSessions.clear();
+    this.loopSleepUntil = 0;
+    this.lastOperationId = null;
+    this.lastOperationStartTime = 0;
+    
+    // Parar coleta de mercado e sincronização quando o usuário desativa.
+    try { await marketDataCollector.stopCollection(); } catch (e) { console.warn('⚠️ [TRADING] Falha ao parar MarketDataCollector:', e); }
+    try { await derivTradeSync.stopAutoSync(); } catch (e) { console.warn('⚠️ [TRADING] Falha ao parar sincronização Deriv:', e); }
+    try { await derivAPI.disconnect(); } catch (e) { console.warn('⚠️ [TRADING] Falha ao desconectar Deriv:', e); }
+    
+    console.log('🛑 [TRADING] Todos os processos de trading foram parados.');
   }
 
   async startScheduler(): Promise<void> {
@@ -5061,11 +5071,24 @@ export class AutoTradingScheduler {
       return;
     }
     
-    // Aguardar inicialização completar antes de iniciar
+    // Inicialização pesada acontece SOMENTE quando o usuário autenticado
+    // solicita manualmente o início do trading.
     if (!this.isInitialized) {
-      console.log('⏳ Aguardando inicialização do sistema...');
-      await this.setupPromise;
-      console.log('✅ Inicialização completa!');
+      console.log('⏳ [TRADING] Ativação manual recebida. Inicializando coleta e motores...');
+      await this.setupAnaliseNaturalSystem();
+      this.isInitialized = true;
+      console.log('✅ [TRADING] Componentes inicializados após ativação manual.');
+      try {
+        supremeAnalyzer.start();
+        console.log('🧠 [SUPREME] Motor de análise ativado manualmente.');
+      } catch (e) {
+        console.warn('⚠️ [SUPREME] Falha ao iniciar motor:', e);
+      }
+      try {
+        await persistentLearningEngine.initialize();
+      } catch (e) {
+        console.warn('⚠️ [LEARNING] Falha ao inicializar motor:', e);
+      }
     }
     
     // Re-checar após await (prevenir race condition com múltiplas chamadas concorrentes)
