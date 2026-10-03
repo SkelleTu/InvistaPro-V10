@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { forensicObservability } from './forensic-observability';
 
 export interface ErrorContext {
   userId?: string;
@@ -75,6 +76,19 @@ class ErrorTracker {
   ): string {
     const errorId = this.generateErrorId();
     const timestamp = new Date().toISOString();
+
+    forensicObservability.record({
+      level,
+      type: "error-tracker.capture",
+      message: error?.message || String(error),
+      component: "error-tracker",
+      metadata: {
+        category,
+        errorId,
+        context,
+        stack: error?.stack,
+      },
+    });
 
     const detailedError: DetailedError = {
       id: errorId,
