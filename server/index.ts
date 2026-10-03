@@ -231,17 +231,27 @@ app.use((req, res, next) => {
   
   // Conectar eventos de restart aos componentes
   resilienceSupervisor.on('restart_scheduler', async () => {
-    console.log('🔄 Reiniciando AutoTradingScheduler por solicitação do ResilienceSupervisor...');
+    // Nunca iniciar trading automaticamente por ação do supervisor.
+    const status = autoTradingScheduler.getSchedulerStatus();
+    if (!status.isRunning) {
+      console.log('🛑 [RESILIENCE] Restart do scheduler ignorado: trading está inativo por política de segurança.');
+      return;
+    }
+    console.log('🔄 Reiniciando AutoTradingScheduler de uma sessão já manualmente ativada...');
     try {
-      autoTradingScheduler.stopScheduler();
+      await autoTradingScheduler.stopScheduler();
       await autoTradingScheduler.startScheduler();
-      console.log('✅ AutoTradingScheduler reiniciado com sucesso');
+      console.log('✅ AutoTradingScheduler reiniciado');
     } catch (error) {
       console.error('❌ Erro ao reiniciar AutoTradingScheduler:', error);
     }
   });
   
   resilienceSupervisor.on('restart_websocket', async () => {
+    if (!autoTradingScheduler.getSchedulerStatus().isRunning) {
+      console.log('🛑 [RESILIENCE] Restart do WebSocket ignorado: trading inativo.');
+      return;
+    }
     console.log('🔄 Reiniciando WebSocket por solicitação do ResilienceSupervisor...');
     try {
       // Reiniciar o market data collector (que contém o WebSocket público de ticks)
@@ -256,6 +266,10 @@ app.use((req, res, next) => {
   });
 
   resilienceSupervisor.on('restart_market_collector', async () => {
+    if (!autoTradingScheduler.getSchedulerStatus().isRunning) {
+      console.log('🛑 [RESILIENCE] Restart do MarketDataCollector ignorado: trading inativo.');
+      return;
+    }
     console.log('🔄 Reiniciando MarketDataCollector por solicitação do ResilienceSupervisor...');
     try {
       await marketDataCollector.stopCollection();
@@ -336,68 +350,10 @@ app.use((req, res, next) => {
       console.warn('⚠️ [BrazilNews] Falha ao iniciar serviço de notícias BR:', brazilErr?.message);
     }
 
-    // Inicializar Auto Trading Scheduler DEPOIS que o servidor estiver rodando
-    console.log('🤖 Inicializando Auto Trading Scheduler...');
-    try {
-      await autoTradingScheduler.startScheduler();
-      console.log('✅ Sistema de trades automáticos ativo e RODANDO!');
-      console.log('📊 Scheduler a cada 60 segundos (1 minuto)');
-      console.log('🔥 Sistema iniciará automaticamente sempre que o app for executado!');
-      
-      // 🔄 INICIAR SINCRONIZAÇÃO DE TRADES COM DERIV
-      console.log('🔄 Iniciando sincronização contínua com Deriv...');
-      derivTradeSync.startAutoSync();
-      console.log('✅ Sincronização de trades ATIVA - recebendo resultados em tempo real!');
-
-      // 📊 INICIALIZAR STATS REAIS DO BANCO + RESTAURAR ESTADO DE RECUPERAÇÃO
-      try {
-        const allUsers = await storage.getAllUsers();
-        let totalWon = 0, totalLost = 0, totalProfit = 0;
-        for (const user of allUsers) {
-          const ops = await storage.getUserTradeOperations(user.id, 10000);
-          const resolved = ops.filter((op: any) => op.status === 'won' || op.status === 'lost');
-          totalWon += resolved.filter((op: any) => op.status === 'won').length;
-          totalLost += resolved.filter((op: any) => op.status === 'lost').length;
-          totalProfit += resolved.reduce((sum: number, op: any) => sum + (op.profit || 0), 0);
-        }
-        realStatsTracker.initializeFromDB(totalWon, totalLost, totalProfit);
-
-        // 🔄 RESTAURAR estado de recuperação persistido (sobrevive a reinícios)
-        try {
-          const savedRecovery = await storage.getSystemHeartbeat('recovery_tracker');
-          if (savedRecovery?.metadata) {
-            const recoveryState = JSON.parse(savedRecovery.metadata as string);
-            realStatsTracker.restoreRecoveryState(recoveryState);
-          }
-        } catch (recoveryErr: any) {
-          console.log(`⚠️ [RECOVERY] Não foi possível restaurar estado de recuperação: ${recoveryErr?.message}`);
-        }
-
-        // 💾 REGISTRAR callback de persistência — salva estado após cada win/loss
-        realStatsTracker.registerPersistCallback((state) => {
-          storage.updateSystemHeartbeat('recovery_tracker', 'active', state)
-            .catch((e: any) => console.warn(`⚠️ [RECOVERY] Falha ao persistir estado: ${e?.message}`));
-        });
-
-      } catch (statsErr: any) {
-        console.log(`⚠️ [REAL STATS] Não foi possível inicializar do banco: ${statsErr?.message}`);
-      }
-      
-      // Enviar heartbeat inicial
-      await storage.updateSystemHeartbeat('scheduler', 'healthy', {
-        startTime: new Date().toISOString(),
-        status: 'initialized'
-      }).catch((err: any) => console.error('⚠️ Erro ao enviar heartbeat inicial:', err));
-      
-    } catch (error: any) {
-      console.error('❌ Erro ao iniciar Auto Trading Scheduler:', error);
-      console.error('⚠️ Scheduler não inicializado - ResilienceSupervisor tentará recuperar');
-      
-      // Reportar erro ao ResilienceSupervisor
-      await storage.incrementHeartbeatError('scheduler', String(error)).catch((err: any) => 
-        console.error('⚠️ Erro ao reportar erro:', err)
-      );
-    }
+    // 🛑 TRADING NÃO INICIA NO BOOT.
+    // Scheduler, coleta Deriv e sincronização só podem ser ativados por ação manual
+    // de um usuário autenticado. Isso impede processos órfãos e tempestades de dados.
+    console.log('🛑 [TRADING] Boot concluído com trading DESATIVADO. Aguardando login + ativação manual.');
     
     // 🔍 KEEP-ALIVE: Ping externo via URL pública a cada 2 minutos
     // Replit hiberna após ~5 min sem tráfego externo — 2 min garante margem segura
