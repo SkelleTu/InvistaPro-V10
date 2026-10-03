@@ -91,13 +91,17 @@ app.use((req, res, next) => {
       if (capturedJsonResponse) {
         logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
       }
-
       if (logLine.length > 80) {
         logLine = logLine.slice(0, 79) + "…";
       }
-
       log(logLine);
     }
+  });
+
+  next();
+});
+
+(async () => {
   // REGRA CRÍTICA DE PRODUÇÃO:
   // O servidor HTTP precisa abrir ANTES de qualquer inicialização pesada.
   // O Render pode reiniciar uma instância que demora para aceitar a porta.
@@ -140,9 +144,6 @@ app.use((req, res, next) => {
   if (app.get("env") === "development") {
     setupVite(app, server).catch((e: any) => console.warn("⚠️ Vite setup error:", e));
   } else {
-    serveStatic(app);
-  }
- } else {
     serveStatic(app);
   }
 
