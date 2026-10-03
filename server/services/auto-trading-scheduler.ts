@@ -50,6 +50,9 @@ export interface ActiveTradeSession {
 
 export class AutoTradingScheduler {
   private activeSessions: Map<string, ActiveTradeSession> = new Map();
+  // Usuários que explicitamente ativaram o trading nesta instância.
+  // Login sozinho NÃO arma o sistema.
+  private armedUserIds: Set<string> = new Set();
   private schedulerRunning: boolean = false;
   private continuousLoopActive: boolean = false;
   private emergencyStop: boolean = false; // SISTEMA REATIVADO PARA MODO SEM LIMITES
@@ -627,6 +630,42 @@ export class AutoTradingScheduler {
     }
   }
 
+  /**
+   * Arma o trading para um usuário autenticado após ação manual explícita.
+   */
+  armUserTrading(userId: string): void {
+    if (!userId) return;
+    this.armedUserIds.add(String(userId));
+    console.log(`🟢 [TRADING] Usuário ${userId} ARMOU o trading manualmente.`);
+  }
+
+  /**
+   * Desarma um usuário. Se não houver mais usuários armados, todo o motor é parado.
+   */
+  async disarmUserTrading(userId: string): Promise<void> {
+    if (!userId) return;
+    this.armedUserIds.delete(String(userId));
+    this.activeSessions.forEach((session, key) => {
+      if (String(session.userId) === String(userId)) this.activeSessions.delete(key);
+    });
+    console.log(`🛑 [TRADING] Usuário ${userId} DESARMOU o trading.`);
+    if (this.armedUserIds.size === 0) {
+      await this.stopScheduler();
+    }
+  }
+
+  /**
+   * Parada total: desarma todos os usuários e encerra coleta/sincronização.
+   */
+  async stopAllTrading(): Promise<void> {
+    this.armedUserIds.clear();
+    await this.stopScheduler();
+  }
+
+  getArmedUserIds(): string[] {
+    return Array.from(this.armedUserIds);
+  }
+
   private async executeAnaliseNaturalAnalysis(): Promise<void> {
     // 🔴 VERIFICAÇÃO CRÍTICA #1: Flag de pausa centralizada (banco de dados)
     const tradingControlStatus = await storage.getTradingControlStatus();
@@ -660,8 +699,9 @@ export class AutoTradingScheduler {
         activeSessions: this.activeSessions.size
       }).catch(err => console.error('⚠️ Erro ao enviar heartbeat:', err));
       
-      // Buscar todas as configurações ativas
+      // Buscar somente configurações de usuários que EXPLICITAMENTE armaram o trading.
       let activeConfigs = await storage.getActiveTradeConfigurations();
+      activeConfigs = activeConfigs.filter((config: any) => this.armedUserIds.has(String(config.userId)));
       
       this.setPhase('ANALISANDO', '🤖 Executando análise de IA em múltiplos ativos...', 'info');
       console.log(`🎯 [${operationId}] Sistema Análise natural continua de IA - Análise microscópica ativa...`);
@@ -674,25 +714,9 @@ export class AutoTradingScheduler {
       if (activeConfigs.length === 0) {
         console.log(`⚠️ [${operationId}] Nenhuma configuração ativa encontrada - verificando configurações desativadas no modo sem limites...`);
         
-        // Buscar todas as configurações desativadas no modo sem limites e reativá-las
-        const allConfigs = await storage.getAllTradeConfigurations();
-        const disabledSemLimites = allConfigs.filter((c: any) => !c.isActive && (c.mode === 'test_sem_limites' || c.mode.includes('perpetuo')));
-        
-        if (disabledSemLimites.length > 0) {
-          console.log(`🔄 [${operationId}] Encontradas ${disabledSemLimites.length} configuração(ões) sem limites desativada(s) - reativando automaticamente...`);
-          
-          for (const config of disabledSemLimites) {
-            await storage.reactivateTradeConfiguration(config.id);
-            console.log(`✅ [${operationId}] Configuração ${config.id} reativada (modo: ${config.mode})`);
-          }
-          
-          // Buscar configurações ativas novamente
-          activeConfigs = await storage.getActiveTradeConfigurations();
-          console.log(`📊 [${operationId}] Configurações ativas após reativação: ${activeConfigs.length}`);
-        }
-        
+        // Nunca reativar configuração automaticamente. A ativação deve ser manual.
         if (activeConfigs.length === 0) {
-          console.log(`⚠️ [${operationId}] Nenhuma configuração ativa encontrada - operações NÃO serão executadas`);
+          console.log(`⚠️ [${operationId}] Nenhuma configuração ativa para usuários armados - operações NÃO serão executadas`);
           return;
         }
       }
@@ -5059,6 +5083,11 @@ export class AutoTradingScheduler {
   }
 
   async startScheduler(): Promise<void> {
+    // SEGURANÇA: nunca iniciar sem usuário explicitamente armado.
+    if (this.armedUserIds.size === 0) {
+      console.log('🛑 [TRADING] startScheduler ignorado: nenhum usuário armou o trading manualmente.');
+      return;
+    }
     // SEGURANÇA: Não permitir restart se parada de emergência ativa
     if (this.emergencyStop) {
       console.log('⛔ Não é possível iniciar: Parada de emergência ativa');
