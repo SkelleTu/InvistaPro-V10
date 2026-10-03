@@ -52,6 +52,14 @@ export class ResilienceSupervisor extends EventEmitter {
     // Recuperar sessões ativas (não apagar subscrições - elas serão usadas na reconexão)
     await this.recoverActiveSessions();
 
+    // Registrar heartbeat inicial imediatamente. Evita que o supervisor considere o WebSocket morto
+    // durante os primeiros 30s antes do primeiro intervalo de heartbeat.
+    try {
+      await this.reportHeartbeat(this.COMPONENT_NAMES.WEBSOCKET, { status: 'starting' });
+      await this.reportHeartbeat(this.COMPONENT_NAMES.MARKET_COLLECTOR, { status: 'starting' });
+      await this.reportHeartbeat(this.COMPONENT_NAMES.SCHEDULER, { status: 'starting' });
+    } catch (_) {}
+
     // Iniciar monitoramento de saúde
     this.startHealthMonitoring();
 
