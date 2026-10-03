@@ -428,6 +428,20 @@ export class DerivAPIService extends EventEmitter {
       this.isConnected = false;
       this.cleanup();
       reject(error);
+
+      // Erro de handshake (ex.: HTTP 520) não deve ser transformado em
+      // reinicializações agressivas pelo supervisor. A própria conexão usa
+      // backoff exponencial limitado para tentar novamente.
+      if (!this.isShuttingDown) {
+        const delay = Math.min(
+          this.reconnectDelay * Math.pow(1.5, Math.min(this.reconnectAttempts, 10)),
+          this.maxReconnectDelay
+        );
+        console.warn(`🔄 [DERIV] Falha de conexão ${error instanceof Error ? error.message : String(error)} — nova tentativa em ${Math.round(delay / 1000)}s`);
+        setTimeout(() => {
+          if (!this.isShuttingDown && !this.isConnected) this.attemptAutoReconnect();
+        }, delay);
+      }
     });
 
     this.ws!.on('message', (data) => {
