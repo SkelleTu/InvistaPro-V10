@@ -1,0 +1,26 @@
+name: Invista Pro Forensic Validation
+
+on:
+  push:
+    branches:
+      - forensic-observability-may
+  pull_request:
+    branches:
+      - forensic-observability-may
+
+jobs:
+  static-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+      - name: TypeScript validation
+        run: npm run check
+      - name: Production build validation
+        run: npm run build
