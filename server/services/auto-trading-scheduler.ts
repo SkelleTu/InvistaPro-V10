@@ -5032,7 +5032,7 @@ export class AutoTradingScheduler {
       currentPhaseDetail: this.currentPhaseDetail,
       lastCycleStartedAt: this.lastCycleStartedAt,
       nextCycleAt: nowSt, // Loop contínuo: próxima análise já está iniciando
-      cycleIntervalMs: 0, // Sem intervalo fixo — IA completamente livre
+      cycleIntervalMs: 2000, // Intervalo de segurança entre ciclos
       activityLog: this.activityLog.slice(0, 10),
       marketQuality: this.lastScanMarketQuality,
       badMarketPaused: isPaused && !this.badMarketReducedGrowthActive,
@@ -5080,7 +5080,7 @@ export class AutoTradingScheduler {
     // bad market pause, recovery mode e gestão de banca são os únicos guardiões.
     this.continuousLoopActive = true;
     (async () => {
-      console.log('🧠 [AI LOOP] IA em modo completamente livre — análise contínua sem intervalo fixo');
+      console.log('🧠 [AI LOOP] Análise contínua com intervalo de segurança de 2s entre ciclos');
       while (this.continuousLoopActive && !this.emergencyStop) {
         // ⏱️ SLEEP INTELIGENTE: respeitar cooldowns conhecidos sem girar em vazio
         const now = Date.now();
@@ -5103,9 +5103,10 @@ export class AutoTradingScheduler {
             // Em caso de erro inesperado, aguardar 1s antes de retry para evitar loop de erro intenso
             await new Promise(resolve => setTimeout(resolve, 1000));
           }
-        }
-        // Yield mínimo ao event loop para não bloquear I/O (WebSocket, DB, etc.)
-        await new Promise(resolve => setImmediate(resolve));
+        // Intervalo mínimo entre ciclos. O loop anterior era efetivamente um busy-loop
+        // (setImmediate), gerando dezenas/centenas de análises por segundo, consultas repetidas
+        // ao banco e reinícios por memória no Render.
+        await new Promise(resolve => setTimeout(resolve, 2000));
       }
       console.log('🛑 [AI LOOP] Loop de IA encerrado.');
     })();
