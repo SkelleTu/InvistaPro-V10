@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events';
 import { dualStorage as storage } from '../storage-dual';
 import { errorTracker } from './error-tracker';
+import { forensicObservability } from './forensic-observability';
 
 export interface ComponentHealth {
   componentName: string;
@@ -92,6 +93,18 @@ export class ResilienceSupervisor extends EventEmitter {
       try {
         const health = await this.getComponentHealth(componentName);
         
+        forensicObservability.record({
+          level: health.isHealthy ? "INFO" : "ERROR",
+          type: "component.health",
+          message: health.isHealthy ? "Component healthy" : "Component unhealthy",
+          component: componentName,
+          metadata: {
+            lastHeartbeat: health.lastHeartbeat.toISOString(),
+            errorCount: health.errorCount,
+            lastError: health.lastError,
+          },
+        });
+
         if (!health.isHealthy) {
           console.warn(`⚠️ Componente ${componentName} não está saudável`);
           console.warn(`   Último heartbeat: ${health.lastHeartbeat}`);
@@ -298,6 +311,14 @@ export class ResilienceSupervisor extends EventEmitter {
         'healthy',
         metadata
       );
+
+      forensicObservability.record({
+        level: "INFO",
+        type: "component.heartbeat",
+        message: "Component heartbeat received",
+        component: componentName,
+        metadata,
+      });
     } catch (error) {
       console.error(`❌ Erro ao reportar heartbeat de ${componentName}:`, error);
     }
@@ -313,6 +334,13 @@ export class ResilienceSupervisor extends EventEmitter {
     try {
       await storage.incrementHeartbeatError(componentName, errorMessage);
       
+      forensicObservability.record({
+        level: "ERROR",
+        type: "component.error",
+        message: errorMessage,
+        component: componentName,
+      });
+
       console.warn(`⚠️ Erro reportado por ${componentName}: ${errorMessage}`);
     } catch (err) {
       console.error(`❌ Erro ao reportar erro de ${componentName}:`, err);
