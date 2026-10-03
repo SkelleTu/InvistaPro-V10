@@ -141,6 +141,14 @@ app.use((req, res, next) => {
     console.error('❌ [BOOT] Falha ao registrar rotas após abrir a porta:', routeError);
   }
 
+  // SPA fallback MUST come after API routes so /auth, /login and other
+  // client-side routes receive index.html without intercepting backend APIs.
+  if (app.get("env") !== "development") {
+    app.get("*", (_req, res) => {
+      res.sendFile(path.resolve(process.cwd(), "dist", "public", "index.html"));
+    });
+  }
+
   // Servir arquivos públicos antes do handler global de erros.
   const rootPublicPath = path.resolve(process.cwd(), 'public');
   app.use(express.static(rootPublicPath));
