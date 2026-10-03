@@ -5103,6 +5103,8 @@ export class AutoTradingScheduler {
             // Em caso de erro inesperado, aguardar 1s antes de retry para evitar loop de erro intenso
             await new Promise(resolve => setTimeout(resolve, 1000));
           }
+        }
+
         // Intervalo mínimo entre ciclos. O loop anterior era efetivamente um busy-loop
         // (setImmediate), gerando dezenas/centenas de análises por segundo, consultas repetidas
         // ao banco e reinícios por memória no Render.
