@@ -4449,7 +4449,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
 
   // ===== VIRTUAL DESKTOP / MT5 ROUTES =====
   const { virtualDesktop } = await import('./services/virtual-desktop');
-  const { mkdirSync, writeFileSync, existsSync: fsExists, readdirSync, statSync } = await import('fs');
+  const { mkdirSyncFs, writeFileSync, existsSync: fsExists, readdirSync, statSync } = await import('fs');
   const pathMod = await import('path');
 
   function findMT5ExeInUpload(dir: string): string | null {
@@ -4520,7 +4520,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         const { rmSync } = await import('fs');
         try { rmSync(MT5_UPLOAD_DIR, { recursive: true, force: true }); } catch {}
       }
-      mkdirSync(MT5_UPLOAD_DIR, { recursive: true });
+      mkdirSyncFs(MT5_UPLOAD_DIR, { recursive: true });
 
       let savedCount = 0;
       for (const file of files) {
@@ -4528,7 +4528,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         const relativePath = file.originalname.replace(/\\/g, '/');
         const targetPath = pathMod.join(MT5_UPLOAD_DIR, relativePath);
         const targetDir = pathMod.dirname(targetPath);
-        mkdirSync(targetDir, { recursive: true });
+        mkdirSyncFs(targetDir, { recursive: true });
         writeFileSync(targetPath, file.buffer);
         savedCount++;
       }
@@ -4582,7 +4582,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
 
       // If this is the last chunk — extract with 7z
       if (chunkIndex === totalChunks - 1) {
-        mkdirSync(MT5_UPLOAD_DIR, { recursive: true });
+        mkdirSyncFs(MT5_UPLOAD_DIR, { recursive: true });
         const { execSync } = await import('child_process');
         try {
           // Extract to a temp subfolder first to detect top-level dir
