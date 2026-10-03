@@ -123,6 +123,7 @@ app.use((req, res, next) => {
   });
 
   log(`serving on port ${port}`);
+  app.locals.serviceReady = false;
   console.log('✅ [BOOT] Servidor HTTP online ANTES do registro das rotas. Continuando inicializações...');
 
   // O frontend estático também precisa estar montado antes das inicializações pesadas.
@@ -162,7 +163,11 @@ app.use((req, res, next) => {
   }
   
   // Inicializar banco de dados local
-  initializeDatabase();
+  try {
+    initializeDatabase();
+  } catch (dbError: any) {
+    console.error("❌ [BOOT] Banco local não pôde ser inicializado; servidor HTTP continuará ativo:", dbError?.message || dbError);
+  }
   
   // 🗄️ EXECUTAR MIGRAÇÃO POSTGRESQL - SUPORTE A QUALQUER BANCO (REPLIT, SUPABASE, ETC)
   console.log('🗄️ Verificando sincronização com PostgreSQL...');
@@ -354,6 +359,8 @@ app.use((req, res, next) => {
     // Scheduler, coleta Deriv e sincronização só podem ser ativados por ação manual
     // de um usuário autenticado. Isso impede processos órfãos e tempestades de dados.
     console.log('🛑 [TRADING] Boot concluído com trading DESATIVADO. Aguardando login + ativação manual.');
+    app.locals.serviceReady = true;
+    console.log('✅ [BOOT] Serviço marcado como READY.');
     
     // 🔍 KEEP-ALIVE: Ping externo via URL pública a cada 2 minutos
     // Replit hiberna após ~5 min sem tráfego externo — 2 min garante margem segura
