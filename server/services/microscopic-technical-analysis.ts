@@ -80,14 +80,14 @@ export class MicroscopicTechnicalAnalyzer extends EventEmitter {
   private candlestickData: Map<string, CandlestickData[]> = new Map();
   private analysisInterval: NodeJS.Timeout | null = null;
   private isActive = false;
-  private readonly ANALYSIS_INTERVAL_MS = 100; // Análise a cada 100ms
+  private readonly ANALYSIS_INTERVAL_MS = 2000; // Produção: 1 análise a cada 2s para evitar tempestade de eventos/memória
   private readonly BUFFER_SIZE = 1000;
   private readonly CANDLESTICK_PERIOD_MS = 1000; // Candlesticks de 1 segundo
 
   constructor() {
     super();
     console.log('🔬 SISTEMA DE ANÁLISE TÉCNICA MICROSCÓPICA INICIALIZADO');
-    console.log('⚡ Análise em intervalos de 100ms para máxima precisão');
+    console.log('⚡ Análise microscópica em intervalos de 2s (produção estável)');
     console.log('📊 Indicadores técnicos avançados + Análise gráfica em tempo real');
   }
 
@@ -99,7 +99,7 @@ export class MicroscopicTechnicalAnalyzer extends EventEmitter {
       this.performMicroscopicAnalysis();
     }, this.ANALYSIS_INTERVAL_MS);
 
-    console.log('🚀 [MICROSCOPIC] Análise técnica microscópica ATIVADA - 100ms intervals');
+    console.log('🚀 [MICROSCOPIC] Análise técnica microscópica ATIVADA - 2s interval');
   }
 
   stop(): void {
