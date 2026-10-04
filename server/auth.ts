@@ -5,7 +5,7 @@ import session from "express-session";
 import crypto from "crypto";
 import { scrypt, randomBytes, timingSafeEqual } from "crypto";
 import { promisify } from "util";
-import { storage } from "./storage";
+import { dualStorage as storage } from "./storage-dual";
 import { User } from "@shared/schema";
 import { SqliteSessionStore } from "./sqlite-session-store";
 import { isAuthorizedEmail, ACCESS_DENIED_MESSAGE } from "./config/access";
