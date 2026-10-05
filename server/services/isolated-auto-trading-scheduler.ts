@@ -8,6 +8,7 @@ type WorkerStatus = "ready" | "armed" | "stopped" | "disconnected";
 interface UserRuntime {
   userId: UserId;
   sessionId: string;
+  requestSessionId: string;
   worker: ChildProcess;
   status: WorkerStatus;
   armed: boolean;
@@ -57,6 +58,7 @@ class IsolatedAutoTradingScheduler {
     const runtime: UserRuntime = {
       userId: id,
       sessionId,
+      requestSessionId: String(requestedSessionId || 'default'),
       worker,
       status: "ready",
       armed: false,
@@ -186,7 +188,8 @@ class IsolatedAutoTradingScheduler {
   getActiveSessions() {
     return [...this.runtimes.values()].map(r => ({
       userId: r.userId,
-      sessionId: r.sessionId,
+      sessionId: r.requestSessionId,
+      runtimeSessionId: r.sessionId,
       isActive: r.armed,
       isolated: true,
       workerReady: r.workerReady,
