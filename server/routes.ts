@@ -1988,57 +1988,6 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     });
   });
 
-  // Health check endpoint ULTRA-ROBUSTO para keep-alive 24/7
-  // Este endpoint garante que o sistema nunca hiberne
-  app.get('/api/health', async (req, res) => {
-    if (app.locals.serviceReady !== true) {
-      return res.status(503).json({
-        status: 'not_ready',
-        timestamp: new Date().toISOString(),
-      });
-    }
-
-    try {
-      // Informações detalhadas do sistema para monitoramento
-      const autoTradingStats = autoTradingScheduler.getSessionStats();
-      const activeSessions = autoTradingScheduler.getActiveSessions();
-      
-      res.json({ 
-        status: 'online',
-        system: 'InvestPro Trading System',
-        timestamp: new Date().toISOString(),
-        uptime: `${Math.floor(process.uptime() / 3600)}h ${Math.floor((process.uptime() % 3600) / 60)}m`,
-        uptimeSeconds: Math.floor(process.uptime()),
-        workspace: 'active',
-        trading: {
-          active: activeSessions.length > 0,
-          sessions: activeSessions.length,
-          totalExecuted: autoTradingStats.totalExecutedOperations,
-          scheduler: 'running'
-        },
-        memory: {
-          used: `${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB`,
-          total: `${Math.round(process.memoryUsage().heapTotal / 1024 / 1024)}MB`
-        },
-        message: '🚀 Sistema operando 24/7 - Trading ativo e autônomo'
-      });
-    } catch (error) {
-      res.status(500).json({ 
-        status: 'error', 
-        message: 'Health check failed',
-        timestamp: new Date().toISOString() 
-      });
-    }
-  });
-
-  // 🔥 ENDPOINTS ANTI-HIBERNAÇÃO OTIMIZADOS PARA SERVIÇOS EXTERNOS
-  // Múltiplos endpoints com respostas variadas para simular tráfego real
-  
-  // Endpoint 1: Ultra-leve para ping externo (UptimeRobot, cron-job.org)
-  app.get('/api/ping', (req, res) => {
-    res.status(200).send('OK');
-  });
-
   // Endpoint 2: JSON com informações de uptime
   app.get('/api/keepalive', (req, res) => {
     const uptime = Math.floor(process.uptime());
