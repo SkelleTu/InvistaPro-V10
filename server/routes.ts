@@ -980,7 +980,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   const handleLogout = (req: any, res: any) => {
     console.log('🚪 Logout solicitado');
     const loggedUserId = req.user?.id ? String(req.user.id) : null;
-    req.logout((err: any) => {
+    req.logout(async (err: any) => {
       if (err) {
         console.error('❌ Erro no logout:', err);
         return res.status(500).json({ message: "Erro ao fazer logout" });
