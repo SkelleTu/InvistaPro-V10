@@ -288,13 +288,23 @@ export class MarketDataCollector extends EventEmitter {
       const digitDiffSymbols = await this.derivAPI.getDigitDiffSupportedSymbols(allSymbols);
       console.log(`💎 [DISCOVERY] ${digitDiffSymbols.length} ativos com DIGITDIFF suportado`);
       
-      // Só atualizar lista se encontrou símbolos (não sobrescrever com lista vazia)
-      if (digitDiffSymbols.length > 0) {
-        this.DIGITDIFF_SUPPORTED_SYMBOLS = digitDiffSymbols;
-        this.allDerivSymbols = new Map(allSymbols.map(s => [s.symbol, s]));
+      // Segurança: descoberta nunca amplia o universo operacional.
+      // Apenas símbolos explicitamente permitidos pelo produto podem entrar na lista.
+      const allowedDiscoveredSymbols = digitDiffSymbols
+        .filter(symbol => !MarketDataCollector.BLOCKED_SYMBOLS_PATTERN.test(symbol))
+        .filter(symbol => MarketDataCollector.ALLOWED_PRODUCTION_SYMBOLS.has(symbol.toUpperCase()))
+        .slice(0, MarketDataCollector.MAX_STREAM_SYMBOLS);
+
+      const allowedSymbolSet = new Set(allowedDiscoveredSymbols);
+      const allowedAssetMetadata = allSymbols.filter(s => allowedSymbolSet.has(String(s.symbol).toUpperCase()));
+
+      // Só atualizar lista se encontrou símbolos permitidos (não sobrescrever com lista vazia)
+      if (allowedDiscoveredSymbols.length > 0) {
+        this.DIGITDIFF_SUPPORTED_SYMBOLS = allowedDiscoveredSymbols;
+        this.allDerivSymbols = new Map(allowedAssetMetadata.map(s => [s.symbol, s]));
         this.lastSymbolsUpdate = Date.now();
         this.isDiscoveryComplete = true;
-        console.log(`✅ [DISCOVERY] Lista atualizada com ${digitDiffSymbols.length} ativos DIGITDIFF`);
+        console.log(`✅ [DISCOVERY] Lista operacional limitada a ${allowedDiscoveredSymbols.length} ativos permitidos`);
       } else {
         console.warn('⚠️ [DISCOVERY] Nenhum símbolo descoberto - mantendo fallback');
         // Manter a lista atual (fallback)
