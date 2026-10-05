@@ -1394,7 +1394,7 @@ export default function TradingSystemPage() {
 
   // generate_order_data — 10 ordens aleatórias (buy/sell)
   const generateOrderData = useCallback(() => {
-    const orders = [];
+    const orders: Array<{ order_id: number; symbol: string; amount: number; price: number; type: "buy" | "sell" }> = [];
     for (let i = 0; i < 10; i++) {
       orders.push({
         order_id: i,
