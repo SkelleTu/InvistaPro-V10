@@ -461,7 +461,7 @@ export class AdvancedLearningSystem {
     if (marketData.length < 2) return 0.15;
     
     const prices = marketData.map(d => d.price || 0);
-    const returns = [];
+    const returns: number[] = [];
     
     for (let i = 1; i < prices.length; i++) {
       if (prices[i-1] !== 0) {
