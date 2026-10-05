@@ -36,6 +36,7 @@ export async function registerUniversalSession(userId: string) {
     sessionId: session.sessionId,
     userId: String(userId),
     platform,
+    tradingArmed: Boolean(session.tradingArmed),
   });
   console.log(`💓 [UNIVERSAL] Sessão registrada | user=${userId} | platform=${platform} | session=${session?.sessionId || "n/a"}`);
   return session;
@@ -45,7 +46,8 @@ export async function heartbeatUniversalSession(userId: string, tradingArmed = f
   const state = sessions.get(String(userId));
   if (!state) return registerUniversalSession(String(userId));
   try {
-    state.tradingArmed = tradingArmed;\n    return (await call("/api/invista/session/heartbeat", {
+    state.tradingArmed = tradingArmed;
+    return (await call("/api/invista/session/heartbeat", {
       sessionId: state.sessionId,
       userId: state.userId,
       platform: state.platform,
@@ -62,7 +64,8 @@ export async function setUniversalTradingArmed(userId: string, armed: boolean) {
   if (!state) await registerUniversalSession(String(userId));
   const current = sessions.get(String(userId));
   if (!current) return null;
-  current.tradingArmed = armed;\n  return (await call("/api/invista/session/arm", {
+  current.tradingArmed = armed;
+  return (await call("/api/invista/session/arm", {
     sessionId: current.sessionId,
     userId: current.userId,
     armed,
