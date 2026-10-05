@@ -14,11 +14,8 @@ permissions:
 concurrency:
   group: invista-full-platform-audit-${{ github.ref }}
   cancel-in-progress: true
-
-
 jobs:
   full-platform-audit:
-    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'ci: synchronize npm lockfile')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
