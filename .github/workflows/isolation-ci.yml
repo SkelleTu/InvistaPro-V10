@@ -64,6 +64,7 @@ jobs:
         run: npm install --package-lock-only --ignore-scripts
 
       - name: Persist lockfile repair
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         shell: bash
         run: |
           if git diff --quiet -- package-lock.json; then
@@ -74,6 +75,18 @@ jobs:
             git add package-lock.json
             git commit -m "ci: synchronize npm lockfile"
             git push origin HEAD:main
+          fi
+
+      - name: Reject lockfile drift on pull requests
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          if git diff --quiet -- package-lock.json; then
+            echo "Lockfile is synchronized."
+          else
+            echo "::error::package-lock.json is out of sync with package.json. Regenerate it and commit the result in the PR."
+            git diff -- package-lock.json
+            exit 1
           fi
 
       - name: Clean dependency install
@@ -112,6 +125,7 @@ jobs:
           for i in $(seq 1 45); do
             if curl -fsS http://127.0.0.1:5123/health > /tmp/health.json; then
               cat /tmp/health.json
+              node -e 'const fs=require("fs"); const d=JSON.parse(fs.readFileSync("/tmp/health.json","utf8")); if(d.status!=="ok" || d.routesReady!==true || d.observability?.critical!==0){console.error("Health check is degraded:",JSON.stringify(d,null,2));process.exit(1)}'
               exit 0
             fi
             if ! kill -0 $pid 2>/dev/null; then
