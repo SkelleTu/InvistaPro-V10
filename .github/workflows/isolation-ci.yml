@@ -164,6 +164,25 @@ jobs:
             if curl -fsS http://127.0.0.1:5123/health > /tmp/health.json; then
               cat /tmp/health.json
               node -e 'const fs=require("fs"); const d=JSON.parse(fs.readFileSync("/tmp/health.json","utf8")); if(d.status!=="ok" || d.routesReady!==true || d.observability?.critical!==0){console.error("Health check is degraded:",JSON.stringify(d,null,2));process.exit(1)}'
+
+              curl -fsS http://127.0.0.1:5123/api/ping > /tmp/ping.json
+              node -e 'const fs=require("fs"); const d=JSON.parse(fs.readFileSync("/tmp/ping.json","utf8")); if(d.pong!==true){console.error("Ping endpoint invalid:",JSON.stringify(d));process.exit(1)}'
+
+              curl -fsS http://127.0.0.1:5123/api/health > /tmp/api-health.json
+              node -e 'const fs=require("fs"); const d=JSON.parse(fs.readFileSync("/tmp/api-health.json","utf8")); if(d.status!=="online" && d.status!=="not_ready"){console.error("API health endpoint invalid:",JSON.stringify(d));process.exit(1)}'
+
+              curl -fsS http://127.0.0.1:5123/api/status > /tmp/status.json
+              node -e 'const fs=require("fs"); const d=JSON.parse(fs.readFileSync("/tmp/status.json","utf8")); if(d.status!=="online"){console.error("Status endpoint invalid:",JSON.stringify(d));process.exit(1)}'
+
+              code=$(curl -s -o /tmp/admin-anon.json -w "%{http_code}" http://127.0.0.1:5123/api/trading/account-info)
+              case "$code" in 401|403) echo "Anonymous trading access correctly denied: HTTP $code" ;; *) cat /tmp/admin-anon.json; echo "Expected 401/403 for anonymous trading route, got $code"; exit 1 ;; esac
+
+              code=$(curl -s -o /tmp/setup-admin-anon.json -w "%{http_code}" -X POST -H "Content-Type: application/json" -d '{"email":"audit@example.invalid","password":"audit-only","nomeCompleto":"Audit"}' http://127.0.0.1:5123/api/setup-admin)
+              case "$code" in 401|403) echo "Anonymous admin setup correctly denied: HTTP $code" ;; *) cat /tmp/setup-admin-anon.json; echo "Expected 401/403 for anonymous admin setup, got $code"; exit 1 ;; esac
+
+              code=$(curl -s -o /tmp/not-found.json -w "%{http_code}" http://127.0.0.1:5123/api/__audit_nonexistent__)
+              test "$code" = "404" || { cat /tmp/not-found.json; echo "Expected 404 for unknown API route, got $code"; exit 1; }
+
               exit 0
             fi
             if ! kill -0 $pid 2>/dev/null; then
