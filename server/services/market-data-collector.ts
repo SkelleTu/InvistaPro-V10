@@ -29,7 +29,15 @@ export class MarketDataCollector extends EventEmitter {
   ];
 
   // Limite rígido para produção no Render Free. Nunca abrir centenas/milhares de streams.
-  private static readonly MAX_STREAM_SYMBOLS = 5;
+  private static readonly MAX_STREAM_SYMBOLS = 9;
+
+  // Universo explícito de produção. Nunca assinar todos os símbolos devolvidos pela Deriv.
+  // Mantém apenas os índices usados pelo Invista Pro: DigitDiff/Accumulator + Boom/Crash.
+  private static readonly ALLOWED_PRODUCTION_SYMBOLS = new Set([
+    "R_10", "R_25", "R_50", "R_75", "R_100",
+    "CRASH500", "CRASH1000", "BOOM500", "BOOM1000",
+    "CRASH_500", "CRASH_1000", "BOOM_500", "BOOM_1000",
+  ]);
   
   // 🚫 BLOQUEADO 100%: Ativos causadores de loss - NUNCA serão operados
   // Cobre tanto o formato "(1s)" quanto o formato de API "1HZ*" (são os mesmos ativos)
@@ -44,9 +52,9 @@ export class MarketDataCollector extends EventEmitter {
   private lastSymbolsUpdate: number = 0;
   
   // Configurações do "Fluxo Natural de Análises Cooperativas de Inteligência Artificial" - análise microscópica contínua
-  private readonly BUFFER_SIZE = 500; // Manter últimos 500 ticks por símbolo
-  private readonly SAVE_INTERVAL_MS = 5000; // Salvar a cada 5s (evita sobrecarga de BD)
-  private readonly MAX_PRICE_HISTORY = 1000; // Histórico máximo por símbolo
+  private readonly BUFFER_SIZE = 250; // Buffer curto: dados em tempo real, sem acumular memória indefinidamente
+  private readonly SAVE_INTERVAL_MS = 15000; // Persistência em lote a cada 15s
+  private readonly MAX_PRICE_HISTORY = 500; // Histórico persistido limitado por símbolo
   
   constructor() {
     super();
@@ -335,6 +343,7 @@ export class MarketDataCollector extends EventEmitter {
       // Deduplicar, bloquear 1s e aplicar teto rígido antes de abrir qualquer stream.
       supportedSymbols = Array.from(new Set(supportedSymbols))
         .filter(symbol => !MarketDataCollector.BLOCKED_SYMBOLS_PATTERN.test(symbol))
+        .filter(symbol => MarketDataCollector.ALLOWED_PRODUCTION_SYMBOLS.has(symbol.toUpperCase()))
         .slice(0, MarketDataCollector.MAX_STREAM_SYMBOLS);
 
       this.DIGITDIFF_SUPPORTED_SYMBOLS = supportedSymbols;
