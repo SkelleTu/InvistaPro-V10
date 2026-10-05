@@ -9,11 +9,11 @@ import { setupVite, serveStatic, log } from "./vite";
 import { initializeDatabase } from "./db";
 import { initializeMarketingSystem } from "./marketingEmailService";
 import { errorTracker } from "./services/error-tracker";
-import { observabilityRequestMiddleware } from "./services/production-observability";
+import { observability, observabilityRequestMiddleware } from "./services/production-observability";
 import { globalErrorHandler, requestLogger } from "./middleware/error-handler";
 import cron from "node-cron";
 import fetch from "node-fetch";
-import { autoTradingScheduler } from "./services/auto-trading-scheduler";
+import { isolatedAutoTradingScheduler as autoTradingScheduler } from "./services/isolated-auto-trading-scheduler";
 import { resilienceSupervisor } from "./services/resilience-supervisor";
 import { marketDataCollector } from "./services/market-data-collector";
 import { derivAPI } from "./services/deriv-api";
@@ -28,6 +28,8 @@ import { startDerivObservabilityBridge } from "./services/deriv-observability-br
 import { startUniversalHeartbeatLoop } from "./services/universal-server-session";
 
 const app = express();
+let routesReady = false;
+let routeRegistrationError: string | null = null;
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.use(cookieParser());
@@ -111,7 +113,8 @@ app.use((req, res, next) => {
   // O Render pode reiniciar uma instância que demora para aceitar a porta.
   // Por isso /health é registrado primeiro e o servidor é criado/listening agora.
   app.get('/health', (_req, res) => {
-    res.status(200).send('OK');
+    if (!routesReady) return res.status(503).json({ status: 'degraded', routesReady: false, error: routeRegistrationError || 'Routes ainda não registradas' });
+    res.status(200).json({ status: 'ok', routesReady: true });
   });
 
   const server = createServer(app);
@@ -142,8 +145,15 @@ app.use((req, res, next) => {
   // Isso evita que imports, banco, Deriv e outros serviços atrasem o health check do Render.
   try {
     await registerRoutes(app, server);
+    routesReady = true;
+    app.locals.routesReady = true;
+    console.log('✅ [BOOT] Todas as rotas da API foram registradas com sucesso.');
   } catch (routeError: any) {
+    routesReady = false;
+    app.locals.routesReady = false;
+    routeRegistrationError = routeError instanceof Error ? routeError.message : String(routeError);
     console.error('❌ [BOOT] Falha ao registrar rotas após abrir a porta:', routeError);
+    observability.captureError(routeError, { level: 'CRITICAL', category: 'BOOT', message: 'Falha crítica no registro das rotas da API', details: { routesReady: false } });
   }
 
   // SPA fallback MUST come after API routes so /auth, /login and other
@@ -153,6 +163,19 @@ app.use((req, res, next) => {
       res.sendFile(path.resolve(process.cwd(), "dist", "public", "index.html"));
     });
   }
+
+  // Nunca deixe uma falha de boot de rotas parecer um simples 404/HTML.
+  app.use('/api', (req, res, next) => {
+    if (!routesReady) {
+      return res.status(503).json({
+        success: false,
+        error: 'API indisponível: falha no registro das rotas durante o boot.',
+        routesReady: false,
+        detail: routeRegistrationError || 'Falha de inicialização não especificada',
+      });
+    }
+    next();
+  });
 
   // Servir arquivos públicos antes do handler global de erros.
   const rootPublicPath = path.resolve(process.cwd(), 'public');
