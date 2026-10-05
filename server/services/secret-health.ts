@@ -18,6 +18,8 @@ export function getSecretHealth() {
     state("ADMIN_EMAIL", v => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)),
     state("SENDGRID_API_KEY"),
     state("HUGGINGFACE_API_KEY"),
+    state("UNIVERSAL_SERVER_URL", v => /^https?:\\/\\//i.test(v)),
+    state("INVISTA_UNIVERSAL_SERVER_KEY", v => v.length >= 16),
   ];
 
   const missing = checks.filter(c => c.state === "missing").map(c => c.name);
