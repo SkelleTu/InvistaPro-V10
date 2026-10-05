@@ -35,7 +35,17 @@ router.get("/health", (_req, res) => {
   res.json({ success: true, ...observability.getHealth(), secrets: getSecretHealth() });
 });
 
-router.get("/forensic", isAuthenticated, isObservabilityAdmin, (_req, res) => {\n  try {\n    const report = getForensicReport();\n    res.status(report.status === "complete" ? 200 : 503).json({ success: true, ...report });\n  } catch (error) {\n    console.error("[OBSERVABILITY] forensic audit failed:", error);\n    res.status(500).json({ success: false, message: "Falha no inventário forense." });\n  }\n});\n\nrouter.get("/errors", isAuthenticated, isObservabilityAdmin, (_req, res) => {
+router.get("/forensic", isAuthenticated, isObservabilityAdmin, (_req, res) => {
+  try {
+    const report = getForensicReport();
+    res.status(report.status === "complete" ? 200 : 503).json({ success: true, ...report });
+  } catch (error) {
+    console.error("[OBSERVABILITY] forensic audit failed:", error);
+    res.status(500).json({ success: false, message: "Falha no inventário forense." });
+  }
+});
+
+router.get("/errors", isAuthenticated, isObservabilityAdmin, (_req, res) => {
   const limit = Number(_req.query.limit || 100);
   res.json({
     success: true,
@@ -59,14 +69,18 @@ router.get("/stream", isAuthenticated, isObservabilityAdmin, (req: Request, res:
   res.flushHeaders?.();
 
   const send = (event: unknown) => {
-    try { res.write(`data: ${JSON.stringify(event)}\\n\\n`); } catch {}
+    try { res.write(`data: ${JSON.stringify(event)}\
+\
+`); } catch {}
   };
 
   send({ type: "snapshot", health: observability.getHealth(), errors: observability.getRecent(50) });
   const unsubscribe = observability.subscribe(event => send({ type: "event", event }));
 
   const heartbeat = setInterval(() => {
-    try { res.write(`: heartbeat ${Date.now()}\\n\\n`); } catch {}
+    try { res.write(`: heartbeat ${Date.now()}\
+\
+`); } catch {}
   }, 15000);
 
   req.on("close", () => {
