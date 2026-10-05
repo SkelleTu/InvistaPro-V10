@@ -50,9 +50,21 @@ jobs:
               *.sh)
                 bash -n "$file"
                 ;;
+              *.py)
+                python -m py_compile "$file"
+                ;;
             esac
             case "$file" in
-              *.ts|*.tsx|*.js|*.mjs|*.cjs|*.json|*.yml|*.yaml|*.sh|*.css|*.html|*.md|*.txt|*.toml)
+              *.yml|*.yaml)
+                ruby -e 'require "yaml"; YAML.load_file(ARGV[0]);' "$file"
+                ;;
+              *.toml|.node-version|.replit)
+                python -c 'import sys,tomllib; tomllib.loads(open(sys.argv[1],"rb").read().decode())' "$file"
+                ;;
+            esac
+
+            case "$file" in
+              *.ts|*.tsx|*.js|*.mjs|*.cjs|*.json|*.yml|*.yaml|*.sh|*.py|*.css|*.html|*.md|*.txt|*.toml)
                 if grep -nE '^(<<<<<<< |=======$|>>>>>>> )' "$file" >/dev/null 2>&1; then
                   echo "MERGE CONFLICT MARKER: $file"
                   exit 1
@@ -123,7 +135,7 @@ jobs:
           if node -e 'process.exit(require("./package.json").scripts?.test ? 0 : 1)'; then
             npm test
           else
-            echo "No application test script is declared in package.json."
+            echo "::warning::No application test script is declared in package.json; structural, type, build, security, and smoke tests remain mandatory."
           fi
 
       - name: Validate auxiliary Vercel API TypeScript
