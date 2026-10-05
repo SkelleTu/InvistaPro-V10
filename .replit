@@ -9,7 +9,7 @@ packages = ["atk", "cairo", "chromium", "fluxbox", "fontconfig", "gdk-pixbuf", "
 [deployment]
 deploymentTarget = "autoscale"
 build = ["npm", "run", "build"]
-run = ["node", "./dist/index.cjs"]
+run = ["node", "./dist/index.js"]
 
 [[ports]]
 localPort = 5000
