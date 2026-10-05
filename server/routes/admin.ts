@@ -60,14 +60,14 @@ const isAdmin = async (req: express.Request, res: express.Response, next: expres
       return res.status(403).json({ message: ACCESS_DENIED_MESSAGE });
     }
     
-    // Verificar se o usuário está na lista de autorizados ou é admin via env
+    // Controle administrativo: exige flag explícita de admin ou o e-mail
+    // configurado como administrador de emergência.
     const userEmail = user[0].email;
     const envAdminEmail = process.env.ADMIN_EMAIL;
+    const isAdminUser = Boolean(user[0].isAdmin) ||
+      Boolean(envAdminEmail && userEmail.toLowerCase() === envAdminEmail.toLowerCase());
     
-    const hasAccess = isAuthorizedEmail(userEmail) || 
-                      (envAdminEmail && userEmail.toLowerCase() === envAdminEmail.toLowerCase());
-    
-    if (!hasAccess) {
+    if (!isAdminUser) {
       return res.status(403).json({ message: ACCESS_DENIED_MESSAGE });
     }
     
