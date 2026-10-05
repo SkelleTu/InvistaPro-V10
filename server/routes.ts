@@ -1971,7 +1971,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         trading: {
           active: activeSessions.length > 0,
           sessions: activeSessions.length,
-          totalExecuted: autoTradingStats.totalExecutedOperations,
+          totalExecuted: autoTradingScheduler.getSchedulerStatus().totalExecutedOperations,
           scheduler: 'running'
         },
         memory: {
