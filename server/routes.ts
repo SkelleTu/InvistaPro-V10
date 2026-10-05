@@ -4237,10 +4237,10 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       
       res.json({
         health,
-        message: health.healthy ? '✅ Sistema saudável' : '⚠️ Bottlenecks detectados',
-        recommendation: health.bottlenecks.length > 0 
-          ? `Ativos com problemas: ${health.bottlenecks.map(b => `${b.symbol} (${b.winRate.toFixed(1)}%)`).join(', ')}`
-          : 'Todas os ativos operando normalmente',
+        message: Array.isArray(health) && health.every((item: any) => item.status !== "error") ? '✅ Sistema saudável' : '⚠️ Verifique os runtimes',
+        recommendation: Array.isArray(health) && health.length > 0
+          ? `Runtimes monitorados: ${health.length}`
+          : 'Nenhum runtime isolado ativo',
         timestamp: new Date().toISOString()
       });
 
