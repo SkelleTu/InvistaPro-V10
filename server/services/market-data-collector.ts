@@ -374,6 +374,16 @@ export class MarketDataCollector extends EventEmitter {
       console.log(`🛡️ [FNACIA] Modo protegido: máximo ${MarketDataCollector.MAX_STREAM_SYMBOLS} streams simultâneos`);
       
     } catch (error) {
+      // Falha parcial não pode deixar WebSocket/timers/buffers vivos.
+      // O próximo Play deve começar de um estado limpo.
+      this.isCollecting = false;
+      this.tickBuffers.clear();
+      this.DIGITDIFF_SUPPORTED_SYMBOLS = [...MarketDataCollector.FALLBACK_SYMBOLS];
+      try {
+        await this.derivAPI.disconnect();
+      } catch (cleanupError) {
+        console.warn('⚠️ [FNACIA] Falha ao limpar conexão após erro de inicialização:', cleanupError);
+      }
       console.error('❌ [FNACIA] Erro ao iniciar coleta:', error);
       throw error;
     }
