@@ -4464,7 +4464,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
 
   // ===== VIRTUAL DESKTOP / MT5 ROUTES =====
   const { virtualDesktop } = await import('./services/virtual-desktop');
-  const { mkdirSync, writeFileSync, existsSync: fsExists, readdirSync, statSync } = await import('fs');
+  const { mkdirSync: mkdirSyncFs, writeFileSync, existsSync: fsExists, readdirSync, statSync } = await import('fs');
   const pathMod = await import('path');
 
   function findMT5ExeInUpload(dir: string): string | null {
