@@ -5089,6 +5089,7 @@ export class AutoTradingScheduler {
     this.loopSleepUntil = 0;
     this.lastOperationId = null;
     this.lastOperationStartTime = 0;
+    this.isInitialized = false;
     
     // Parar também os motores de análise que possuem timers próprios.
     try { supremeAnalyzer.stop(); } catch (e) { console.warn('⚠️ [SUPREME] Falha ao parar motor:', e); }
