@@ -30,6 +30,7 @@ import { startUniversalHeartbeatLoop } from "./services/universal-server-session
 const app = express();
 let routesReady = false;
 let routeRegistrationError: string | null = null;
+let bootFailureEventId: string | null = null;
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.use(cookieParser());
@@ -113,8 +114,54 @@ app.use((req, res, next) => {
   // O Render pode reiniciar uma instância que demora para aceitar a porta.
   // Por isso /health é registrado primeiro e o servidor é criado/listening agora.
   app.get('/health', (_req, res) => {
-    if (!routesReady) return res.status(503).json({ status: 'degraded', routesReady: false, error: routeRegistrationError || 'Routes ainda não registradas' });
-    res.status(200).json({ status: 'ok', routesReady: true });
+    const obsHealth = observability.getHealth();
+    if (!routesReady) {
+      return res.status(503).json({
+        status: 'degraded',
+        routesReady: false,
+        error: routeRegistrationError || 'Routes ainda não registradas',
+        bootFailureEventId,
+        observability: {
+          status: obsHealth.status,
+          errors: obsHealth.errors,
+          critical: obsHealth.critical,
+          warnings: obsHealth.warnings,
+        },
+      });
+    }
+    res.status(200).json({
+      status: 'ok',
+      routesReady: true,
+      observability: {
+        status: obsHealth.status,
+        errors: obsHealth.errors,
+        critical: obsHealth.critical,
+        warnings: obsHealth.warnings,
+      },
+    });
+  });
+
+  // Observabilidade de boot fica disponível ANTES de registerRoutes().
+  // Assim uma falha durante o próprio registro das rotas nunca fica escondida.
+  app.get('/api/observability/health', (_req, res) => {
+    const health = observability.getHealth();
+    res.status(routesReady && health.critical === 0 ? 200 : 503).json({
+      success: true,
+      routesReady,
+      bootFailureEventId,
+      ...health,
+    });
+  });
+
+  app.get('/api/observability/errors', (_req, res) => {
+    const errors = observability.getUnresolved();
+    res.status(routesReady && errors.length === 0 ? 200 : 503).json({
+      success: true,
+      routesReady,
+      bootFailureEventId,
+      count: errors.length,
+      errors,
+    });
   });
 
   const server = createServer(app);
@@ -153,7 +200,17 @@ app.use((req, res, next) => {
     app.locals.routesReady = false;
     routeRegistrationError = routeError instanceof Error ? routeError.message : String(routeError);
     console.error('❌ [BOOT] Falha ao registrar rotas após abrir a porta:', routeError);
-    observability.captureError(routeError, { level: 'CRITICAL', category: 'BOOT', message: 'Falha crítica no registro das rotas da API', details: { routesReady: false } });
+    const bootEvent = observability.captureError(routeError, {
+      level: 'CRITICAL',
+      category: 'BOOT',
+      message: 'Falha crítica no registro das rotas da API',
+      details: {
+        routesReady: false,
+        phase: 'registerRoutes',
+        routeRegistrationError,
+      },
+    });
+    bootFailureEventId = bootEvent.id;
   }
 
   // API nunca pode cair no HTML do SPA. Primeiro protegemos o namespace /api
