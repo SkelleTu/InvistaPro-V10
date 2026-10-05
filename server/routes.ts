@@ -1552,7 +1552,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   // Rotas do sistema interno de emails removidas - sistema desnecessário
 
   // Autonomous Email System Routes
-  app.get('/api/autonomous-emails', (req, res) => {
+  app.get('/api/autonomous-emails', isTradingAuthorized, (req, res) => {
     try {
       const emails = autonomousEmailService.getAllDeliveredEmails();
       res.json({
@@ -1566,7 +1566,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
   });
 
-  app.get('/api/email-status/:messageId', (req, res) => {
+  app.get('/api/email-status/:messageId', isTradingAuthorized, (req, res) => {
     try {
       const messageId = req.params.messageId;
       const status = autonomousEmailService.getEmailStatus(messageId);
@@ -2004,7 +2004,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   });
 
   // Error tracking health endpoint
-  app.get('/api/system/error-health', async (req, res) => {
+  app.get('/api/system/error-health', isTradingAuthorized, async (req, res) => {
     try {
       const healthReport = errorTracker.getSystemHealthReport();
       res.json({
@@ -4286,7 +4286,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   // =================== END TRADING SYSTEM ROUTES ===================
 
   // Endpoint especial para inicializar conta de dono (apenas desenvolvimento)
-  app.post('/api/admin/init-owner', async (req, res) => {
+  app.post('/api/admin/init-owner', isTradingAuthorized, async (req, res) => {
     try {
       const { email, password } = req.body;
       
