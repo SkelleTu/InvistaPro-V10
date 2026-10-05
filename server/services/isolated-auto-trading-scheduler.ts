@@ -211,26 +211,19 @@ class IsolatedAutoTradingScheduler {
   }
 
   getAssetHealthStatus() {
-    return [...this.runtimes.values()].map(r => ({
-      userId: r.userId,
-      sessionId: r.sessionId,
-      status: r.status,
-      isolated: true,
-    }));
+    const runtimes = [...this.runtimes.values()];
+    const bottlenecks: Array<{symbol: string; winRate: number; trades: number}> = [];
+    const healthy = runtimes.every(r => r.workerReady && r.status !== "disconnected");
+
+    return {
+      totalAssets: 0,
+      assetsWithPerformance: 0,
+      averageWinRate: 0,
+      bottlenecks,
+      healthy,
+      metricsAvailable: false,
+      isolatedUsers: runtimes.length,
+      activeRuntimes: runtimes.filter(r => r.armed).length,
+    };
   }
 
-  async disconnectUser(userId: string, sessionId?: string): Promise<void> {
-    const id = String(userId);
-    const key = this.runtimeKey(id, sessionId);
-    const runtime = this.runtimes.get(key);
-    if (!runtime) return;
-    if (runtime.worker.connected) runtime.worker.send({ type: "shutdown", userId: id, sessionId: runtime.sessionId });
-    setTimeout(() => {
-      if (runtime.worker.connected) runtime.worker.kill("SIGTERM");
-    }, 5000).unref();
-    this.runtimes.delete(key);
-    console.log(`🔌 [USER-RUNTIME] destruído | user=${id} | session=${runtime.sessionId}`);
-  }
-}
-
-export const isolatedAutoTradingScheduler = new IsolatedAutoTradingScheduler();
