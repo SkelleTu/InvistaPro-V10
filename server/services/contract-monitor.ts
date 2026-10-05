@@ -1686,7 +1686,29 @@ class UniversalContractMonitor extends EventEmitter {
     finalProfit?: number;
     closedAt?: number;
   }> {
-    const result = [];
+    const result: Array<{
+      contractId: number;
+      contractType: string;
+      symbol: string;
+      openedAt: number;
+      ageMin: number;
+      tickCount: number;
+      buyPrice: number;
+      currentSpot: number;
+      entrySpot: number;
+      bidPrice: number;
+      profit: number;
+      profitPct: number;
+      peakProfit: number;
+      barrierDistance?: number;
+      barrierValue?: number;
+      status: string;
+      openReason?: string;
+      aiSnapshot?: AITickSnapshot;
+      finalResult?: string;
+      finalProfit?: number;
+      closedAt?: number;
+    }> = [];
 
     // Contratos ativos (em monitoramento)
     for (const [contractId, state] of Array.from(this.monitored.entries())) {
