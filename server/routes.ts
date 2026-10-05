@@ -661,8 +661,8 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
           
           console.log('🎉 Login bem-sucedido para:', user.email);
           // Cada login recebe seu próprio runtime isolado. Login prepara a sessão, mas NÃO arma o trading.
-          autoTradingScheduler.registerUser(String(user.id));
-          void registerUniversalSession(String(user.id)).catch((e) => console.warn('⚠️ [UNIVERSAL] Falha ao registrar sessão pós-login:', e));
+          autoTradingScheduler.registerUser(String(user.id), req.sessionID);
+          void registerUniversalSession(String(user.id), req.sessionID).catch((e) => console.warn('⚠️ [UNIVERSAL] Falha ao registrar sessão pós-login:', e));
           const { passwordHash, codigoVerificacao, ...userWithoutSensitiveData } = user;
           res.json({ 
             message: "Login realizado com sucesso",
@@ -1023,8 +1023,8 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         return res.status(500).json({ message: "Erro ao fazer logout" });
       }
       if (loggedUserId) {
-        await autoTradingScheduler.disconnectUser(loggedUserId);
-        await disconnectUniversalSession(loggedUserId);
+        await autoTradingScheduler.disconnectUser(loggedUserId, req.sessionID);
+        await disconnectUniversalSession(loggedUserId, req.sessionID);
       }
       console.log('✅ Logout realizado com sucesso');
       res.json({ message: "Logout realizado com sucesso", success: true });
@@ -1925,8 +1925,8 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       const userId = req.user?.id;
       if (!userId) return res.status(401).json({ message: 'Usuário não autenticado' });
 
-      autoTradingScheduler.armUserTrading(String(userId));
-      await setUniversalTradingArmed(String(userId), true);
+      autoTradingScheduler.armUserTrading(String(userId), req.sessionID);
+      await setUniversalTradingArmed(String(userId), true, req.sessionID);
       await autoTradingScheduler.startScheduler();
 
       res.json({
@@ -1948,8 +1948,8 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       const userId = req.user?.id;
       if (!userId) return res.status(401).json({ message: 'Usuário não autenticado' });
 
-      await setUniversalTradingArmed(String(userId), false);
-      await autoTradingScheduler.disarmUserTrading(String(userId));
+      await setUniversalTradingArmed(String(userId), false, req.sessionID);
+      await autoTradingScheduler.disarmUserTrading(String(userId), req.sessionID);
 
       res.json({
         success: true,
