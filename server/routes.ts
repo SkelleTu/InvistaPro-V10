@@ -1969,9 +1969,9 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
 
       res.json({
         success: true,
-        active: autoTradingScheduler.getSchedulerStatus().isRunning,
+        active: autoTradingScheduler.getSessionStatus(String(userId), req.sessionID).isRunning,
         message: 'Trading desativado manualmente para o usuário.',
-        armedUsers: autoTradingScheduler.getArmedUserIds(),
+        armedUsers: autoTradingScheduler.getSessionStatus(String(userId), req.sessionID).armedUsers,
         timestamp: new Date().toISOString(),
       });
     } catch (error) {
@@ -1983,8 +1983,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   app.get('/api/trading/scheduler/status', isAuthenticated, isTradingAuthorized, async (req: any, res) => {
     res.json({
       success: true,
-      status: autoTradingScheduler.getSchedulerStatus(),
-      armedUsers: autoTradingScheduler.getArmedUserIds(),
+      status: autoTradingScheduler.getSessionStatus(String(req.user.id), req.sessionID),
       timestamp: new Date().toISOString(),
     });
   });
