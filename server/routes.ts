@@ -18,7 +18,7 @@ import QRCode from "qrcode";
 import multer from "multer";
 import path from "path";
 import crypto from "crypto";
-import { mkdirSync } from "fs";
+import { mkdirSync, readFileSync } from "fs";
 import kycRoutes from "./routes/kyc";
 import adminRoutes from "./routes/admin";
 import monitorRoutes from "./routes/monitor-routes";
@@ -260,7 +260,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     const usage = process.memoryUsage();
     const readCgroup = (file: string) => {
       try {
-        const raw = require('fs').readFileSync(file, 'utf8').trim();
+        const raw = readFileSync(file, 'utf8').trim();
         if (!raw || raw === 'max') return null;
         const value = Number(raw);
         return Number.isFinite(value) && value > 0 ? value : null;
