@@ -7,7 +7,6 @@ import { scrypt, randomBytes, timingSafeEqual } from "crypto";
 import { promisify } from "util";
 import { dualStorage as storage } from "./storage-dual";
 import { User } from "@shared/schema";
-import { SqliteSessionStore } from "./sqlite-session-store";
 import createMemoryStore from "memorystore";
 import connectPgSimple from "connect-pg-simple";
 import { isAuthorizedEmail, ACCESS_DENIED_MESSAGE } from "./config/access";
