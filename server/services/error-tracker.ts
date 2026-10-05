@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { observability } from './production-observability';
 
 export interface ErrorContext {
   userId?: string;
@@ -91,6 +92,29 @@ class ErrorTracker {
       originalError: this.sanitizeError(error),
       solved: false
     };
+
+    // Mirror every tracked backend error into the Render-native structured observability stream.
+    try {
+      observability.captureError(error, {
+        level,
+        category: category as any,
+        message: detailedError.message,
+        requestId: String(context.requestHeaders?.['x-request-id'] || context.requestHeaders?.['rndr-id'] || ''),
+        method: context.requestMethod,
+        path: context.requestPath,
+        userId: context.userId,
+        userEmail: context.userEmail,
+        details: {
+          requestBody: context.requestBody,
+          requestQuery: context.requestQuery,
+          requestParams: context.requestParams,
+          sessionData: context.sessionData,
+          errorId,
+        },
+      });
+    } catch (observabilityError) {
+      console.error('[OBSERVABILITY] Failed to mirror error:', observabilityError);
+    }
 
     // Adicionar ao banco em memória
     this.errorDatabase.push(detailedError);

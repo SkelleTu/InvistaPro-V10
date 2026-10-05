@@ -211,6 +211,9 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   // Setup authentication
   setupAuth(app);
 
+  // Production observability: health, sanitized client error intake, admin diagnostics and live SSE stream.
+  app.use("/api/observability", observabilityRoutes);
+
   // Servir arquivos estáticos (incluindo logo para emails)
   app.use('/public', express.static(path.join(process.cwd(), 'server/public')));
 

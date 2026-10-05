@@ -9,6 +9,7 @@ import { setupVite, serveStatic, log } from "./vite";
 import { initializeDatabase } from "./db";
 import { initializeMarketingSystem } from "./marketingEmailService";
 import { errorTracker } from "./services/error-tracker";
+import { observabilityRequestMiddleware } from "./services/production-observability";
 import { globalErrorHandler, requestLogger } from "./middleware/error-handler";
 import cron from "node-cron";
 import fetch from "node-fetch";
@@ -72,6 +73,7 @@ console.log('🔍 Inicializando sistema avançado de error tracking...');
 console.log('🔥 Configurando handlers globais para exceções não tratadas...');
 // Os handlers globais já foram configurados automaticamente no constructor do errorTracker
 app.use(requestLogger);
+app.use(observabilityRequestMiddleware);
 
 app.use((req, res, next) => {
   const start = Date.now();

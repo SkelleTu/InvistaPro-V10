@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Loader2 } from "lucide-react";
 import { useEffect } from "react";
+import { initClientObservability } from "./lib/observability";
 import NotFound from "@/pages/not-found";
 import AuthPage from "@/pages/auth-page";
 import ResetPasswordPage from "@/pages/reset-password-page";
@@ -132,6 +133,10 @@ function AppContent() {
 }
 
 function App() {
+  useEffect(() => {
+    initClientObservability();
+  }, []);
+
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
