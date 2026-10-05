@@ -21,4 +21,6 @@ jobs:
           test -f /tmp/aura/aura-build.mjs
           echo "OK: Aura System Style consumes InvistaPro-V10 as its canonical functional core."
       - name: Record canonical core SHA
-        run: echo "Canonical InvistaPro-V10 core: $GITHUB_SHA"
+        run: |
+          echo "Canonical InvistaPro-V10 core: $GITHUB_SHA"
+
