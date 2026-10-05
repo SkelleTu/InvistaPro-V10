@@ -336,20 +336,24 @@ app.use((req, res, next) => {
   
   // Conectar eventos de restart aos componentes
   resilienceSupervisor.on('restart_scheduler', async () => {
-    // Nunca iniciar trading automaticamente por ação do supervisor.
-    const status = autoTradingScheduler.getSchedulerStatus();
-    if (!status.isRunning) {
-      console.log('🛑 [RESILIENCE] Restart do scheduler ignorado: trading está inativo por política de segurança.');
+    // O scheduler agora é isolado por usuário + sessão. O supervisor só pode
+    // reiniciar sessões que já estavam explicitamente armadas.
+    const activeSessions = autoTradingScheduler.getActiveSessions().filter((s: any) => s.isActive);
+    if (activeSessions.length === 0) {
+      console.log('🛑 [RESILIENCE] Restart do scheduler ignorado: nenhuma sessão está manualmente armada.');
       return;
     }
-    console.log('🔄 Reiniciando AutoTradingScheduler de uma sessão já manualmente ativada...');
-    try {
-      await autoTradingScheduler.stopScheduler();
-      await autoTradingScheduler.startScheduler();
-      console.log('✅ AutoTradingScheduler reiniciado');
-    } catch (error) {
-      console.error('❌ Erro ao reiniciar AutoTradingScheduler:', error);
+
+    console.log(`🔄 [RESILIENCE] Reiniciando ${activeSessions.length} sessão(ões) de trading já armada(s)...`);
+    for (const session of activeSessions) {
+      try {
+        await autoTradingScheduler.stopSchedulerForUser(String(session.userId), String(session.sessionId));
+        await autoTradingScheduler.startSchedulerForUser(String(session.userId), String(session.sessionId));
+      } catch (error) {
+        console.error(`❌ [RESILIENCE] Falha ao reiniciar user=${session.userId} session=${session.sessionId}:`, error);
+      }
     }
+    console.log('✅ [RESILIENCE] Sessões armadas reiniciadas sem alterar sessões inativas.');
   });
   
   resilienceSupervisor.on('restart_websocket', async () => {
