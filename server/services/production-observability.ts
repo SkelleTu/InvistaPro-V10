@@ -200,7 +200,45 @@ class ProductionObservability {
       critical: critical.length,
       warnings: warnings.length,
       uptimeSeconds: Math.floor(process.uptime()),
-      memory: {\n        rssMB: mb(usage.rss),\n        heapUsedMB: mb(usage.heapUsed),\n        heapTotalMB: mb(usage.heapTotal),\n        externalMB: mb(usage.external),\n        arrayBuffersMB: mb(usage.arrayBuffers),\n        cgroupCurrentMB: mb(cgroupCurrent),\n        cgroupLimitMB: mb(cgroupLimit),\n        cgroupUsedPercent,\n        cgroupHeadroomPercent: cgroupUsedPercent == null ? null : Math.round((100 - cgroupUsedPercent) * 100) / 100,\n        limitSource: cgroupLimit ? "linux.cgroup" : "unavailable",\n        measuredAt: new Date().toISOString(),\n      },
+      memory: (() => {
+        const usage = process.memoryUsage();
+        const readCgroup = (file: string) => {
+          try {
+            const raw = fs.readFileSync(file, "utf8").trim();
+            if (!raw || raw === "max") return null;
+            const value = Number(raw);
+            return Number.isFinite(value) && value > 0 ? value : null;
+          } catch {
+            return null;
+          }
+        };
+        const cgroupCurrent = readCgroup("/sys/fs/cgroup/memory.current")
+          ?? readCgroup("/sys/fs/cgroup/memory/memory.usage_in_bytes");
+        const cgroupLimit = readCgroup("/sys/fs/cgroup/memory.max")
+          ?? readCgroup("/sys/fs/cgroup/memory/memory.limit_in_bytes");
+        const mb = (bytes: number | null) =>
+          bytes == null ? null : Math.round(bytes / 1024 / 1024 * 100) / 100;
+        const cgroupUsedPercent =
+          cgroupCurrent && cgroupLimit
+            ? Math.round(cgroupCurrent / cgroupLimit * 10000) / 100
+            : null;
+        return {
+          rssMB: mb(usage.rss),
+          heapUsedMB: mb(usage.heapUsed),
+          heapTotalMB: mb(usage.heapTotal),
+          externalMB: mb(usage.external),
+          arrayBuffersMB: mb(usage.arrayBuffers),
+          cgroupCurrentMB: mb(cgroupCurrent),
+          cgroupLimitMB: mb(cgroupLimit),
+          cgroupUsedPercent,
+          cgroupHeadroomPercent:
+            cgroupUsedPercent == null
+              ? null
+              : Math.round((100 - cgroupUsedPercent) * 100) / 100,
+          limitSource: cgroupLimit ? "linux.cgroup" : "unavailable",
+          measuredAt: new Date().toISOString(),
+        };
+      })(),
       pid: process.pid,
       node: process.version,
       timestamp: new Date().toISOString(),
