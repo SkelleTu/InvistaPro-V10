@@ -1680,7 +1680,7 @@ class UniversalContractMonitor extends EventEmitter {
     }
   }
 
-  getLiveAnalysis(): Array<{
+  getLiveAnalysis(userId?: string): Array<{
     contractId: number;
     contractType: string;
     symbol: string;
@@ -1707,6 +1707,7 @@ class UniversalContractMonitor extends EventEmitter {
 
     // Contratos ativos (em monitoramento)
     for (const [contractId, state] of Array.from(this.monitored.entries())) {
+      if (userId && String(state.input.userId) !== String(userId)) continue;
       result.push({
         contractId,
         contractType: state.input.contractType,
@@ -1732,6 +1733,7 @@ class UniversalContractMonitor extends EventEmitter {
     // Contratos recentemente fechados (visíveis por 20s)
     for (const [contractId, entry] of Array.from(this.recentlyClosed.entries())) {
       const state = entry.state;
+      if (userId && String(state.input.userId) !== String(userId)) continue;
       result.push({
         contractId,
         contractType: state.input.contractType,
