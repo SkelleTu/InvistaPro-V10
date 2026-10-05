@@ -23,7 +23,7 @@ function sendStatus() {
       sessionId,
       status: status?.isRunning ? "armed" : "ready",
       armed: Boolean(status?.isRunning),
-      activeSessions: Number(status?.activeSessions || 0),
+      activeSessions: status?.hasActiveSessions ? 1 : 0,
     });
   } catch {}
 }
