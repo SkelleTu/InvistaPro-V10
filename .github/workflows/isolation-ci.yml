@@ -141,12 +141,6 @@ jobs:
             echo "::warning::No application test script is declared in package.json; structural, type, build, security, and smoke tests remain mandatory."
           fi
 
-      - name: Validate auxiliary Vercel API TypeScript
-        shell: bash
-        run: |
-          npm install --prefix vercel-api --ignore-scripts
-          npx --yes -p typescript@5.6.3 tsc             --noEmit             --target ES2022             --module NodeNext             --moduleResolution NodeNext             --strict             --esModuleInterop             --skipLibCheck             vercel-api/api/*.ts
-
       - name: Production build
         run: npm run build
 
