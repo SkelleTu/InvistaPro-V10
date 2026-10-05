@@ -783,6 +783,23 @@ class UniversalContractMonitor extends EventEmitter {
   }
 
   /**
+   * Encerra somente os contratos pertencentes ao usuário informado.
+   * Evita que uma ação de limpeza de sessão afete outros usuários.
+   */
+  clearUser(userId: string): number {
+    const ids = Array.from(this.monitored.entries())
+      .filter(([, state]) => String(state.input.userId) === String(userId))
+      .map(([contractId]) => contractId);
+
+    for (const contractId of ids) {
+      this.stopMonitoring(contractId);
+    }
+
+    console.log(`🧹 [MONITOR] clearUser(${userId}) executado — ${ids.length} contrato(s) removido(s)`);
+    return ids.length;
+  }
+
+  /**
    * Encerra o monitoramento de TODOS os contratos da memória.
    * Usado ao limpar a aba monitor ou ao resetar o sistema.
    */
