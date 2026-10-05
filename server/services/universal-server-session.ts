@@ -6,7 +6,7 @@ const platform: Platform = process.env.INVISTA_PLATFORM === "aura" ? "aura" : "m
 const universalUrl = (process.env.UNIVERSAL_SERVER_URL || "").replace(/\/$/, "");
 const serviceKey = process.env.INVISTA_UNIVERSAL_SERVER_KEY || "";
 
-interface SessionState { sessionId: string; userId: string; platform: Platform; }
+interface SessionState { sessionId: string; userId: string; platform: Platform; tradingArmed: boolean; }
 const sessions = new Map<string, SessionState>();
 
 function enabled() {
@@ -45,7 +45,7 @@ export async function heartbeatUniversalSession(userId: string, tradingArmed = f
   const state = sessions.get(String(userId));
   if (!state) return registerUniversalSession(String(userId));
   try {
-    return (await call("/api/invista/session/heartbeat", {
+    state.tradingArmed = tradingArmed;\n    return (await call("/api/invista/session/heartbeat", {
       sessionId: state.sessionId,
       userId: state.userId,
       platform: state.platform,
@@ -62,7 +62,7 @@ export async function setUniversalTradingArmed(userId: string, armed: boolean) {
   if (!state) await registerUniversalSession(String(userId));
   const current = sessions.get(String(userId));
   if (!current) return null;
-  return (await call("/api/invista/session/arm", {
+  current.tradingArmed = armed;\n  return (await call("/api/invista/session/arm", {
     sessionId: current.sessionId,
     userId: current.userId,
     armed,
@@ -88,7 +88,7 @@ export function startUniversalHeartbeatLoop() {
   }
   setInterval(() => {
     for (const state of sessions.values()) {
-      void heartbeatUniversalSession(state.userId, false);
+      void heartbeatUniversalSession(state.userId, state.tradingArmed);
     }
   }, 30_000).unref?.();
   console.log(`💓 [UNIVERSAL] Heartbeat Invista Pro → Universal Server ativo a cada 30s | platform=${platform}`);
