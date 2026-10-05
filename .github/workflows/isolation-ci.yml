@@ -175,6 +175,15 @@ jobs:
           PORT: 5123
           ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
           SESSION_SECRET: github-actions-smoke-test-secret-32-characters
+          DERIV_APP_ID: "123456"
+          DERIV_API_KEY_DEMO: "audit-demo-token"
+          DERIV_API_KEY_REAL: "audit-real-token"
+          DATABASE_URL: "postgresql://audit:auditaudit@127.0.0.1:5432/audit"
+          ADMIN_EMAIL: "audit@example.invalid"
+          SENDGRID_API_KEY: "SG.audit"
+          HUGGINGFACE_API_KEY: "hf_audit"
+          UNIVERSAL_SERVER_URL: "http://127.0.0.1:5123"
+          INVISTA_UNIVERSAL_SERVER_KEY: "audit-universal-key"
         run: |
           set -euo pipefail
           node dist/index.js > /tmp/invista-server.log 2>&1 &
