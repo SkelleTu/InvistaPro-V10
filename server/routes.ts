@@ -1898,6 +1898,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       if (!userId) return res.status(401).json({ message: 'Usuário não autenticado' });
 
       autoTradingScheduler.armUserTrading(String(userId));
+      await setUniversalTradingArmed(String(userId), true);
       await autoTradingScheduler.startScheduler();
 
       res.json({
