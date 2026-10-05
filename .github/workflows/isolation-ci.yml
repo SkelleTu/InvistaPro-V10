@@ -10,6 +10,11 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: invista-full-platform-audit-${{ github.ref }}
+  cancel-in-progress: true
+
+
 jobs:
   full-platform-audit:
     runs-on: ubuntu-latest
