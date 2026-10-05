@@ -868,6 +868,7 @@ export class DerivAPIService extends EventEmitter {
     }
 
     const subscriptionKey = `ticks_${symbol}`;
+    this.desiredTickSymbols.add(symbol);
     if (this.activeSubscriptions.has(subscriptionKey)) {
       return; // Already subscribed
     }
@@ -1712,6 +1713,7 @@ export class DerivAPIService extends EventEmitter {
     this.pendingConnectPromise = null;
     this.isShuttingDown = true;
     this.activeSubscriptions.clear();
+    this.desiredTickSymbols.clear();
     this.stopKeepAlive();
     this.stopAllHeartbeats();
     
@@ -1808,24 +1810,22 @@ export class DerivAPIService extends EventEmitter {
   // Recupera e resubscreve todas as subscrições persistidas
   private async resubscribeAll(): Promise<void> {
     try {
-      const subscriptions = await storage.getActiveWebSocketSubscriptions();
       const allowed = new Set([
         "R_10", "R_25", "R_50", "R_75", "R_100",
         "CRASH500", "CRASH1000", "BOOM500", "BOOM1000",
         "CRASH_500", "CRASH_1000", "BOOM_500", "BOOM_1000",
       ]);
-      const symbols = [...new Set(
-        subscriptions
-          .filter((sub: any) => sub.subscriptionType === "ticks" && sub.symbol)
-          .map((sub: any) => String(sub.symbol))
-          .filter((symbol: string) => allowed.has(symbol) && !CRIME_PATTERN.test(symbol))
-      )].slice(0, 9);
+
+      const symbols = [...this.desiredTickSymbols]
+        .map(String)
+        .filter(symbol => allowed.has(symbol) && !CRIME_PATTERN.test(symbol))
+        .slice(0, 9);
 
       this.activeSubscriptions.clear();
 
       if (symbols.length === 0) return;
 
-      console.log(`🔄 Resubscrevendo ${symbols.length} streams permitidos após reconexão.`);
+      console.log(`🔄 Resubscrevendo ${symbols.length} streams da sessão após reconexão.`);
       for (const symbol of symbols) {
         try {
           await this.subscribeToTicks(symbol);
@@ -1835,7 +1835,7 @@ export class DerivAPIService extends EventEmitter {
       }
       console.log(`✅ Resubscrição controlada concluída: ${symbols.length} streams.`);
     } catch (error) {
-      console.error('❌ Erro ao recuperar subscrições:', error);
+      console.error('❌ Erro ao recuperar subscrições da sessão:', error);
     }
   }
 }
