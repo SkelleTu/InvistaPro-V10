@@ -436,7 +436,7 @@ app.use((req, res, next) => {
     if (req.url && req.url.startsWith('/api/desktop/vnc-ws')) {
       const target = net.connect(6080, 'localhost', () => {
         const reqLine = `${req.method} ${req.url} HTTP/${req.httpVersion}\r\n`;
-        const headers = [];
+        const headers: string[] = [];
         for (let i = 0; i < req.rawHeaders.length; i += 2) {
           headers.push(`${req.rawHeaders[i]}: ${req.rawHeaders[i + 1]}`);
         }
