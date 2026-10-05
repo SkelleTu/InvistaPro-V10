@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events';
 import { dualStorage as storage } from '../storage-dual';
 import { errorTracker } from './error-tracker';
+import { observability } from './production-observability';
 
 export interface ComponentHealth {
   componentName: string;
@@ -101,6 +102,7 @@ export class ResilienceSupervisor extends EventEmitter {
         const health = await this.getComponentHealth(componentName);
         
         if (!health.isHealthy) {
+          observability.emit({ level: 'WARNING', category: componentName === 'websocket' || componentName === 'market_collector' ? 'WEBSOCKET' : 'SYSTEM', message: `Componente ${componentName} não está saudável`, details: { lastHeartbeat: health.lastHeartbeat.toISOString(), errorCount: health.errorCount, lastError: health.lastError } });
           console.warn(`⚠️ Componente ${componentName} não está saudável`);
           console.warn(`   Último heartbeat: ${health.lastHeartbeat}`);
           console.warn(`   Erros: ${health.errorCount}`);
@@ -155,6 +157,7 @@ export class ResilienceSupervisor extends EventEmitter {
   ): Promise<void> {
     // Verificar política de restart
     if (!this.canRestart(componentName)) {
+      observability.emit({ level: 'CRITICAL', category: 'SYSTEM', message: `Componente ${componentName} excedeu o limite de reinícios`, details: { componentName, lastHeartbeat: health.lastHeartbeat.toISOString(), errorCount: health.errorCount, lastError: health.lastError } });
       console.error(`🚫 Componente ${componentName} excedeu limite de restarts`);
       console.error(`   Intervenção manual necessária`);
       
@@ -184,10 +187,10 @@ export class ResilienceSupervisor extends EventEmitter {
       // Restart específico por componente
       await this.restartComponent(componentName);
 
-      // Resetar contadores de erro após restart bem-sucedido
-      await storage.resetHeartbeatErrors(componentName);
-      
-      console.log(`✅ Componente ${componentName} reiniciado com sucesso`);
+      // O restart é solicitado por EventEmitter e só deve ser considerado concluído
+      // quando o próximo heartbeat confirmar a recuperação. Não apague o diagnóstico aqui.
+      observability.emit({ level: 'INFO', category: componentName === 'websocket' || componentName === 'market_collector' ? 'WEBSOCKET' : 'SYSTEM', message: `Restart solicitado para ${componentName}; aguardando novo heartbeat para confirmar recuperação`, details: { componentName } });
+      console.log(`🔄 Restart solicitado para ${componentName}; aguardando confirmação por heartbeat`);
       
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -321,6 +324,7 @@ export class ResilienceSupervisor extends EventEmitter {
     try {
       await storage.incrementHeartbeatError(componentName, errorMessage);
       
+      observability.captureError(new Error(errorMessage), { level: 'ERROR', category: componentName === 'websocket' || componentName === 'market_collector' ? 'WEBSOCKET' : 'SYSTEM', message: `Erro reportado por ${componentName}`, details: { componentName } });
       console.warn(`⚠️ Erro reportado por ${componentName}: ${errorMessage}`);
     } catch (err) {
       console.error(`❌ Erro ao reportar erro de ${componentName}:`, err);
