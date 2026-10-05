@@ -71,34 +71,35 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if git diff --quiet -- package-lock.json; then
-            echo "package-lock.json is already synchronized."
-            exit 0
-          fi
-
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           for attempt in 1 2 3 4 5; do
+            echo "Lockfile synchronization attempt $attempt/5"
             git fetch origin main
-            git rebase origin/main
+            git reset --hard origin/main
             npm install --package-lock-only --ignore-scripts
 
             if git diff --quiet -- package-lock.json; then
-              echo "package-lock.json is synchronized after rebase."
+              echo "package-lock.json is already synchronized."
               exit 0
             fi
 
             git add package-lock.json
             git commit -m "ci: synchronize npm lockfile"
 
+            if git fetch origin main && git merge-base --is-ancestor HEAD origin/main; then
+              echo "Remote main moved before push. Retrying from latest main..."
+              git reset --hard origin/main
+              continue
+            fi
+
             if git push origin HEAD:main; then
               echo "package-lock.json synchronized and pushed."
               exit 0
             fi
 
-            git rebase --abort || true
-            git reset --hard origin/main
+            echo "Push race detected. Retrying from latest main..."
           done
 
           echo "::error::Unable to synchronize package-lock.json after 5 retries."
