@@ -112,7 +112,8 @@
     "ws": "^8.18.3",
     "yauzl": "^3.2.0",
     "zod": "^3.24.2",
-    "zod-validation-error": "^3.4.0"
+    "zod-validation-error": "^3.4.0",
+    "react-day-picker": "^8.10.1"
   },
   "devDependencies": {
     "@replit/vite-plugin-cartographer": "^0.2.8",
