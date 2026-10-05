@@ -51,6 +51,10 @@ export function startDerivObservabilityBridge() {
   });
 
   derivAPI.on("message", (message: any) => {
+    // Ticks já são agregados em tickTelemetry abaixo. Não gravar um evento por tick,
+    // pois isso recriaria o próprio "turbilhão de dados" dentro da observabilidade.
+    if (message?.msg_type === "tick") return;
+
     observability.emit({
       level: message?.error ? "ERROR" : "DEBUG",
       category: message?.error ? "API_EXTERNAL" : "WEBSOCKET",
@@ -59,8 +63,6 @@ export function startDerivObservabilityBridge() {
         msgType: message?.msg_type,
         reqId: message?.req_id,
         symbol: message?.tick?.symbol,
-        quote: message?.tick?.quote,
-        epoch: message?.tick?.epoch,
         contractId: message?.proposal_open_contract?.contract_id || message?.buy?.contract_id,
         subscriptionId: message?.subscription?.id,
         errorCode: message?.error?.code,
