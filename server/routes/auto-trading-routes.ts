@@ -228,8 +228,8 @@ router.get('/ai-threshold-stats', isAuthenticated, isTradingAuthorized, asyncErr
   
   // Calcular dias ativo: da primeira operação até hoje
   let diasAtivo = uptimeDias;
-  let primeiraAnalise = null;
-  let ultimaAnalise = null;
+  let primeiraAnalise: string | null = null;
+  let ultimaAnalise: string | null = null;
   
   if (datas.length > 0) {
     datas.sort((a, b) => a.getTime() - b.getTime());
@@ -483,7 +483,7 @@ router.get('/diagnose', isAuthenticated, isTradingAuthorized, asyncErrorHandler(
 // Endpoint de correção automática
 router.post('/fix-auto', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
   const userId = req.user.id;
-  const fixes = [];
+  const fixes: string[] = [];
   
   // 1. Verificar e corrigir parada de emergência
   const securityStatus = autoTradingScheduler.getSecurityStatus();
