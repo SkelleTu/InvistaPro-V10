@@ -9,6 +9,10 @@ const serviceKey = process.env.INVISTA_UNIVERSAL_SERVER_KEY || "";
 interface SessionState { sessionId: string; userId: string; platform: Platform; tradingArmed: boolean; }
 const sessions = new Map<string, SessionState>();
 
+function localSessionKey(userId: string, sessionId?: string) {
+  return `${String(userId)}::${String(sessionId || 'default')}`;
+}
+
 function enabled() {
   return Boolean(universalUrl && serviceKey);
 }
@@ -28,11 +32,11 @@ async function call(path: string, body: any) {
   return await response.json() as any;
 }
 
-export async function registerUniversalSession(userId: string) {
+export async function registerUniversalSession(userId: string, localSessionId?: string) {
   if (!enabled() || !userId) return null;
   const result = await call("/api/invista/session/register", { userId: String(userId), platform });
   const session = result?.session;
-  if (session?.sessionId) sessions.set(String(userId), {
+  if (session?.sessionId) sessions.set(localSessionKey(userId, localSessionId), {
     sessionId: session.sessionId,
     userId: String(userId),
     platform,
@@ -42,9 +46,10 @@ export async function registerUniversalSession(userId: string) {
   return session;
 }
 
-export async function heartbeatUniversalSession(userId: string, tradingArmed = false) {
-  const state = sessions.get(String(userId));
-  if (!state) return registerUniversalSession(String(userId));
+export async function heartbeatUniversalSession(userId: string, tradingArmed = false, localSessionId?: string) {
+  const key = localSessionKey(userId, localSessionId);
+  const state = sessions.get(key);
+  if (!state) return registerUniversalSession(String(userId), localSessionId);
   try {
     state.tradingArmed = tradingArmed;
     return (await call("/api/invista/session/heartbeat", {
@@ -59,10 +64,11 @@ export async function heartbeatUniversalSession(userId: string, tradingArmed = f
   }
 }
 
-export async function setUniversalTradingArmed(userId: string, armed: boolean) {
-  const state = sessions.get(String(userId));
-  if (!state) await registerUniversalSession(String(userId));
-  const current = sessions.get(String(userId));
+export async function setUniversalTradingArmed(userId: string, armed: boolean, localSessionId?: string) {
+  const key = localSessionKey(userId, localSessionId);
+  const state = sessions.get(key);
+  if (!state) await registerUniversalSession(String(userId), localSessionId);
+  const current = sessions.get(key);
   if (!current) return null;
   current.tradingArmed = armed;
   return (await call("/api/invista/session/arm", {
@@ -72,15 +78,16 @@ export async function setUniversalTradingArmed(userId: string, armed: boolean) {
   }))?.session || null;
 }
 
-export async function disconnectUniversalSession(userId: string) {
-  const state = sessions.get(String(userId));
+export async function disconnectUniversalSession(userId: string, localSessionId?: string) {
+  const key = localSessionKey(userId, localSessionId);
+  const state = sessions.get(key);
   if (!state || !enabled()) return;
   try {
     await call("/api/invista/session/disconnect", { sessionId: state.sessionId, userId: state.userId });
   } catch (error) {
     console.warn(`⚠️ [UNIVERSAL] Falha ao desconectar sessão user=${userId}:`, error instanceof Error ? error.message : error);
   } finally {
-    sessions.delete(String(userId));
+    sessions.delete(key);
   }
 }
 
@@ -91,7 +98,7 @@ export function startUniversalHeartbeatLoop() {
   }
   setInterval(() => {
     for (const state of sessions.values()) {
-      void heartbeatUniversalSession(state.userId, state.tradingArmed);
+      void heartbeatUniversalSession(state.userId, state.tradingArmed, state.sessionId);
     }
   }, 30_000).unref?.();
   console.log(`💓 [UNIVERSAL] Heartbeat Invista Pro → Universal Server ativo a cada 30s | platform=${platform}`);
