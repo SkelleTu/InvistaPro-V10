@@ -26,7 +26,7 @@ echo ""
 
 APP_DIR="/opt/investapro"
 APP_USER="investapro"
-NODE_VERSION="20"
+NODE_VERSION="22"
 
 # ── Coletar configurações ────────────────────────────────────────
 step "Configuração inicial"
