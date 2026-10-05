@@ -229,18 +229,6 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     keepAliveSystem.start();
   }
 
-  // Endpoint de ping simples (para serviços externos como cron-job.org, UptimeRobot)
-  app.get('/api/ping', (req, res) => {
-    const source = req.headers['x-ping-from'] as string || req.query.source as string || 'external';
-    const result = keepAliveSystem.receivePing(source);
-    res.json({
-      pong: true,
-      timestamp: new Date().toISOString(),
-      source,
-      ...result.status
-    });
-  });
-
   // Endpoint de ping via POST (para Vercel e outros serviços)
   app.post('/api/ping', (req, res) => {
     const source = req.headers['x-ping-from'] as string || req.body?.source || 'vercel';
@@ -253,20 +241,6 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     });
   });
 
-  // Endpoint de status completo do sistema
-  app.get('/api/status', (req, res) => {
-    const status = keepAliveSystem.getStatus();
-    res.json({
-      status: 'online',
-      server: 'replit',
-      ...status,
-      memory: {
-        heapUsed: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB',
-        heapTotal: Math.round(process.memoryUsage().heapTotal / 1024 / 1024) + 'MB'
-      }
-    });
-  });
-
   // Endpoint para configurar URL do Vercel
   app.post('/api/keepalive/config', (req, res) => {
     const { vercelUrl } = req.body;
@@ -276,15 +250,6 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     } else {
       res.status(400).json({ success: false, message: 'vercelUrl é obrigatório' });
     }
-  });
-
-  // Endpoint de health check (compatível com uptime monitors)
-  app.get('/health', (req, res) => {
-    res.status(200).send('OK');
-  });
-
-  app.get('/api/health', (req, res) => {
-    res.json({ status: 'healthy', timestamp: new Date().toISOString() });
   });
 
   // =========================== END KEEP-ALIVE SYSTEM ===========================
@@ -3635,100 +3600,6 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       res.json({ contracts: liveData, ts: Date.now() });
     } catch (error) {
       res.json({ contracts: [], ts: Date.now() });
-    }
-  });
-
-  // =========================== TRADING ASSETS - ALL AVAILABLE SYMBOLS ===========================
-
-  app.get('/api/trading/assets', isAuthenticated, isTradingAuthorized, async (req, res) => {
-    try {
-      if (!req.user?.id) {
-        return res.status(401).json({ message: 'Usuário não autenticado' });
-      }
-
-      // Lista padrão de ativos Deriv DIGITDIFF
-      const defaultAssets = [
-        // Volatility Indices
-        { symbol: 'R_10', displayName: 'Volatility 10', category: 'Volatility Indices', supportsDigitDiff: true },
-        { symbol: 'R_25', displayName: 'Volatility 25', category: 'Volatility Indices', supportsDigitDiff: true },
-        { symbol: 'R_50', displayName: 'Volatility 50', category: 'Volatility Indices', supportsDigitDiff: true },
-        { symbol: 'R_75', displayName: 'Volatility 75', category: 'Volatility Indices', supportsDigitDiff: true },
-        { symbol: 'R_100', displayName: 'Volatility 100', category: 'Volatility Indices', supportsDigitDiff: true },
-        { symbol: 'R_250', displayName: 'Volatility 250', category: 'Volatility Indices', supportsDigitDiff: true },
-        
-        
-        // Crash/Boom Indices
-        { symbol: 'Crash 300', displayName: 'Crash 300 Index', category: 'Crash/Boom', supportsDigitDiff: true },
-        { symbol: 'Crash 500', displayName: 'Crash 500 Index', category: 'Crash/Boom', supportsDigitDiff: true },
-        { symbol: 'Crash 1000', displayName: 'Crash 1000 Index', category: 'Crash/Boom', supportsDigitDiff: true },
-        { symbol: 'Boom 300', displayName: 'Boom 300 Index', category: 'Crash/Boom', supportsDigitDiff: true },
-        { symbol: 'Boom 500', displayName: 'Boom 500 Index', category: 'Crash/Boom', supportsDigitDiff: true },
-        { symbol: 'Boom 1000', displayName: 'Boom 1000 Index', category: 'Crash/Boom', supportsDigitDiff: true },
-        
-        // Jump Indices ⚠️ (Bloqueados por padrão)
-        { symbol: 'Jump 10', displayName: 'Jump 10 Index', category: 'Jump (Risco Alto)', supportsDigitDiff: true },
-        { symbol: 'Jump 25', displayName: 'Jump 25 Index', category: 'Jump (Risco Alto)', supportsDigitDiff: true },
-        { symbol: 'Jump 50', displayName: 'Jump 50 Index', category: 'Jump (Risco Alto)', supportsDigitDiff: true },
-        { symbol: 'Jump 75', displayName: 'Jump 75 Index', category: 'Jump (Risco Alto)', supportsDigitDiff: true },
-        { symbol: 'Jump 100', displayName: 'Jump 100 Index', category: 'Jump (Risco Alto)', supportsDigitDiff: true },
-        
-        // Drift Switch Indices
-        { symbol: 'DSI 10', displayName: 'Drift Switch 10', category: 'Drift Switch', supportsDigitDiff: true },
-        { symbol: 'DSI 20', displayName: 'Drift Switch 20', category: 'Drift Switch', supportsDigitDiff: true },
-        { symbol: 'DSI 30', displayName: 'Drift Switch 30', category: 'Drift Switch', supportsDigitDiff: true },
-        
-        // Step Indices
-        { symbol: 'Step 10', displayName: 'Step 10 Index', category: 'Step', supportsDigitDiff: true },
-        { symbol: 'Step 25', displayName: 'Step 25 Index', category: 'Step', supportsDigitDiff: true },
-        { symbol: 'Step 50', displayName: 'Step 50 Index', category: 'Step', supportsDigitDiff: true },
-        
-        // Range Break
-        { symbol: 'Range Break 100', displayName: 'Range Break 100', category: 'Range Break', supportsDigitDiff: true },
-        { symbol: 'Range Break 200', displayName: 'Range Break 200', category: 'Range Break', supportsDigitDiff: true },
-        
-        // RD Basket
-        { symbol: 'RDBULL', displayName: 'RD Bull Index', category: 'RD Basket', supportsDigitDiff: true },
-        { symbol: 'RDBEAR', displayName: 'RD Bear Index', category: 'RD Basket', supportsDigitDiff: true },
-        
-        // Japanese Indices
-        { symbol: 'JD10', displayName: 'Japanese Index 10', category: 'Japanese', supportsDigitDiff: true },
-        { symbol: 'JD25', displayName: 'Japanese Index 25', category: 'Japanese', supportsDigitDiff: true },
-        { symbol: 'JD50', displayName: 'Japanese Index 50', category: 'Japanese', supportsDigitDiff: true },
-        { symbol: 'JD75', displayName: 'Japanese Index 75', category: 'Japanese', supportsDigitDiff: true },
-        { symbol: 'JD100', displayName: 'Japanese Index 100', category: 'Japanese', supportsDigitDiff: true },
-      ];
-
-      const allAssets = marketDataCollector.getAllAssets();
-      const supportedSymbols = marketDataCollector.getSupportedSymbols();
-
-      let assets: any[] = [];
-
-      if (allAssets && allAssets.length > 0) {
-        // Se temos dados do marketDataCollector, usar eles
-        assets = allAssets.map((asset: any) => ({
-          symbol: asset.symbol,
-          displayName: asset.display_name || asset.symbol,
-          category: asset.market_display_name || asset.submarket_display_name || 'Outros',
-          supportsDigitDiff: supportedSymbols.includes(asset.symbol),
-        }));
-      } else {
-        // Fallback: usar lista padrão
-        assets = defaultAssets;
-      }
-
-      res.json(assets);
-
-    } catch (error) {
-      console.error('❌ Erro ao buscar ativos disponíveis:', error);
-      // Em caso de erro, retornar lista padrão
-      const defaultAssets = [
-        { symbol: 'R_10', displayName: 'Volatility 10', category: 'Volatility Indices', supportsDigitDiff: true },
-        { symbol: 'R_25', displayName: 'Volatility 25', category: 'Volatility Indices', supportsDigitDiff: true },
-        { symbol: 'R_50', displayName: 'Volatility 50', category: 'Volatility Indices', supportsDigitDiff: true },
-        { symbol: 'Jump 10', displayName: 'Jump 10 Index', category: 'Jump (Risco Alto)', supportsDigitDiff: true },
-        { symbol: 'Jump 25', displayName: 'Jump 25 Index', category: 'Jump (Risco Alto)', supportsDigitDiff: true },
-      ];
-      res.json(defaultAssets);
     }
   });
 
