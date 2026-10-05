@@ -47,14 +47,21 @@ class KeepAliveSystem {
   }
 
   private resolveTargetUrl(): string | null {
+    const configuredUrl = process.env.KEEP_ALIVE_URL;
+    if (configuredUrl) {
+      return configuredUrl.startsWith("http") ? configuredUrl : `https://${configuredUrl}`;
+    }
+
+    const renderUrl = process.env.RENDER_EXTERNAL_URL;
+    if (renderUrl) {
+      return `${renderUrl.replace(/\\/$/, "")}/api/status`;
+    }
+
     const replitDomain = process.env.REPLIT_DEV_DOMAIN;
     if (replitDomain) {
       return `https://${replitDomain}/api/status`;
     }
-    const customUrl = process.env.KEEP_ALIVE_URL;
-    if (customUrl) {
-      return customUrl.startsWith('http') ? customUrl : `https://${customUrl}`;
-    }
+
     return null;
   }
 
