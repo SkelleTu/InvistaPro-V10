@@ -83,7 +83,22 @@ function fallbackInventory(root: string): ForensicFile[] {
 
 export function getForensicReport(manifest?: ForensicFile[]) {
   const root = process.cwd();
-  const expected = manifest && manifest.length ? manifest : fallbackInventory(root);
+  let embeddedManifest = manifest;
+  if (!embeddedManifest?.length) {
+    for (const candidate of [
+      path.resolve(root, "dist", "forensic-manifest.json"),
+      path.resolve(root, "forensic-manifest.json"),
+    ]) {
+      try {
+        const parsed = JSON.parse(fs.readFileSync(candidate, "utf8"));
+        if (Array.isArray(parsed?.files) && parsed.files.length) {
+          embeddedManifest = parsed.files as ForensicFile[];
+          break;
+        }
+      } catch {}
+    }
+  }
+  const expected = embeddedManifest && embeddedManifest.length ? embeddedManifest : fallbackInventory(root);
   let checked = 0;
   let missing = 0;
   let changed = 0;
