@@ -884,24 +884,7 @@ export class DerivAPIService extends EventEmitter {
     this.sendMessage(subscribeMessage);
     this.activeSubscriptions.add(subscriptionKey);
     
-    // Persistir subscrição no banco de dados (verificar se já existe)
-    try {
-      const existing = await storage.getActiveWebSocketSubscriptions();
-      const alreadyExists = existing.some(sub => sub.subscriptionId === subscriptionKey);
-      
-      if (!alreadyExists) {
-        await storage.saveWebSocketSubscription({
-          subscriptionId: subscriptionKey,
-          subscriptionType: 'ticks',
-          symbol,
-          isActive: true,
-        });
-        console.log(`💾 Subscrição persistida: ${subscriptionKey}`);
-      }
-    } catch (error) {
-      console.error('❌ Erro ao persistir subscrição:', error);
-    }
-    // console.log(`📈 Inscrito nos ticks de ${symbol}`); // Desabilitado para limpar logs
+    // Assinatura efêmera: permanece somente nesta instância/worker.\n    // Não persistir streams globais evita cruzamento de sessões e recuperação de lixo histórico.\n    // console.log(`📈 Inscrito nos ticks de ${symbol}`); // Desabilitado para limpar logs
   }
 
   async buyCallPutContract(symbol: string, direction: 'up' | 'down', duration: number, amount: number): Promise<DerivContractInfo | null> {
