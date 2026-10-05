@@ -468,10 +468,12 @@ app.use((req, res, next) => {
     // de um usuário autenticado. Isso impede processos órfãos e tempestades de dados.
     console.log('🛑 [TRADING] Boot concluído com trading DESATIVADO. Aguardando login + ativação manual.');
     
-    // 🔍 KEEP-ALIVE: Ping externo via URL pública a cada 2 minutos
-    // Replit hiberna após ~5 min sem tráfego externo — 2 min garante margem segura
-    setInterval(keepWorkspaceAlive, 2 * 60 * 1000);
-    setTimeout(keepWorkspaceAlive, 5000);
+    // 🔍 KEEP-ALIVE legado somente para Replit. No Render/produção,
+    // o serviço não cria um timer de auto-ping desnecessário.
+    if (process.env.NODE_ENV !== 'production' && publicDomain) {
+      setInterval(keepWorkspaceAlive, 2 * 60 * 1000).unref?.();
+      setTimeout(keepWorkspaceAlive, 5000).unref?.();
+    }
     
     log('\n' + '='.repeat(80));
     log('⚠️  AVISO IMPORTANTE - CONFIGURAÇÃO ANTI-HIBERNAÇÃO:');
