@@ -209,9 +209,8 @@ export class DerivAPIService extends EventEmitter {
           this.processMessageQueue();
           this.startHeartbeat();
           
-          // Resubscrever todas as subscrições após reconexão
-          // TEMPORARIAMENTE DESABILITADO: await this.resubscribeAll();
-          // Motivo: 11,396 subscrições estão bloqueando a inicialização do servidor
+          // Recuperação controlada: no máximo 9 streams permitidos e deduplicados.
+          await this.resubscribeAll();
           
           resolve(true);
         });
@@ -311,9 +310,8 @@ export class DerivAPIService extends EventEmitter {
               this.startHeartbeat();
               this.startKeepAlive(); // Previne timeout de 2 minutos
               
-              // Resubscrever todas as subscrições após reconexão
-              // TEMPORARIAMENTE DESABILITADO: await this.resubscribeAll();
-              // Motivo: 11,396 subscrições estão bloqueando a inicialização do servidor
+              // Recuperação controlada: no máximo 9 streams permitidos e deduplicados.
+              await this.resubscribeAll();
               
               done(true);
             } else {
@@ -1810,30 +1808,32 @@ export class DerivAPIService extends EventEmitter {
   // Recupera e resubscreve todas as subscrições persistidas
   private async resubscribeAll(): Promise<void> {
     try {
-      console.log('🔄 Recuperando subscrições persistidas...');
       const subscriptions = await storage.getActiveWebSocketSubscriptions();
-      
-      if (subscriptions.length === 0) {
-        console.log('ℹ️ Nenhuma subscrição para recuperar');
-        return;
-      }
+      const allowed = new Set([
+        "R_10", "R_25", "R_50", "R_75", "R_100",
+        "CRASH500", "CRASH1000", "BOOM500", "BOOM1000",
+        "CRASH_500", "CRASH_1000", "BOOM_500", "BOOM_1000",
+      ]);
+      const symbols = [...new Set(
+        subscriptions
+          .filter((sub: any) => sub.subscriptionType === "ticks" && sub.symbol)
+          .map((sub: any) => String(sub.symbol))
+          .filter((symbol: string) => allowed.has(symbol) && !CRIME_PATTERN.test(symbol))
+      )].slice(0, 9);
 
-      console.log(`📋 Encontradas ${subscriptions.length} subscrições para recuperar`);
+      this.activeSubscriptions.clear();
 
-      for (const sub of subscriptions) {
+      if (symbols.length === 0) return;
+
+      console.log(`🔄 Resubscrevendo ${symbols.length} streams permitidos após reconexão.`);
+      for (const symbol of symbols) {
         try {
-          if (sub.subscriptionType === 'ticks' && sub.symbol) {
-            // console.log(`🔄 Resubscrevendo ticks: ${sub.symbol}`); // Desabilitado para limpar logs
-            // Remover da lista ativa antes de subscrever novamente
-            this.activeSubscriptions.delete(sub.subscriptionId);
-            await this.subscribeToTicks(sub.symbol);
-          }
+          await this.subscribeToTicks(symbol);
         } catch (error) {
-          console.error(`❌ Erro ao resubscrever ${sub.subscriptionId}:`, error);
+          console.error(`❌ Falha ao resubscrever ${symbol}:`, error);
         }
       }
-
-      console.log('✅ Resubscrição completa');
+      console.log(`✅ Resubscrição controlada concluída: ${symbols.length} streams.`);
     } catch (error) {
       console.error('❌ Erro ao recuperar subscrições:', error);
     }
