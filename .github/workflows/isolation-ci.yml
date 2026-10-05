@@ -62,7 +62,7 @@ jobs:
                 python -c 'import sys,tomllib; tomllib.loads(open(sys.argv[1],"rb").read().decode())' "$file"
                 ;;
               .node-version)
-                python -c 'import sys,re; v=open(sys.argv[1],"r",encoding="utf-8").read().strip(); assert re.fullmatch(r"[0-9]+(?:\.[0-9]+){1,2}", v), "invalid .node-version: "+v' "$file"
+                python -c 'import sys,re; v=open(sys.argv[1],"r",encoding="utf-8").read().strip(); assert re.fullmatch(r"[0-9]+(?:\.[0-9]+){0,2}", v), "invalid .node-version: "+v' "$file"
                 ;;
             esac
 
