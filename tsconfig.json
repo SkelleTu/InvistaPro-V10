@@ -39,6 +39,7 @@
         "./shared/*"
       ]
     },
-    "target": "ES2022"
+    "target": "ES2022",
+    "noImplicitAny": false
   }
 }
