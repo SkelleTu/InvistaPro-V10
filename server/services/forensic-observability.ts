@@ -127,7 +127,7 @@ export function getForensicReport(manifest?: ForensicFile[]) {
 
   const total = expected.length;
   const buildInventoryCoveragePercent = total ? 100 : 0;
-  const runtimeArtifactCoveragePercent = 2 ? Math.round((runtimeChecked / 2) * 10000) / 100 : 100;
+  const runtimeArtifactCoveragePercent = Math.round((runtimeChecked / 2) * 10000) / 100;
   const memory = memoryTransparency();
 
   return {
