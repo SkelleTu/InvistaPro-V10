@@ -69,19 +69,32 @@ export function startDerivObservabilityBridge() {
     });
   });
 
+  const tickStats = new Map<string, { count: number; lastQuote: number | null; lastEpoch: number | null }>();
   derivAPI.on("tick", (tick: any) => {
+    const symbol = String(tick?.symbol || "UNKNOWN");
+    const current = tickStats.get(symbol) || { count: 0, lastQuote: null, lastEpoch: null };
+    current.count += 1;
+    current.lastQuote = Number.isFinite(Number(tick?.quote)) ? Number(tick.quote) : current.lastQuote;
+    current.lastEpoch = Number.isFinite(Number(tick?.epoch)) ? Number(tick.epoch) : current.lastEpoch;
+    tickStats.set(symbol, current);
+  });
+
+  const tickTelemetry = setInterval(() => {
+    if (tickStats.size === 0) return;
+    const snapshot = [...tickStats.entries()].map(([symbol, stats]) => ({ symbol, ...stats }));
+    tickStats.clear();
     observability.emit({
       level: "INFO",
       category: "WEBSOCKET",
-      message: "DERIV TICK",
+      message: "DERIV TICK TELEMETRY WINDOW",
       details: {
-        symbol: tick?.symbol,
-        quote: tick?.quote,
-        epoch: tick?.epoch,
-        displayValue: tick?.display_value,
+        windowSeconds: 10,
+        totalTicks: snapshot.reduce((sum, item) => sum + item.count, 0),
+        symbols: snapshot,
       },
     });
-  });
+  }, 10000);
+  tickTelemetry.unref?.();
 
   observability.emit({
     level: "INFO",
