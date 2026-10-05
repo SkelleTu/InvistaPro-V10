@@ -158,8 +158,8 @@ jobs:
         env:
           NODE_ENV: production
           PORT: 5123
-          ENCRYPTION_KEY: 0000000000000000000000000000000000000000000000000000000000000000
-          SESSION_SECRET: github-actions-smoke-test
+          ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+          SESSION_SECRET: github-actions-smoke-test-secret-32-characters
         run: |
           set -euo pipefail
           node dist/index.js > /tmp/invista-server.log 2>&1 &
@@ -170,8 +170,8 @@ jobs:
               cat /tmp/health.json
               node -e 'const fs=require("fs"); const d=JSON.parse(fs.readFileSync("/tmp/health.json","utf8")); if(d.status!=="ok" || d.routesReady!==true || d.observability?.critical!==0){console.error("Health check is degraded:",JSON.stringify(d,null,2));process.exit(1)}'
 
-              curl -fsS http://127.0.0.1:5123/api/ping > /tmp/ping.json
-              node -e 'const fs=require("fs"); const d=JSON.parse(fs.readFileSync("/tmp/ping.json","utf8")); if(d.pong!==true){console.error("Ping endpoint invalid:",JSON.stringify(d));process.exit(1)}'
+              curl -fsS http://127.0.0.1:5123/api/ping > /tmp/ping.txt
+              test "$(cat /tmp/ping.txt)" = "OK" || { cat /tmp/ping.txt; echo "Ping endpoint invalid: expected OK"; exit 1; }
 
               curl -fsS http://127.0.0.1:5123/api/health > /tmp/api-health.json
               node -e 'const fs=require("fs"); const d=JSON.parse(fs.readFileSync("/tmp/api-health.json","utf8")); if(d.status!=="online" && d.status!=="not_ready"){console.error("API health endpoint invalid:",JSON.stringify(d));process.exit(1)}'
