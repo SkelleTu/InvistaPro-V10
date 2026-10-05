@@ -986,7 +986,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     try {
       // Valores predefinidos: 130, 350, 825, 1000, depois incrementos de 10.000
       const baseAmounts = [130, 350, 825, 1000];
-      const incrementalAmounts = [];
+      const incrementalAmounts: number[] = [];
       
       // Gerar valores incrementais a partir de 10.000
       for (let i = 10000; i <= 100000; i += 10000) {
@@ -1338,7 +1338,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       
       const taxaMensal = 0.00835; // 0.835% mensal = 10.63% anual composto exato
       let saldo = parseFloat(depositoInicial);
-      const historico = [];
+      const historico: Array<{ mes: number; rendimento: number; saldoAcumulado: number }> = [];
       
       for (let m = 1; m <= meses; m++) {
         const rendimento = saldo * taxaMensal;
@@ -1632,7 +1632,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       const realSelic = parseFloat(selic) || 10.75;
       
       // Gerar 240 pontos de dados históricos com variações mais visíveis e tendências
-      const historicalData = [];
+      const historicalData: Array<{ time: number; price: number }> = [];
       let basePrice = realCDI;
       let trend = 0; // Tendência atual
       
