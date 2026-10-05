@@ -55,8 +55,8 @@ export default function PortfolioOverview() {
     };
 
     // Simular dados históricos para gráfico de tendência
-    const months = [];
-    const values = [];
+    const months: string[] = [];
+    const values: number[] = [];
     const currentMonth = new Date().getMonth();
     
     for (let i = 5; i >= 0; i--) {
