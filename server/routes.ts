@@ -242,7 +242,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   });
 
   // Endpoint para configurar URL do Vercel
-  app.post('/api/keepalive/config', (req, res) => {
+  app.post('/api/keepalive/config', isTradingAuthorized, (req, res) => {
     const { vercelUrl } = req.body;
     if (vercelUrl) {
       keepAliveSystem.setVercelUrl(vercelUrl);
@@ -255,7 +255,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   // =========================== END KEEP-ALIVE SYSTEM ===========================
 
   // Endpoint temporário para criar conta de administrador
-  app.post('/api/setup-admin', async (req, res) => {
+  app.post('/api/setup-admin', isTradingAuthorized, async (req, res) => {
     try {
       const { email, password, nomeCompleto } = req.body;
 
@@ -332,7 +332,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   });
 
   // Endpoint temporário para alterar senha
-  app.post('/api/change-password-admin', async (req, res) => {
+  app.post('/api/change-password-admin', isTradingAuthorized, async (req, res) => {
     try {
       const { email, newPassword } = req.body;
 
@@ -385,7 +385,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   });
 
   // Endpoint temporário para verificar status de conta
-  app.post('/api/check-account-status', async (req, res) => {
+  app.post('/api/check-account-status', isTradingAuthorized, async (req, res) => {
     try {
       const { email } = req.body;
 
