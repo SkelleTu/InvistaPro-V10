@@ -42,7 +42,7 @@ import { and } from "drizzle-orm";
 import { derivAPI, DerivAPIService } from './services/deriv-api';
 import { executeFrenetic9TokensBurst, getSlotBalances, closeAllSlotConnections, selectBestAsset } from './services/frenetico-9tokens';
 import { huggingFaceAI } from './services/huggingface-ai';
-import { autoTradingScheduler } from './services/auto-trading-scheduler';
+import { isolatedAutoTradingScheduler as autoTradingScheduler } from './services/isolated-auto-trading-scheduler';
 import { realStatsTracker } from './services/real-stats-tracker';
 import { isAuthorizedEmail, ACCESS_DENIED_MESSAGE } from './config/access';
 import { errorTracker } from './services/error-tracker';
