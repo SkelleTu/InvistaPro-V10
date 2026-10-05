@@ -3613,7 +3613,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
 
   app.get('/api/trading/live-analysis', isAuthenticated, isTradingAuthorized, async (req, res) => {
     try {
-      const liveData = contractMonitor.getLiveAnalysis(String(req.user.id));
+      const liveData = await autoTradingScheduler.getLiveAnalysis(String(req.user.id), req.sessionID);
       res.json({ contracts: liveData, ts: Date.now() });
     } catch (error) {
       res.json({ contracts: [], ts: Date.now() });
