@@ -32,6 +32,18 @@ process.on("message", async (message: any) => {
   if (!message || message.userId !== userId || message.sessionId !== sessionId) return;
   try {
     switch (message.type) {
+      case "getLiveAnalysis": {
+        const activeScheduler = await ensureScheduler();
+        const data = activeScheduler.getLiveAnalysis(String(userId));
+        process.send?.({
+          type: "response",
+          requestId: String(message.requestId || ""),
+          userId,
+          sessionId,
+          data,
+        });
+        break;
+      }
       case "arm": {
         const activeScheduler = await ensureScheduler();
         activeScheduler.armUserTrading(userId);
