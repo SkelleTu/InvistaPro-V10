@@ -1925,9 +1925,8 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       const userId = req.user?.id;
       if (!userId) return res.status(401).json({ message: 'Usuário não autenticado' });
 
-      autoTradingScheduler.armUserTrading(String(userId), req.sessionID);
+      await autoTradingScheduler.startSchedulerForUser(String(userId), req.sessionID);
       await setUniversalTradingArmed(String(userId), true, req.sessionID);
-      await autoTradingScheduler.startScheduler();
 
       res.json({
         success: true,
@@ -4156,13 +4155,11 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         return res.status(401).json({ message: 'Usuário não autenticado' });
       }
 
-      const result = autoTradingScheduler.resetCooldownSystem(req.user.id);
+      autoTradingScheduler.resetCooldownSystem(String(req.user.id), req.sessionID);
       
       res.json({
         success: true,
-        message: `Sistema desbloqueado! ${result.cleared} ativos liberados`,
-        cleared: result.cleared,
-        reason: result.reason,
+        message: 'Solicitação de desbloqueio enviada para a sessão ativa.',
         timestamp: new Date().toISOString()
       });
 
@@ -4179,8 +4176,8 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       const userId = req.user?.id;
       if (!userId) return res.status(401).json({ message: 'Usuário não autenticado' });
 
-      // 1. Pausar o scheduler se estiver ativo
-      autoTradingScheduler.clearAllSessions();
+      // 1. Pausar somente o scheduler da sessão autenticada
+      await autoTradingScheduler.disarmUserTrading(String(userId), req.sessionID);
 
       // 2. Resetar memória em tempo real
       realStatsTracker.resetUserMemory(userId);
@@ -4222,8 +4219,8 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
 
       // Para o monitor, também encerra sessões ativas na memória e limpa contratos travados
       if (tab === 'monitor') {
-        autoTradingScheduler.clearAllSessions();
-        contractMonitor.clearAll();
+        await autoTradingScheduler.disarmUserTrading(String(userId), req.sessionID);
+        contractMonitor.clearUser?.(String(userId));
       }
 
       // Para learning/stats também reseta a memória em tempo real
