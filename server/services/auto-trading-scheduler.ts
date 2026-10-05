@@ -631,6 +631,22 @@ export class AutoTradingScheduler {
   }
 
   /**
+   * Pré-aquece os componentes de mercado no boot sem armar nenhuma conta.
+   * Login/heartbeat e o botão Play continuam sendo as únicas portas para execução financeira.
+   */
+  async prepareAtBoot(): Promise<void> {
+    if (this.isInitialized) return;
+    try {
+      console.log('🔥 [TRADING] Pré-aquecimento no boot: preparando análise e mercado, sem executar trades...');
+      await this.setupAnaliseNaturalSystem();
+      this.isInitialized = true;
+      console.log('✅ [TRADING] Motor pronto no boot. Nenhuma conta está armada e nenhum trade pode ser executado até Play.');
+    } catch (error) {
+      console.error('❌ [TRADING] Falha no pré-aquecimento do boot:', error);
+    }
+  }
+
+  /**
    * Arma o trading para um usuário autenticado após ação manual explícita.
    */
   armUserTrading(userId: string): void {
