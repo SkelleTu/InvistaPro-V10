@@ -156,15 +156,8 @@ app.use((req, res, next) => {
     observability.captureError(routeError, { level: 'CRITICAL', category: 'BOOT', message: 'Falha crítica no registro das rotas da API', details: { routesReady: false } });
   }
 
-  // SPA fallback MUST come after API routes so /auth, /login and other
-  // client-side routes receive index.html without intercepting backend APIs.
-  if (app.get("env") !== "development") {
-    app.get("*", (_req, res) => {
-      res.sendFile(path.resolve(process.cwd(), "dist", "public", "index.html"));
-    });
-  }
-
-  // Nunca deixe uma falha de boot de rotas parecer um simples 404/HTML.
+  // API nunca pode cair no HTML do SPA. Primeiro protegemos o namespace /api
+  // e devolvemos JSON determinístico para boot degradado ou rota inexistente.
   app.use('/api', (req, res, next) => {
     if (!routesReady) {
       return res.status(503).json({
@@ -176,6 +169,22 @@ app.use((req, res, next) => {
     }
     next();
   });
+
+  app.use('/api', (req, res) => {
+    res.status(404).json({
+      success: false,
+      error: 'API route not found',
+      path: req.originalUrl || req.path,
+    });
+  });
+
+  // SPA fallback MUST be the final application fallback so /auth, /login
+  // and other client-side routes receive index.html without intercepting APIs.
+  if (app.get("env") !== "development") {
+    app.get("*", (_req, res) => {
+      res.sendFile(path.resolve(process.cwd(), "dist", "public", "index.html"));
+    });
+  }
 
   // Servir arquivos públicos antes do handler global de erros.
   const rootPublicPath = path.resolve(process.cwd(), 'public');
@@ -196,8 +205,8 @@ app.use((req, res, next) => {
     console.error("❌ [BOOT] Banco local não pôde ser inicializado; servidor HTTP continuará ativo:", dbError?.message || dbError);
   }
   
-  app.locals.serviceReady = true;
-  console.log("✅ [BOOT] Serviço HTTP/rotas/banco local prontos para o Render.");
+  app.locals.serviceReady = routesReady;
+  console.log(`✅ [BOOT] Serviço HTTP finalizado. routesReady=${routesReady}`);
 
   // 🗄️ EXECUTAR MIGRAÇÃO POSTGRESQL - SUPORTE A QUALQUER BANCO (REPLIT, SUPABASE, ETC)
   console.log('🗄️ Verificando sincronização com PostgreSQL...');
