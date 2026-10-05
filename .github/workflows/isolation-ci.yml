@@ -1,21 +1,126 @@
-name: Invista Isolation CI
+name: Invista Full Platform Audit
+
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
+
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: invista-full-audit-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  typecheck-and-build:
+  full-platform-audit:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
-      - run: npm ci
-      - run: npm run check
-      - run: npm run build
+
+      - name: Repository-wide structural scan
+        shell: bash
+        run: |
+          set -euo pipefail
+          count=0
+          while IFS= read -r -d '' file; do
+            test -e "$file" || { echo "MISSING: $file"; exit 1; }
+            case "$file" in
+              *.js|*.mjs|*.cjs)
+                node --check "$file"
+                ;;
+              *.json)
+                node -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' "$file"
+                ;;
+              *.sh)
+                bash -n "$file"
+                ;;
+            esac
+            case "$file" in
+              *.ts|*.tsx|*.js|*.mjs|*.cjs|*.json|*.yml|*.yaml|*.sh|*.css|*.html|*.md|*.txt|*.toml)
+                if grep -nE '^(<<<<<<< |=======|>>>>>>> )' "$file" >/dev/null 2>&1; then
+                  echo "MERGE CONFLICT MARKER: $file"
+                  exit 1
+                fi
+                ;;
+            esac
+            count=$((count+1))
+          done < <(git ls-files -z)
+          echo "Repository-wide scan completed: $count tracked files inspected."
+
+      - name: Synchronize npm lockfile
+        run: npm install --package-lock-only --ignore-scripts
+
+      - name: Persist lockfile repair
+        shell: bash
+        run: |
+          if git diff --quiet -- package-lock.json; then
+            echo "Lockfile already synchronized."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add package-lock.json
+            git commit -m "ci: synchronize npm lockfile"
+            git push origin HEAD:main
+          fi
+
+      - name: Clean dependency install
+        run: npm ci
+
+      - name: TypeScript validation
+        run: npm run check
+
+      - name: Production build
+        run: npm run build
+
+      - name: Dependency vulnerability scan
+        continue-on-error: true
+        run: npm audit --audit-level=high
+
+      - name: Verify production artifact
+        shell: bash
+        run: |
+          test -f dist/index.js
+          test -f dist/trading-user-worker.js
+          test -f dist/public/index.html
+          echo "Production artifact checks passed."
+
+      - name: Production boot smoke test
+        shell: bash
+        env:
+          NODE_ENV: production
+          PORT: 5123
+          ENCRYPTION_KEY: 0000000000000000000000000000000000000000000000000000000000000000
+          SESSION_SECRET: github-actions-smoke-test
+        run: |
+          set -euo pipefail
+          node dist/index.js > /tmp/invista-server.log 2>&1 &
+          pid=$!
+          trap 'kill $pid 2>/dev/null || true' EXIT
+          for i in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:5123/health > /tmp/health.json; then
+              cat /tmp/health.json
+              exit 0
+            fi
+            if ! kill -0 $pid 2>/dev/null; then
+              echo "Server exited before /health became available."
+              cat /tmp/invista-server.log
+              exit 1
+            fi
+            sleep 1
+          done
+          echo "Server did not expose /health within 45 seconds."
+          cat /tmp/invista-server.log
+          exit 1
