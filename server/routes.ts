@@ -3431,7 +3431,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         });
 
         // 🎯 RASTREAR ATIVO PARA DIVERSIFICAÇÃO
-        autoTradingScheduler.trackAssetUsage(userId, symbol);
+        autoTradingScheduler.trackAssetUsage(userId, symbol, req.sessionID);
 
         res.json({
           message: 'Trade executado com sucesso',
