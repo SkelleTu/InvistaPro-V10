@@ -115,7 +115,7 @@ export class QuantumNeuralSystem {
     const symbols = ['R_50', 'R_75', 'R_100', 'JD50', 'JD75', 'JD100'];
     
     for (const symbol of symbols) {
-      const quantumState = [];
+      const quantumState: any[] = [];
       
       // Criar qubits para cada universo paralelo
       for (let i = 0; i < this.config.quantum.qubits; i++) {
@@ -396,7 +396,7 @@ export class QuantumNeuralSystem {
 
     console.log(`🌌 [QUANTUM] Processando ${quantumState.length} qubits para ${symbol}`);
 
-    const results = [];
+    const results: any[] = [];
     
     // Processar cada qubit em paralelo (simulação de computação quântica)
     for (let i = 0; i < this.config.quantum.parallelUniverses; i++) {
@@ -708,7 +708,7 @@ export class QuantumNeuralSystem {
 
   private prepareNeuralInput(symbol: string, marketData: any[], networkType: string): number[] {
     // Preparar entrada específica para cada tipo de rede neural
-    const input = [];
+    const input: number[] = [];
     const recent = marketData.slice(-20); // Últimos 20 pontos
     
     for (const data of recent) {
@@ -734,7 +734,7 @@ export class QuantumNeuralSystem {
 
   private activateLayer(input: number[], layer: any): number[] {
     // Simulação simplificada de ativação de camada
-    const output = [];
+    const output: number[] = [];
     
     for (let i = 0; i < layer.neurons; i++) {
       let sum = (layer.biases && layer.biases[i]) ? layer.biases[i] : 0;
@@ -819,7 +819,7 @@ export class QuantumNeuralSystem {
 
   private prepareRLState(symbol: string, marketData: any[], agentType: string): number[] {
     // Estado específico para cada tipo de agente RL
-    const state = [];
+    const state: number[] = [];
     const recent = marketData.slice(-10);
     
     for (const data of recent) {
