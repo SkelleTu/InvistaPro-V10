@@ -384,6 +384,10 @@ app.use((req, res, next) => {
   
   console.log('✅ ResilienceSupervisor ativo e monitorando componentes');
 
+  // Universal Server: manter heartbeat global ativo para as sessões isoladas.
+  // As sessões individuais só são criadas após autenticação, então isto não inicia trading.
+  startUniversalHeartbeatLoop();
+
   // 🌐 INICIALIZAR URL REGISTRY — Registra URL atual para o EA MT5 auto-descobrir
   console.log('🌐 Inicializando URL Registry para o EA do MT5...');
   initUrlRegistry().catch(err => console.warn('⚠️ URL Registry falhou (não crítico):', err));
