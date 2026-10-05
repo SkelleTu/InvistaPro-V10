@@ -24,6 +24,7 @@ import { realStatsTracker } from "./services/real-stats-tracker";
 import { runPostgresMigration } from "./migrate-postgres";
 import { initUrlRegistry } from "./services/url-registry";
 import { brazilNewsService } from "./services/brazil-news-service";
+import { startDerivObservabilityBridge } from "./services/deriv-observability-bridge";
 
 const app = express();
 app.use(express.json());
