@@ -5096,6 +5096,7 @@ export class AutoTradingScheduler {
     // Parar coleta de mercado e sincronização quando o usuário desativa.
     try { await marketDataCollector.stopCollection(); } catch (e) { console.warn('⚠️ [TRADING] Falha ao parar MarketDataCollector:', e); }
     try { await derivTradeSync.stopAutoSync(); } catch (e) { console.warn('⚠️ [TRADING] Falha ao parar sincronização Deriv:', e); }
+    try { contractMonitor.clearAll(); } catch (e) { console.warn('⚠️ [MONITOR] Falha ao limpar contratos monitorados:', e); }
     try { await derivAPI.disconnect(); } catch (e) { console.warn('⚠️ [TRADING] Falha ao desconectar Deriv:', e); }
     
     console.log('🛑 [TRADING] Todos os processos de trading foram parados.');
