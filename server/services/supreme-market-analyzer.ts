@@ -169,6 +169,7 @@ export class SupremeMarketAnalyzer extends EventEmitter {
   }
 
   start(): void {
+    if (this.analysisInterval) return;
     this.analysisInterval = setInterval(() => this.runCycle(), this.ANALYSIS_INTERVAL_MS);
     console.log('🚀 [SUPREME] Motor ativo — análise a cada 3s');
   }
