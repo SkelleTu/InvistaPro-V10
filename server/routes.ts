@@ -254,15 +254,51 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   });
 
   // Endpoint de status completo do sistema
+  // ÚNICO /api/status da aplicação: expõe runtime + memória real do cgroup.
   app.get('/api/status', (req, res) => {
     const status = keepAliveSystem.getStatus();
+    const usage = process.memoryUsage();
+    const readCgroup = (file: string) => {
+      try {
+        const raw = require('fs').readFileSync(file, 'utf8').trim();
+        if (!raw || raw === 'max') return null;
+        const value = Number(raw);
+        return Number.isFinite(value) && value > 0 ? value : null;
+      } catch {
+        return null;
+      }
+    };
+    const cgroupCurrent = readCgroup('/sys/fs/cgroup/memory.current')
+      ?? readCgroup('/sys/fs/cgroup/memory/memory.usage_in_bytes');
+    const cgroupLimit = readCgroup('/sys/fs/cgroup/memory.max')
+      ?? readCgroup('/sys/fs/cgroup/memory/memory.limit_in_bytes');
+    const mb = (bytes: number | null) => bytes == null ? null : Math.round(bytes / 1024 / 1024 * 100) / 100;
+    const usedPercent = cgroupCurrent && cgroupLimit
+      ? Math.round(cgroupCurrent / cgroupLimit * 10000) / 100
+      : null;
     res.json({
       status: 'online',
-      server: 'replit',
+      server: process.env.RENDER ? 'render' : 'node',
+      runtime: process.version,
       ...status,
       memory: {
-        heapUsed: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB',
-        heapTotal: Math.round(process.memoryUsage().heapTotal / 1024 / 1024) + 'MB'
+        rssBytes: usage.rss,
+        rssMB: mb(usage.rss),
+        heapUsedBytes: usage.heapUsed,
+        heapUsedMB: mb(usage.heapUsed),
+        heapTotalBytes: usage.heapTotal,
+        heapTotalMB: mb(usage.heapTotal),
+        externalBytes: usage.external,
+        externalMB: mb(usage.external),
+        arrayBuffersBytes: usage.arrayBuffers,
+        arrayBuffersMB: mb(usage.arrayBuffers),
+        cgroupCurrentBytes: cgroupCurrent,
+        cgroupCurrentMB: mb(cgroupCurrent),
+        cgroupLimitBytes: cgroupLimit,
+        cgroupLimitMB: mb(cgroupLimit),
+        cgroupUsedPercent: usedPercent,
+        limitSource: cgroupLimit ? 'linux.cgroup' : 'unavailable',
+        measuredAt: new Date().toISOString(),
       }
     });
   });
@@ -1999,15 +2035,6 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       trading: activeSessions.length > 0,
       sessions: activeSessions.length,
       timestamp: Date.now()
-    });
-  });
-
-  // Endpoint 3: Status simples
-  app.get('/api/status', (req, res) => {
-    res.json({ 
-      status: 'online',
-      uptime: Math.floor(process.uptime()),
-      timestamp: new Date().toISOString()
     });
   });
 
