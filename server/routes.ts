@@ -4236,6 +4236,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       // Para o monitor, também encerra sessões ativas na memória e limpa contratos travados
       if (tab === 'monitor') {
         await autoTradingScheduler.disarmUserTrading(String(userId), req.sessionID);
+        contractMonitor.clearUser(String(userId));
       }
 
       // Para learning/stats também reseta a memória em tempo real
