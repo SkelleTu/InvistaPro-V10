@@ -1,19 +1,29 @@
-import { AutoTradingScheduler } from "./auto-trading-scheduler";
+import type { AutoTradingScheduler } from "./auto-trading-scheduler";
 
 const userId = String(process.env.INVISTA_RUNTIME_USER_ID || "");
 const sessionId = String(process.env.INVISTA_RUNTIME_SESSION_ID || "");
-const scheduler = new AutoTradingScheduler();
+let scheduler: AutoTradingScheduler | null = null;
+
+async function ensureScheduler(): Promise<AutoTradingScheduler> {
+  if (scheduler) return scheduler;
+  // Importação dinâmica é intencional: login/heartbeat não deve carregar os
+  // motores pesados de trading, IA, mercado ou Deriv. Eles só entram na memória
+  // depois do Play/arm autenticado.
+  const { AutoTradingScheduler } = await import("./auto-trading-scheduler");
+  scheduler = new AutoTradingScheduler();
+  return scheduler;
+}
 
 function sendStatus() {
   try {
-    const status = scheduler.getSchedulerStatus();
+    const status = scheduler?.getSchedulerStatus();
     process.send?.({
       type: "status",
       userId,
       sessionId,
-      status: status.isRunning ? "armed" : "ready",
-      armed: status.isRunning,
-      activeSessions: status.activeSessions || 0,
+      status: status?.isRunning ? "armed" : "ready",
+      armed: Boolean(status?.isRunning),
+      activeSessions: Number(status?.activeSessions || 0),
     });
   } catch {}
 }
@@ -22,25 +32,30 @@ process.on("message", async (message: any) => {
   if (!message || message.userId !== userId || message.sessionId !== sessionId) return;
   try {
     switch (message.type) {
-      case "arm":
-        scheduler.armUserTrading(userId);
-        await scheduler.startScheduler();
+      case "arm": {
+        const activeScheduler = await ensureScheduler();
+        activeScheduler.armUserTrading(userId);
+        await activeScheduler.startScheduler();
         break;
+      }
       case "disarm":
-        await scheduler.disarmUserTrading(userId);
+        if (scheduler) await scheduler.disarmUserTrading(userId);
         break;
       case "trackAssetUsage":
-        scheduler.trackAssetUsage(userId, String(message.symbol || ""));
+        // Não inicializar o motor pesado por causa de uma chamada de diagnóstico.
+        if (scheduler) scheduler.trackAssetUsage(userId, String(message.symbol || ""));
         break;
       case "resetCooldownSystem":
-        scheduler.resetCooldownSystem(userId);
+        if (scheduler) scheduler.resetCooldownSystem(userId);
         break;
       case "clearAllSessions":
-        scheduler.clearAllSessions();
+        if (scheduler) scheduler.clearAllSessions();
         break;
       case "shutdown":
-        await scheduler.disarmUserTrading(userId);
-        await scheduler.stopScheduler();
+        if (scheduler) {
+          await scheduler.disarmUserTrading(userId);
+          await scheduler.stopScheduler();
+        }
         process.exit(0);
         break;
     }
