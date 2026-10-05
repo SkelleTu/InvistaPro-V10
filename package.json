@@ -142,5 +142,10 @@
   "optionalDependencies": {
     "bufferutil": "^4.0.8"
   },
-  "description": "Invista PRO V10"
+  "description": "Invista PRO V10",
+  "overrides": {
+    "whatsapp-web.js": {
+      "puppeteer": "^25.8.0"
+    }
+  }
 }
