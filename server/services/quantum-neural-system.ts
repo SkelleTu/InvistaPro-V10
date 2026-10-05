@@ -94,7 +94,7 @@ export class QuantumNeuralSystem {
     console.log(`   • Redes neurais profundas: ${this.config.neuralNetwork.layers.length} camadas`);
     console.log(`   • Algoritmo RL: ${this.config.deepRL.algorithm}`);
     console.log(`   • Análise de sentimento: ${this.config.sentiment.analysisDepth}`);
-    console.log('✨ ACERTIVIDADE QUÂNTICA E LUCROS EXPONENCIAIS GARANTIDOS!');
+    console.log('✨ Sistema quântico inicializado: análise adaptativa e gestão de risco ativas.');
     
     await this.initializeQuantumStates();
     await this.initializeNeuralNetworks();
@@ -329,7 +329,7 @@ export class QuantumNeuralSystem {
       }
     };
 
-    console.log('⚙️ [OPTIMIZER] Auto-otimização ativada - Melhoria contínua garantida');
+    console.log('⚙️ [OPTIMIZER] Auto-otimização ativada: parâmetros adaptativos em execução.');
   }
 
   /**
