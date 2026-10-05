@@ -160,31 +160,36 @@ chown -R "$APP_USER:$APP_USER" "$APP_DIR"
 step "Configurando PM2 para rodar 24/7"
 cat > "$APP_DIR/ecosystem.config.js" << 'EOF'
 module.exports = {
-  apps: [{
-    name: 'investapro',
-    script: 'npm',
-    args: 'start',
-    cwd: '/opt/investapro',
-    env_file: '/opt/investapro/.env',
-    instances: 1,
-    autorestart: true,
-    watch: false,
-    max_memory_restart: '1G',
-    restart_delay: 5000,
-    log_file: '/var/log/investapro/app.log',
-    error_file: '/var/log/investapro/error.log',
-    time: true
-  }]
+  apps: [
+    {
+      name: 'investapro',
+      script: 'npm',
+      args: 'start',
+      cwd: '/opt/investapro',
+      env_file: '/opt/investapro/.env',
+      instances: 1,
+      autorestart: true,
+      watch: false,
+      max_memory_restart: '1G',
+      restart_delay: 5000,
+      log_file: '/var/log/investapro/app.log',
+      error_file: '/var/log/investapro/error.log',
+      time: true
+    },
+    {
+      name: 'investapro-desktop',
+      script: '/opt/investapro/desktop-start.sh',
+      instances: 1,
+      autorestart: true,
+      watch: false,
+      restart_delay: 10000,
+      log_file: '/var/log/investapro/desktop.log',
+      error_file: '/var/log/investapro/desktop-error.log',
+      time: true
+    }
+  ]
 }
 EOF
-
-mkdir -p /var/log/investapro
-chown -R "$APP_USER:$APP_USER" /var/log/investapro
-
-sudo -u "$APP_USER" pm2 start "$APP_DIR/ecosystem.config.js"
-sudo -u "$APP_USER" pm2 save
-env PATH=$PATH:/usr/bin pm2 startup systemd -u "$APP_USER" --hp "/home/$APP_USER" | tail -1 | bash
-log "PM2 configurado — InvestaPRO inicia automaticamente no boot"
 
 # ── PM2 — Desktop virtual (Xvfb + noVNC) ────────────────────────
 step "Configurando desktop virtual MT5 (Xvfb + noVNC)"
@@ -215,20 +220,6 @@ echo "Desktop virtual iniciado! Acesse: http://SEU_IP:6080/vnc.html"
 DESKEOF
 chmod +x "$APP_DIR/desktop-start.sh"
 chown "$APP_USER:$APP_USER" "$APP_DIR/desktop-start.sh"
-
-cat >> "$APP_DIR/ecosystem.config.js" << 'EOF2'
-,{
-    name: 'investapro-desktop',
-    script: '/opt/investapro/desktop-start.sh',
-    instances: 1,
-    autorestart: true,
-    watch: false,
-    restart_delay: 10000,
-    log_file: '/var/log/investapro/desktop.log',
-    error_file: '/var/log/investapro/desktop-error.log',
-    time: true
-  }
-EOF2
 
 sudo -u "$APP_USER" pm2 start "$APP_DIR/ecosystem.config.js" --only investapro-desktop 2>/dev/null || true
 sudo -u "$APP_USER" pm2 save
