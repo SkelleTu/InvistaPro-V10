@@ -117,6 +117,27 @@ export class ResilienceSupervisor extends EventEmitter {
   }
 
   private async getComponentHealth(componentName: string): Promise<ComponentHealth> {
+    // Em repouso, nenhum componente de trading deve ser reiniciado ou gerar falso
+    // positivo. O trading só existe quando há sessão ativa explicitamente armada.
+    try {
+      const activeSessions = await storage.getAllActiveTradingSessions();
+      if (activeSessions.length === 0) {
+        return {
+          componentName,
+          isHealthy: true,
+          lastHeartbeat: new Date(),
+          errorCount: 0,
+        };
+      }
+    } catch (error) {
+      observability.captureError(error, {
+        level: 'WARNING',
+        category: 'DATABASE',
+        message: 'Falha ao consultar sessões ativas para health check',
+        details: { componentName },
+      });
+    }
+
     const heartbeat = await storage.getSystemHeartbeat(componentName);
 
     if (!heartbeat) {
