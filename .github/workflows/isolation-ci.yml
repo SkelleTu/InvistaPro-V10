@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: invista-full-platform-audit-${{ github.ref }}
@@ -66,6 +66,35 @@ jobs:
 
       - name: Reconcile npm lockfile for this audit
         run: npm install --package-lock-only --ignore-scripts
+
+      - name: Persist synchronized npm lockfile
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- package-lock.json; then
+            echo "package-lock.json is already synchronized."
+          else
+            echo "Synchronizing package-lock.json in the repository..."
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add package-lock.json
+            git commit -m "ci: synchronize npm lockfile"
+            git push origin HEAD:main
+          fi
+
+      - name: Reject lockfile drift on pull requests
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- package-lock.json; then
+            echo "package-lock.json is synchronized."
+          else
+            echo "::error::package-lock.json differs from package.json. Commit a synchronized lockfile with the PR."
+            git diff -- package-lock.json
+            exit 1
+          fi
 
       - name: Clean dependency install
         run: npm ci
