@@ -1,5 +1,7 @@
 import { derivAPI } from "./deriv-api";
 import { observability } from "./production-observability";
+import { autoTradingScheduler } from "./auto-trading-scheduler";
+import { resilienceSupervisor } from "./resilience-supervisor";
 
 export function startDerivObservabilityBridge() {
   // Runtime instrumentation also captures outbound frames without storing secrets.
@@ -87,4 +89,21 @@ export function startDerivObservabilityBridge() {
     message: "DERIV OBSERVABILITY BRIDGE ACTIVE",
     details: { mode: "complete-inbound-and-tick-telemetry" },
   });
+
+  const heartbeat = async () => {
+    const tradingActive = Boolean(autoTradingScheduler.getSchedulerStatus()?.isRunning);
+    const connected = derivAPI.getIsConnected();
+    // When trading is intentionally OFF, websocket inactivity is a healthy idle state.
+    // When trading is ON, heartbeat is emitted only while connected so a disconnect expires naturally.
+    if (!tradingActive) {
+      await resilienceSupervisor.reportHeartbeat("websocket", { status: "idle", tradingActive: false, connected });
+      await resilienceSupervisor.reportHeartbeat("market_collector", { status: "idle", tradingActive: false });
+      return;
+    }
+    if (connected) {
+      await resilienceSupervisor.reportHeartbeat("websocket", { status: "connected", tradingActive: true, connected });
+    }
+  };
+  void heartbeat();
+  setInterval(() => { void heartbeat(); }, 30000).unref?.();
 }
