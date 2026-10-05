@@ -8,7 +8,7 @@ export interface EmailOptions {
 }
 
 class NodemailerService {
-  private transporter: nodemailer.Transporter;
+  private transporter: ReturnType<typeof nodemailer.createTransport>;
 
   constructor() {
     // Configurar transporter usando variáveis de ambiente para segurança
