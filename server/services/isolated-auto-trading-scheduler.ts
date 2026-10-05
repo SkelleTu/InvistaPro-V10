@@ -81,8 +81,8 @@ class IsolatedAutoTradingScheduler {
     });
 
     const cleanup = () => {
-      const current = this.runtimes.get(id);
-      if (current?.worker === worker) this.runtimes.delete(id);
+      const current = this.runtimes.get(key);
+      if (current?.worker === worker) this.runtimes.delete(key);
     };
     worker.once("exit", cleanup);
     worker.once("error", (error) => {
