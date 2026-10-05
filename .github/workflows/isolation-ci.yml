@@ -49,7 +49,7 @@ jobs:
             esac
             case "$file" in
               *.ts|*.tsx|*.js|*.mjs|*.cjs|*.json|*.yml|*.yaml|*.sh|*.css|*.html|*.md|*.txt|*.toml)
-                if grep -nE '^(<<<<<<< |=======|>>>>>>> )' "$file" >/dev/null 2>&1; then
+                if grep -nE '^(<<<<<<< |=======$|>>>>>>> )' "$file" >/dev/null 2>&1; then
                   echo "MERGE CONFLICT MARKER: $file"
                   exit 1
                 fi
