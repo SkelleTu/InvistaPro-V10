@@ -1639,17 +1639,9 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       for (let i = 239; i >= 0; i--) {
         const time = currentTime - (i * 60000); // 1 ponto por minuto (4 horas de dados)
         
-        // Criar micro-tendências que mudam a cada 20-30 pontos
-        if (i % 25 === 0) {
-          trend = (Math.random() - 0.5) * 0.3; // Tendência entre -0.15% e +0.15%
-        }
-        
-        // Variação mais ampla: ±0.2% + tendência
-        const randomVariation = (Math.random() - 0.5) * 0.4; // ±0.2%
-        const trendInfluence = trend * (1 - i / 240); // Tendência diminui com o tempo
-        
-        const variation = randomVariation + trendInfluence;
-        const price = Math.max(0.1, realCDI + variation); // Nunca vai abaixo de 0.1%
+        // Sem endpoint histórico disponível nesta rota, mantenha uma série determinística
+        // baseada na taxa atual, sem inventar oscilações aleatórias.
+        const price = basePrice; // Nunca vai abaixo de 0.1%
         
         historicalData.push({
           time,
@@ -1657,7 +1649,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         });
       }
       
-      console.log(`✅ Dados reais obtidos: CDI ${realCDI}%, Selic ${realSelic}%`);
+      console.log(`✅ Taxas atuais obtidas de fonte externa: CDI ${realCDI}%, Selic ${realSelic}%`);
       
       res.json({
         success: true,
@@ -1689,14 +1681,15 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
             symbol: 'SELIC',
             currentRate: realSelic,
             color: '#4caf50',
-            data: historicalData.map((point, index) => ({
+            data: historicalData.map((point) => ({
               ...point,
-              price: parseFloat((realSelic + (Math.random() - 0.5) * 0.35).toFixed(3))
+              price: realSelic
             }))
           }
         ],
         source: 'HG Brasil Finance API',
-        message: 'Dados de mercado em tempo real obtidos com sucesso'
+        historicalSeries: 'synthetic',
+        message: 'Taxas atuais obtidas com sucesso; séries históricas do gráfico são aproximações sintéticas porque esta rota não consulta candles históricos.'
       });
       
     } catch (error) {
