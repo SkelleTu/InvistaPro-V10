@@ -16,6 +16,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   full-platform-audit:
+    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'ci: synchronize npm lockfile')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -63,10 +64,7 @@ jobs:
           done < <(git ls-files -z)
           echo "Repository-wide scan completed: $count tracked files inspected."
 
-      - name: Reconcile npm lockfile for this audit
-        run: npm install --package-lock-only --ignore-scripts
-
-      - name: Persist synchronized npm lockfile
+      - name: Synchronize and persist npm lockfile
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         shell: bash
         run: |
@@ -75,31 +73,25 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           for attempt in 1 2 3 4 5; do
-            echo "Lockfile synchronization attempt $attempt/5"
             git fetch origin main
             git reset --hard origin/main
+
             npm install --package-lock-only --ignore-scripts
 
             if git diff --quiet -- package-lock.json; then
-              echo "package-lock.json is already synchronized."
+              echo "package-lock.json already synchronized with current main."
               exit 0
             fi
 
             git add package-lock.json
             git commit -m "ci: synchronize npm lockfile"
 
-            if git fetch origin main && git merge-base --is-ancestor HEAD origin/main; then
-              echo "Remote main moved before push. Retrying from latest main..."
-              git reset --hard origin/main
-              continue
-            fi
-
             if git push origin HEAD:main; then
               echo "package-lock.json synchronized and pushed."
               exit 0
             fi
 
-            echo "Push race detected. Retrying from latest main..."
+            echo "Concurrent update detected; retrying from latest origin/main..."
           done
 
           echo "::error::Unable to synchronize package-lock.json after 5 retries."
