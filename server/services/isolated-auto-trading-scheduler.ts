@@ -153,6 +153,7 @@ class IsolatedAutoTradingScheduler {
       activeSessions: runtimes.reduce((n, r) => n + r.activeSessions, 0),
       isolatedUsers: runtimes.length,
       armedUsers: runtimes.filter(r => r.armed).map(r => r.userId),
+      totalExecutedOperations: 0,
     };
   }
 
@@ -180,8 +181,9 @@ class IsolatedAutoTradingScheduler {
     this.send(userId, "trackAssetUsage", { symbol });
   }
 
-  resetCooldownSystem(userId: string): void {
+  resetCooldownSystem(userId: string): { cleared: number; reason: string } {
     this.send(userId, "resetCooldownSystem");
+    return { cleared: 0, reason: "reset solicitado ao runtime isolado" };
   }
 
   clearAllSessions(): void {
