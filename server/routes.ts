@@ -1678,7 +1678,6 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
 
       if (!cdi.length || !selic.length) throw new Error('BCB SGS retornou série vazia');
 
-      const selicByTime = new Map(selic.map(point => [point.time, point.value]));
       const cdiData = cdi.slice(-260).map(point => ({
         time: point.time,
         price: Number(point.value.toFixed(4)),
