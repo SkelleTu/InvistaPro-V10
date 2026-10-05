@@ -667,6 +667,27 @@ class UniversalContractMonitor extends EventEmitter {
     }
   }
 
+  pause(): void {
+    if (this.orphanScanTimer) {
+      clearInterval(this.orphanScanTimer);
+      this.orphanScanTimer = null;
+    }
+    this.stopKeepAlive();
+    this.reconnecting = false;
+    this.isShuttingDown = true;
+    if (this.ws) {
+      try { this.ws.removeAllListeners(); } catch {}
+      try { this.ws.close(); } catch {}
+      this.ws = null;
+    }
+    this.connected = false;
+  }
+
+  resume(): void {
+    this.isShuttingDown = false;
+    this.startOrphanScan();
+  }
+
   // ── API Pública ──────────────────────────────────────────
 
   setToken(token: string): void {
