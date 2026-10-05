@@ -7,8 +7,7 @@ import { scrypt, randomBytes, timingSafeEqual } from "crypto";
 import { promisify } from "util";
 import { dualStorage as storage } from "./storage-dual";
 import { User } from "@shared/schema";
-import createMemoryStore from "memorystore";
-import * as connectPgSimpleModule from "connect-pg-simple";
+import { createRequire } from "module";
 import { isAuthorizedEmail, ACCESS_DENIED_MESSAGE } from "./config/access";
 
 declare global {
@@ -26,6 +25,10 @@ declare global {
     }
   }
 }
+
+const require = createRequire(import.meta.url);
+const createMemoryStoreFactory: any = require("memorystore");
+const connectPgSimpleFactory: any = require("connect-pg-simple");
 
 const scryptAsync = promisify(scrypt);
 
@@ -59,7 +62,6 @@ export function setupAuth(app: Express) {
   // MemoryStore somente como fallback. Evita depender do módulo nativo SQLite
   // no caminho crítico de autenticação/boot.
   let sessionStore: session.Store;
-  const connectPgSimpleFactory = (connectPgSimpleModule as any).default ?? connectPgSimpleModule;
   if (process.env.DATABASE_URL) {
     const PgStore = connectPgSimpleFactory(session);
     sessionStore = new PgStore({
@@ -69,7 +71,7 @@ export function setupAuth(app: Express) {
     });
     console.log("✅ [SessionStore] PostgreSQL selecionado para sessões persistentes.");
   } else {
-    const MemoryStore = createMemoryStore(session);
+    const MemoryStore = createMemoryStoreFactory(session);
     sessionStore = new MemoryStore({ checkPeriod: 24 * 60 * 60 * 1000 });
     console.warn("⚠️ [SessionStore] DATABASE_URL ausente; usando MemoryStore em modo fallback.");
   }
