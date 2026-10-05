@@ -5090,6 +5090,9 @@ export class AutoTradingScheduler {
     this.lastOperationId = null;
     this.lastOperationStartTime = 0;
     
+    // Parar também os motores de análise que possuem timers próprios.
+    try { supremeAnalyzer.stop(); } catch (e) { console.warn('⚠️ [SUPREME] Falha ao parar motor:', e); }
+
     // Parar coleta de mercado e sincronização quando o usuário desativa.
     try { await marketDataCollector.stopCollection(); } catch (e) { console.warn('⚠️ [TRADING] Falha ao parar MarketDataCollector:', e); }
     try { await derivTradeSync.stopAutoSync(); } catch (e) { console.warn('⚠️ [TRADING] Falha ao parar sincronização Deriv:', e); }
