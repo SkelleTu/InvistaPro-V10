@@ -117,6 +117,18 @@ class IsolatedAutoTradingScheduler {
     this.armUserTrading(userId);
   }
 
+  async startScheduler(): Promise<void> {
+    for (const runtime of this.runtimes.values()) {
+      if (!runtime.armed) this.armUserTrading(runtime.userId);
+    }
+  }
+
+  async stopScheduler(): Promise<void> {
+    for (const runtime of this.runtimes.values()) {
+      await this.disarmUserTrading(runtime.userId);
+    }
+  }
+
   async disarmUserTrading(userId: string): Promise<void> {
     const runtime = this.runtimes.get(String(userId));
     if (!runtime) return;
