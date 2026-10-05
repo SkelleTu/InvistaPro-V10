@@ -76,6 +76,8 @@ jobs:
             git reset --hard origin/main
 
             npm install --package-lock-only --ignore-scripts
+            npm audit fix --package-lock-only --ignore-scripts || true
+            npm install --package-lock-only --ignore-scripts
 
             if git diff --quiet -- package-lock.json; then
               echo "package-lock.json already synchronized with current main."
