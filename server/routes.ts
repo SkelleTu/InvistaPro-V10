@@ -3638,20 +3638,43 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
 
   // =========================== DERIV REAL-TIME DATA ===========================
 
+  // Snapshot anterior por usuário para detectar uma mudança REAL de saldo.
+  const _lastRealtimeBalance = new Map<string, number>();
+
   app.get('/api/trading/realtime-data', isAuthenticated, isTradingAuthorized, async (req, res) => {
     try {
       if (!req.user?.id) {
         return res.status(401).json({ message: 'Usuário não autenticado' });
       }
-      
-      // Dados em tempo real simulados - pode ser integrado com WebSockets no futuro
+
+      const userId = req.user.id;
+
+      // Não inventar atividade. O endpoint expõe apenas estados observáveis pelo
+      // próprio backend: sessões armadas, cache de saldo e descoberta de mercado.
+      const schedulerStatus = autoTradingScheduler.getSchedulerStatus();
+      const cachedBalance = _balanceCache.get(userId);
+      const previousBalance = _lastRealtimeBalance.get(userId);
+      const currentBalance = cachedBalance?.balance;
+
+      let balanceChanged = false;
+      if (currentBalance !== undefined) {
+        balanceChanged = previousBalance !== undefined && currentBalance !== previousBalance;
+        _lastRealtimeBalance.set(userId, currentBalance);
+      }
+
+      const supportedSymbols = marketDataCollector.getSupportedSymbols();
+      const marketStatus = marketDataCollector.isDiscoveryDone() && supportedSymbols.length > 0
+        ? 'ready'
+        : 'initializing';
+
       res.json({
         lastUpdate: new Date().toISOString(),
-        balanceChanged: Math.random() > 0.7, // 30% chance de mudança detectada
-        activeOperations: Math.floor(Math.random() * 5),
-        marketStatus: 'active'
+        balanceChanged,
+        activeOperations: schedulerStatus.activeSessions,
+        marketStatus,
+        marketSymbols: supportedSymbols.length,
+        balanceSource: cachedBalance ? 'deriv-cache' : 'unavailable'
       });
-
     } catch (error) {
       console.error('❌ Erro ao buscar dados em tempo real:', error);
       res.status(500).json({ message: 'Erro interno do servidor' });
