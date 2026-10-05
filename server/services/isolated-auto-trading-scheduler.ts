@@ -16,6 +16,7 @@ interface UserRuntime {
   lastHeartbeatAt: number;
   activeSessions: number;
   workerReady: boolean;
+  pendingRequests: Map<string, { resolve: (value: any) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }>;
 }
 
 class IsolatedAutoTradingScheduler {
@@ -66,6 +67,7 @@ class IsolatedAutoTradingScheduler {
       lastHeartbeatAt: Date.now(),
       activeSessions: 0,
       workerReady: false,
+      pendingRequests: new Map(),
     };
 
     worker.on("message", (message: any) => {
@@ -77,6 +79,14 @@ class IsolatedAutoTradingScheduler {
         runtime.status = message.status || runtime.status;
         runtime.armed = Boolean(message.armed);
         runtime.activeSessions = Number(message.activeSessions || 0);
+      } else if (message?.type === "response" && message.requestId) {
+        const pending = runtime.pendingRequests.get(String(message.requestId));
+        if (pending) {
+          clearTimeout(pending.timer);
+          runtime.pendingRequests.delete(String(message.requestId));
+          if (message.error) pending.reject(new Error(String(message.error)));
+          else pending.resolve(message.data);
+        }
       } else if (message?.type === "error") {
         console.error(`❌ [USER-RUNTIME] user=${id} session=${sessionId}: ${message.error}`);
       }
@@ -104,6 +114,27 @@ class IsolatedAutoTradingScheduler {
       runtime.worker.send({ type: command, userId: runtime.userId, sessionId: runtime.sessionId, ...payload });
     }
     return runtime;
+  }
+
+  async getLiveAnalysis(userId: string, sessionId?: string): Promise<any[]> {
+    const runtime = this.runtimes.get(this.runtimeKey(userId, sessionId));
+    if (!runtime || !runtime.worker.connected || !runtime.workerReady) return [];
+
+    const requestId = crypto.randomUUID();
+    return new Promise<any[]>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        runtime.pendingRequests.delete(requestId);
+        resolve([]);
+      }, 5000);
+      timer.unref?.();
+      runtime.pendingRequests.set(requestId, { resolve, reject, timer });
+      runtime.worker.send({
+        type: "getLiveAnalysis",
+        requestId,
+        userId: runtime.userId,
+        sessionId: runtime.sessionId,
+      });
+    });
   }
 
   prepareAtBoot(): void {
