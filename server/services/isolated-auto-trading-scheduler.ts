@@ -138,6 +138,31 @@ class IsolatedAutoTradingScheduler {
     return [...this.runtimes.values()].filter(r => r.armed).map(r => r.userId);
   }
 
+  getSessionStatus(userId: string, sessionId?: string) {
+    const runtime = this.runtimes.get(this.runtimeKey(userId, sessionId));
+    if (!runtime) {
+      return {
+        isRunning: false,
+        schedulerRunning: false,
+        activeSessions: 0,
+        isolatedUsers: 0,
+        armedUsers: [],
+        exists: false,
+      };
+    }
+    return {
+      isRunning: runtime.armed,
+      schedulerRunning: runtime.armed,
+      activeSessions: runtime.activeSessions,
+      isolatedUsers: 1,
+      armedUsers: runtime.armed ? [runtime.userId] : [],
+      exists: true,
+      workerReady: runtime.workerReady,
+      status: runtime.status,
+      lastHeartbeatAt: runtime.lastHeartbeatAt,
+    };
+  }
+
   getSchedulerStatus() {
     const runtimes = [...this.runtimes.values()];
     return {
