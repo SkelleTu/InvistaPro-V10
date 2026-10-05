@@ -99,8 +99,9 @@ const RSS_FEEDS = [
 function parseRSSXML(xml: string): Array<{ title: string; source: string; pubDate: string }> {
   const items: Array<{ title: string; source: string; pubDate: string }> = [];
   try {
-    const itemMatches = xml.match(/<item>([\s\S]*?)<\/item>/g) || [];
-    for (const item of itemMatches) {
+    const boundedXml = xml.length > 256_000 ? xml.slice(0, 256_000) : xml;
+    const itemMatches = boundedXml.match(/<item>([\s\S]*?)<\/item>/g) || [];
+    for (const item of itemMatches.slice(0, 80)) {
       const titleMatch = item.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/) || item.match(/<title>(.*?)<\/title>/);
       const sourceMatch = item.match(/<source[^>]*>(.*?)<\/source>/) || item.match(/<dc:creator[^>]*>(.*?)<\/dc:creator>/);
       const pubDateMatch = item.match(/<pubDate>(.*?)<\/pubDate>/);
@@ -154,7 +155,7 @@ function analyzeHeadlineSentiment(title: string): { sentiment: 'bullish' | 'bear
 class BrazilNewsService {
   private cache: BrazilMarketSentiment | null = null;
   private cacheTimestamp = 0;
-  private readonly CACHE_TTL_MS = 60_000; // 1 minuto
+  private readonly CACHE_TTL_MS = 5 * 60_000; // 5 minutos, evitando polling agressivo das fontes
   private isUpdating = false;
 
   async getBrazilMarketSentiment(): Promise<BrazilMarketSentiment> {
@@ -185,10 +186,13 @@ class BrazilNewsService {
       const weightedScores: number[] = [];
       const catScores: Record<string, number[]> = { cambio: [], bolsa: [], juros: [], economia: [], politica: [] };
 
-      // Busca paralela de todos os feeds RSS
-      const feedResults = await Promise.allSettled(
-        RSS_FEEDS.map(feed => this.fetchRSSFeed(feed.url, feed.weight))
-      );
+      // Buscar em pequenos lotes para evitar pico simultâneo de memória/rede.
+      const feedResults: PromiseSettledResult<{ items: Array<{ title: string; source: string; pubDate: string }>; weight: number }>[] = [];
+      for (let i = 0; i < RSS_FEEDS.length; i += 2) {
+        const batch = RSS_FEEDS.slice(i, i + 2);
+        const results = await Promise.allSettled(batch.map(feed => this.fetchRSSFeed(feed.url, feed.weight)));
+        feedResults.push(...results);
+      }
 
       for (let i = 0; i < feedResults.length; i++) {
         const result = feedResults[i];
