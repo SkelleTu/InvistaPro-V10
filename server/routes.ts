@@ -50,6 +50,7 @@ import { contractMonitor } from './services/contract-monitor';
 import { asyncErrorHandler } from './middleware/error-handler';
 import { tpmSystem } from './services/tpm-system';
 import { getRegistryInfo } from './services/url-registry';
+import { registerUniversalSession, setUniversalTradingArmed, disconnectUniversalSession } from './services/universal-server-session';
 
 // PIX payload generator compatível com Santander
 function generatePixPayload(data: {
@@ -621,7 +622,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
             return res.status(500).json({ message: "Erro ao fazer login" });
           }
           
-          console.log('🎉 Login bem-sucedido para:', user.email);
+          console.log('🎉 Login bem-sucedido para:', user.email);\n          // Registra a sessão individual no Universal Server. Isto NÃO inicia trading.\n          void registerUniversalSession(String(user.id)).catch((e) => console.warn('⚠️ [UNIVERSAL] Falha ao registrar sessão pós-login:', e));
           const { passwordHash, codigoVerificacao, ...userWithoutSensitiveData } = user;
           res.json({ 
             message: "Login realizado com sucesso",
@@ -974,7 +975,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
 
   // Logout routes (both GET and POST for compatibility)
   const handleLogout = (req: any, res: any) => {
-    console.log('🚪 Logout solicitado');
+    console.log('🚪 Logout solicitado');\n    const loggedUserId = req.user?.id ? String(req.user.id) : null;
     req.logout((err: any) => {
       if (err) {
         console.error('❌ Erro no logout:', err);
@@ -1910,7 +1911,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       const userId = req.user?.id;
       if (!userId) return res.status(401).json({ message: 'Usuário não autenticado' });
 
-      await autoTradingScheduler.disarmUserTrading(String(userId));
+      await setUniversalTradingArmed(String(userId), false);\n      await autoTradingScheduler.disarmUserTrading(String(userId));
 
       res.json({
         success: true,
