@@ -1950,7 +1950,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         active: true,
         message: 'Trading ativado manualmente para o usuário autenticado.',
         userId: String(userId),
-        armedUsers: autoTradingScheduler.getArmedUserIds(),
+        armedUsers: autoTradingScheduler.getSessionStatus(String(userId), req.sessionID).armedUsers,
         timestamp: new Date().toISOString(),
       });
     } catch (error) {
