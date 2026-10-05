@@ -1641,125 +1641,117 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
   });
 
-  // Real CDI/CDB market data from HG Brasil Finance API
-  app.get('/api/market/cdi-data', async (req, res) => {
+  // CDI/Selic oficiais via Banco Central do Brasil (SGS).
+  // Séries: CDI anualizado base 252 = 4389; Selic anualizada base 252 = 1178.
+  // Não gerar histórico aleatório e não mascarar falha de fonte como dado real.
+  app.get('/api/market/cdi-data', async (_req, res) => {
+    const parseBRDate = (value: string) => {
+      const [day, month, year] = String(value).split('/').map(Number);
+      return new Date(Date.UTC(year, month - 1, day)).getTime();
+    };
+
+    const dateBR = (date: Date) => {
+      const dd = String(date.getUTCDate()).padStart(2, '0');
+      const mm = String(date.getUTCMonth() + 1).padStart(2, '0');
+      return `${dd}/${mm}/${date.getUTCFullYear()}`;
+    };
+
+    const fetchSeries = async (series: number, startDate: Date, endDate: Date) => {
+      const url = `https://api.bcb.gov.br/dados/serie/bcdata.sgs.${series}/dados?formato=json&dataInicial=${dateBR(startDate)}&dataFinal=${dateBR(endDate)}`;
+      const response = await fetch(url, { signal: AbortSignal.timeout(10000) });
+      if (!response.ok) throw new Error(`BCB SGS ${series} HTTP ${response.status}`);
+      const data = await response.json() as Array<{ data: string; valor: string }>;
+      if (!Array.isArray(data)) throw new Error(`BCB SGS ${series}: resposta inválida`);
+      return data
+        .map(item => ({ time: parseBRDate(item.data), value: Number(item.valor) }))
+        .filter(item => Number.isFinite(item.time) && Number.isFinite(item.value))
+        .sort((a, b) => a.time - b.time);
+    };
+
     try {
-      console.log('🔍 Buscando dados reais de CDI/CDB...');
-      
-      // HG Brasil Finance API (gratuita, 400 requests/dia)
-      const response = await fetch('https://api.hgbrasil.com/finance');
-      
-      if (!response.ok) {
-        throw new Error(`HG Brasil API error: ${response.status}`);
-      }
-      
-      const data = await response.json() as any;
-      
-      if (!data.results || !data.results.taxes) {
-        throw new Error('Invalid API response structure');
-      }
-      
-      const { cdi, selic, date } = data.results.taxes;
-      
-      // Simular dados históricos baseados na taxa real atual
-      const currentTime = Date.now();
-      const realCDI = parseFloat(cdi) || 10.65;
-      const realSelic = parseFloat(selic) || 10.75;
-      
-      // Gerar 240 pontos de dados históricos com variações mais visíveis e tendências
-      const historicalData = [];
-      let basePrice = realCDI;
-      let trend = 0; // Tendência atual
-      
-      for (let i = 239; i >= 0; i--) {
-        const time = currentTime - (i * 60000); // 1 ponto por minuto (4 horas de dados)
-        
-        // Criar micro-tendências que mudam a cada 20-30 pontos
-        if (i % 25 === 0) {
-          trend = (Math.random() - 0.5) * 0.3; // Tendência entre -0.15% e +0.15%
-        }
-        
-        // Variação mais ampla: ±0.2% + tendência
-        const randomVariation = (Math.random() - 0.5) * 0.4; // ±0.2%
-        const trendInfluence = trend * (1 - i / 240); // Tendência diminui com o tempo
-        
-        const variation = randomVariation + trendInfluence;
-        const price = Math.max(0.1, realCDI + variation); // Nunca vai abaixo de 0.1%
-        
-        historicalData.push({
-          time,
-          price: parseFloat(price.toFixed(3))
-        });
-      }
-      
-      console.log(`✅ Dados reais obtidos: CDI ${realCDI}%, Selic ${realSelic}%`);
-      
+      const endDate = new Date();
+      const startDate = new Date(endDate.getTime() - 370 * 24 * 60 * 60 * 1000);
+      const [cdi, selic] = await Promise.all([
+        fetchSeries(4389, startDate, endDate),
+        fetchSeries(1178, startDate, endDate),
+      ]);
+
+      if (!cdi.length || !selic.length) throw new Error('BCB SGS retornou série vazia');
+
+      const selicByTime = new Map(selic.map(point => [point.time, point.value]));
+      const cdiData = cdi.slice(-260).map(point => ({
+        time: point.time,
+        price: Number(point.value.toFixed(4)),
+      }));
+
+      const selicData = selic.slice(-260).map(point => ({
+        time: point.time,
+        price: Number(point.value.toFixed(4)),
+      }));
+
+      const latestCDI = cdi[cdi.length - 1];
+      const latestSelic = selic[selic.length - 1];
+      const cdbData = cdiData.map(point => ({
+        ...point,
+        price: Number((point.price * 1.30).toFixed(4)),
+      }));
+
       res.json({
         success: true,
-        date,
+        fallback: false,
+        date: new Date(latestCDI.time).toISOString().split('T')[0],
         realRates: {
-          cdi: realCDI,
-          selic: realSelic
+          cdi: latestCDI.value,
+          selic: latestSelic.value,
         },
         assets: [
           {
             name: 'CDI',
             symbol: 'CDI',
-            currentRate: realCDI,
+            currentRate: latestCDI.value,
+            unit: '% a.a. (base 252)',
             color: '#00bcd4',
-            data: historicalData
+            data: cdiData,
           },
           {
-            name: 'CDB',
-            symbol: 'CDB',
-            currentRate: realCDI * 1.30, // 130% do CDI
+            name: 'CDB 130% CDI',
+            symbol: 'CDB_130_CDI',
+            currentRate: Number((latestCDI.value * 1.30).toFixed(4)),
+            unit: '% a.a. de referência',
             color: '#ff9800',
-            data: historicalData.map(point => ({
-              ...point,
-              price: parseFloat((point.price * 1.30).toFixed(3))
-            }))
+            data: cdbData,
+            derivedFrom: 'CDI oficial BCB SGS × 1,30; não representa oferta específica de instituição financeira.',
           },
           {
             name: 'Selic',
             symbol: 'SELIC',
-            currentRate: realSelic,
+            currentRate: latestSelic.value,
+            unit: '% a.a. (base 252)',
             color: '#4caf50',
-            data: historicalData.map((point, index) => ({
-              ...point,
-              price: parseFloat((realSelic + (Math.random() - 0.5) * 0.35).toFixed(3))
-            }))
-          }
+            data: selicData,
+          },
         ],
-        source: 'HG Brasil Finance API',
-        message: 'Dados de mercado em tempo real obtidos com sucesso'
-      });
-      
-    } catch (error) {
-      console.error('❌ Erro ao buscar dados de CDI:', error);
-      
-      // Fallback para dados simulados se a API falhar
-      const fallbackData = {
-        success: false,
-        fallback: true,
-        date: new Date().toISOString().split('T')[0],
-        realRates: {
-          cdi: 10.65,
-          selic: 10.75
+        source: 'Banco Central do Brasil — SGS (séries 4389 e 1178)',
+        sourceUrls: {
+          cdi: 'https://api.bcb.gov.br/dados/serie/bcdata.sgs.4389/dados',
+          selic: 'https://api.bcb.gov.br/dados/serie/bcdata.sgs.1178/dados',
         },
-        assets: [
-          {
-            name: 'CDI (Simulado)',
-            symbol: 'CDI_FALLBACK',
-            currentRate: 10.65,
-            color: '#00bcd4',
-            data: []
-          }
-        ],
+        observations: {
+          cdi: cdi.length,
+          selic: selic.length,
+          historicalWindowDays: 370,
+        },
+        message: 'Dados oficiais do Banco Central obtidos com sucesso.',
+      });
+    } catch (error) {
+      console.error('❌ Erro ao buscar CDI/Selic no Banco Central:', error);
+      res.status(503).json({
+        success: false,
+        fallback: false,
+        source: 'Banco Central do Brasil — SGS',
         error: error instanceof Error ? error.message : String(error),
-        message: 'Usando dados simulados devido à falha na API'
-      };
-      
-      res.json(fallbackData);
+        message: 'Fonte oficial indisponível. Nenhum dado sintético foi apresentado como real.',
+      });
     }
   });
 
