@@ -8,6 +8,8 @@ import { promisify } from "util";
 import { dualStorage as storage } from "./storage-dual";
 import { User } from "@shared/schema";
 import { SqliteSessionStore } from "./sqlite-session-store";
+import createMemoryStore from "memorystore";
+import connectPgSimple from "connect-pg-simple";
 import { isAuthorizedEmail, ACCESS_DENIED_MESSAGE } from "./config/access";
 
 declare global {
@@ -54,8 +56,23 @@ export function setupAuth(app: Express) {
     console.warn("⚠️ SESSION_SECRET não configurada; usando segredo efêmero desta instância.");
   }
 
-  // Session store persistente em SQLite — sobrevive a restarts do servidor
-  const sessionStore = new SqliteSessionStore();
+  // Session store robusto para Render: PostgreSQL quando DATABASE_URL existe,
+  // MemoryStore somente como fallback. Evita depender do módulo nativo SQLite
+  // no caminho crítico de autenticação/boot.
+  let sessionStore: session.Store;
+  if (process.env.DATABASE_URL) {
+    const PgStore = connectPgSimple(session);
+    sessionStore = new PgStore({
+      conString: process.env.DATABASE_URL,
+      createTableIfMissing: true,
+      tableName: "user_sessions",
+    });
+    console.log("✅ [SessionStore] PostgreSQL selecionado para sessões persistentes.");
+  } else {
+    const MemoryStore = createMemoryStore(session);
+    sessionStore = new MemoryStore({ checkPeriod: 24 * 60 * 60 * 1000 });
+    console.warn("⚠️ [SessionStore] DATABASE_URL ausente; usando MemoryStore em modo fallback.");
+  }
 
   const isProduction = process.env.NODE_ENV === 'production';
 
