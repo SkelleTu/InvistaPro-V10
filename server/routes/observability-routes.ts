@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { isAuthenticated } from "../auth";
 import { isAuthorizedEmail } from "../config/access";
 import { observability, clientErrorPayload } from "../services/production-observability";
+import { getSecretHealth } from "../services/secret-health";
 
 const router = Router();
 
@@ -30,7 +31,7 @@ router.post("/client-error", (req, res) => {
 });
 
 router.get("/health", (_req, res) => {
-  res.json({ success: true, ...observability.getHealth() });
+  res.json({ success: true, ...observability.getHealth(), secrets: getSecretHealth() });
 });
 
 router.get("/errors", isAuthenticated, isObservabilityAdmin, (_req, res) => {
