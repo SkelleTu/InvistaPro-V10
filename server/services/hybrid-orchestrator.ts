@@ -243,7 +243,7 @@ export class HybridOrchestrator {
     }
 
     // Log da fusão baseada nos sistemas disponíveis
-    const availableSystems = [];
+    const availableSystems: string[] = [];
     if (quantumResult) availableSystems.push('Quântico');
     if (hasMicroscopic) availableSystems.push('Microscópico Técnico');
     
