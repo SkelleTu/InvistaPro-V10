@@ -1833,7 +1833,7 @@ Os modelos identificaram padrões convergentes nos dados de mercado que indicam 
   private calculateVolatility(prices: number[]): number {
     if (prices.length < 2) return 0;
     
-    const returns = [];
+    const returns: number[] = [];
     for (let i = 1; i < prices.length; i++) {
       returns.push((prices[i] - prices[i-1]) / prices[i-1]);
     }
@@ -2341,7 +2341,7 @@ Os modelos identificaram padrões convergentes nos dados de mercado que indicam 
   // MÉTODOS DE ANÁLISE MICROSCÓPICA PARA DIGIT DIFFERS
   
   private analyzeDigitSequences(digits: number[]): {breakingPattern: boolean, strength: number, suggestedDirection: 'up' | 'down'} {
-    const sequences = [];
+    const sequences: number[] = [];
     let currentSeq = 1;
     
     for (let i = 1; i < digits.length; i++) {
