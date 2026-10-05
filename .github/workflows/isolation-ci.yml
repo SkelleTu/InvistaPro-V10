@@ -16,7 +16,6 @@ concurrency:
   cancel-in-progress: true
 jobs:
   full-platform-audit:
-    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'ci: synchronize npm lockfile')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
