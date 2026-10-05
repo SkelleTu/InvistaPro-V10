@@ -18,7 +18,11 @@ interface UserRuntime {
 }
 
 class IsolatedAutoTradingScheduler {
-  private runtimes = new Map<UserId, UserRuntime>();
+  private runtimes = new Map<string, UserRuntime>();
+
+  private runtimeKey(userId: string, sessionId?: string): string {
+    return `${String(userId)}::${String(sessionId || 'default')}`;
+  }
 
   private workerPath(): { file: string; execArgv: string[] } {
     const production = process.env.NODE_ENV === "production";
@@ -29,9 +33,10 @@ class IsolatedAutoTradingScheduler {
     };
   }
 
-  private ensureRuntime(userId: string): UserRuntime {
+  private ensureRuntime(userId: string, requestedSessionId?: string): UserRuntime {
     const id = String(userId);
-    const existing = this.runtimes.get(id);
+    const key = this.runtimeKey(id, requestedSessionId);
+    const existing = this.runtimes.get(key);
     if (existing && existing.worker.connected) {
       existing.lastHeartbeatAt = Date.now();
       return existing;
@@ -85,13 +90,13 @@ class IsolatedAutoTradingScheduler {
       cleanup();
     });
 
-    this.runtimes.set(id, runtime);
+    this.runtimes.set(key, runtime);
     console.log(`🧩 [USER-RUNTIME] criado | user=${id} | session=${sessionId}`);
     return runtime;
   }
 
-  private send(userId: string, command: string, payload: Record<string, unknown> = {}) {
-    const runtime = this.ensureRuntime(userId);
+  private send(userId: string, command: string, payload: Record<string, unknown> = {}, sessionId?: string) {
+    const runtime = this.ensureRuntime(userId, sessionId);
     runtime.lastHeartbeatAt = Date.now();
     if (runtime.worker.connected) {
       runtime.worker.send({ type: command, userId: runtime.userId, sessionId: runtime.sessionId, ...payload });
@@ -103,30 +108,30 @@ class IsolatedAutoTradingScheduler {
     console.log("🧠 [USER-RUNTIME] núcleo compartilhado pronto; runtimes individuais serão criados por login.");
   }
 
-  registerUser(userId: string): string {
-    return this.ensureRuntime(userId).sessionId;
+  registerUser(userId: string, sessionId?: string): string {
+    return this.ensureRuntime(userId, sessionId).sessionId;
   }
 
-  armUserTrading(userId: string): void {
-    const runtime = this.send(userId, "arm");
+  armUserTrading(userId: string, sessionId?: string): void {
+    const runtime = this.send(userId, "arm", {}, sessionId);
     runtime.armed = true;
     runtime.status = "armed";
   }
 
-  async startSchedulerForUser(userId: string): Promise<void> {
-    this.armUserTrading(userId);
+  async startSchedulerForUser(userId: string, sessionId?: string): Promise<void> {
+    this.armUserTrading(userId, sessionId);
   }
 
-  async disarmUserTrading(userId: string): Promise<void> {
-    const runtime = this.runtimes.get(String(userId));
+  async disarmUserTrading(userId: string, sessionId?: string): Promise<void> {
+    const runtime = this.runtimes.get(this.runtimeKey(userId, sessionId));
     if (!runtime) return;
     runtime.armed = false;
     runtime.status = "stopped";
     if (runtime.worker.connected) runtime.worker.send({ type: "disarm", userId: runtime.userId, sessionId: runtime.sessionId });
   }
 
-  async stopSchedulerForUser(userId: string): Promise<void> {
-    await this.disarmUserTrading(userId);
+  async stopSchedulerForUser(userId: string, sessionId?: string): Promise<void> {
+    await this.disarmUserTrading(userId, sessionId);
   }
 
   getArmedUserIds(): string[] {
@@ -164,12 +169,12 @@ class IsolatedAutoTradingScheduler {
     }));
   }
 
-  trackAssetUsage(userId: string, symbol: string): void {
-    this.send(userId, "trackAssetUsage", { symbol });
+  trackAssetUsage(userId: string, symbol: string, sessionId?: string): void {
+    this.send(userId, "trackAssetUsage", { symbol }, sessionId);
   }
 
-  resetCooldownSystem(userId: string): void {
-    this.send(userId, "resetCooldownSystem");
+  resetCooldownSystem(userId: string, sessionId?: string): void {
+    this.send(userId, "resetCooldownSystem", {}, sessionId);
   }
 
   clearAllSessions(): void {
@@ -189,15 +194,16 @@ class IsolatedAutoTradingScheduler {
     }));
   }
 
-  async disconnectUser(userId: string): Promise<void> {
+  async disconnectUser(userId: string, sessionId?: string): Promise<void> {
     const id = String(userId);
-    const runtime = this.runtimes.get(id);
+    const key = this.runtimeKey(id, sessionId);
+    const runtime = this.runtimes.get(key);
     if (!runtime) return;
     if (runtime.worker.connected) runtime.worker.send({ type: "shutdown", userId: id, sessionId: runtime.sessionId });
     setTimeout(() => {
       if (runtime.worker.connected) runtime.worker.kill("SIGTERM");
     }, 5000).unref();
-    this.runtimes.delete(id);
+    this.runtimes.delete(key);
     console.log(`🔌 [USER-RUNTIME] destruído | user=${id} | session=${runtime.sessionId}`);
   }
 }
