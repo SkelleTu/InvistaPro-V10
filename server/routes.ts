@@ -653,20 +653,28 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
 
         console.log('✅ Usuário autenticado, fazendo login:', user.email);
 
-        req.logIn(user, (err) => {
-          if (err) {
-            console.error('❌ Erro no req.logIn:', err);
-            return res.status(500).json({ message: "Erro ao fazer login" });
+        // Regenerar o ID da sessão após autenticação evita session fixation.
+        req.session.regenerate((regenerateErr: any) => {
+          if (regenerateErr) {
+            console.error('❌ Erro ao regenerar sessão no login:', regenerateErr);
+            return res.status(500).json({ message: "Erro ao iniciar sessão segura" });
           }
-          
-          console.log('🎉 Login bem-sucedido para:', user.email);
-          // Cada login recebe seu próprio runtime isolado. Login prepara a sessão, mas NÃO arma o trading.
-          autoTradingScheduler.registerUser(String(user.id), req.sessionID);
-          void registerUniversalSession(String(user.id), req.sessionID).catch((e) => console.warn('⚠️ [UNIVERSAL] Falha ao registrar sessão pós-login:', e));
-          const { passwordHash, codigoVerificacao, ...userWithoutSensitiveData } = user;
-          res.json({ 
-            message: "Login realizado com sucesso",
-            user: userWithoutSensitiveData
+
+          req.logIn(user, (err) => {
+            if (err) {
+              console.error('❌ Erro no req.logIn:', err);
+              return res.status(500).json({ message: "Erro ao fazer login" });
+            }
+            
+            console.log('🎉 Login bem-sucedido para:', user.email);
+            // Cada login recebe seu próprio runtime isolado. Login prepara a sessão, mas NÃO arma o trading.
+            autoTradingScheduler.registerUser(String(user.id), req.sessionID);
+            void registerUniversalSession(String(user.id), req.sessionID).catch((e) => console.warn('⚠️ [UNIVERSAL] Falha ao registrar sessão pós-login:', e));
+            const { passwordHash, codigoVerificacao, ...userWithoutSensitiveData } = user;
+            res.json({ 
+              message: "Login realizado com sucesso",
+              user: userWithoutSensitiveData
+            });
           });
         });
       })(req, res, next);
@@ -1026,8 +1034,17 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         await autoTradingScheduler.disconnectUser(loggedUserId, req.sessionID);
         await disconnectUniversalSession(loggedUserId, req.sessionID);
       }
-      console.log('✅ Logout realizado com sucesso');
-      res.json({ message: "Logout realizado com sucesso", success: true });
+
+      // Encerrar a sessão do Express após o logout para invalidar o cookie server-side.
+      req.session.destroy((destroyErr: any) => {
+        if (destroyErr) {
+          console.error('❌ Erro ao destruir sessão após logout:', destroyErr);
+          return res.status(500).json({ message: "Logout realizado, mas a sessão não pôde ser encerrada completamente" });
+        }
+        res.clearCookie('investpro.sid', { path: '/' });
+        console.log('✅ Logout realizado com sucesso');
+        res.json({ message: "Logout realizado com sucesso", success: true });
+      });
     });
   };
 
