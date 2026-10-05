@@ -2,6 +2,25 @@ import { derivAPI } from "./deriv-api";
 import { observability } from "./production-observability";
 
 export function startDerivObservabilityBridge() {
+  // Runtime instrumentation also captures outbound frames without storing secrets.
+  const api: any = derivAPI as any;
+  const originalSend = api.sendMessage?.bind(api);
+  if (originalSend && !api.__observabilityWrapped) {
+    api.sendMessage = (payload: any) => {
+      const safe: Record<string, any> = {};
+      for (const [key, value] of Object.entries(payload || {})) {
+        safe[key] = /token|secret|authorization|password|api[-_]?key/i.test(key) ? "[REDACTED]" : value;
+      }
+      observability.emit({
+        level: "DEBUG",
+        category: "WEBSOCKET",
+        message: "DERIV OUTBOUND FRAME",
+        details: { keys: Object.keys(payload || {}), payload: safe, connected: api.isConnected, readyState: api.ws?.readyState },
+      });
+      return originalSend(payload);
+    };
+    api.__observabilityWrapped = true;
+  }
   derivAPI.on("connected", () => {
     observability.emit({
       level: "INFO",
