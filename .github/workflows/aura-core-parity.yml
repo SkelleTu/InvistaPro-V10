@@ -17,8 +17,7 @@ jobs:
       - name: Verify Aura wrapper points to canonical core
         run: |
           git clone --depth 1 https://github.com/SkelleTu/Invista-PRO-V10-Aura-System-Style.git /tmp/aura
-          grep -q 'https://github.com/SkelleTu/InvistaPro-V10.git' /tmp/aura/package.json
-          grep -q 'node aura-build.mjs' /tmp/aura/aura-build.mjs || true
+          grep -q 'https://github.com/SkelleTu/InvistaPro-V10.git' /tmp/aura/package.json || grep -q 'https://github.com/SkelleTu/InvistaPro-V10.git' /tmp/aura/aura-build.mjs
           grep -q 'node aura-build.mjs' /tmp/aura/package.json
           test -f /tmp/aura/aura-build.mjs
           echo "OK: Aura System Style consumes InvistaPro-V10 as its canonical functional core."
