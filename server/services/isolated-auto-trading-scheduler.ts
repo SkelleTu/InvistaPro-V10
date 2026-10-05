@@ -163,6 +163,7 @@ class IsolatedAutoTradingScheduler {
       activeSessions: runtimes.reduce((n, r) => n + r.activeSessions, 0),
       isolatedUsers: runtimes.length,
       armedUsers: runtimes.filter(r => r.armed).length,
+      totalExecutedOperations: 0,
     };
   }
 
