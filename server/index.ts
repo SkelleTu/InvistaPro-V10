@@ -25,6 +25,7 @@ import { runPostgresMigration } from "./migrate-postgres";
 import { initUrlRegistry } from "./services/url-registry";
 import { brazilNewsService } from "./services/brazil-news-service";
 import { startDerivObservabilityBridge } from "./services/deriv-observability-bridge";
+import { startUniversalHeartbeatLoop } from "./services/universal-server-session";
 
 const app = express();
 app.use(express.json());
