@@ -26,6 +26,7 @@ import { initUrlRegistry } from "./services/url-registry";
 import { brazilNewsService } from "./services/brazil-news-service";
 import { startDerivObservabilityBridge } from "./services/deriv-observability-bridge";
 import { startUniversalHeartbeatLoop } from "./services/universal-server-session";
+import { getSecretHealth } from "./services/secret-health";
 
 const app = express();
 let routesReady = false;
@@ -127,6 +128,7 @@ app.use((req, res, next) => {
           critical: obsHealth.critical,
           warnings: obsHealth.warnings,
         },
+        secrets: getSecretHealth(),
       });
     }
     res.status(200).json({
@@ -138,6 +140,7 @@ app.use((req, res, next) => {
         critical: obsHealth.critical,
         warnings: obsHealth.warnings,
       },
+      secrets: getSecretHealth(),
     });
   });
 
@@ -149,6 +152,7 @@ app.use((req, res, next) => {
       success: true,
       routesReady,
       bootFailureEventId,
+      secrets: getSecretHealth(),
       ...health,
     });
   });
