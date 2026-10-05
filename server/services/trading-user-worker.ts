@@ -33,8 +33,8 @@ process.on("message", async (message: any) => {
   try {
     switch (message.type) {
       case "getLiveAnalysis": {
-        const activeScheduler = await ensureScheduler();
-        const data = activeScheduler.getLiveAnalysis(String(userId));
+        const { contractMonitor } = await import("./contract-monitor");
+        const data = contractMonitor.getLiveAnalysis(String(userId));
         process.send?.({
           type: "response",
           requestId: String(message.requestId || ""),
