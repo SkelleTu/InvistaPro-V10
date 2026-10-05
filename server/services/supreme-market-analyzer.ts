@@ -512,7 +512,7 @@ export class SupremeMarketAnalyzer extends EventEmitter {
 
   private analyzeMicrostructure(prices: number[]): SupremeAnalysis['microstructure'] {
     const recent = prices.slice(-50);
-    const tickSizes = [];
+    const tickSizes: number[] = [];
     let streak = 1;
     let streakDir: 'up' | 'down' | 'mixed' = 'mixed';
 
