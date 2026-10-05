@@ -4143,6 +4143,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
 
       // 1. Pausar somente o scheduler da sessão autenticada
       await autoTradingScheduler.disarmUserTrading(String(userId), req.sessionID);
+      contractMonitor.clearUser(String(userId));
 
       // 2. Resetar memória em tempo real
       realStatsTracker.resetUserMemory(userId);
