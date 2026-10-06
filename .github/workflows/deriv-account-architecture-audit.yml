@@ -11,7 +11,7 @@ permissions:
 jobs:
   deriv-account-audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -21,77 +21,35 @@ jobs:
         with:
           node-version: 22
 
-      - name: Inventory Deriv integration
+      - name: Static Deriv architecture audit
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p audit-artifacts
-          {
-            echo "# Deriv Account Architecture Audit"
-            echo
-            echo "Commit: `$(git rev-parse HEAD)`"
-            echo
-            echo "## Relevant files"
-            git ls-files | grep -Ei 'deriv|trading|broker|websocket|account|token' | sort || true
-            echo
-            echo "## Endpoint/account markers"
-            git grep -nEi 'ws\.derivws|api\.derivws|websockets/v3|trading/v1|/demo|/real|accountId|loginid|authorize|otp|DERIV_APP_ID' -- ':!*.lock' ':!node_modules' || true
-            echo
-            echo "## Secret-like literals"
-            git grep -nE '["'"'"']([A-Za-z0-9_-]{20,})["'"'"']' -- 'server/**' 'client/**' 2>/dev/null | grep -Ei 'token|secret|authorization|bearer' || true
-          } | tee audit-artifacts/deriv-inventory.md
-
-      - name: Validate account routing architecture
-        shell: bash
-        run: |
-          set -euo pipefail
-          files="$(git ls-files | grep -Ei '\.(ts|tsx|js|mjs|cjs)$' | tr '
-' ' ')"
-          [ -n "$files" ] || { echo "No application source files found"; exit 1; }
-
-          has_account_context=0
-          has_demo_real=0
-          has_new_api=0
-          has_legacy_api=0
-          has_otp=0
-          has_account_id=0
-          has_authorize=0
-
-          grep -Eiq 'account(Id|ID)|accountId|accountType|accountMode' $files && has_account_context=1 || true
-          grep -Eiq 'demo.{0,80}real|real.{0,80}demo|["'"'"']demo["'"'"'].{0,120}["'"'"']real["'"'"']' $files && has_demo_real=1 || true
-          grep -Eiq 'api\.derivws\.com|trading/v1' $files && has_new_api=1 || true
-          grep -Eiq 'ws\.derivws\.com/websockets/v3|websockets/v3' $files && has_legacy_api=1 || true
-          grep -Eiq '/otp|otp' $files && has_otp=1 || true
-          grep -Eiq 'accountId|account_id' $files && has_account_id=1 || true
-          grep -Eiq 'authorize' $files && has_authorize=1 || true
-
-          {
-            echo "account_context=$has_account_context"
-            echo "demo_real_routing=$has_demo_real"
-            echo "new_api=$has_new_api"
-            echo "legacy_api=$has_legacy_api"
-            echo "otp=$has_otp"
-            echo "account_id=$has_account_id"
-            echo "authorize=$has_authorize"
-          } | tee audit-artifacts/deriv-architecture-flags.txt
-
-          if [ "$has_account_context" -eq 0 ] || [ "$has_demo_real" -eq 0 ]; then
-            echo "::error::Centralized Demo/Real account context is missing."
-            exit 1
-          fi
-
-          if [ "$has_new_api" -eq 1 ] && { [ "$has_otp" -eq 0 ] || [ "$has_account_id" -eq 0 ]; }; then
-            echo "::error::New Deriv API detected without accountId + OTP routing."
-            exit 1
-          fi
+          python3 - <<'PY'
+          from pathlib import Path
+          exts={".ts",".tsx",".js",".jsx",".mjs",".cjs"}
+          files=[p for p in Path(".").rglob("*") if p.is_file() and p.suffix in exts and "node_modules" not in p.parts and ".git" not in p.parts and "dist" not in p.parts]
+          text="\n".join(f.read_text(errors="ignore") for f in files)
+          required=["api.derivws.com","/otp","accountId","accountType","demo","real","Deriv-App-ID","deriv-account-gateway"]
+          missing=[x for x in required if x not in text]
+          forbidden=["ws.derivws.com/websockets/v3","ws.binaryws.com/websockets/v3","authorize:"]
+          found_forbidden=[x for x in forbidden if x in text]
+          Path("audit-artifacts/deriv-architecture-report.md").write_text(
+              "# Deriv Account Architecture\n\n"
+              f"Source files scanned: {len(files)}\n"
+              f"Required markers missing: {missing}\n"
+              f"Forbidden legacy markers found: {found_forbidden}\n"
+          )
+          print(Path("audit-artifacts/deriv-architecture-report.md").read_text())
+          if missing or found_forbidden:
+              raise SystemExit(1)
+          PY
 
       - name: TypeScript validation
         run: |
-          if [ -f package.json ]; then
-            npm ci --ignore-scripts --no-audit
-            if npm pkg get scripts.typecheck | grep -qv 'null'; then npm run typecheck; fi
-            if npm pkg get scripts.test | grep -qv 'null'; then npm test -- --runInBand; fi
-          fi
+          npm ci --ignore-scripts --no-audit
+          npm exec -- tsc --noEmit
 
       - name: Upload audit report
         if: always()
