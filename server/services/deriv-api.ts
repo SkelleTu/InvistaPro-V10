@@ -3,6 +3,7 @@ import { EventEmitter } from 'events';
 import { errorTracker } from './error-tracker';
 import { dualStorage as storage } from '../storage-dual';
 import { resilienceSupervisor } from './resilience-supervisor';
+import { connectDerivAccount, type DerivAccountContext } from './deriv-account-gateway';
 
 // ☠️ PROTOCOLO DE EXECUÇÃO IMEDIATA — tolerância zero para ativos criminosos
 // Qualquer símbolo que viole as regras é executado aqui: blacklistado, logado e morto.
@@ -107,6 +108,7 @@ export class DerivAPIService extends EventEmitter {
   private pendingConnectPromise: Promise<boolean> | null = null;
   private apiToken: string | null = null;
   private accountType: 'demo' | 'real' = 'demo';
+  private accountContext: DerivAccountContext | null = null;
   private reconnectAttempts = 0;
   private reconnectDelay = 1000;
   private maxReconnectDelay = 30000; // Max 30 seconds between retries
@@ -179,8 +181,7 @@ export class DerivAPIService extends EventEmitter {
     this.operationId = operationId || `CONNECT_PUBLIC_${Date.now()}`;
     this.isShuttingDown = false;
     
-    const appId = process.env.DERIV_APP_ID || '1089';
-    const endpoint = `wss://ws.binaryws.com/websockets/v3?app_id=${appId}`;
+    const endpoint = 'wss://api.derivws.com/trading/v1/options/ws/public';
 
     console.log(`🔌 Conectando Deriv (público) - Operation ID: ${this.operationId}`);
 
@@ -227,30 +228,31 @@ export class DerivAPIService extends EventEmitter {
   }
 
   async connect(apiToken: string, accountType: 'demo' | 'real' = 'demo', operationId?: string): Promise<boolean> {
-    // ⚡ CONEXÃO PERSISTENTE: se já estiver conectado com o mesmo token, reutilizar
-    if (this.isConnected && this.ws && this.ws.readyState === WebSocket.OPEN && this.apiToken === apiToken) {
-      console.log(`⚡ [CONN REUSE] Deriv já conectado — reutilizando conexão existente (Operation: ${operationId || 'N/A'})`);
+    const normalizedToken = String(apiToken ?? '').trim();
+    if (!normalizedToken) throw new Error('Deriv authorization token is required');
+
+    // A connection is account-scoped. Never reuse a Demo socket for Real or vice versa.
+    if (
+      this.isConnected &&
+      this.ws &&
+      this.ws.readyState === WebSocket.OPEN &&
+      this.apiToken === normalizedToken &&
+      this.accountType === accountType &&
+      this.accountContext?.accountType === accountType
+    ) {
+      console.log(`⚡ [CONN REUSE] Deriv ${accountType} connection reused | account=${this.accountContext.accountId}`);
       return true;
     }
 
-    // ⚡ LOCK: se já houver uma conexão em andamento, aguardar ela terminar
     if (this.isConnecting && this.pendingConnectPromise) {
-      console.log(`⏳ [CONN WAIT] Conexão em andamento — aguardando resultado (Operation: ${operationId || 'N/A'})`);
       return this.pendingConnectPromise;
     }
 
     this.isConnecting = true;
     this.operationId = operationId || `CONNECT_${Date.now()}`;
-    this.apiToken = apiToken;
+    this.apiToken = normalizedToken;
     this.accountType = accountType;
     this.isShuttingDown = false;
-    
-    const appId = process.env.DERIV_APP_ID || '1089';
-    const endpoint = accountType === 'demo' 
-      ? `wss://ws.derivws.com/websockets/v3?app_id=${appId}`
-      : `wss://ws.derivws.com/websockets/v3?app_id=${appId}`;
-
-    console.log(`🔌 Iniciando conexão Deriv - Operation ID: ${this.operationId}`);
 
     this.pendingConnectPromise = new Promise((resolve, reject) => {
       let settled = false;
@@ -259,128 +261,63 @@ export class DerivAPIService extends EventEmitter {
         settled = true;
         this.isConnecting = false;
         this.pendingConnectPromise = null;
-        if (result instanceof Error) {
-          reject(result);
-        } else {
-          resolve(result);
-        }
+        if (result instanceof Error) reject(result);
+        else resolve(result);
       };
 
       const connectionTimer = setTimeout(() => {
-        const timeoutError = new Error('Connection timeout after 10 seconds');
-        
-        errorTracker.captureError(
-          timeoutError,
-          'ERROR',
-          'WEBSOCKET',
-          {
-            requestPath: 'DERIV_CONNECTION_TIMEOUT',
-            requestMethod: 'CONNECT',
-            requestBody: {
-              operationId: this.operationId,
-              endpoint,
-              accountType,
-              timeout: '10s'
-            }
-          }
-        );
-        
+        const timeoutError = new Error('Connection timeout after 15 seconds');
         this.cleanup();
         done(timeoutError);
-      }, 10000);
+      }, 15000);
 
-      try {
-        this.ws = new WebSocket(endpoint, {
-          headers: {
-            'Origin': 'https://app.deriv.com'
-          }
-        });
-
-        this.ws.on('open', async () => {
+      void (async () => {
+        try {
+          // New Deriv API architecture:
+          // PAT/OAuth token -> GET accounts -> accountId -> POST OTP -> demo/real WebSocket URL.
+          const { ws, context } = await connectDerivAccount(normalizedToken, accountType);
           clearTimeout(connectionTimer);
-          console.log(`🔗 Deriv WebSocket conectado - Operation ID: ${this.operationId}`);
+          this.ws = ws;
+          this.accountContext = context;
           this.isConnected = true;
           this.reconnectAttempts = 0;
-          
-          try {
-            // Authenticate
-            const authResult = await this.authenticate();
-            if (authResult) {
-              this.emit('connected');
-              this.processMessageQueue();
-              this.startHeartbeat();
-              this.startKeepAlive(); // Previne timeout de 2 minutos
-              
-              // Resubscrever todas as subscrições após reconexão
-              // TEMPORARIAMENTE DESABILITADO: await this.resubscribeAll();
-              // Motivo: 11,396 subscrições estão bloqueando a inicialização do servidor
-              
-              done(true);
-            } else {
-              const authError = new Error('Authentication failed');
-              
-              errorTracker.captureError(
-                authError,
-                'ERROR',
-                'AUTH',
-                {
-                  requestPath: 'DERIV_AUTHENTICATION',
-                  requestMethod: 'AUTHENTICATE',
-                  requestBody: {
-                    operationId: this.operationId,
-                    accountType
-                  }
-                }
-              );
-              
-              this.cleanup();
-              done(authError);
-            }
-          } catch (authError) {
-            clearTimeout(connectionTimer);
-            
-            errorTracker.captureError(
-              authError as Error,
-              'ERROR',
-              'AUTH',
-              {
-                requestPath: 'DERIV_AUTHENTICATION_EXCEPTION',
-                requestMethod: 'AUTHENTICATE',
-                requestBody: {
-                  operationId: this.operationId,
-                  accountType
-                }
-              }
-            );
-            
-            this.cleanup();
-            done(authError as Error);
-          }
-        });
 
-        this.setupWebSocketListeners((err: Error) => done(err), connectionTimer, endpoint, accountType);
+          console.log(
+            `🔐 [DERIV] Authenticated ${context.accountType} session | account=${context.accountId} | endpoint=${new URL(context.websocketUrl).pathname}`
+          );
 
-      } catch (error) {
-        clearTimeout(connectionTimer);
-        
-        errorTracker.captureError(
-          error as Error,
-          'ERROR',
-          'WEBSOCKET',
-          {
-            requestPath: 'DERIV_CONNECTION_SETUP',
-            requestMethod: 'CONNECT',
-            requestBody: {
-              operationId: this.operationId,
-              endpoint,
-              accountType
+          this.setupWebSocketListeners(
+            (err: Error) => done(err),
+            connectionTimer,
+            context.websocketUrl,
+            accountType
+          );
+          this.emit('connected');
+          this.processMessageQueue();
+          this.startHeartbeat();
+          this.startKeepAlive();
+          done(true);
+        } catch (error) {
+          clearTimeout(connectionTimer);
+          this.accountContext = null;
+          this.isConnected = false;
+          this.cleanup();
+          errorTracker.captureError(
+            error as Error,
+            'ERROR',
+            'AUTH',
+            {
+              requestPath: 'DERIV_ACCOUNT_GATEWAY',
+              requestMethod: 'CONNECT',
+              requestBody: {
+                operationId: this.operationId,
+                accountType,
+              },
             }
-          }
-        );
-        
-        console.error(`❌ Erro ao configurar conexão Deriv - Operation ID: ${this.operationId}:`, error);
-        done(error as Error);
-      }
+          );
+          done(error as Error);
+        }
+      })();
     });
 
     return this.pendingConnectPromise;
@@ -557,37 +494,7 @@ export class DerivAPIService extends EventEmitter {
     console.log(`✅ Shutdown graceful concluído - Operation ID: ${this.operationId}`);
   }
 
-  private async authenticate(): Promise<boolean> {
-    if (!this.apiToken) return false;
-
-    return new Promise((resolve) => {
-      const reqId = this.generateRequestId();
-      
-      const authMessage = {
-        authorize: this.apiToken,
-        req_id: reqId
-      };
-
-      // Store auth handler
-      const authHandler = (message: any) => {
-        if (message.req_id === reqId) {
-          this.removeListener('message', authHandler);
-          if (message.authorize) {
-            console.log('✅ Deriv autenticação realizada com sucesso');
-            console.log(`📊 Conta: ${message.authorize.loginid} (${message.authorize.currency})`);
-            resolve(true);
-          } else {
-            console.error('❌ Falha na autenticação Deriv:', message.error);
-            resolve(false);
-          }
-        }
-      };
-
-      this.on('message', authHandler);
-      this.sendMessage(authMessage);
-    });
-  }
-
+  // Authentication is now performed by deriv-account-gateway.ts via REST OTP.\n
   async getBalance(): Promise<DerivBalance | null> {
     if (!this.isConnected) return null;
 
