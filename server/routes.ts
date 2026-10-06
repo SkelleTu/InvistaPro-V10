@@ -3367,7 +3367,9 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       const aiConsensus = await huggingFaceAI.analyzeMarketData(tickData, symbol);
 
       // Connect to Deriv and execute trade
-      const connected = await derivAPI.connect(tokenData.token, tokenData.accountType as "demo" | "real");
+      const accountType = tokenData.accountType === 'real' ? 'real' : 'demo';
+      const accountAPI = getDerivAPI(accountType);
+      const connected = await accountAPI.connect(tokenData.token, accountType);
       if (!connected) {
         return res.status(500).json({ 
           message: 'Erro de conexão com Deriv' 
@@ -4206,7 +4208,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         });
       }
 
-      const balance = await derivAPI.getBalance();
+      const balance = await accountAPI.getBalance();
       
       res.json({
         balance: balance?.balance || 0,
