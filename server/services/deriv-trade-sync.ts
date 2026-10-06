@@ -146,7 +146,7 @@ export class DerivTradeSync {
       }
 
       const accountType = derivToken.accountType === 'real' ? 'real' : 'demo';
-      const syncApi = syncApis[accountType];
+      const syncApi = this.syncApis[accountType];
 
       // Conectar à Deriv para sincronização se não estiver conectado
       let connectedForSync = false;
