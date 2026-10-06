@@ -1,5 +1,3 @@
-import pkg from 'whatsapp-web.js';
-const { Client, LocalAuth } = pkg;
 import QRCode from 'qrcode-terminal';
 import { writeFileSync, readFileSync, existsSync } from 'fs';
 import path from 'path';
@@ -19,6 +17,8 @@ class InvestProWhatsAppService implements WhatsAppService {
   private logPath: string;
   private useSimulationMode: boolean = false;
   private readonly enabled: boolean;
+  private Client: any | null = null;
+  private LocalAuth: any | null = null;
 
   constructor() {
     this.enabled = process.env.NODE_ENV !== 'production' ||
@@ -32,7 +32,7 @@ class InvestProWhatsAppService implements WhatsAppService {
     }
 
     this.ensureLogFileExists();
-    this.setupWhatsAppClient();
+    void this.setupWhatsAppClient();
   }
 
   private ensureLogFileExists(): void {
@@ -41,11 +41,17 @@ class InvestProWhatsAppService implements WhatsAppService {
     }
   }
 
-  private setupWhatsAppClient(): void {
+  private async setupWhatsAppClient(): Promise<void> {
     try {
+      // Carrega o cliente WhatsApp apenas quando o serviço está explicitamente habilitado.
+      // Isso mantém o runtime Aura/Render saudável quando WhatsApp está desativado.
+      const pkg = await import('whatsapp-web.js');
+      const whatsapp = pkg.default ?? pkg;
+      this.Client = whatsapp.Client;
+      this.LocalAuth = whatsapp.LocalAuth;
       // Configurar cliente WhatsApp com autenticação local
-      this.client = new Client({
-        authStrategy: new LocalAuth({
+      this.client = new this.Client({
+        authStrategy: new this.LocalAuth!({
           clientId: 'investpro-bot',
           dataPath: './whatsapp-session'
         }),
