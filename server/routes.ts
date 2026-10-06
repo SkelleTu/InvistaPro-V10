@@ -134,11 +134,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     console.log(`🔍 [API] Buscando ativos para o modo: ${mode}`);
 
     try {
-      // Usar conexão autenticada se disponível, senão pública
-      if (!derivAPI.getIsConnected()) {
-        await derivAPI.connectPublic('FETCH_ASSETS_API');
-      }
-      
+      // Symbol discovery owns its dedicated public market-data socket.
       const assets = await derivAPI.getAvailableSymbolsByTradeMode(String(mode || "digit_diff"));
       console.log(`✅ [API] Retornados ${assets?.length || 0} ativos para o modo ${mode}`);
       
@@ -2029,7 +2025,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     console.log('🔧'.repeat(60));
     console.log(`👤 Usuário: ${req.user?.email} (ID: ${req.user?.id})`);
     console.log(`📅 Timestamp: ${new Date().toISOString()}`);
-    console.log(`📦 Request Body: ${JSON.stringify(req.body, null, 2)}`);
+    console.log(`📦 Request Body: ${JSON.stringify({ ...req.body, token: req.body?.token ? '[REDACTED]' : undefined }, null, 2)}`);
     console.log('🔧'.repeat(60));
 
     let tempDerivAPI = new DerivAPIService('demo');
@@ -2502,14 +2498,24 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     // 🛡️ BURST GUARD: buscar saldo real antes de disparar para limitar exposição
     let liveBalance: number | undefined;
     try {
-      const { derivAPI: derivApiService } = await import('./services/deriv-api');
-      const balData = await derivApiService.getBalance();
-      if (balData?.balance && balData.balance > 0) {
-        liveBalance = balData.balance;
-        console.log(`💰 [BURST ROUTE] Saldo real obtido: $${liveBalance.toFixed(2)} — passando ao BURST GUARD`);
+      const balances: number[] = [];
+      for (const slot of slots) {
+        const slotApi = new DerivAPIService(slot.accountType);
+        try {
+          if (await slotApi.connect(slot.token, slot.accountType, `BURST_BALANCE_${userId}_${slot.slotIndex}`)) {
+            const balData = await slotApi.getBalance();
+            if (balData?.balance > 0) balances.push(Number(balData.balance));
+          }
+        } finally {
+          await slotApi.disconnect().catch(() => {});
+        }
+      }
+      if (balances.length > 0) {
+        liveBalance = Math.min(...balances);
+        console.log(`💰 [BURST ROUTE] Saldo conservador para proteção: ${liveBalance.toFixed(2)}`);
       }
     } catch (balErr: any) {
-      console.warn(`⚠️ [BURST ROUTE] Falha ao buscar saldo — BURST GUARD sem referência de banca:`, balErr?.message);
+      console.warn(`⚠️ [BURST ROUTE] Falha ao buscar saldo por slot — BURST GUARD sem referência de banca:`, balErr?.message);
     }
 
     const operationId = `MANUAL_BURST_${Date.now()}`;
