@@ -496,7 +496,20 @@ export class DerivAPIService extends EventEmitter {
   }
 
   // Authentication is now performed by deriv-account-gateway.ts via REST OTP.\n
+  private requireAuthenticatedAccountSession(operation: string): void {
+    if (!this.isConnected || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error(`Deriv ${operation} requires an active WebSocket connection`);
+    }
+    if (!this.accountContext) {
+      throw new Error(`Deriv ${operation} requires an authenticated Demo/Real account session`);
+    }
+    if (this.accountContext.accountType !== this.accountType) {
+      throw new Error(`Deriv ${operation} account context mismatch`);
+    }
+  }
+
   async getBalance(): Promise<DerivBalance | null> {
+    this.requireAuthenticatedAccountSession('balance');
     if (!this.isConnected) return null;
 
     return new Promise((resolve) => {
@@ -814,6 +827,7 @@ export class DerivAPIService extends EventEmitter {
   }
 
   async buyCallPutContract(symbol: string, direction: 'up' | 'down', duration: number, amount: number): Promise<DerivContractInfo | null> {
+    this.requireAuthenticatedAccountSession('buy');
     if (!this.isConnected) return null;
 
     try {
@@ -876,6 +890,7 @@ export class DerivAPIService extends EventEmitter {
   }
 
   async buyDigitDifferContract(params: DigitDifferContract): Promise<DerivContractInfo | null> {
+    this.requireAuthenticatedAccountSession('buy');
     if (!this.isConnected) return null;
 
     console.log(`[DERIV_API] 🚀 Tentando abrir contrato: ${params.symbol}, Valor: ${params.amount}, Barreira: ${params.barrier}`);
@@ -1081,6 +1096,7 @@ export class DerivAPIService extends EventEmitter {
    * Suporta: DIGITDIFF, DIGITMATCH, DIGITEVEN, DIGITODD, DIGITOVER, DIGITUNDER
    */
   async buyGenericDigitContract(params: {
+    this.requireAuthenticatedAccountSession('buy');
     contract_type: 'DIGITDIFF' | 'DIGITMATCH' | 'DIGITEVEN' | 'DIGITODD' | 'DIGITOVER' | 'DIGITUNDER';
     symbol: string;
     duration: number;
@@ -1279,6 +1295,7 @@ export class DerivAPIService extends EventEmitter {
    * VANILLALONGCALL, VANILLALONGPUT, LBFLOATPUT, LBFLOATCALL, LBHIGHLOW
    */
   async buyFlexibleContract(params: {
+    this.requireAuthenticatedAccountSession('buy');
     contract_type: string;
     symbol: string;
     amount: number;
@@ -1432,6 +1449,7 @@ export class DerivAPIService extends EventEmitter {
   }
 
   async getProfitTable(limit: number = 100): Promise<any[]> {
+    this.requireAuthenticatedAccountSession('profit_table');
     if (!this.isConnected) return [];
 
     return new Promise((resolve) => {
@@ -1466,6 +1484,7 @@ export class DerivAPIService extends EventEmitter {
   }
 
   async getContractInfo(contractId: number): Promise<DerivContractInfo | null> {
+    this.requireAuthenticatedAccountSession('proposal_open_contract');
     if (!this.isConnected) return null;
 
     return new Promise((resolve) => {
