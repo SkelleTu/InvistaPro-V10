@@ -1,7 +1,7 @@
 import * as cron from 'node-cron';
 import { dualStorage as storage } from '../storage-dual';
 import { huggingFaceAI } from './huggingface-ai';
-import { derivAPI, DerivAPIService } from './deriv-api';
+import { derivAPI, DerivAPIService, getDerivAPI } from './deriv-api';
 import { errorTracker } from '../services/error-tracker';
 import { marketDataCollector } from './market-data-collector';
 import { dynamicThresholdTracker } from './dynamic-threshold-tracker';
@@ -419,7 +419,7 @@ export class AutoTradingScheduler {
     
     // Desconectar Deriv forçadamente
     try {
-      await derivAPI.disconnect();
+      await tradeDerivAPI.disconnect();
       console.log(`✅ [CLEANUP] Deriv desconectado forçadamente`);
     } catch (e) {
       console.error(`⚠️ [CLEANUP] Erro ao desconectar Deriv:`, e);
@@ -877,6 +877,7 @@ export class AutoTradingScheduler {
     const config = activeConfigs[0];
     const tokenData = await storage.getUserDerivToken(config.userId);
     if (!tokenData) return;
+    const tradeDerivAPI = getDerivAPI((tokenData.accountType as 'demo' | 'real') || 'demo');
 
     // 7b. Respeitar modalidades do usuário — Leverage só dispara ACCU se o usuário habilitou 'accumulator'
     let levUserModalities: string[] = [];
@@ -967,8 +968,8 @@ export class AutoTradingScheduler {
     this.setPhase('EXECUTANDO', `🚀 ALAVANCAGEM: ${best.symbol} $${leverageStake} (${exceptional.length} ativos alinhados)`, 'trade');
 
     try {
-      await derivAPI.connect(tokenData.token, (tokenData.accountType as 'demo' | 'real') || 'demo', levOpId);
-      const contract = await derivAPI.buyFlexibleContract({
+      await tradeDerivAPI.connect(tokenData.token, (tokenData.accountType as 'demo' | 'real') || 'demo', levOpId);
+      const contract = await tradeDerivAPI.buyFlexibleContract({
         contract_type: 'ACCU',
         symbol: best.symbol,
         amount: leverageStake,
@@ -1270,6 +1271,7 @@ export class AutoTradingScheduler {
 
   private async executeAutomaticTrade(config: any, tokenData: any, operationId: string): Promise<{success: boolean, error?: string}> {
     try {
+      const tradeDerivAPI = getDerivAPI((tokenData.accountType as 'demo' | 'real') || 'demo');
       // 🔴 CAMADA 3 - CIRCUIT BREAKER: Sincronizar config do usuário no tracker
       const userEnableCircuitBreaker = (config as any)?.enableCircuitBreaker ?? true;
       const userCbLosses = Number((config as any)?.circuitBreakerLosses ?? 0);
@@ -1338,7 +1340,7 @@ export class AutoTradingScheduler {
         // 🔄 Saldo crítico em cache — verificar saldo REAL no Deriv antes de bloquear
         // (conta demo pode ter sido recarregada ou resetada)
         try {
-          const freshBalance = await derivAPI.getBalance();
+          const freshBalance = await tradeDerivAPI.getBalance();
           if (freshBalance && freshBalance.balance >= 0) {
             currentBalance = freshBalance.balance;
             this.cachedBalance = { value: currentBalance, currency: freshBalance.currency, loginid: freshBalance.loginid, fetchedAt: Date.now() };
@@ -1959,7 +1961,7 @@ export class AutoTradingScheduler {
       let connected = false;
       
       try {
-        const connectPromise = derivAPI.connect(tokenData.token, tokenData.accountType as "demo" | "real", operationId);
+        const connectPromise = tradeDerivAPI.connect(tokenData.token, tokenData.accountType as "demo" | "real", operationId);
         const timeoutPromise = new Promise<boolean>((_, reject) => {
           setTimeout(() => reject(new Error('Timeout de conexão Deriv (12s)')), CONNECTION_TIMEOUT);
         });
@@ -1985,7 +1987,7 @@ export class AutoTradingScheduler {
           // ⚡ Saldo em cache — sem round-trip WebSocket (reduz latência para ACCU)
           console.log(`⚡ [${operationId}] Saldo em CACHE: $${this.cachedBalance.value} ${this.cachedBalance.currency} (${Math.round((Date.now() - this.cachedBalance.fetchedAt)/1000)}s atrás)`);
         } else {
-          const realBalance = await derivAPI.getBalance();
+          const realBalance = await tradeDerivAPI.getBalance();
           if (realBalance && realBalance.balance >= 0) {
             const rb = realBalance.balance;
             // Atualizar cache
@@ -2551,7 +2553,7 @@ export class AutoTradingScheduler {
               }
               console.log(`🎯💜 [${operationId}] DIGITMATCH KELLY×10 | ${selectedSymbol} | 10 dígitos | Total: $${totalKelly.toFixed(2)} | Stakes: ${kellyStakes.map(k => `${k.digit}→$${k.stake}`).join(', ')}`);
               const kellyPromises = kellyStakes.map(({ digit, stake }, idx) =>
-                derivAPI.buyGenericDigitContract({
+                tradeDerivAPI.buyGenericDigitContract({
                   contract_type: 'DIGITMATCH',
                   symbol: selectedSymbol,
                   duration: digitDuration,
@@ -2578,7 +2580,7 @@ export class AutoTradingScheduler {
             let safeBurstMax = multiDigitCount;
             let realPayoutMultiplier = BURST_PAYOUT_ASSUMED;
             try {
-              const payoutMultiplier = await derivAPI.getDigitMatchPayoutMultiplier(selectedSymbol, digitDuration, tradeParams.amount, sampleDigit);
+              const payoutMultiplier = await tradeDerivAPI.getDigitMatchPayoutMultiplier(selectedSymbol, digitDuration, tradeParams.amount, sampleDigit);
               if (payoutMultiplier && payoutMultiplier > 1) {
                 realPayoutMultiplier = payoutMultiplier;
                 const payoutBasedMax = Math.max(1, Math.floor(payoutMultiplier) - 1);
@@ -2632,7 +2634,7 @@ export class AutoTradingScheduler {
             console.log(`📊 [STATS] ${summary}`);
 
             const burstPromises = hottestDigits.map((digit, idx) =>
-              derivAPI.buyGenericDigitContract({
+              tradeDerivAPI.buyGenericDigitContract({
                 contract_type: 'DIGITMATCH',
                 symbol: selectedSymbol,
                 duration: digitDuration,
@@ -2661,7 +2663,7 @@ export class AutoTradingScheduler {
             contract = firstOk;
             } // fim else !isKelly10
           } else {
-            contract = await derivAPI.buyGenericDigitContract({
+            contract = await tradeDerivAPI.buyGenericDigitContract({
               contract_type: contractType,
               symbol: selectedSymbol,
               duration: digitDuration,
@@ -2681,14 +2683,14 @@ export class AutoTradingScheduler {
             : rawRFTicks
               ? Math.max(1, Math.min(rawRFTicks, 10))
               : Math.max(1, Math.floor(tradeParams.duration / 2));
-          contract = await derivAPI.buyCallPutContract(selectedSymbol, callPutDirection, callPutDuration, tradeParams.amount);
+          contract = await tradeDerivAPI.buyCallPutContract(selectedSymbol, callPutDirection, callPutDuration, tradeParams.amount);
           resolvedTradeType = selectedModality;
 
         } else if (HIGHER_LOWER_TYPES[selectedModality]) {
           // ── Contratos Higher/Lower (CALLE/PUTE) — preço deve terminar acima/abaixo da barreira ──
           const contractType = HIGHER_LOWER_TYPES[selectedModality]; // 'CALLE' ou 'PUTE'
           const isHigher = selectedModality === 'higher';
-          const currentPrice = await derivAPI.getCurrentPrice(selectedSymbol);
+          const currentPrice = await tradeDerivAPI.getCurrentPrice(selectedSymbol);
           // Barreira: 0.3% do preço (adaptada pelo Motor Supremo se disponível)
           const rawHLBarrierPct = supremeAnalysis?.adaptiveParams?.touch?.barrierOffsetPct;
           const hlOffsetPct = rawHLBarrierPct ? Math.min(rawHLBarrierPct, 0.005) : 0.003;
@@ -2700,7 +2702,7 @@ export class AutoTradingScheduler {
           const durationMin = rawHLMin === 0 ? aiHLDurMin : (rawHLMin && rawHLMin > 0 ? rawHLMin : aiHLDurMin);
           const dateExpiry = Math.floor(Date.now() / 1000) + (durationMin * 60);
           console.log(`📊 [${operationId}] ${contractType}: barrier=${barrier}, expiry=${durationMin}min | Symbol: ${selectedSymbol}`);
-          contract = await derivAPI.buyFlexibleContract({
+          contract = await tradeDerivAPI.buyFlexibleContract({
             contract_type: contractType,
             symbol: selectedSymbol,
             amount: tradeParams.amount,
@@ -2715,7 +2717,7 @@ export class AutoTradingScheduler {
           // EXPIRYRANGE/EXPIRYMISS: usam date_expiry + barriers absolutas
           // RANGE/UPORDOWN: usam duration + barriers relativas
           const contractType = IN_OUT_TYPES[selectedModality];
-          const currentPrice = await derivAPI.getCurrentPrice(selectedSymbol);
+          const currentPrice = await tradeDerivAPI.getCurrentPrice(selectedSymbol);
 
           const isExpiry = (selectedModality === 'ends_between' || selectedModality === 'ends_outside');
           // Offsets específicos por modalidade — NÃO usar touch.barrierOffsetPct (é para ONETOUCH/NOTOUCH)
@@ -2740,7 +2742,7 @@ export class AutoTradingScheduler {
             const dateExpiry  = Math.floor(Date.now() / 1000) + (adaptiveExpiryMin * 60);
 
             console.log(`📊 [${operationId}] ${contractType}: barrier=${upperBarrier}, barrier2=${lowerBarrier}, expiry=${adaptiveExpiryMin}min ${rawInOutMin === 0 ? '🤖 IA' : userInOutMin ? '⚙️ FIXO' : 'ADAPTATIVO'} (regime=${supremeAnalysis?.regime ?? 'padrão'}) | Symbol: ${selectedSymbol}`);
-            contract = await derivAPI.buyFlexibleContract({
+            contract = await tradeDerivAPI.buyFlexibleContract({
               contract_type: contractType,
               symbol: selectedSymbol,
               amount: tradeParams.amount,
@@ -2759,7 +2761,7 @@ export class AutoTradingScheduler {
             const lowerBarrier  = '-' + offset;
 
             console.log(`📊 [${operationId}] ${contractType}: barrier=${upperBarrier}, barrier2=${lowerBarrier}, ${adaptiveRangeDurMin}m ${rawInOutMin === 0 ? '🤖 IA' : userInOutMin ? '⚙️ FIXO' : 'ADAPTATIVO'} (regime=${supremeAnalysis?.regime ?? 'padrão'}) | Symbol: ${selectedSymbol}`);
-            contract = await derivAPI.buyFlexibleContract({
+            contract = await tradeDerivAPI.buyFlexibleContract({
               contract_type: contractType,
               symbol: selectedSymbol,
               amount: tradeParams.amount,
@@ -2796,7 +2798,7 @@ export class AutoTradingScheduler {
             }
           }
 
-          const currentPrice = await derivAPI.getCurrentPrice(selectedSymbol);
+          const currentPrice = await tradeDerivAPI.getCurrentPrice(selectedSymbol);
           let barrier: string;
 
           if (currentPrice && currentPrice > 0) {
@@ -2871,7 +2873,7 @@ export class AutoTradingScheduler {
             ` → winProb_efetiva=${(winProb*100).toFixed(1)}% → payout_mínimo=${(touchMinProfitRatio*100).toFixed(1)}%`
           );
 
-          contract = await derivAPI.buyFlexibleContract({
+          contract = await tradeDerivAPI.buyFlexibleContract({
             contract_type: contractType,
             symbol: selectedSymbol,
             amount: tradeParams.amount,
@@ -2906,7 +2908,7 @@ export class AutoTradingScheduler {
             adaptiveMult = rawAdaptiveMult;
           }
           console.log(`📊 [${operationId}] ${contractType}: multiplier=${adaptiveMult}x${supremeAnalysis ? ` ADAPTATIVO (regime=${supremeAnalysis.regime})` : ' padrão'} | Symbol: ${selectedSymbol}`);
-          contract = await derivAPI.buyFlexibleContract({
+          contract = await tradeDerivAPI.buyFlexibleContract({
             contract_type: contractType,
             symbol: selectedSymbol,
             amount: tradeParams.amount,
@@ -3217,7 +3219,7 @@ export class AutoTradingScheduler {
               const microD = supremeAnalysis?.microstructure;
               if (microD && microD.avgTickSize > 0) {
                 try {
-                  const priceForBarrier = await derivAPI.getCurrentPrice(selectedSymbol);
+                  const priceForBarrier = await tradeDerivAPI.getCurrentPrice(selectedSymbol);
                   if (priceForBarrier && priceForBarrier > 0) {
                     // Distância estimada da barreira em unidades de preço
                     const estimatedBarrierPct = adaptiveGrowth * 50; // e.g. 0.01*50 = 0.5%
@@ -3308,7 +3310,7 @@ export class AutoTradingScheduler {
             accuTargetTicks = accuTicks;
             const opportunityQuality = consensus >= 75 ? 'ALTA' : consensus >= 50 ? 'MÉDIA' : 'BAIXA';
             console.log(`📊 [${operationId}] ACCU MODO-OPS: stake=$${accuStake} [${opportunityQuality}] (banca=$${bankBalance.toFixed(2)} | consenso=${consensus}% | risco=${accuRisk}) | growth=${(adaptiveGrowth*100).toFixed(0)}% ${growthModeLabel} | ticks=${accuTicks}${supremeAnalysis ? ` | regime=${regime} | hurst=${supremeAnalysis.statistics.hurstExponent.toFixed(2)}` : ''} | ${selectedSymbol}`);
-            contract = await derivAPI.buyFlexibleContract({
+            contract = await tradeDerivAPI.buyFlexibleContract({
               contract_type: 'ACCU',
               symbol: selectedSymbol,
               amount: accuStake,
@@ -3324,7 +3326,7 @@ export class AutoTradingScheduler {
         } else if (TURBO_TYPES[selectedModality]) {
           // ── Contratos Turbos/Knockouts (TURBOSLONG, TURBOSSHORT) ──
           const contractType = TURBO_TYPES[selectedModality];
-          const currentPrice = await derivAPI.getCurrentPrice(selectedSymbol);
+          const currentPrice = await tradeDerivAPI.getCurrentPrice(selectedSymbol);
 
           if (!currentPrice || currentPrice <= 0) {
             console.warn(`⚠️ [${operationId}] Turbo sem preço válido para ${selectedSymbol} — operação cancelada`);
@@ -3342,7 +3344,7 @@ export class AutoTradingScheduler {
             : (currentPrice + knockoutOffset).toFixed(4);
           const dateExpiry = Math.floor(Date.now() / 1000) + (adaptiveTurboDur * 60);
           console.log(`📊 [${operationId}] ${contractType}: barrier=${barrier} (${(adaptiveTurboPct*100).toFixed(2)}%${supremeAnalysis ? ' ADAPTATIVO' : ' padrão'}), expiry=${adaptiveTurboDur}min ${turboModeLabel} | Symbol: ${selectedSymbol}`);
-          contract = await derivAPI.buyFlexibleContract({
+          contract = await tradeDerivAPI.buyFlexibleContract({
             contract_type: contractType,
             symbol: selectedSymbol,
             amount: tradeParams.amount,
@@ -3358,7 +3360,7 @@ export class AutoTradingScheduler {
         } else if (VANILLA_TYPES[selectedModality]) {
           // ── Contratos Vanilla Options (VANILLALONGCALL, VANILLALONGPUT) ──
           const contractType = VANILLA_TYPES[selectedModality];
-          const currentPrice = await derivAPI.getCurrentPrice(selectedSymbol);
+          const currentPrice = await tradeDerivAPI.getCurrentPrice(selectedSymbol);
 
           if (!currentPrice || currentPrice <= 0) {
             console.warn(`⚠️ [${operationId}] Vanilla sem preço válido para ${selectedSymbol} — operação cancelada`);
@@ -3376,7 +3378,7 @@ export class AutoTradingScheduler {
             : (currentPrice - strikeOffset).toFixed(4);
           const dateExpiry = Math.floor(Date.now() / 1000) + (adaptiveVanillaDur * 60);
           console.log(`📊 [${operationId}] ${contractType}: strike=${strike} (${(adaptiveVanillaPct*100).toFixed(2)}%${supremeAnalysis ? ' ADAPTATIVO' : ' padrão'}), expiry=${adaptiveVanillaDur}min ${vanillaModeLabel} | Symbol: ${selectedSymbol}`);
-          contract = await derivAPI.buyFlexibleContract({
+          contract = await tradeDerivAPI.buyFlexibleContract({
             contract_type: contractType,
             symbol: selectedSymbol,
             amount: tradeParams.amount,
@@ -3405,7 +3407,7 @@ export class AutoTradingScheduler {
             : aiLbDur;
           const lbModeLabel = rawLbMin === 0 ? '🤖 IA' : rawLbMin && rawLbMin > 0 ? '⚙️ FIXO' : 'ADAPTATIVO';
           console.log(`📊 [${operationId}] ${contractType}: multiplier=${Math.max(1, Math.round(tradeParams.amount))} | duration=${lbDurMin}min ${lbModeLabel} (regime=${supremeAnalysis?.regime ?? 'padrão'}) | Symbol: ${selectedSymbol}`);
-          contract = await derivAPI.buyFlexibleContract({
+          contract = await tradeDerivAPI.buyFlexibleContract({
             contract_type: contractType,
             symbol: selectedSymbol,
             amount: Math.max(1, Math.round(tradeParams.amount)), // multiplier deve ser inteiro >= 1
@@ -5093,7 +5095,7 @@ export class AutoTradingScheduler {
     // Parar coleta de mercado e sincronização quando o usuário desativa.
     try { await marketDataCollector.stopCollection(); } catch (e) { console.warn('⚠️ [TRADING] Falha ao parar MarketDataCollector:', e); }
     try { await derivTradeSync.stopAutoSync(); } catch (e) { console.warn('⚠️ [TRADING] Falha ao parar sincronização Deriv:', e); }
-    try { await derivAPI.disconnect(); } catch (e) { console.warn('⚠️ [TRADING] Falha ao desconectar Deriv:', e); }
+    try { await Promise.all([getDerivAPI('demo').disconnect(), getDerivAPI('real').disconnect()]); } catch (e) { console.warn('⚠️ [TRADING] Falha ao desconectar sessões Deriv:', e); }
     
     console.log('🛑 [TRADING] Todos os processos de trading foram parados.');
   }
