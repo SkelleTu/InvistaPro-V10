@@ -463,6 +463,7 @@ export class DerivAPIService extends EventEmitter {
 
   private cleanup(): void {
     this.stopHeartbeat(); // mantém supervisor heartbeat ativo
+    this.stopKeepAlive();
     this.isConnected = false;
     this.isConnecting = false;
     this.accountContext = null;
@@ -472,6 +473,9 @@ export class DerivAPIService extends EventEmitter {
       this.connectionTimeout = null;
     }
     
+    // Never replay stale proposals/buys after a disconnect.
+    this.messageQueue = [];
+
     if (this.ws) {
       const ws = this.ws;
       this.ws = null;
@@ -678,9 +682,9 @@ export class DerivAPIService extends EventEmitter {
   async getAvailableSymbolsByTradeMode(mode: string) {
     console.log(`📡 [DerivAPI] Buscando símbolos para o modo: ${mode}`);
     
-    // Public market-data traffic must never replace an authenticated Demo/Real socket.
-    // Reuse this authenticated session when available; otherwise use the dedicated public session.
-    const marketApi = this.isConnected ? this : derivPublicAPI;
+    // Public market-data traffic uses its own socket exclusively.
+    // Never let symbol discovery share or overwrite an authenticated Demo/Real session.
+    const marketApi = derivPublicAPI;
     if (!marketApi.isConnected) {
       await marketApi.connectPublic('GET_SYMBOLS_' + (mode || 'DEFAULT'));
     }
@@ -1569,11 +1573,16 @@ export class DerivAPIService extends EventEmitter {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(message));
     } else {
-      // Queue message with size limit to prevent memory issues
+      // Never queue trade/auth requests across a disconnected socket.
+      // Replaying stale proposals or buys after reconnect is unsafe.
+      if (message?.type !== 'subscribe_ticks') {
+        console.warn('⚠️ Deriv socket offline: dropping non-subscription message');
+        return;
+      }
       if (this.messageQueue.length < this.maxQueueSize) {
         this.messageQueue.push(message);
       } else {
-        console.warn('⚠️ Message queue full, dropping oldest message');
+        console.warn('⚠️ Message queue full, dropping oldest subscription intent');
         this.messageQueue.shift();
         this.messageQueue.push(message);
       }
