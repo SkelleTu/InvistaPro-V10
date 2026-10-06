@@ -168,9 +168,9 @@ export class DerivAPIService extends EventEmitter {
       // O error handling será feito internamente
     });
 
-    // Setup graceful shutdown
-    process.on('SIGTERM', () => this.gracefulShutdown());
-    process.on('SIGINT', () => this.gracefulShutdown());
+    // Process-level shutdown is owned by the application server. Registering
+    // SIGTERM/SIGINT listeners per DerivAPIService instance leaks listeners when
+    // temporary validation/slot sessions are created.
   }
 
   getIsConnected(): boolean {
