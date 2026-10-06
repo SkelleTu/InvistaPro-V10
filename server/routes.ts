@@ -2032,7 +2032,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     console.log(`📦 Request Body: ${JSON.stringify(req.body, null, 2)}`);
     console.log('🔧'.repeat(60));
 
-    let tempDerivAPI = new DerivAPIService();
+    let tempDerivAPI = new DerivAPIService('demo');
     try {
       // PASSO 1: Validação dos dados
       console.log(`📝 PASSO 1: Validando dados de entrada...`);
@@ -2065,6 +2065,8 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       // PASSO 2: Verificação de autenticação
       console.log(`🔐 PASSO 2: Verificando autenticação do usuário...`);
       const { token, accountType } = validation.data;
+      // Validation sessions are fixed to the requested environment.
+      tempDerivAPI = new DerivAPIService(accountType);
       if (!req.user?.id) {
         const errorId = errorTracker.captureError(
           new Error('Usuário não autenticado'), 
@@ -2408,7 +2410,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
 
     try {
       // Valida o token conectando à Deriv
-      const testApi = new DerivAPIService();
+      const testApi = new DerivAPIService(accountType);
       const connected = await testApi.connect(token.trim(), accountType, `SLOT_VALIDATE_${slotIndex}`);
       if (!connected) return res.status(400).json({ message: `Slot ${slotIndex}: não foi possível conectar com este token` });
 
@@ -3388,7 +3390,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
           currency: 'USD'
         };
 
-        const contract = await derivAPI.buyDigitDifferContract(digitDifferContract);
+        const contract = await accountAPI.buyDigitDifferContract(digitDifferContract);
         
         if (!contract) {
           throw new Error('Falha ao executar trade na Deriv');
@@ -4201,7 +4203,9 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         });
       }
 
-      const connected = await derivAPI.connect(tokenData.token, tokenData.accountType as "demo" | "real");
+      const accountType = tokenData.accountType === 'real' ? 'real' : 'demo';
+      const accountAPI = getDerivAPI(accountType);
+      const connected = await accountAPI.connect(tokenData.token, accountType);
       if (!connected) {
         return res.status(500).json({ 
           message: 'Erro de conexão com Deriv' 
