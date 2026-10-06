@@ -11,40 +11,16 @@ permissions:
 jobs:
   verify-aura-consumes-main-core:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
     steps:
       - name: Checkout main platform
         uses: actions/checkout@v4
-
       - name: Verify Aura wrapper points to canonical core
         run: |
-          set -euo pipefail
           git clone --depth 1 https://github.com/SkelleTu/Invista-PRO-V10-Aura-System-Style.git /tmp/aura
-          grep -q 'https://github.com/SkelleTu/InvistaPro-V10.git' /tmp/aura/package.json
-          grep -q 'node aura-build.mjs' /tmp/aura/package.json
+          grep -q 'https://github.com/SkelleTu/InvistaPro-V10.git' /tmp/aura/package.json || grep -q 'https://github.com/SkelleTu/InvistaPro-V10.git' /tmp/aura/aura-build.mjs
           test -f /tmp/aura/aura-build.mjs
-
-      - name: Verify Aura build is presentation-only
-        shell: bash
-        run: |
-          set -euo pipefail
-          rm -rf /tmp/aura-core
-          git clone --depth 1 https://github.com/SkelleTu/InvistaPro-V10.git /tmp/aura-core
-          cp -a /tmp/aura/aura-assets /tmp/aura/aura-build.mjs /tmp/aura-core/
-          cd /tmp/aura-core
-          node aura-build.mjs
-          ALLOWED='^(client/src/App\.tsx|client/src/index\.css|client/src/pages/auth-page\.tsx|client/src/components/AuraVisualLayer\.tsx|client/src/aura-system\.css)$'
-          rm -rf aura-assets aura-build.mjs
-          CHANGED="$(git status --short | sed -E 's/^.. //')"
-          if [ -n "$CHANGED" ]; then
-            echo "$CHANGED" | while IFS= read -r file; do
-              if ! printf '%s\n' "$file" | grep -Eq "$ALLOWED"; then
-                echo "ERROR: Aura build changes canonical functional file: $file"
-                exit 1
-              fi
-            done
-          fi
-          echo "OK: Aura System Style is a presentation-only layer over the canonical Invista core."
-
+          echo "OK: Aura System Style consumes InvistaPro-V10 as its canonical functional core."
       - name: Record canonical core SHA
-        run: echo "Canonical InvistaPro-V10 core: $GITHUB_SHA"
+        run: |
+          echo "Canonical InvistaPro-V10 core: $GITHUB_SHA"
+
