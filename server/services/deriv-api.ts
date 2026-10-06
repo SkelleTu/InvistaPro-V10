@@ -177,6 +177,16 @@ export class DerivAPIService extends EventEmitter {
     return this.isConnected;
   }
 
+  /** Returns true only when this authenticated session belongs to the supplied token/environment. */
+  isSessionFor(apiToken: string, accountType: 'demo' | 'real'): boolean {
+    return Boolean(
+      this.isConnected &&
+      this.apiToken === String(apiToken ?? '').trim() &&
+      this.accountType === accountType &&
+      this.accountContext?.accountType === accountType
+    );
+  }
+
   async connectPublic(operationId?: string): Promise<boolean> {
     // Conexão pública sem autenticação para ticks
     this.operationId = operationId || `CONNECT_PUBLIC_${Date.now()}`;
