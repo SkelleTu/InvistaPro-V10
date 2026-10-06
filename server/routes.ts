@@ -2504,7 +2504,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         try {
           if (await slotApi.connect(slot.token, slot.accountType, `BURST_BALANCE_${userId}_${slot.slotIndex}`)) {
             const balData = await slotApi.getBalance();
-            if (balData?.balance > 0) balances.push(Number(balData.balance));
+            if (typeof balData?.balance === "number" && balData.balance > 0) balances.push(balData.balance);
           }
         } finally {
           await slotApi.disconnect().catch(() => {});
