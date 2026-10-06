@@ -3688,7 +3688,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       if (_balanceAPI) {
         await _balanceAPI.disconnect().catch(() => {});
       }
-      _balanceAPI = new DerivAPIService('BALANCE_SINGLETON');
+      _balanceAPI = new DerivAPIService(accountType as 'demo' | 'real');
       const ok = await _balanceAPI.connect(token, accountType as 'demo' | 'real');
       if (!ok) { _balanceAPI = null; _balanceAPIToken = null; return null; }
       _balanceAPIToken = token;
