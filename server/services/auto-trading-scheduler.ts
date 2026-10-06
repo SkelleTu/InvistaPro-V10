@@ -1,7 +1,7 @@
 import * as cron from 'node-cron';
 import { dualStorage as storage } from '../storage-dual';
 import { huggingFaceAI } from './huggingface-ai';
-import { DerivAPIService, getDerivAPI } from './deriv-api';
+import { DerivAPIService } from './deriv-api';
 import { errorTracker } from '../services/error-tracker';
 import { marketDataCollector } from './market-data-collector';
 import { dynamicThresholdTracker } from './dynamic-threshold-tracker';
@@ -577,7 +577,7 @@ export class AutoTradingScheduler {
       
       // Conectar à Deriv para buscar símbolos disponíveis
       console.log('📊 [INIT] Conectando à Deriv API...');
-      const tempDerivAPI = new DerivAPIService();
+      const tempDerivAPI = new DerivAPIService('demo');
       await tempDerivAPI.connectPublic('GET_ALL_SYMBOLS');
       console.log('✅ [INIT] Conectado à Deriv API');
       
