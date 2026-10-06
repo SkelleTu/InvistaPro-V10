@@ -61,6 +61,26 @@ export class AutoTradingScheduler {
   private adminApprovalRequired: boolean = false; // APROVAÇÃO AUTOMÁTICA PARA MODO SEM LIMITES
   private setupPromise: Promise<void>;
   private isInitialized: boolean = false;
+
+  // Cada usuário mantém seu próprio par Demo/Real. Nunca compartilhe um WebSocket
+  // autenticado entre usuários, mesmo quando usam o mesmo ambiente.
+  private readonly userDerivSessions = new Map<string, { demo: DerivAPIService; real: DerivAPIService }>();
+
+  private getUserDerivAPI(userId: string, accountType: 'demo' | 'real'): DerivAPIService {
+    const key = String(userId);
+    let sessions = this.userDerivSessions.get(key);
+    if (!sessions) {
+      sessions = { demo: new DerivAPIService('demo'), real: new DerivAPIService('real') };
+      this.userDerivSessions.set(key, sessions);
+    }
+    return sessions[accountType];
+  }
+
+  private async disconnectAllUserDerivSessions(): Promise<void> {
+    const sessions = Array.from(this.userDerivSessions.values());
+    await Promise.all(sessions.flatMap(({ demo, real }) => [demo.disconnect(), real.disconnect()]));
+    this.userDerivSessions.clear();
+  }
   
   // 🚫 BLOQUEADO 100%: Ativos causadores de loss - NUNCA serão operados
   // Cobre: formato "(1s)", formato de API "1HZ*" e formato interno "_1S" (ex: R_100_1S)
@@ -419,7 +439,7 @@ export class AutoTradingScheduler {
     
     // Desconectar Deriv forçadamente
     try {
-      await Promise.all([getDerivAPI('demo').disconnect(), getDerivAPI('real').disconnect()]);
+      await this.disconnectAllUserDerivSessions();
       console.log(`✅ [CLEANUP] Sessões Deriv Demo/Real desconectadas forçadamente`);
     } catch (e) {
       console.error(`⚠️ [CLEANUP] Erro ao desconectar Deriv:`, e);
@@ -877,7 +897,7 @@ export class AutoTradingScheduler {
     const config = activeConfigs[0];
     const tokenData = await storage.getUserDerivToken(config.userId);
     if (!tokenData) return;
-    const tradeDerivAPI = getDerivAPI((tokenData.accountType as 'demo' | 'real') || 'demo');
+    const tradeDerivAPI = this.getUserDerivAPI(String(config.userId), (tokenData.accountType as 'demo' | 'real') || 'demo');
 
     // 7b. Respeitar modalidades do usuário — Leverage só dispara ACCU se o usuário habilitou 'accumulator'
     let levUserModalities: string[] = [];
@@ -1271,7 +1291,7 @@ export class AutoTradingScheduler {
 
   private async executeAutomaticTrade(config: any, tokenData: any, operationId: string): Promise<{success: boolean, error?: string}> {
     try {
-      const tradeDerivAPI = getDerivAPI((tokenData.accountType as 'demo' | 'real') || 'demo');
+      const tradeDerivAPI = this.getUserDerivAPI(String(config.userId), (tokenData.accountType as 'demo' | 'real') || 'demo');
       // 🔴 CAMADA 3 - CIRCUIT BREAKER: Sincronizar config do usuário no tracker
       const userEnableCircuitBreaker = (config as any)?.enableCircuitBreaker ?? true;
       const userCbLosses = Number((config as any)?.circuitBreakerLosses ?? 0);
@@ -5095,7 +5115,7 @@ export class AutoTradingScheduler {
     // Parar coleta de mercado e sincronização quando o usuário desativa.
     try { await marketDataCollector.stopCollection(); } catch (e) { console.warn('⚠️ [TRADING] Falha ao parar MarketDataCollector:', e); }
     try { await derivTradeSync.stopAutoSync(); } catch (e) { console.warn('⚠️ [TRADING] Falha ao parar sincronização Deriv:', e); }
-    try { await Promise.all([getDerivAPI('demo').disconnect(), getDerivAPI('real').disconnect()]); } catch (e) { console.warn('⚠️ [TRADING] Falha ao desconectar sessões Deriv:', e); }
+    try { await this.disconnectAllUserDerivSessions(); } catch (e) { console.warn('⚠️ [TRADING] Falha ao desconectar sessões Deriv:', e); }
     
     console.log('🛑 [TRADING] Todos os processos de trading foram parados.');
   }
