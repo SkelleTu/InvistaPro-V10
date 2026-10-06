@@ -28,10 +28,19 @@ export class DerivTradeSync {
   private syncInProgress: Set<string> = new Set(); // userId
   private readonly SYNC_INTERVAL_MS = 15000; // 🔄 ACELERADO: Sincroniza a cada 15 segundos
   private readonly CACHE_DURATION_MS = 10000; // Cache reduzido para 10 segundos (mais real-time)
-  private syncApis = {
-    demo: new DerivAPIService('demo'),
-    real: new DerivAPIService('real'),
-  } as const; // Sessões próprias e persistentes, isoladas por ambiente
+  // Sync sessions are isolated by user and environment. A shared Demo/Real socket
+  // could otherwise reuse user A's token while syncing user B.
+  private syncApis = new Map<string, { demo: DerivAPIService; real: DerivAPIService }>();
+
+  private getSyncApi(userId: string, accountType: 'demo' | 'real'): DerivAPIService {
+    const key = String(userId);
+    let sessions = this.syncApis.get(key);
+    if (!sessions) {
+      sessions = { demo: new DerivAPIService('demo'), real: new DerivAPIService('real') };
+      this.syncApis.set(key, sessions);
+    }
+    return sessions[accountType];
+  }
 
   constructor() {
     console.log('🔄 [DERIV SYNC] Sistema de sincronização de trades inicializado');
@@ -146,7 +155,7 @@ export class DerivTradeSync {
       }
 
       const accountType = derivToken.accountType === 'real' ? 'real' : 'demo';
-      const syncApi = this.syncApis[accountType];
+      const syncApi = this.getSyncApi(userId, accountType);
 
       // Conectar à Deriv para sincronização se não estiver conectado
       let connectedForSync = false;
