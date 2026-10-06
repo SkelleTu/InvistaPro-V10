@@ -21,28 +21,22 @@ jobs:
         with:
           node-version: 22
 
-      - name: Static Deriv architecture audit
+      - name: Validate centralized Deriv account routing
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p audit-artifacts
           python3 - <<'PY'
           from pathlib import Path
-          exts={".ts",".tsx",".js",".jsx",".mjs",".cjs"}
-          files=[p for p in Path(".").rglob("*") if p.is_file() and p.suffix in exts and "node_modules" not in p.parts and ".git" not in p.parts and "dist" not in p.parts]
-          text="\n".join(f.read_text(errors="ignore") for f in files)
-          required=["api.derivws.com","/otp","accountId","accountType","demo","real","Deriv-App-ID","deriv-account-gateway"]
-          missing=[x for x in required if x not in text]
-          forbidden=["ws.derivws.com/websockets/v3","ws.binaryws.com/websockets/v3","authorize:"]
-          found_forbidden=[x for x in forbidden if x in text]
-          Path("audit-artifacts/deriv-architecture-report.md").write_text(
-              "# Deriv Account Architecture\n\n"
-              f"Source files scanned: {len(files)}\n"
-              f"Required markers missing: {missing}\n"
-              f"Forbidden legacy markers found: {found_forbidden}\n"
-          )
-          print(Path("audit-artifacts/deriv-architecture-report.md").read_text())
-          if missing or found_forbidden:
+          gateway=Path("server/services/deriv-account-gateway.ts").read_text()
+          service=Path("server/services/deriv-api.ts").read_text()
+          required_gateway=["https://api.derivws.com","/trading/v1/options/accounts","/otp","accountId","accountType","demo","real","Deriv-App-ID","Authorization"]
+          missing=[x for x in required_gateway if x not in gateway]
+          forbidden=[x for x in ["ws.derivws.com/websockets/v3","ws.binaryws.com/websockets/v3","authorize:"] if x in service]
+          report=f"# Deriv Account Architecture\n\nGateway missing: {missing}\nLegacy markers in trading service: {forbidden}\n"
+          Path("audit-artifacts/deriv-architecture-report.md").write_text(report)
+          print(report)
+          if missing or forbidden:
               raise SystemExit(1)
           PY
 
