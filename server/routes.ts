@@ -39,7 +39,7 @@ import {
   blockedAssets
 } from "@shared/schema";
 import { and } from "drizzle-orm";
-import { derivAPI, DerivAPIService } from './services/deriv-api';
+import { derivAPI, DerivAPIService, getDerivAPI } from './services/deriv-api';
 import { executeFrenetic9TokensBurst, getSlotBalances, closeAllSlotConnections, selectBestAsset } from './services/frenetico-9tokens';
 import { huggingFaceAI } from './services/huggingface-ai';
 import { isolatedAutoTradingScheduler as autoTradingScheduler } from './services/isolated-auto-trading-scheduler';
