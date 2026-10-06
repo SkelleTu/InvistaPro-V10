@@ -209,6 +209,7 @@ export class DerivAPIService extends EventEmitter {
           // Sem autenticação - só configurar listeners e heartbeat
           this.emit('connected');
           this.processMessageQueue();
+          await this.resubscribeActiveSubscriptions();
           this.startHeartbeat();
           
           // Resubscrever todas as subscrições após reconexão
@@ -250,6 +251,12 @@ export class DerivAPIService extends EventEmitter {
 
     if (this.isConnecting && this.pendingConnectPromise) {
       return this.pendingConnectPromise;
+    }
+
+    // If this persistent session belongs to a different token/context, close the old socket first.
+    // Never leave an orphaned WebSocket alive while replacing the account context.
+    if (this.ws && this.ws.readyState !== WebSocket.CLOSED) {
+      this.cleanup();
     }
 
     this.isConnecting = true;
@@ -298,6 +305,7 @@ export class DerivAPIService extends EventEmitter {
           );
           this.emit('connected');
           this.processMessageQueue();
+          await this.resubscribeActiveSubscriptions();
           this.startHeartbeat();
           this.startKeepAlive();
           done(true);
@@ -1743,6 +1751,24 @@ export class DerivAPIService extends EventEmitter {
       this.connectPublic(this.operationId || undefined).catch(error => {
         console.error('❌ Falha na reconexão pública:', error);
       });
+    }
+  }
+
+  // Reestablish only the subscriptions already active in this process.
+  // This avoids replaying an unbounded database-wide subscription set on reconnect.
+  private async resubscribeActiveSubscriptions(): Promise<void> {
+    if (!this.isConnected || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    const subscriptions = Array.from(this.activeSubscriptions)
+      .filter((key) => key.startsWith('ticks_'))
+      .map((key) => key.slice('ticks_'.length))
+      .filter(Boolean);
+
+    for (const symbol of subscriptions) {
+      try {
+        this.sendMessage({ ticks: symbol, subscribe: 1, req_id: this.generateRequestId() });
+      } catch (error) {
+        console.warn(`⚠️ [DERIV] Falha ao restaurar subscrição ${symbol}: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
   }
 
