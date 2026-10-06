@@ -1767,5 +1767,16 @@ export class DerivAPIService extends EventEmitter {
   }
 }
 
-// Singleton instance
-export const derivAPI = new DerivAPIService();
+// Persistent account-scoped sessions. Demo and Real are deliberately isolated so
+// account discovery/OTP/WebSocket setup never sits on the critical trade path.
+export const derivAPISessions = {
+  demo: new DerivAPIService('demo'),
+  real: new DerivAPIService('real'),
+} as const;
+
+export function getDerivAPI(accountType: 'demo' | 'real'): DerivAPIService {
+  return derivAPISessions[accountType];
+}
+
+// Backward compatibility for legacy callers. New trading flows should use getDerivAPI().
+export const derivAPI = derivAPISessions.demo;
