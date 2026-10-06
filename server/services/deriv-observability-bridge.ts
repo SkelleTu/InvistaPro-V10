@@ -1,107 +1,135 @@
-import { derivAPI } from "./deriv-api";
+import { getDerivAPI } from "./deriv-api";
 import { observability } from "./production-observability";
 import { autoTradingScheduler } from "./auto-trading-scheduler";
 import { resilienceSupervisor } from "./resilience-supervisor";
 
 export function startDerivObservabilityBridge() {
-  // Runtime instrumentation also captures outbound frames without storing secrets.
-  const api: any = derivAPI as any;
-  const originalSend = api.sendMessage?.bind(api);
-  if (originalSend && !api.__observabilityWrapped) {
-    api.sendMessage = (payload: any) => {
-      const safe: Record<string, any> = {};
-      for (const [key, value] of Object.entries(payload || {})) {
-        safe[key] = /token|secret|authorization|password|api[-_]?key/i.test(key) ? "[REDACTED]" : value;
-      }
+  const sessions = [getDerivAPI("demo"), getDerivAPI("real")];
+
+  for (const api of sessions) {
+    const rawApi: any = api as any;
+    const originalSend = rawApi.sendMessage?.bind(rawApi);
+    if (originalSend && !rawApi.__observabilityWrapped) {
+      rawApi.sendMessage = (payload: any) => {
+        const safe: Record<string, any> = {};
+        for (const [key, value] of Object.entries(payload || {})) {
+          safe[key] = /token|secret|authorization|password|api[-_]?key|otp/i.test(key)
+            ? "[REDACTED]"
+            : value;
+        }
+        observability.emit({
+          level: "DEBUG",
+          category: "WEBSOCKET",
+          message: "DERIV OUTBOUND FRAME",
+          details: {
+            accountType: rawApi.accountType,
+            keys: Object.keys(payload || {}),
+            payload: safe,
+            connected: rawApi.isConnected,
+            readyState: rawApi.ws?.readyState,
+          },
+        });
+        return originalSend(payload);
+      };
+      rawApi.__observabilityWrapped = true;
+    }
+
+    api.on("connected", () => {
       observability.emit({
-        level: "DEBUG",
+        level: "INFO",
         category: "WEBSOCKET",
-        message: "DERIV OUTBOUND FRAME",
-        details: { keys: Object.keys(payload || {}), payload: safe, connected: api.isConnected, readyState: api.ws?.readyState },
+        message: "DERIV CONNECTED",
+        details: {
+          accountType: rawApi.accountType,
+          activeSubscriptions: api.getActiveSubscriptions().length,
+        },
       });
-      return originalSend(payload);
-    };
-    api.__observabilityWrapped = true;
+    });
+
+    api.on("disconnected", (info: any) => {
+      observability.emit({
+        level: "WARNING",
+        category: "WEBSOCKET",
+        message: "DERIV DISCONNECTED",
+        details: { accountType: rawApi.accountType, ...(info || {}) },
+      });
+    });
+
+    api.on("error", (error: any) => {
+      observability.captureError(error, {
+        level: "ERROR",
+        category: "WEBSOCKET",
+        message: "DERIV EVENT ERROR",
+        details: {
+          accountType: rawApi.accountType,
+          activeSubscriptions: api.getActiveSubscriptions().length,
+        },
+      });
+    });
+
+    api.on("message", (message: any) => {
+      observability.emit({
+        level: message?.error ? "ERROR" : "DEBUG",
+        category: message?.error ? "API_EXTERNAL" : "WEBSOCKET",
+        message: "DERIV MESSAGE",
+        details: {
+          accountType: rawApi.accountType,
+          msgType: message?.msg_type,
+          reqId: message?.req_id,
+          symbol: message?.tick?.symbol,
+          quote: message?.tick?.quote,
+          epoch: message?.tick?.epoch,
+          contractId: message?.proposal_open_contract?.contract_id || message?.buy?.contract_id,
+          subscriptionId: message?.subscription?.id,
+          errorCode: message?.error?.code,
+          errorMessage: message?.error?.message,
+        },
+      });
+    });
+
+    api.on("tick", (tick: any) => {
+      observability.emit({
+        level: "INFO",
+        category: "WEBSOCKET",
+        message: "DERIV TICK",
+        details: {
+          accountType: rawApi.accountType,
+          symbol: tick?.symbol,
+          quote: tick?.quote,
+          epoch: tick?.epoch,
+          displayValue: tick?.display_value,
+        },
+      });
+    });
   }
-  derivAPI.on("connected", () => {
-    observability.emit({
-      level: "INFO",
-      category: "WEBSOCKET",
-      message: "DERIV CONNECTED",
-      details: { activeSubscriptions: derivAPI.getActiveSubscriptions().length },
-    });
-  });
-
-  derivAPI.on("disconnected", (info: any) => {
-    observability.emit({
-      level: "WARNING",
-      category: "WEBSOCKET",
-      message: "DERIV DISCONNECTED",
-      details: info || {},
-    });
-  });
-
-  derivAPI.on("error", (error: any) => {
-    observability.captureError(error, {
-      level: "ERROR",
-      category: "WEBSOCKET",
-      message: "DERIV EVENT ERROR",
-      details: { activeSubscriptions: derivAPI.getActiveSubscriptions().length },
-    });
-  });
-
-  derivAPI.on("message", (message: any) => {
-    observability.emit({
-      level: message?.error ? "ERROR" : "DEBUG",
-      category: message?.error ? "API_EXTERNAL" : "WEBSOCKET",
-      message: "DERIV MESSAGE",
-      details: {
-        msgType: message?.msg_type,
-        reqId: message?.req_id,
-        symbol: message?.tick?.symbol,
-        quote: message?.tick?.quote,
-        epoch: message?.tick?.epoch,
-        contractId: message?.proposal_open_contract?.contract_id || message?.buy?.contract_id,
-        subscriptionId: message?.subscription?.id,
-        errorCode: message?.error?.code,
-        errorMessage: message?.error?.message,
-      },
-    });
-  });
-
-  derivAPI.on("tick", (tick: any) => {
-    observability.emit({
-      level: "INFO",
-      category: "WEBSOCKET",
-      message: "DERIV TICK",
-      details: {
-        symbol: tick?.symbol,
-        quote: tick?.quote,
-        epoch: tick?.epoch,
-        displayValue: tick?.display_value,
-      },
-    });
-  });
 
   observability.emit({
     level: "INFO",
     category: "SYSTEM",
     message: "DERIV OBSERVABILITY BRIDGE ACTIVE",
-    details: { mode: "complete-inbound-and-tick-telemetry" },
+    details: { mode: "demo-and-real-account-telemetry" },
   });
 
   const heartbeat = async () => {
     const tradingActive = Boolean(autoTradingScheduler.getSchedulerStatus()?.isRunning);
-    const connected = derivAPI.getIsConnected();
-    // When trading is intentionally OFF, websocket inactivity is a healthy idle state.
-    // When trading is ON, heartbeat is emitted only while connected so a disconnect expires naturally.
-    if (!tradingActive) {
-      await resilienceSupervisor.reportHeartbeat("websocket", { status: "idle", tradingActive: false, connected });
-      await resilienceSupervisor.reportHeartbeat("market_collector", { status: "idle", tradingActive: false });
-      return;
-    }
-    if (connected) {
-      await resilienceSupervisor.reportHeartbeat("websocket", { status: "connected", tradingActive: true, connected });
+    for (const api of sessions) {
+      const rawApi: any = api as any;
+      const connected = api.getIsConnected();
+      if (!tradingActive) {
+        await resilienceSupervisor.reportHeartbeat("websocket", {
+          status: "idle",
+          tradingActive: false,
+          connected,
+          accountType: rawApi.accountType,
+        });
+      } else if (connected) {
+        await resilienceSupervisor.reportHeartbeat("websocket", {
+          status: "connected",
+          tradingActive: true,
+          connected,
+          accountType: rawApi.accountType,
+        });
+      }
     }
   };
   void heartbeat();
