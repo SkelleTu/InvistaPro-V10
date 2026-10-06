@@ -461,6 +461,7 @@ export class DerivAPIService extends EventEmitter {
     this.stopHeartbeat(); // mantém supervisor heartbeat ativo
     this.isConnected = false;
     this.isConnecting = false;
+    this.accountContext = null;
     
     if (this.connectionTimeout) {
       clearTimeout(this.connectionTimeout);
