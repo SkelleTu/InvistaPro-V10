@@ -234,12 +234,14 @@ async function getOrCreateConnection(
 
   if (api) {
     try {
-      if (api.getIsConnected()) return api;
-    } catch { /* conexão morta */ }
+      // A slot connection is reusable only for the exact same token/environment.
+      if (api.isSessionFor(slot.token, slot.accountType)) return api;
+    } catch { /* conexão morta ou contexto inválido */ }
+    try { await api.disconnect(); } catch { /* ignore stale socket */ }
     userPool.delete(slot.slotIndex);
   }
 
-  api = new DerivAPIService();
+  api = new DerivAPIService(slot.accountType);
   const connected = await api.connect(
     slot.token, slot.accountType, `${operationId}_SLOT${slot.slotIndex}`
   );
