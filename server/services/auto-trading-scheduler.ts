@@ -1,7 +1,7 @@
 import * as cron from 'node-cron';
 import { dualStorage as storage } from '../storage-dual';
 import { huggingFaceAI } from './huggingface-ai';
-import { derivAPI, DerivAPIService, getDerivAPI } from './deriv-api';
+import { DerivAPIService, getDerivAPI } from './deriv-api';
 import { errorTracker } from '../services/error-tracker';
 import { marketDataCollector } from './market-data-collector';
 import { dynamicThresholdTracker } from './dynamic-threshold-tracker';
@@ -419,8 +419,8 @@ export class AutoTradingScheduler {
     
     // Desconectar Deriv forçadamente
     try {
-      await tradeDerivAPI.disconnect();
-      console.log(`✅ [CLEANUP] Deriv desconectado forçadamente`);
+      await Promise.all([getDerivAPI('demo').disconnect(), getDerivAPI('real').disconnect()]);
+      console.log(`✅ [CLEANUP] Sessões Deriv Demo/Real desconectadas forçadamente`);
     } catch (e) {
       console.error(`⚠️ [CLEANUP] Erro ao desconectar Deriv:`, e);
     }
