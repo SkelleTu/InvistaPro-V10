@@ -188,6 +188,10 @@ export class DerivAPIService extends EventEmitter {
   }
 
   async connectPublic(operationId?: string): Promise<boolean> {
+    // Reuse the dedicated public socket instead of creating parallel sockets.
+    if (this.isConnected && this.ws?.readyState === WebSocket.OPEN && !this.apiToken) {
+      return true;
+    }
     // Conexão pública sem autenticação para ticks
     this.operationId = operationId || `CONNECT_PUBLIC_${Date.now()}`;
     this.isShuttingDown = false;
@@ -266,6 +270,12 @@ export class DerivAPIService extends EventEmitter {
     // If this persistent session belongs to a different token/context, close the old socket first.
     // Never leave an orphaned WebSocket alive while replacing the account context.
     if (this.ws && this.ws.readyState !== WebSocket.CLOSED) {
+      // A different token is a different security context. Do not carry
+      // subscriptions/tick state from the previous account into the new one.
+      if (this.apiToken !== normalizedToken || this.accountType !== accountType) {
+        this.activeSubscriptions.clear();
+        this.lastTickCache.clear();
+      }
       this.cleanup();
     }
 
@@ -361,6 +371,12 @@ export class DerivAPIService extends EventEmitter {
       this.isConnected = false;
       this.stopHeartbeat();
       this.emit('disconnected', closeInfo);
+
+      // A clean unexpected close can happen without an accompanying error event.
+      // Restart the same authenticated/public context instead of waiting for a dead heartbeat.
+      if (!this.isShuttingDown && !this.isConnecting) {
+        this.handleConnectionLoss();
+      }
     });
 
     this.ws!.on('error', (error) => {
