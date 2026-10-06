@@ -34,6 +34,7 @@ jobs:
           cd /tmp/aura-core
           node aura-build.mjs
           ALLOWED='^(client/src/App\.tsx|client/src/index\.css|client/src/pages/auth-page\.tsx|client/src/components/AuraVisualLayer\.tsx|client/src/aura-system\.css)$'
+          rm -rf aura-assets aura-build.mjs
           CHANGED="$(git status --short | sed -E 's/^.. //')"
           if [ -n "$CHANGED" ]; then
             echo "$CHANGED" | while IFS= read -r file; do
