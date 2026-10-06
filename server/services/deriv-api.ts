@@ -1096,7 +1096,6 @@ export class DerivAPIService extends EventEmitter {
    * Suporta: DIGITDIFF, DIGITMATCH, DIGITEVEN, DIGITODD, DIGITOVER, DIGITUNDER
    */
   async buyGenericDigitContract(params: {
-    this.requireAuthenticatedAccountSession('buy');
     contract_type: 'DIGITDIFF' | 'DIGITMATCH' | 'DIGITEVEN' | 'DIGITODD' | 'DIGITOVER' | 'DIGITUNDER';
     symbol: string;
     duration: number;
@@ -1104,6 +1103,7 @@ export class DerivAPIService extends EventEmitter {
     barrier?: string; // Obrigatório para DIGITDIFF, DIGITMATCH, DIGITOVER, DIGITUNDER
     currency?: string;
   }): Promise<DerivContractInfo | null> {
+    this.requireAuthenticatedAccountSession('buy');
     if (!this.isConnected) return null;
 
     // ☠️ EXECUÇÃO IMEDIATA: CRIME = ativo 1s
@@ -1295,7 +1295,6 @@ export class DerivAPIService extends EventEmitter {
    * VANILLALONGCALL, VANILLALONGPUT, LBFLOATPUT, LBFLOATCALL, LBHIGHLOW
    */
   async buyFlexibleContract(params: {
-    this.requireAuthenticatedAccountSession('buy');
     contract_type: string;
     symbol: string;
     amount: number;
@@ -1310,6 +1309,7 @@ export class DerivAPIService extends EventEmitter {
     basis?: string;
     minProfitRatio?: number; // Ex: 0.25 = lucro mínimo de 25% sobre o stake. Se payout não atingir, aborta.
   }): Promise<DerivContractInfo | null> {
+    this.requireAuthenticatedAccountSession('buy');
     if (!this.isConnected) return null;
 
     // ☠️ EXECUÇÃO IMEDIATA: CRIME = ativo 1s
