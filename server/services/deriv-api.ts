@@ -498,7 +498,6 @@ export class DerivAPIService extends EventEmitter {
     
     console.log(`✅ Shutdown graceful concluído - Operation ID: ${this.operationId}`);
   }
-
   // Authentication is now performed by deriv-account-gateway.ts via REST OTP.\n
   private requireAuthenticatedAccountSession(operation: string): void {
     if (!this.isConnected || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
@@ -679,9 +678,11 @@ export class DerivAPIService extends EventEmitter {
   async getAvailableSymbolsByTradeMode(mode: string) {
     console.log(`📡 [DerivAPI] Buscando símbolos para o modo: ${mode}`);
     
-    // 1. Garantir conexão
-    if (!this.isConnected) {
-      await this.connectPublic('GET_SYMBOLS_' + (mode || 'DEFAULT'));
+    // Public market-data traffic must never replace an authenticated Demo/Real socket.
+    // Reuse this authenticated session when available; otherwise use the dedicated public session.
+    const marketApi = this.isConnected ? this : derivPublicAPI;
+    if (!marketApi.isConnected) {
+      await marketApi.connectPublic('GET_SYMBOLS_' + (mode || 'DEFAULT'));
     }
 
     // Se o modo for digit_diff, usar o sistema de descoberta especializado
@@ -690,11 +691,11 @@ export class DerivAPIService extends EventEmitter {
         console.log('🔍 [DerivAPI] Usando descoberta dinâmica para DIGITDIFF...');
         
         // 2. Obter símbolos ativos (com cache)
-        const allSymbols = await this.getActiveSymbolsCached();
+        const allSymbols = await marketApi.getActiveSymbolsCached();
         console.log(`📊 [DerivAPI] Total de símbolos ativos: ${allSymbols.length}`);
         
         // 3. Filtrar os que suportam DIGITDIFF (com cache)
-        const digitDiffSymbols = await this.getDigitDiffSupportedSymbols(allSymbols);
+        const digitDiffSymbols = await marketApi.getDigitDiffSupportedSymbols(allSymbols);
         
         // 4. Mapear para o formato esperado pelo frontend
         return digitDiffSymbols.map(symbol => {
@@ -719,7 +720,7 @@ export class DerivAPIService extends EventEmitter {
     }
 
     // Fallback para outros modos
-    const symbols = await this.getActiveSymbolsCached();
+    const symbols = await marketApi.getActiveSymbolsCached();
     return symbols.map(s => ({
       symbol: s.symbol,
       display_name: s.display_name,
@@ -997,8 +998,7 @@ export class DerivAPIService extends EventEmitter {
     return symbol; // Nunca remover underscore para DIGITDIFF
   }
 
-  private async createCallPutProposal(symbol: string, contractType: 'CALL' | 'PUT', duration: number, amount: number): Promise<{id: string, ask_price: number} | null> {
-    return new Promise((resolve) => {
+  private async createCallPutProposal(symbol: string, contractType: 'CALL' | 'PUT', duration: number, amount: number): Promise<{id: string, ask_price: number} | null> {    return new Promise((resolve) => {
       const reqId = this.generateRequestId();
       const normalizedSymbol = this.normalizeSymbol(symbol);
       
@@ -1497,8 +1497,7 @@ export class DerivAPIService extends EventEmitter {
       const contractHandler = (message: any) => {
         if (message.req_id === reqId) {
           this.removeListener('message', contractHandler);
-          if (message.proposal_open_contract) {
-            const contract = message.proposal_open_contract;
+          if (message.proposal_open_contract) {            const contract = message.proposal_open_contract;
             resolve({
               contract_id: contract.contract_id,
               shortcode: contract.shortcode,
@@ -1770,6 +1769,9 @@ export class DerivAPIService extends EventEmitter {
     }
   }
 }
+
+// Dedicated public market-data session. It is never used for authenticated account actions.
+const derivPublicAPI = new DerivAPIService('demo');
 
 // Persistent account-scoped sessions. Demo and Real are deliberately isolated so
 // account discovery/OTP/WebSocket setup never sits on the critical trade path.
