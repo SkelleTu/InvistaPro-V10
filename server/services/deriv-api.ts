@@ -133,8 +133,9 @@ export class DerivAPIService extends EventEmitter {
   private lastTickCache: Map<string, { quote: number; epoch: number; receivedAt: number }> = new Map();
   private readonly TICK_CACHE_MAX_AGE_MS = 3000; // 3 segundos
 
-  constructor(_name?: string) {
+  constructor(private readonly fixedAccountType: 'demo' | 'real' = 'demo') {
     super();
+    this.accountType = fixedAccountType;
     
     // Configurar listeners para error recovery
     // 200 slots: 25 ativos × (proposta + compra) + subscrições + heartbeat + auth
@@ -227,7 +228,10 @@ export class DerivAPIService extends EventEmitter {
     });
   }
 
-  async connect(apiToken: string, accountType: 'demo' | 'real' = 'demo', operationId?: string): Promise<boolean> {
+  async connect(apiToken: string, accountType: 'demo' | 'real' = this.fixedAccountType, operationId?: string): Promise<boolean> {
+    if (accountType !== this.fixedAccountType) {
+      throw new Error(`Deriv session is fixed to ${this.fixedAccountType}; cannot connect it as ${accountType}`);
+    }
     const normalizedToken = String(apiToken ?? '').trim();
     if (!normalizedToken) throw new Error('Deriv authorization token is required');
 
