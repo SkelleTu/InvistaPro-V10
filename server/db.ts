@@ -749,6 +749,3 @@ export function initializeDatabase() {
   }
 }
 
-// Auto-inicializar tabelas ao carregar o módulo
-// Isso garante que as tabelas existem antes de qualquer outro serviço tentar acessar
-initializeDatabase();
