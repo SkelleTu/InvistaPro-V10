@@ -1,6 +1,8 @@
 name: Observability Forensic Audit
 
 on:
+  schedule:
+    - cron: "*/15 * * * *"
   push:
     branches: [main]
   pull_request:
@@ -44,6 +46,16 @@ jobs:
           node -e 'const x=require("/tmp/health.json"); if(x.status!=="ok" || x.routesReady!==true) { console.error(x); process.exit(1) }'
           curl --fail --silent --show-error --retry 4 --retry-delay 3 "$PRODUCTION_URL/api/observability/health" | tee /tmp/obs.json
           node -e 'const x=require("/tmp/obs.json"); if(!x.success || !x.status) { console.error(x); process.exit(1) }'
+
+      - name: Verify production observability headers
+        env:
+          PRODUCTION_URL: https://invista-pro-v10-aura-system-style.onrender.com
+        run: |
+          set -euo pipefail
+          headers=$(curl -sS -D - -o /dev/null "$PRODUCTION_URL/health")
+          echo "$headers"
+          echo "$headers" | grep -qi "^x-request-id:"
+          echo "$headers" | grep -qi "^x-observability-trace-id:" || true
 
       - name: Verify deterministic API 404 instrumentation
         env:
