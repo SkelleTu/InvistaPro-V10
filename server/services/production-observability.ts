@@ -29,6 +29,7 @@ export interface ObservabilityEvent {
   durationMs?: number;
   userId?: string;
   userEmail?: string;
+  traceId?: string;
   service: string;
   environment: string;
   instance?: string;
@@ -38,6 +39,8 @@ export interface ObservabilityEvent {
 
 const MAX_EVENTS = 2000;
 const MAX_DETAIL_LENGTH = 12000;
+const MAX_ACTIVE_REQUESTS = 1000;
+const SLOW_REQUEST_MS = 1500;
 const LOG_DIR = path.resolve(process.cwd(), "logs");
 const LOG_FILE = path.join(LOG_DIR, "observability.jsonl");
 
@@ -67,7 +70,7 @@ function sanitizeObject(input: unknown): unknown {
 class ProductionObservability {
   private events: ObservabilityEvent[] = [];
   private subscribers = new Set<(event: ObservabilityEvent) => void>();
-  private activeRequests = new Map<string, { requestId: string; method: string; path: string; startedAt: number; userId?: string }>();
+  private activeRequests = new Map<string, { requestId: string; method: string; path: string; startedAt: number; userId?: string; traceId?: string }>();
   private memoryWatchdog: NodeJS.Timeout | null = null;
   private lastMemoryLevel: "NORMAL" | "WARNING" | "CRITICAL" = "NORMAL";
 
@@ -107,6 +110,9 @@ class ProductionObservability {
               .sort((a, b) => a.startedAt - b.startedAt)
               .slice(0, 100)
               .map(r => ({ ...r, ageMs: Date.now() - r.startedAt })),
+            activeRequestCount: this.activeRequests.size,
+            rssMb: Math.round(heap.rss / 1024 / 1024),
+            heapUsedMb: Math.round(heap.heapUsed / 1024 / 1024),
           },
         });
       }
@@ -214,11 +220,14 @@ class ProductionObservability {
       durationMs,
       userId: (req as any).user?.id,
       userEmail: (req as any).user?.email,
+      traceId: String(req.headers["x-client-trace-id"] || ""),
       details: {
         query: sanitizeObject(req.query),
         params: sanitizeObject(req.params),
         userAgent: req.headers["user-agent"],
         contentType: req.headers["content-type"],
+        clientTraceId: String(req.headers["x-client-trace-id"] || ""),
+        memory: (status >= 500 || durationMs >= SLOW_REQUEST_MS) ? process.memoryUsage() : undefined,
       },
     });
   }
@@ -256,10 +265,10 @@ class ProductionObservability {
     };
   }
 
-  trackRequest(requestId: string, method: string, path: string, startedAt: number, userId?: string) {
-    this.activeRequests.set(requestId, { requestId, method, path, startedAt, userId });
-    if (this.activeRequests.size > 5000) {
-      const oldest = Array.from(this.activeRequests.entries()).sort((a, b) => a[1].startedAt - b[1].startedAt).slice(0, 500);
+  trackRequest(requestId: string, method: string, path: string, startedAt: number, userId?: string, traceId?: string) {
+    this.activeRequests.set(requestId, { requestId, method, path, startedAt, userId, traceId });
+    if (this.activeRequests.size > MAX_ACTIVE_REQUESTS) {
+      const oldest = Array.from(this.activeRequests.entries()).sort((a, b) => a[1].startedAt - b[1].startedAt).slice(0, 100);
       for (const [id] of oldest) this.activeRequests.delete(id);
     }
   }
@@ -316,9 +325,12 @@ export function observabilityRequestMiddleware(req: Request, res: Response, next
   const started = Date.now();
   const incoming = req.headers["x-request-id"] || req.headers["rndr-id"];
   const requestId = String(incoming || crypto.randomUUID());
+  const traceId = String(req.headers["x-client-trace-id"] || requestId);
   res.setHeader("x-request-id", requestId);
+  res.setHeader("x-observability-trace-id", traceId);
   (req as any).observabilityRequestId = requestId;
-  observability.trackRequest(requestId, req.method, req.originalUrl || req.path, started, (req as any).user?.id);
+  (req as any).observabilityTraceId = traceId;
+  observability.trackRequest(requestId, req.method, req.originalUrl || req.path, started, (req as any).user?.id, traceId);
 
   res.on("finish", () => {
     const duration = Date.now() - started;
