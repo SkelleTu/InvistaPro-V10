@@ -18,7 +18,14 @@ export function log(message: string, source = "express") {
 }
 
 export async function setupVite(app: Express, server: Server) {
-  // Keep Vite completely out of the production module graph. The Aura production\n  // bundle is executed without Vite installed, so literal dynamic imports here\n  // can still be resolved by esbuild into the server bundle. Using variables keeps\n  // these development-only imports runtime-only.\n  const vitePackage = "vite";\n  const viteConfigSpecifier = "../vite.config";\n  const { createServer: createViteServer, createLogger } = await import(vitePackage);\n  const { default: viteConfig } = await import(viteConfigSpecifier);
+  // Keep Vite completely out of the production module graph. The Aura production
+  // bundle is executed without Vite installed, so literal dynamic imports here
+  // can still be resolved by esbuild into the server bundle. Using variables keeps
+  // these development-only imports runtime-only.
+  const vitePackage = "vite";
+  const viteConfigSpecifier = "../vite.config";
+  const { createServer: createViteServer, createLogger } = await import(vitePackage);
+  const { default: viteConfig } = await import(viteConfigSpecifier);
   const viteLogger = createLogger();
 
   const serverOptions = {
