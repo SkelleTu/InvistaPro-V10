@@ -67,10 +67,58 @@ function sanitizeObject(input: unknown): unknown {
 class ProductionObservability {
   private events: ObservabilityEvent[] = [];
   private subscribers = new Set<(event: ObservabilityEvent) => void>();
+  private activeRequests = new Map<string, { requestId: string; method: string; path: string; startedAt: number; userId?: string }>();
+  private memoryWatchdog: NodeJS.Timeout | null = null;
+  private lastMemoryLevel: "NORMAL" | "WARNING" | "CRITICAL" = "NORMAL";
+
+  private readCgroupMemory() {
+    try {
+      const fs = require("fs") as typeof import("fs");
+      const limitRaw = fs.readFileSync("/sys/fs/cgroup/memory.max", "utf8").trim();
+      const currentRaw = fs.readFileSync("/sys/fs/cgroup/memory.current", "utf8").trim();
+      const limit = limitRaw === "max" ? null : Number(limitRaw);
+      const current = Number(currentRaw);
+      return Number.isFinite(current) && limit && Number.isFinite(limit) && limit > 0
+        ? { current, limit, ratio: current / limit }
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private startMemoryWatchdog() {
+    if (this.memoryWatchdog) return;
+    this.memoryWatchdog = setInterval(() => {
+      const cgroup = this.readCgroupMemory();
+      const heap = process.memoryUsage();
+      const rssRatio = cgroup?.ratio ?? 0;
+      const ratio = Math.max(rssRatio, heap.rss / (512 * 1024 * 1024));
+      const level = ratio >= 0.92 ? "CRITICAL" : ratio >= 0.80 ? "WARNING" : "NORMAL";
+
+      if (level !== this.lastMemoryLevel || level === "CRITICAL") {
+        this.lastMemoryLevel = level;
+        this.emit({
+          level: level === "CRITICAL" ? "CRITICAL" : level === "WARNING" ? "WARNING" : "INFO",
+          category: "SYSTEM",
+          message: `Memory watchdog: ${level}`,
+          details: {
+            memory: heap,
+            cgroup,
+            activeRequests: Array.from(this.activeRequests.values())
+              .sort((a, b) => a.startedAt - b.startedAt)
+              .slice(0, 100)
+              .map(r => ({ ...r, ageMs: Date.now() - r.startedAt })),
+          },
+        });
+      }
+    }, 5000);
+    this.memoryWatchdog.unref();
+  }
 
   constructor() {
     fs.mkdirSync(LOG_DIR, { recursive: true });
     this.load();
+    this.startMemoryWatchdog();
   }
 
   private load() {
@@ -151,6 +199,8 @@ class ProductionObservability {
   }
 
   captureRequest(req: Request, res: Response, durationMs: number) {
+    const requestId = String((req as any).observabilityRequestId || req.headers["x-request-id"] || req.headers["rndr-id"] || "");
+    if (requestId) this.activeRequests.delete(requestId);
     const status = res.statusCode;
     const level: ObservabilityLevel = status >= 500 ? "ERROR" : status >= 400 ? "WARNING" : "INFO";
     const category: ObservabilityCategory = status === 401 || status === 403 ? "AUTH" : "HTTP";
@@ -257,6 +307,17 @@ export function observabilityRequestMiddleware(req: Request, res: Response, next
   const requestId = String(incoming || crypto.randomUUID());
   res.setHeader("x-request-id", requestId);
   (req as any).observabilityRequestId = requestId;
+  observability["activeRequests"].set(requestId, {
+    requestId,
+    method: req.method,
+    path: req.originalUrl || req.path,
+    startedAt: started,
+    userId: (req as any).user?.id,
+  });
+  if (observability["activeRequests"].size > 5000) {
+    const oldest = Array.from(observability["activeRequests"].entries()).sort((a, b) => a[1].startedAt - b[1].startedAt).slice(0, 500);
+    for (const [id] of oldest) observability["activeRequests"].delete(id);
+  }
 
   res.on("finish", () => {
     const duration = Date.now() - started;
