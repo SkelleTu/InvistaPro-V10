@@ -138,11 +138,3 @@ export function restoreBackup(backupFileName: string): boolean {
   }
 }
 
-// Backup automático ao iniciar o servidor
-console.log('🔄 Criando backup automático ao iniciar...');
-const initialBackup = createDatabaseBackup();
-if (initialBackup) {
-  console.log('✅ Backup inicial criado com sucesso');
-} else {
-  console.warn('⚠️ Não foi possível criar backup inicial');
-}
