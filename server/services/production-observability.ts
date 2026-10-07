@@ -73,7 +73,6 @@ class ProductionObservability {
 
   private readCgroupMemory() {
     try {
-      const fs = require("fs") as typeof import("fs");
       const limitRaw = fs.readFileSync("/sys/fs/cgroup/memory.max", "utf8").trim();
       const currentRaw = fs.readFileSync("/sys/fs/cgroup/memory.current", "utf8").trim();
       const limit = limitRaw === "max" ? null : Number(limitRaw);
@@ -200,7 +199,7 @@ class ProductionObservability {
 
   captureRequest(req: Request, res: Response, durationMs: number) {
     const requestId = String((req as any).observabilityRequestId || req.headers["x-request-id"] || req.headers["rndr-id"] || "");
-    if (requestId) this.activeRequests.delete(requestId);
+    if (requestId) this.finishRequest(requestId);
     const status = res.statusCode;
     const level: ObservabilityLevel = status >= 500 ? "ERROR" : status >= 400 ? "WARNING" : "INFO";
     const category: ObservabilityCategory = status === 401 || status === 403 ? "AUTH" : "HTTP";
@@ -257,6 +256,18 @@ class ProductionObservability {
     };
   }
 
+  trackRequest(requestId: string, method: string, path: string, startedAt: number, userId?: string) {
+    this.activeRequests.set(requestId, { requestId, method, path, startedAt, userId });
+    if (this.activeRequests.size > 5000) {
+      const oldest = Array.from(this.activeRequests.entries()).sort((a, b) => a[1].startedAt - b[1].startedAt).slice(0, 500);
+      for (const [id] of oldest) this.activeRequests.delete(id);
+    }
+  }
+
+  finishRequest(requestId: string) {
+    this.activeRequests.delete(requestId);
+  }
+
   subscribe(fn: (event: ObservabilityEvent) => void) {
     this.subscribers.add(fn);
     return () => this.subscribers.delete(fn);
@@ -307,17 +318,7 @@ export function observabilityRequestMiddleware(req: Request, res: Response, next
   const requestId = String(incoming || crypto.randomUUID());
   res.setHeader("x-request-id", requestId);
   (req as any).observabilityRequestId = requestId;
-  observability["activeRequests"].set(requestId, {
-    requestId,
-    method: req.method,
-    path: req.originalUrl || req.path,
-    startedAt: started,
-    userId: (req as any).user?.id,
-  });
-  if (observability["activeRequests"].size > 5000) {
-    const oldest = Array.from(observability["activeRequests"].entries()).sort((a, b) => a[1].startedAt - b[1].startedAt).slice(0, 500);
-    for (const [id] of oldest) observability["activeRequests"].delete(id);
-  }
+  observability.trackRequest(requestId, req.method, req.originalUrl || req.path, started, (req as any).user?.id);
 
   res.on("finish", () => {
     const duration = Date.now() - started;
