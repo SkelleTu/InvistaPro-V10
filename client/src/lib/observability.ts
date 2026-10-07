@@ -1,4 +1,5 @@
 let initialized = false;
+const clientTraceId = (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2)) + "-" + Date.now().toString(36);
 
 function send(payload: Record<string, unknown>) {
   try {
@@ -7,6 +8,7 @@ function send(payload: Record<string, unknown>) {
       url: window.location.href,
       browser: navigator.userAgent,
       timestamp: new Date().toISOString(),
+      clientTraceId,
     });
 
     if (navigator.sendBeacon) {
@@ -28,6 +30,25 @@ function send(payload: Record<string, unknown>) {
 export function initClientObservability() {
   if (initialized || typeof window === "undefined") return;
   initialized = true;
+
+  try {
+    if ("PerformanceObserver" in window) {
+      const observer = new PerformanceObserver(list => {
+        for (const entry of list.getEntries()) {
+          if (entry.duration >= 250) {
+            send({
+              source: "performance.longtask",
+              level: "WARNING",
+              name: "LongTask",
+              message: "Browser long task: " + Math.round(entry.duration) + "ms",
+              details: { durationMs: Math.round(entry.duration), startTime: Math.round(entry.startTime) },
+            });
+          }
+        }
+      });
+      observer.observe({ entryTypes: ["longtask"] });
+    }
+  } catch {}
 
   window.addEventListener("error", event => {
     send({
