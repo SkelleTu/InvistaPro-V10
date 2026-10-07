@@ -22,6 +22,10 @@ for (const [file, needles] of required) {
 const obs = read("server/services/production-observability.ts");
 if (!obs.includes("memory.max") || !obs.includes("memory.current")) failures.push("memory watchdog: cgroup limits not instrumented");
 if (!obs.includes("activeRequests")) failures.push("request causality: active request registry missing");
+if (!obs.includes("x-client-trace-id") || !obs.includes("x-observability-trace-id")) failures.push("request causality: client/server trace correlation missing");
+const client = read("client/src/lib/observability.ts");
+if (!client.includes("clientTraceId")) failures.push("client causality: client trace id missing");
+if (!client.includes("PerformanceObserver")) failures.push("client performance: long-task instrumentation missing");
 if (!obs.includes('res.setHeader("x-request-id"')) failures.push("request causality: response request-id missing");
 
 const index = read("server/index.ts");
