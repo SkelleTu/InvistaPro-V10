@@ -4,6 +4,7 @@ import { storage } from '../storage.js';
 import { microscopicAnalyzer } from './microscopic-technical-analysis.js';
 import { digitFrequencyAnalyzer } from './digit-frequency-analyzer.js';
 import { supremeAnalyzer } from './supreme-market-analyzer.js';
+import { isAllowedProductionSymbol } from './production-symbol-policy.js';
 
 interface TickBuffer {
   symbol: string;
@@ -25,7 +26,7 @@ export class MarketDataCollector extends EventEmitter {
   
   // 🎯 FALLBACK SEGURO: Símbolos que SEMPRE suportam DIGITDIFF (garantido pela Deriv)
   private static readonly FALLBACK_SYMBOLS = [
-    'R_10', 'R_25', 'R_50', 'R_75', 'R_100',
+    'BOOM500', 'BOOM1000', 'CRASH500', 'CRASH1000',
   ];
 
   // Limite rígido para produção no Render Free. Nunca abrir centenas/milhares de streams.
@@ -34,9 +35,7 @@ export class MarketDataCollector extends EventEmitter {
   // Universo explícito de produção. Nunca assinar todos os símbolos devolvidos pela Deriv.
   // Mantém apenas os índices usados pelo Invista Pro: DigitDiff/Accumulator + Boom/Crash.
   private static readonly ALLOWED_PRODUCTION_SYMBOLS = new Set([
-    "R_10", "R_25", "R_50", "R_75", "R_100",
     "CRASH500", "CRASH1000", "BOOM500", "BOOM1000",
-    "CRASH_500", "CRASH_1000", "BOOM_500", "BOOM_1000",
   ]);
   
   // 🚫 BLOQUEADO 100%: Ativos causadores de loss - NUNCA serão operados
@@ -343,7 +342,7 @@ export class MarketDataCollector extends EventEmitter {
       // Deduplicar, bloquear 1s e aplicar teto rígido antes de abrir qualquer stream.
       supportedSymbols = Array.from(new Set(supportedSymbols))
         .filter(symbol => !MarketDataCollector.BLOCKED_SYMBOLS_PATTERN.test(symbol))
-        .filter(symbol => MarketDataCollector.ALLOWED_PRODUCTION_SYMBOLS.has(symbol.toUpperCase()))
+        .filter(symbol => MarketDataCollector.ALLOWED_PRODUCTION_SYMBOLS.has(String(symbol).toUpperCase().replace(/[^A-Z0-9]/g, '')) && isAllowedProductionSymbol(symbol))
         .slice(0, MarketDataCollector.MAX_STREAM_SYMBOLS);
 
       this.DIGITDIFF_SUPPORTED_SYMBOLS = supportedSymbols;

@@ -23,7 +23,7 @@ const isTradingAuthorized = (req: any, res: any, next: any) => {
 router.get('/status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
   const userId = req.user.id;
   const stats = autoTradingScheduler.getSessionStats();
-  const activeSessions = autoTradingScheduler.getActiveSessions();
+  const activeSessions = autoTradingScheduler.getActiveSessions().filter((session: any) => String(session.userId) === String(userId));
   const schedulerStatus = autoTradingScheduler.getSchedulerStatus();
 
   // Verificar se o token Deriv está configurado para este usuário
@@ -36,21 +36,22 @@ router.get('/status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(as
   const activeConfigsCount = userActiveConfigs.length;
 
   // O sistema só está realmente operando se: scheduler rodando + token configurado + configurações ativas
-  const canExecuteTrades = schedulerStatus.isRunning && derivTokenConfigured && activeConfigsCount > 0;
+  const canExecuteTrades = schedulerActiveForUser && derivTokenConfigured && activeConfigsCount > 0;
 
   // Bloqueios que impedem trading
   const tradingBlockers: string[] = [];
+  if (!schedulerActiveForUser) tradingBlockers.push('Trading não ativado para esta sessão');
   if (!derivTokenConfigured) tradingBlockers.push('Token Deriv não configurado');
   if (activeConfigsCount === 0) tradingBlockers.push('Nenhuma configuração de trading ativa');
 
   res.json({
-    schedulerActive: schedulerStatus.isRunning,
+    schedulerActive: schedulerActiveForUser,
     canExecuteTrades,
     derivTokenConfigured,
     activeConfigsCount,
     tradingBlockers,
     schedulerStatus,
-    stats,
+    stats: { ...stats, activeSessions: activeSessions.length, isolatedUsers: activeSessions.length > 0 ? 1 : 0, armedUsers: schedulerActiveForUser ? 1 : 0 },
     activeSessions: activeSessions.map(session => ({
       userId: session.userId,
       configId: session.configId,
@@ -70,8 +71,10 @@ router.get('/status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(as
 
 // Obter configurações ativas
 router.get('/active-configs', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
-  const activeConfigs = await storage.getActiveTradeConfigurations();
-  
+  const allActiveConfigs = await storage.getActiveTradeConfigurations();
+  // Never disclose other users' configuration records to an authenticated client.
+  const activeConfigs = allActiveConfigs.filter((config: any) => String(config.userId) === String(req.user.id));
+
   res.json({
     count: activeConfigs.length,
     configurations: activeConfigs.map(config => ({
@@ -115,24 +118,25 @@ router.post('/scheduler/:action', isAuthenticated, isTradingAuthorized, asyncErr
   const { action } = req.params;
   
   if (action === 'pause') {
-    console.log('⏸️ [SCHEDULER] Pausando scheduler via API...');
-    autoTradingScheduler.stopScheduler();
+    const userId = String(req.user.id);
+    console.log(`⏸️ [SCHEDULER] Pausando somente a sessão do usuário ${userId}...`);
+    await autoTradingScheduler.disarmUserTrading(userId);
     const status = autoTradingScheduler.getSchedulerStatus();
-    console.log('✅ [SCHEDULER] Scheduler pausado. Status:', status);
-    res.json({ 
-      message: 'Scheduler pausado com sucesso',
+    res.json({
+      message: 'Trading pausado para o usuário autenticado',
       schedulerActive: status.isRunning,
-      status 
+      status
     });
   } else if (action === 'resume') {
-    console.log('▶️ [SCHEDULER] Retomando scheduler via API...');
+    const userId = String(req.user.id);
+    console.log(`▶️ [SCHEDULER] Retomando somente a sessão do usuário ${userId}...`);
+    autoTradingScheduler.armUserTrading(userId);
     await autoTradingScheduler.startScheduler();
     const status = autoTradingScheduler.getSchedulerStatus();
-    console.log('✅ [SCHEDULER] Scheduler retomado. Status:', status);
-    res.json({ 
-      message: 'Scheduler retomado com sucesso',
+    res.json({
+      message: 'Trading retomado para o usuário autenticado',
       schedulerActive: status.isRunning,
-      status 
+      status
     });
   } else {
     res.status(400).json({ message: 'Ação inválida. Use "pause" ou "resume"' });
@@ -363,7 +367,7 @@ router.post('/toggle-admin-approval', isAuthenticated, isTradingAuthorized, asyn
 // =================== CONTROLES PARA CONTA DEMO/TESTING ===================
 
 // Resetar sessões bloqueadas (para testing) - TEMPORARIAMENTE SEM AUTH PARA DEMO
-router.post('/reset-blocked-sessions', asyncErrorHandler(async (req: any, res: any) => {
+router.post('/reset-blocked-sessions', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
   const success = autoTradingScheduler.resetBlockedSessions();
   
   res.json({
@@ -375,7 +379,7 @@ router.post('/reset-blocked-sessions', asyncErrorHandler(async (req: any, res: a
 }));
 
 // Aumentar limites para modo demo - TEMPORARIAMENTE SEM AUTH PARA DEMO
-router.post('/increase-demo-limits', asyncErrorHandler(async (req: any, res: any) => {
+router.post('/increase-demo-limits', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
   const success = autoTradingScheduler.increaseLimitsForDemo();
   const securityStatus = autoTradingScheduler.getSecurityStatus();
   
@@ -392,7 +396,7 @@ router.post('/increase-demo-limits', asyncErrorHandler(async (req: any, res: any
 }));
 
 // Limpar todas as sessões ativas - TEMPORARIAMENTE SEM AUTH PARA DEMO
-router.post('/clear-all-sessions', asyncErrorHandler(async (req: any, res: any) => {
+router.post('/clear-all-sessions', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
   const success = autoTradingScheduler.clearAllSessions();
   
   res.json({
@@ -415,7 +419,7 @@ router.get('/diagnose', isAuthenticated, isTradingAuthorized, asyncErrorHandler(
   const userId = req.user.id;
   
   // 1. Verificar configurações ativas
-  const activeConfigs = await storage.getActiveTradeConfigurations();
+  const activeConfigs = (await storage.getActiveTradeConfigurations()).filter((config: any) => String(config.userId) === String(userId));
   const userConfig = await storage.getUserTradeConfig(userId);
   
   // 2. Verificar token Deriv

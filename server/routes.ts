@@ -1776,11 +1776,9 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   // Marketing Email Routes
   app.post('/api/marketing/add-email', isAuthenticated, async (req, res) => {
     try {
-      const { email } = req.body;
-      if (!email) {
-        return res.status(400).json({ message: 'Email é obrigatório' });
-      }
-      
+      const email = String((req.user as any)?.email || '').trim().toLowerCase();
+      if (!email) return res.status(401).json({ message: 'Usuário não autenticado' });
+
       addUserToMarketing(email);
       res.json({ message: 'Email adicionado à lista de marketing', email });
     } catch (error) {
@@ -1791,11 +1789,9 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
 
   app.delete('/api/marketing/remove-email', isAuthenticated, async (req, res) => {
     try {
-      const { email } = req.body;
-      if (!email) {
-        return res.status(400).json({ message: 'Email é obrigatório' });
-      }
-      
+      const email = String((req.user as any)?.email || '').trim().toLowerCase();
+      if (!email) return res.status(401).json({ message: 'Usuário não autenticado' });
+
       removeUserFromMarketing(email);
       res.json({ message: 'Email removido da lista de marketing', email });
     } catch (error) {
@@ -1804,7 +1800,8 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
   });
 
-  app.post('/api/marketing/campaign', isAuthenticated, async (req, res) => {
+  app.post('/api/marketing/campaign', isAuthenticated, async (req: any, res) => {
+    if (!(req.user as any)?.isAdmin) return res.status(403).json({ message: 'Acesso restrito ao administrador' });
     try {
       await marketingManager.runMarketingCampaign();
       res.json({ message: 'Campanha de marketing iniciada com sucesso' });
@@ -1814,7 +1811,8 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
   });
 
-  app.get('/api/marketing/stats', isAuthenticated, async (req, res) => {
+  app.get('/api/marketing/stats', isAuthenticated, async (req: any, res) => {
+    if (!(req.user as any)?.isAdmin) return res.status(403).json({ message: 'Acesso restrito ao administrador' });
     try {
       const stats = marketingManager.getStats();
       res.json(stats);
@@ -1871,10 +1869,19 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   });
 
   app.get('/api/trading/scheduler/status', isAuthenticated, isTradingAuthorized, async (req: any, res) => {
+    const userId = String(req.user.id);
+    const activeForUser = autoTradingScheduler.getArmedUserIds().some((id: string) => String(id) === userId);
+    const globalStatus = autoTradingScheduler.getSchedulerStatus();
     res.json({
       success: true,
-      status: autoTradingScheduler.getSchedulerStatus(),
-      armedUsers: autoTradingScheduler.getArmedUserIds(),
+      status: {
+        ...globalStatus,
+        isRunning: activeForUser,
+        schedulerRunning: activeForUser,
+        activeSessions: activeForUser ? 1 : 0,
+        armedUsers: activeForUser ? [userId] : [],
+      },
+      armedUsers: activeForUser ? [userId] : [],
       timestamp: new Date().toISOString(),
     });
   });
@@ -3338,9 +3345,9 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
 
       // Get AI analysis first
       const marketDataInfo = await dbStorage.getMarketData(symbol);
-      if (!marketDataInfo) {
-        return res.status(400).json({ 
-          message: 'Dados de mercado não disponíveis para análise' 
+      if (!marketDataInfo || marketDataInfo.isSimulated) {
+        return res.status(400).json({
+          message: 'Execução bloqueada: são obrigatórios dados reais de mercado da Deriv; dados simulados não podem autorizar trades.'
         });
       }
 
@@ -4517,10 +4524,12 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     res.json({ uploaded: !!exePath, exePath: exePath || null, uploadDir: MT5_UPLOAD_DIR });
   });
 
-  const INTERNAL_SECRET = 'internal-desktop-ctrl-9f3a';
+  // Internal desktop control must use a deployment secret, never a credential committed to source.
+  const INTERNAL_SECRET = String(process.env.INTERNAL_DESKTOP_CTRL_SECRET || '').trim();
   const isInternal = (req: any, res: any, next: any) => {
+    if (!INTERNAL_SECRET) return res.status(503).json({ error: 'internal_control_not_configured' });
     if (req.headers['x-internal-key'] === INTERNAL_SECRET) return next();
-    res.status(403).json({ error: 'forbidden' });
+    return res.status(403).json({ error: 'forbidden' });
   };
 
   app.get('/api/internal/desktop/status', isInternal, (req, res) => {

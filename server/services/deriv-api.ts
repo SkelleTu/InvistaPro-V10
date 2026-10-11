@@ -4,6 +4,7 @@ import { errorTracker } from './error-tracker';
 import { dualStorage as storage } from '../storage-dual';
 import { resilienceSupervisor } from './resilience-supervisor';
 import { connectDerivAccount, type DerivAccountContext } from './deriv-account-gateway';
+import { isAllowedProductionSymbol, isAllowedProductionContractType, minimumStakeForContract } from './production-symbol-policy';
 
 // ☠️ PROTOCOLO DE EXECUÇÃO IMEDIATA — tolerância zero para ativos criminosos
 // Qualquer símbolo que viole as regras é executado aqui: blacklistado, logado e morto.
@@ -654,6 +655,7 @@ export class DerivAPIService extends EventEmitter {
     
     for (const symbolInfo of allSymbols) {
       const symbol = symbolInfo.symbol;
+      if (!isAllowedProductionSymbol(symbol)) continue;
       checked++;
       
       // Log a cada 10 símbolos para rastreamento
@@ -748,18 +750,17 @@ export class DerivAPIService extends EventEmitter {
         console.error('❌ Erro na descoberta dinâmica DIGITDIFF:', error);
         // Fallback básico se a descoberta falhar
         return [
-          { symbol: 'R_10', display_name: 'Volatility 10 Index', market: 'synthetic_index' },
-          { symbol: 'R_25', display_name: 'Volatility 25 Index', market: 'synthetic_index' },
-          { symbol: 'R_50', display_name: 'Volatility 50 Index', market: 'synthetic_index' },
-          { symbol: 'R_75', display_name: 'Volatility 75 Index', market: 'synthetic_index' },
-          { symbol: 'R_100', display_name: 'Volatility 100 Index', market: 'synthetic_index' }
+          { symbol: 'BOOM500', display_name: 'Boom 500 Index', market: 'synthetic_index' },
+          { symbol: 'BOOM1000', display_name: 'Boom 1000 Index', market: 'synthetic_index' },
+          { symbol: 'CRASH500', display_name: 'Crash 500 Index', market: 'synthetic_index' },
+          { symbol: 'CRASH1000', display_name: 'Crash 1000 Index', market: 'synthetic_index' }
         ];
       }
     }
 
     // Fallback para outros modos
     const symbols = await marketApi.getActiveSymbolsCached();
-    return symbols.map(s => ({
+    return symbols.filter(s => isAllowedProductionSymbol(s.symbol)).map(s => ({
       symbol: s.symbol,
       display_name: s.display_name,
       market: s.market
@@ -828,6 +829,10 @@ export class DerivAPIService extends EventEmitter {
   }
 
   async subscribeToTicks(symbol: string): Promise<void> {
+    if (!isAllowedProductionSymbol(symbol)) {
+      console.warn(`[DERIV_POLICY] Tick subscription blocked for disallowed symbol: ${symbol}`);
+      return;
+    }
     if (!this.isConnected) {
       this.sendMessage({ type: 'subscribe_ticks', symbol });
       return;
@@ -870,69 +875,13 @@ export class DerivAPIService extends EventEmitter {
   }
 
   async buyCallPutContract(symbol: string, direction: 'up' | 'down', duration: number, amount: number): Promise<DerivContractInfo | null> {
-    this.requireAuthenticatedAccountSession('buy');
-    if (!this.isConnected) return null;
-
-    try {
-      // Determinar tipo de contrato baseado na direção
-      const contractType = direction === 'up' ? 'CALL' : 'PUT';
-      
-      // Passo 1: Criar proposta para validar o contrato
-      const proposal = await this.createCallPutProposal(symbol, contractType, duration, amount);
-      if (!proposal) {
-        console.error('❌ Falha ao criar proposta CALL/PUT');
-        return null;
-      }
-
-      // Passo 2: Comprar usando o ID da proposta
-      return new Promise((resolve) => {
-        const reqId = this.generateRequestId();
-        
-        const buyHandler = (message: any) => {
-          if (message.req_id === reqId) {
-            this.removeListener('message', buyHandler);
-            if (message.buy) {
-              const contract: DerivContractInfo = {
-                contract_id: message.buy.contract_id,
-                shortcode: message.buy.shortcode,
-                status: 'active',
-                entry_tick: 0,
-                buy_price: message.buy.buy_price,
-              };
-              
-              console.log(`✅ Contrato ${contractType} comprado: ${contract.contract_id}`);
-              console.log(`🎯 Parâmetros: ${symbol} | ${direction.toUpperCase()} | Duration: ${duration}t | Amount: $${amount}`);
-              resolve(contract);
-            } else {
-              console.error(`❌ Erro ao comprar contrato ${contractType}:`, message.error);
-              resolve(null);
-            }
-          }
-        };
-
-        this.on('message', buyHandler);
-
-        // Comprar usando o ID da proposta
-        // Tolerância de 5%: se o mercado moveu ligeiramente desde a proposta,
-        // a Deriv não rejeita por preço obsoleto
-        const maxPrice = parseFloat((proposal.ask_price * 1.05).toFixed(2));
-        const buyMessage = {
-          buy: proposal.id,
-          price: maxPrice,
-          req_id: reqId
-        };
-
-        console.log(`📝 Comprando contrato ${contractType} com proposta ID: ${proposal.id} | MaxPrice: $${maxPrice}`);
-        this.sendMessage(buyMessage);
-      });
-
-    } catch (error) {
-      console.error('❌ Erro no processo de compra CALL/PUT:', error);
-      return null;
-    }
+    console.warn(`[DERIV_POLICY] CALL/PUT contracts are disabled in production. Rejected ${direction} on ${symbol}.`);
+    return null;
   }
 
   async buyDigitDifferContract(params: DigitDifferContract): Promise<DerivContractInfo | null> {
+    if (!isAllowedProductionSymbol(params.symbol)) { console.error(`[DERIV_POLICY] Order blocked for disallowed symbol: ${params.symbol}`); return null; }
+    if (params.amount < 0.35) { console.error('[DERIV_POLICY] DIGITDIFF stake below minimum $0.35'); return null; }
     this.requireAuthenticatedAccountSession('buy');
     if (!this.isConnected) return null;
 
@@ -1145,6 +1094,8 @@ export class DerivAPIService extends EventEmitter {
     barrier?: string; // Obrigatório para DIGITDIFF, DIGITMATCH, DIGITOVER, DIGITUNDER
     currency?: string;
   }): Promise<DerivContractInfo | null> {
+    if (!isAllowedProductionSymbol(params.symbol)) { console.error(`[DERIV_POLICY] Order blocked for disallowed symbol: ${params.symbol}`); return null; }
+    if (params.amount < 0.35) { console.error(`[DERIV_POLICY] Stake below minimum $0.35 for ${params.contract_type}`); return null; }
     this.requireAuthenticatedAccountSession('buy');
     if (!this.isConnected) return null;
 
@@ -1351,6 +1302,9 @@ export class DerivAPIService extends EventEmitter {
     basis?: string;
     minProfitRatio?: number; // Ex: 0.25 = lucro mínimo de 25% sobre o stake. Se payout não atingir, aborta.
   }): Promise<DerivContractInfo | null> {
+    if (!isAllowedProductionSymbol(params.symbol)) { console.error(`[DERIV_POLICY] Order blocked for disallowed symbol: ${params.symbol}`); return null; }
+    if (!isAllowedProductionContractType(params.contract_type)) { console.error(`[DERIV_POLICY] Contract type blocked: ${params.contract_type}`); return null; }
+    if (params.amount < minimumStakeForContract(params.contract_type)) { console.error(`[DERIV_POLICY] Stake below configured minimum for ${params.contract_type}`); return null; }
     this.requireAuthenticatedAccountSession('buy');
     if (!this.isConnected) return null;
 

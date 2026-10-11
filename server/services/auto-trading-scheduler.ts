@@ -18,6 +18,7 @@ import { analyzeCrashBoomSpike } from './crash-boom-spike-engine';
 import { setSignal } from './signal-store';
 import { classifyAsset, getGateThreshold } from '../utils/asset-classifier';
 import { consensusCache } from './consensus-cache';
+import { isAllowedProductionSymbol } from './production-symbol-policy';
 
 function derivToMT5Name(derivSymbol: string): string | null {
   const map: Record<string, string> = {
@@ -91,15 +92,15 @@ export class AutoTradingScheduler {
    * ☠️ EXECUÇÃO: qualquer tentativa é registrada com máxima severidade
    */
   private isSymbolBlocked(symbol: string, contexto?: string): boolean {
-    const bloqueado = AutoTradingScheduler.BLOCKED_SYMBOLS_PATTERN.test(symbol);
+    const bloqueado = AutoTradingScheduler.BLOCKED_SYMBOLS_PATTERN.test(symbol) || !isAllowedProductionSymbol(symbol);
     if (bloqueado && contexto) {
       const ts = new Date().toISOString();
       console.error(`\n☠️ ══════════════════════════════════════════════════════`);
-      console.error(`☠️  EXECUÇÃO — TENTATIVA DE CRIME INTERCEPTADA`);
+      console.error(`☠️  EXECUÇÃO — SÍMBOLO FORA DA POLÍTICA INTERCEPTADO`);
       console.error(`☠️  Símbolo criminoso : ${symbol}`);
       console.error(`☠️  Interceptado em   : ${contexto}`);
       console.error(`☠️  Timestamp         : ${ts}`);
-      console.error(`☠️  Sentença          : SELEÇÃO ABORTADA — nunca chegará à execução`);
+      console.error(`☠️  Sentença          : SELEÇÃO ABORTADA — fora da allowlist de produção`);
       console.error(`☠️ ══════════════════════════════════════════════════════\n`);
     }
     return bloqueado;
@@ -1739,29 +1740,15 @@ export class AutoTradingScheduler {
         console.warn(`⚠️ [${operationId}] Erro na verificação de recovery mode:`, recoveryCheckError);
       }
 
-      // Buscar dados de mercado
-      let marketDataInfo = await storage.getMarketData(selectedSymbol);
-      if (!marketDataInfo) {
-        // Tentar gerar dados de mercado simulados se não existirem
-        console.log(`📊 [${operationId}] Gerando dados de mercado simulados para ${selectedSymbol}...`);
-        try {
-          await this.createMockMarketData(selectedSymbol);
-          marketDataInfo = await storage.getMarketData(selectedSymbol);
-        } catch (error) {
-          console.error(`❌ [${operationId}] Erro ao gerar dados de mercado:`, error);
-        }
-        
-        if (!marketDataInfo) {
-          return { success: false, error: 'Dados de mercado não disponíveis' };
-        }
-      }
-
-      // Verificação de segurança: não permitir trading real com dados simulados
-      if (marketDataInfo.isSimulated && tokenData.accountType === 'real') {
-        return { 
-          success: false, 
-          error: 'SEGURANÇA: Não é possível executar trades em conta real com dados simulados' 
+      // Fail closed: trading exige dados reais recebidos da Deriv.
+      // Não criar histórico aleatório nem permitir ordens (demo ou real) com dados simulados.
+      const marketDataInfo = await storage.getMarketData(selectedSymbol);
+      if (!marketDataInfo || marketDataInfo.isSimulated) {
+        return {
+          success: false,
+          error: 'SEGURANÇA: dados reais de mercado da Deriv indisponíveis; execução bloqueada (dados simulados nunca são aceitos).'
         };
+      }
       }
 
       // Verificação de qualidade dos dados

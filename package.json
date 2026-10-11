@@ -11,7 +11,8 @@
     "build": "npm rebuild better-sqlite3 --build-from-source && vite build && esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist && esbuild server/services/trading-user-worker.ts --platform=node --packages=external --bundle --format=esm --outfile=dist/trading-user-worker.js",
     "start": "NODE_ENV=production node dist/index.js",
     "check": "tsc --noEmit",
-    "db:push": "drizzle-kit push"
+    "db:push": "drizzle-kit push",
+    "test": "tsx scripts/test-production-symbol-policy.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
