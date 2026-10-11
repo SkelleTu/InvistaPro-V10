@@ -1095,7 +1095,9 @@ export class DerivAPIService extends EventEmitter {
     currency?: string;
   }): Promise<DerivContractInfo | null> {
     if (!isAllowedProductionSymbol(params.symbol)) { console.error(`[DERIV_POLICY] Order blocked for disallowed symbol: ${params.symbol}`); return null; }
-    if (params.amount < 0.35) { console.error(`[DERIV_POLICY] Stake below minimum $0.35 for ${params.contract_type}`); return null; }
+    if (!isAllowedProductionContractType(params.contract_type)) { console.error(`[DERIV_POLICY] Contract type blocked: ${params.contract_type}`); return null; }
+    const minimumStake = minimumStakeForContract(params.contract_type);
+    if (params.amount < minimumStake) { console.error(`[DERIV_POLICY] Stake below minimum ${minimumStake} for ${params.contract_type}`); return null; }
     this.requireAuthenticatedAccountSession('buy');
     if (!this.isConnected) return null;
 
