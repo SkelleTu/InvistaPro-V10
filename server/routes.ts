@@ -4517,10 +4517,12 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     res.json({ uploaded: !!exePath, exePath: exePath || null, uploadDir: MT5_UPLOAD_DIR });
   });
 
-  const INTERNAL_SECRET = 'internal-desktop-ctrl-9f3a';
+  // Internal desktop control must use a deployment secret, never a credential committed to source.
+  const INTERNAL_SECRET = String(process.env.INTERNAL_DESKTOP_CTRL_SECRET || '').trim();
   const isInternal = (req: any, res: any, next: any) => {
+    if (!INTERNAL_SECRET) return res.status(503).json({ error: 'internal_control_not_configured' });
     if (req.headers['x-internal-key'] === INTERNAL_SECRET) return next();
-    res.status(403).json({ error: 'forbidden' });
+    return res.status(403).json({ error: 'forbidden' });
   };
 
   app.get('/api/internal/desktop/status', isInternal, (req, res) => {
