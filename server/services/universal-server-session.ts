@@ -8,6 +8,9 @@ const serviceKey = process.env.INVISTA_UNIVERSAL_SERVER_KEY || "";
 
 interface SessionState { sessionId: string; userId: string; platform: Platform; tradingArmed: boolean; }
 const sessions = new Map<string, SessionState>();
+// Keep authenticated users in the retry set even when a transient registration
+// failure leaves them without a session entry. The heartbeat loop can recover.
+const knownUserIds = new Set<string>();
 
 function enabled() {
   return Boolean(universalUrl && serviceKey);
@@ -31,7 +34,9 @@ async function call(path: string, body: any) {
 export async function registerUniversalSession(userId: string) {
   if (!userId) throw new Error("Universal session requires an authenticated user ID.");
   if (!enabled()) throw new Error("Universal Server integration is not configured; refusing to create an untracked trading session.");
-  const result = await call("/api/invista/session/register", { userId: String(userId), platform });
+  const id = String(userId);
+  knownUserIds.add(id);
+  const result = await call("/api/invista/session/register", { userId: id, platform });
   const session = result?.session;
   if (!session?.sessionId) throw new Error("Universal Server did not confirm session registration.");
   sessions.set(String(userId), {
@@ -45,9 +50,17 @@ export async function registerUniversalSession(userId: string) {
 }
 
 export async function heartbeatUniversalSession(userId: string, tradingArmed = false) {
-  const state = sessions.get(String(userId));
-  if (!state) return registerUniversalSession(String(userId));
+  const id = String(userId);
+  if (!id) return null;
   try {
+    knownUserIds.add(id);
+    const state = sessions.get(id);
+    // If login-time registration failed, retry it on the next heartbeat instead
+    // of leaving this user permanently absent from the heartbeat loop.
+    if (!state) {
+      await registerUniversalSession(id);
+      return sessions.get(id) || null;
+    }
     state.tradingArmed = tradingArmed;
     return (await call("/api/invista/session/heartbeat", {
       sessionId: state.sessionId,
@@ -56,7 +69,7 @@ export async function heartbeatUniversalSession(userId: string, tradingArmed = f
       tradingArmed,
     }))?.session || null;
   } catch (error) {
-    console.warn(`⚠️ [UNIVERSAL] Heartbeat falhou para user=${userId}:`, error instanceof Error ? error.message : error);
+    console.warn(`⚠️ [UNIVERSAL] Heartbeat/registration retry failed for user=${id}:`, error instanceof Error ? error.message : error);
     return null;
   }
 }
@@ -80,8 +93,13 @@ export async function setUniversalTradingArmed(userId: string, armed: boolean) {
 }
 
 export async function disconnectUniversalSession(userId: string) {
-  const state = sessions.get(String(userId));
-  if (!state || !enabled()) return;
+  const id = String(userId);
+  knownUserIds.delete(id);
+  const state = sessions.get(id);
+  if (!state || !enabled()) {
+    sessions.delete(id);
+    return;
+  }
   try {
     await call("/api/invista/session/disconnect", { sessionId: state.sessionId, userId: state.userId });
   } catch (error) {
@@ -97,8 +115,8 @@ export function startUniversalHeartbeatLoop() {
     return;
   }
   setInterval(() => {
-    for (const state of sessions.values()) {
-      void heartbeatUniversalSession(state.userId, state.tradingArmed);
+    for (const userId of knownUserIds) {
+      void heartbeatUniversalSession(userId, sessions.get(userId)?.tradingArmed ?? false);
     }
   }, 30_000).unref?.();
   console.log(`💓 [UNIVERSAL] Heartbeat Invista Pro → Universal Server ativo a cada 30s | platform=${platform}`);
