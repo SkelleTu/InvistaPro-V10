@@ -234,7 +234,27 @@ export class DualStorage implements IStorage {
   async getUserDerivToken(uid: string) {
     return this.localRead(() => this.turso!.getUserDerivToken(uid), () => this.sqlite.getUserDerivToken(uid), 'getUserDerivToken');
   }
-  async updateDerivToken(uid: string, token: string, accountType: string) { return this.write(() => this.turso!.updateDerivToken(uid, token, accountType), () => this.sqlite.updateDerivToken(uid, token, accountType), 'updateDerivToken'); }
+  // Token de autenticação precisa estar visível imediatamente nas leituras locais após o POST.
+  // O write() genérico sincroniza SQLite em background; isso causava corrida: o POST retornava
+  // sucesso, mas GET /account-info lia SQLite antes da cópia terminar e dizia "token não configurado".
+  async updateDerivToken(uid: string, token: string, accountType: string) {
+    if (this.turso) {
+      try {
+        const saved = await this.turso.updateDerivToken(uid, token, accountType);
+        await this.sqlite.updateDerivToken(uid, token, accountType);
+        console.info('[STORAGE] Deriv token persisted in primary + local store', { accountType });
+        return saved;
+      } catch (err: any) {
+        console.warn('[STORAGE] Deriv token primary write failed; using local fallback', {
+          accountType,
+          error: err?.message || String(err),
+        });
+      }
+    }
+    const saved = await this.sqlite.updateDerivToken(uid, token, accountType);
+    console.info('[STORAGE] Deriv token persisted in local store', { accountType });
+    return saved;
+  }
   async deactivateDerivToken(uid: string)                                  { return this.write(() => this.turso!.deactivateDerivToken(uid), () => this.sqlite.deactivateDerivToken(uid), 'deactivateDerivToken'); }
 
   // ─── Frenético 10-Tokens ──────────────────────────────────────────────────
