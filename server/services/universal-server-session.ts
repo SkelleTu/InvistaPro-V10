@@ -22,7 +22,7 @@ async function call(path: string, body: any) {
       "x-invista-server-key": serviceKey,
     },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(8000),
+    signal: AbortSignal.timeout(20000),
   });
   if (!response.ok) throw new Error(`Universal Server ${path} returned HTTP ${response.status}`);
   return await response.json() as any;
