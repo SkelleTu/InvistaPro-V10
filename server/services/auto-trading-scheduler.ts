@@ -584,8 +584,11 @@ export class AutoTradingScheduler {
       
       // BUSCAR TODOS OS ATIVOS DISPONÍVEIS DA API DA DERIV
       console.log('📊 [INIT] Buscando ativos disponíveis...');
-      const activeSymbols = await tempDerivAPI.getActiveSymbols();
-      console.log(`✅ [INIT] Recuperados ${activeSymbols.length} símbolos ativos da Deriv API`);
+      const discoveredSymbols = await tempDerivAPI.getActiveSymbols();
+      const activeSymbols = discoveredSymbols.filter((entry: any) =>
+        isAllowedProductionSymbol(typeof entry === 'string' ? entry : entry?.symbol)
+      );
+      console.log(`✅ [INIT] Recuperados ${activeSymbols.length} símbolos permitidos da Deriv API (de ${discoveredSymbols.length} descobertos)`);
       
       if (activeSymbols.length === 0) {
         console.warn('⚠️ [INIT] AVISO: getActiveSymbols() retornou 0 ativos!');
@@ -614,15 +617,9 @@ export class AutoTradingScheduler {
 
       // Fallback caso a API não retorne nenhum Crash/Boom (ex: conta demo limitada)
       // Inclui variantes com e sem underscore (Deriv usa ambos dependendo do ambiente)
-      const CRASH_BOOM_FALLBACK = [
-        'CRASH300',  'CRASH_300',
-        'CRASH500',  'CRASH_500',
-        'CRASH1000', 'CRASH_1000',
-        'BOOM300',   'BOOM_300',
-        'BOOM500',   'BOOM_500',
-        'BOOM1000',  'BOOM_1000',
-      ];
-      const crashBoomSymbols = crashBoomFromApi.length > 0 ? crashBoomFromApi : CRASH_BOOM_FALLBACK;
+      const CRASH_BOOM_FALLBACK = ['CRASH500', 'CRASH1000', 'BOOM500', 'BOOM1000'];
+      const crashBoomSymbols = (crashBoomFromApi.length > 0 ? crashBoomFromApi : CRASH_BOOM_FALLBACK)
+        .filter((symbol: string) => isAllowedProductionSymbol(symbol));
       console.log(`⚡ [INIT] Crash/Boom adicionados à coleta: ${crashBoomSymbols.join(', ')}`);
       
       // Desconectar a conexão temporária
@@ -631,10 +628,9 @@ export class AutoTradingScheduler {
       console.log('✅ [INIT] Desconectado');
       
       // Unir DigitDiff + Crash/Boom (sem duplicatas)
-      const baseSymbols = digitdiffSymbols.length > 0
-        ? digitdiffSymbols
-        : ['R_10', 'R_25', 'R_50', 'R_75', 'R_100']; // Fallback - sempre suportados
-      const symbolsToUse = Array.from(new Set([...baseSymbols, ...crashBoomSymbols]));
+      const baseSymbols = digitdiffSymbols.filter((symbol: string) => isAllowedProductionSymbol(symbol));
+      const symbolsToUse = Array.from(new Set([...baseSymbols, ...crashBoomSymbols]))
+        .filter((symbol: string) => isAllowedProductionSymbol(symbol));
       
       console.log(`🎯 [INIT] Usando ${symbolsToUse.length} símbolos para coleta (DigitDiff + Crash/Boom)`);
       console.log(`🎯 [INIT] Símbolos: ${symbolsToUse.join(', ')}`);
@@ -656,20 +652,18 @@ export class AutoTradingScheduler {
    * Login/heartbeat e o botão Play continuam sendo as únicas portas para execução financeira.
    */
   async prepareAtBoot(): Promise<void> {
-    if (this.isInitialized) return;
-    try {
-      console.log('🔥 [TRADING] Pré-aquecimento no boot: preparando análise e mercado, sem executar trades...');
-      await this.setupAnaliseNaturalSystem();
-      this.isInitialized = true;
-      console.log('✅ [TRADING] Motor pronto no boot. Nenhuma conta está armada e nenhum trade pode ser executado até Play.');
-    } catch (error) {
-      console.error('❌ [TRADING] Falha no pré-aquecimento do boot:', error);
-    }
+    // Boot is deliberately passive: no Deriv connection, market collection, or trading
+    // initialization occurs until an authenticated user explicitly presses Play.
+    console.log('🛡️ [TRADING] Boot passivo concluído. Coleta e trading aguardam ativação manual.');
   }
 
   /**
    * Arma o trading para um usuário autenticado após ação manual explícita.
    */
+  isUserTradingArmed(userId: string): boolean {
+    return !!userId && this.armedUserIds.has(String(userId));
+  }
+
   armUserTrading(userId: string): void {
     if (!userId) return;
     this.armedUserIds.add(String(userId));
@@ -1749,8 +1743,7 @@ export class AutoTradingScheduler {
           error: 'SEGURANÇA: dados reais de mercado da Deriv indisponíveis; execução bloqueada (dados simulados nunca são aceitos).'
         };
       }
-      }
-
+      
       // Verificação de qualidade dos dados
       // 🔥 AUMENTADO para 15 minutos para aguentar reconexões temporárias do WebSocket
       const lastUpdateTime = marketDataInfo.lastUpdate ? new Date(marketDataInfo.lastUpdate).getTime() : 0;
