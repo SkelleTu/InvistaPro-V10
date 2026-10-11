@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: invista-full-platform-audit-${{ github.ref }}
@@ -78,53 +78,13 @@ jobs:
           done < <(git ls-files -z)
           echo "Repository-wide scan completed: $count tracked files inspected."
 
-      - name: Synchronize and persist npm lockfile
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - name: Validate lockfile consistency
         shell: bash
         run: |
           set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          for attempt in 1 2 3 4 5; do
-            git fetch origin main
-            git reset --hard origin/main
-
-            npm install --package-lock-only --ignore-scripts
-            npm audit fix --package-lock-only --ignore-scripts || true
-            npm install --package-lock-only --ignore-scripts
-
-            if git diff --quiet -- package-lock.json; then
-              echo "package-lock.json already synchronized with current main."
-              exit 0
-            fi
-
-            git add package-lock.json
-            git commit -m "ci: synchronize npm lockfile"
-
-            if git push origin HEAD:main; then
-              echo "package-lock.json synchronized and pushed."
-              exit 0
-            fi
-
-            echo "Concurrent update detected; retrying from latest origin/main..."
-          done
-
-          echo "::error::Unable to synchronize package-lock.json after 5 retries."
-          exit 1
-
-      - name: Reject lockfile drift on pull requests
-        if: github.event_name == 'pull_request'
-        shell: bash
-        run: |
-          set -euo pipefail
-          if git diff --quiet -- package-lock.json; then
-            echo "package-lock.json is synchronized."
-          else
-            echo "::error::package-lock.json differs from package.json. Commit a synchronized lockfile with the PR."
-            git diff -- package-lock.json
-            exit 1
-          fi
+          npm install --package-lock-only --ignore-scripts --dry-run
+          git diff --exit-code -- package-lock.json
+          echo "package-lock.json is consistent with package.json."
 
       - name: Clean dependency install
         run: npm ci
