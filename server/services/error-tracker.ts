@@ -75,6 +75,7 @@ class ErrorTracker {
     category: DetailedError['category'] = 'UNKNOWN',
     context: Partial<ErrorContext> = {}
   ): string {
+    const safeContext = sanitizeSensitiveData(context) as Partial<ErrorContext>;
     const errorId = this.generateErrorId();
     const timestamp = new Date().toISOString();
 
@@ -88,7 +89,7 @@ class ErrorTracker {
       context: {
         timestamp,
         errorId,
-        ...context
+        ...safeContext
       },
       originalError: this.sanitizeError(error),
       solved: false
@@ -100,16 +101,16 @@ class ErrorTracker {
         level,
         category: category as any,
         message: detailedError.message,
-        requestId: String(context.requestHeaders?.['x-request-id'] || context.requestHeaders?.['rndr-id'] || ''),
-        method: context.requestMethod,
-        path: context.requestPath,
-        userId: context.userId,
-        userEmail: context.userEmail,
+        requestId: String(safeContext.requestHeaders?.['x-request-id'] || safeContext.requestHeaders?.['rndr-id'] || ''),
+        method: safeContext.requestMethod,
+        path: safeContext.requestPath,
+        userId: safeContext.userId,
+        userEmail: safeContext.userEmail,
         details: {
-          requestBody: context.requestBody,
-          requestQuery: context.requestQuery,
-          requestParams: context.requestParams,
-          sessionData: context.sessionData,
+          requestBody: safeContext.requestBody,
+          requestQuery: safeContext.requestQuery,
+          requestParams: safeContext.requestParams,
+          sessionData: safeContext.sessionData,
           errorId,
         },
       });
