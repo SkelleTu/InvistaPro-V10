@@ -74,7 +74,7 @@ const waitForEncryption = async () => {
   return false; // Permite continuar sem exit
 };
 
-console.log('🔍 Inicializando sistema avançado de error tracking...');
+console.log('🔍 Inicializando monitoramento de falhas...');
 console.log('🔥 Configurando handlers globais para exceções não tratadas...');
 // Os handlers globais já foram configurados automaticamente no constructor do errorTracker
 app.use(requestLogger);
