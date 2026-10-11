@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { observability } from './production-observability';
+import { sanitizeSensitiveData } from './sensitive-data-redaction';
 
 export interface ErrorContext {
   userId?: string;
@@ -252,35 +253,11 @@ class ErrorTracker {
   }
 
   private sanitizeRequestBody(body: any): any {
-    if (!body) return body;
-    
-    const sanitized = { ...body };
-    
-    // Remove campos sensíveis
-    const sensitiveFields = ['password', 'token', 'secret', 'key', 'auth', 'credential'];
-    sensitiveFields.forEach(field => {
-      if (sanitized[field]) {
-        sanitized[field] = '[REDACTED]';
-      }
-    });
-    
-    return sanitized;
+    return sanitizeSensitiveData(body);
   }
 
   private sanitizeHeaders(headers: any): any {
-    if (!headers) return headers;
-    
-    const sanitized = { ...headers };
-    
-    // Remove headers sensíveis
-    const sensitiveHeaders = ['authorization', 'cookie', 'x-api-key', 'x-auth-token'];
-    sensitiveHeaders.forEach(header => {
-      if (sanitized[header]) {
-        sanitized[header] = '[REDACTED]';
-      }
-    });
-    
-    return sanitized;
+    return sanitizeSensitiveData(headers);
   }
 
   // Método para capturar erros não tratados
