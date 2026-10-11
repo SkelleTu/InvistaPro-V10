@@ -55,7 +55,7 @@ jobs:
           headers=$(curl -sS -D - -o /dev/null "$PRODUCTION_URL/health")
           echo "$headers"
           echo "$headers" | grep -qi "^x-request-id:"
-          echo "$headers" | grep -qi "^x-observability-trace-id:" || true
+          echo "$headers" | grep -qi "^x-observability-trace-id:"
 
       - name: Verify deterministic API 404 instrumentation
         env:
