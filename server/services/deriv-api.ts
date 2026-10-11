@@ -989,54 +989,17 @@ export class DerivAPIService extends EventEmitter {
     return symbol; // Nunca remover underscore para DIGITDIFF
   }
 
-  private async createCallPutProposal(symbol: string, contractType: 'CALL' | 'PUT', duration: number, amount: number): Promise<{id: string, ask_price: number} | null> {    return new Promise((resolve) => {
-      const reqId = this.generateRequestId();
-      const normalizedSymbol = this.normalizeSymbol(symbol);
-      
-      const timer = setTimeout(() => {
-        this.removeListener('message', proposalHandler);
-        console.error(`⏰ Timeout ao criar proposta ${contractType} para ${normalizedSymbol}`);
-        resolve(null);
-      }, 15000);
-
-      const proposalHandler = (message: any) => {
-        if (message.req_id === reqId) {
-          clearTimeout(timer);
-          this.removeListener('message', proposalHandler);
-          if (message.proposal) {
-            console.log(`✅ Proposta ${contractType} criada: ID ${message.proposal.id} | Preço: $${message.proposal.ask_price}`);
-            resolve({
-              id: message.proposal.id,
-              ask_price: message.proposal.ask_price
-            });
-          } else {
-            console.error(`❌ Erro ao criar proposta ${contractType}:`, message.error);
-            resolve(null);
-          }
-        }
-      };
-
-      this.on('message', proposalHandler);
-
-      // Criar proposta CALL/PUT (Rise/Fall)
-      const proposalMessage = {
-        proposal: 1,
-        contract_type: contractType,
-        symbol: normalizedSymbol,
-        duration: duration,
-        duration_unit: 't',
-        currency: 'USD',
-        amount: amount,
-        basis: 'stake',
-        req_id: reqId
-      };
-
-      console.log(`📋 Criando proposta ${contractType}: ${normalizedSymbol} (${symbol}) | Duration: ${duration}t | Amount: $${amount}`);
-      this.sendMessage(proposalMessage);
-    });
+  private async createCallPutProposal(_symbol: string, _contractType: 'CALL' | 'PUT', _duration: number, _amount: number): Promise<{id: string, ask_price: number} | null> {
+    // CALL/PUT are disabled in production; do not even request a proposal.
+    console.warn('[DERIV_POLICY] CALL/PUT proposal blocked by production contract allowlist.');
+    return null;
   }
 
   private async createDigitDifferProposal(params: DigitDifferContract): Promise<{id: string, ask_price: number} | null> {
+    if (!isAllowedProductionSymbol(params.symbol) || !isValidProductionStake('DIGITDIFF', params.amount)) {
+      console.warn('[DERIV_POLICY] DIGITDIFF proposal blocked by production symbol/stake policy.');
+      return null;
+    }
     return new Promise((resolve) => {
       const reqId = this.generateRequestId();
       const normalizedSymbol = this.normalizeSymbol(params.symbol);
