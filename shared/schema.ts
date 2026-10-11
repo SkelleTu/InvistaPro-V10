@@ -867,5 +867,7 @@ export interface ModuleSlotConfig {
   enabled: boolean;
   stakeMode: 'ai' | 'fixed' | 'manual';
   fixedStake: number;
+  /** Independent account environment for this modality/module. Optional for legacy saved configs. */
+  accountType?: 'demo' | 'real';
 }
 
