@@ -53,6 +53,7 @@ import { asyncErrorHandler } from './middleware/error-handler';
 import { tpmSystem } from './services/tpm-system';
 import { getRegistryInfo } from './services/url-registry';
 import { registerUniversalSession, setUniversalTradingArmed, disconnectUniversalSession } from './services/universal-server-session';
+import { isAllowedProductionSymbol, isAllowedProductionContractType } from './services/production-symbol-policy';
 
 // PIX payload generator compatível com Santander
 function generatePixPayload(data: {
@@ -2635,6 +2636,16 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     const userId = req.user.id;
     const { modality } = req.params;
     const { symbol, aiStake = 0.35, contractType, duration, barrier, growthRate } = req.body;
+
+    // Validate policy before evaluating signals or opening any slot connections.
+    if (!isAllowedProductionSymbol(symbol) || !isAllowedProductionContractType(contractType)) {
+      return res.status(409).json({
+        success: false,
+        blocked: true,
+        code: 'PRODUCTION_POLICY_BLOCKED',
+        message: 'Execução bloqueada: informe símbolo permitido (BOOM500, BOOM1000, CRASH500 ou CRASH1000) e contrato ACCU ou DIGITDIFF.',
+      });
+    }
 
     // Verificar condições antes de disparar
     const { checkRajadaConditions, executeModulesTrade, recordModuleExecution } = await import('./services/module-executor');
