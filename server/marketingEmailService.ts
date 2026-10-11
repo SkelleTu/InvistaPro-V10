@@ -669,23 +669,10 @@ export const marketingManager = MarketingCampaignManager.getInstance();
 
 // Função para inicializar o sistema de marketing
 export function initializeMarketingSystem(): void {
-  console.log('🚀 Inicializando sistema de marketing InvistaPRO...');
-  
-  marketingManager.startAutomaticCampaigns();
-  
-  // Adicionar emails de teste automático
-  const testEmails = [
-    'investidor1@gmail.com',
-    'cliente.potencial@outlook.com', 
-    'futuro.milionario@yahoo.com'
-  ];
-  
-  testEmails.forEach(email => {
-    marketingManager.addToMarketingList(email);
-  });
-
-  console.log('✅ Sistema de marketing configurado e ativo!');
-  console.log('📧 Emails de marketing serão enviados 2-3x por semana automaticamente');
+  // Segurança: campanhas promocionais não podem ser iniciadas no boot nem usar
+  // destinatários de teste fixos. Só habilitar após fluxo explícito de consentimento,
+  // lista real autorizada e revisão do conteúdo/descadastro.
+  console.warn("[MARKETING] Campanhas automáticas desativadas; nenhum e-mail será enviado no boot.");
 }
 
 // Exportar função para adicionar usuários à lista de marketing
