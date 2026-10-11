@@ -1802,15 +1802,13 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
   });
 
-  app.post('/api/marketing/campaign', isAuthenticated, async (req: any, res) => {
-    if (!(req.user as any)?.isAdmin) return res.status(403).json({ message: 'Acesso restrito ao administrador' });
-    try {
-      await marketingManager.runMarketingCampaign();
-      res.json({ message: 'Campanha de marketing iniciada com sucesso' });
-    } catch (error) {
-      console.error('❌ Erro ao executar campanha de marketing:', error);
-      res.status(500).json({ message: 'Erro ao executar campanha' });
-    }
+  app.post('/api/marketing/campaign', isAuthenticated, async (_req: any, res) => {
+    // Campanhas permanecem bloqueadas até existir consentimento verificável,
+    // lista autorizada e conteúdo promocional revisado.
+    return res.status(410).json({
+      success: false,
+      message: 'Campanhas de marketing estão desativadas até a validação de consentimento e conteúdo.',
+    });
   });
 
   app.get('/api/marketing/stats', isAuthenticated, async (req: any, res) => {
