@@ -881,7 +881,7 @@ export class DerivAPIService extends EventEmitter {
 
   async buyDigitDifferContract(params: DigitDifferContract): Promise<DerivContractInfo | null> {
     if (!isAllowedProductionSymbol(params.symbol)) { console.error(`[DERIV_POLICY] Order blocked for disallowed symbol: ${params.symbol}`); return null; }
-    if (params.amount < 0.35) { console.error('[DERIV_POLICY] DIGITDIFF stake below minimum $0.35'); return null; }
+    if (!Number.isFinite(params.amount) || params.amount < 0.35) { console.error('[DERIV_POLICY] DIGITDIFF stake must be finite and at least $0.35'); return null; }
     this.requireAuthenticatedAccountSession('buy');
     if (!this.isConnected) return null;
 
@@ -1097,7 +1097,7 @@ export class DerivAPIService extends EventEmitter {
     if (!isAllowedProductionSymbol(params.symbol)) { console.error(`[DERIV_POLICY] Order blocked for disallowed symbol: ${params.symbol}`); return null; }
     if (!isAllowedProductionContractType(params.contract_type)) { console.error(`[DERIV_POLICY] Contract type blocked: ${params.contract_type}`); return null; }
     const minimumStake = minimumStakeForContract(params.contract_type);
-    if (params.amount < minimumStake) { console.error(`[DERIV_POLICY] Stake below minimum ${minimumStake} for ${params.contract_type}`); return null; }
+    if (!Number.isFinite(params.amount) || params.amount < minimumStake) { console.error(`[DERIV_POLICY] Stake must be finite and at least ${minimumStake} for ${params.contract_type}`); return null; }
     this.requireAuthenticatedAccountSession('buy');
     if (!this.isConnected) return null;
 
@@ -1306,7 +1306,8 @@ export class DerivAPIService extends EventEmitter {
   }): Promise<DerivContractInfo | null> {
     if (!isAllowedProductionSymbol(params.symbol)) { console.error(`[DERIV_POLICY] Order blocked for disallowed symbol: ${params.symbol}`); return null; }
     if (!isAllowedProductionContractType(params.contract_type)) { console.error(`[DERIV_POLICY] Contract type blocked: ${params.contract_type}`); return null; }
-    if (params.amount < minimumStakeForContract(params.contract_type)) { console.error(`[DERIV_POLICY] Stake below configured minimum for ${params.contract_type}`); return null; }
+    const minimumStake = minimumStakeForContract(params.contract_type);
+    if (!Number.isFinite(params.amount) || params.amount < minimumStake) { console.error(`[DERIV_POLICY] Stake must be finite and at least ${minimumStake} for ${params.contract_type}`); return null; }
     this.requireAuthenticatedAccountSession('buy');
     if (!this.isConnected) return null;
 
