@@ -16,6 +16,7 @@ import {
 } from '../services/crash-boom-spike-engine';
 import { brazilNewsService } from '../services/brazil-news-service';
 import { computeSyntheticGirassol } from '../services/synthetic-girassol';
+import { isAllowedProductionSymbol } from '../services/production-symbol-policy';
 import { consensusCache } from '../services/consensus-cache';
 
 
@@ -66,6 +67,28 @@ router.get('/signal', (req: Request, res: Response) => {
       });
     }
     const resolvedSymbol = symbolStr || config.symbols[0] || 'EURUSD';
+
+    // MT5 emits direct BUY/SELL positions, which are not ACCU/DIGITDIFF
+    // Deriv contracts. In production it must never authorize an order.
+    if (process.env.NODE_ENV === 'production') {
+      if (symbolStr && !isAllowedProductionSymbol(symbolStr)) {
+        return res.status(403).json({
+          action: 'HOLD',
+          executionEnabled: false,
+          code: 'PRODUCTION_SYMBOL_BLOCKED',
+          reason: 'Ativo fora da allowlist de produção.',
+          timestamp: Date.now(),
+        });
+      }
+      return res.json({
+        action: 'HOLD',
+        executionEnabled: false,
+        code: 'PRODUCTION_CONTRACT_TYPE_BLOCKED',
+        reason: 'Ordens diretas BUY/SELL do MT5 estão desativadas; a política permite somente contratos Deriv ACCU e DIGITDIFF.',
+        timestamp: Date.now(),
+      });
+    }
+
     const signal = metaTraderBridge.getPendingSignal(resolvedSymbol);
 
     // Se não há sinal pendente, gerar sob demanda (modo IA pura ou com candles)
@@ -899,6 +922,9 @@ router.post('/signal-with-indicators', async (req: Request, res: Response) => {
 router.get('/asset-profile/:symbol', (req: Request, res: Response) => {
   try {
     const symbol = req.params.symbol;
+    if (process.env.NODE_ENV === 'production' && !isAllowedProductionSymbol(symbol)) {
+      return res.status(403).json({ error: 'Ativo bloqueado pela allowlist de produção.' });
+    }
     const profile = metaTraderBridge.getDerivSyntheticProfile(symbol);
     const aiContext = metaTraderBridge.getAssetAIContext(symbol);
     const atr = metaTraderBridge.getSymbolATR(symbol);
@@ -941,6 +967,9 @@ router.post('/market-data', (req: Request, res: Response) => {
     const { symbol, candles } = req.body;
     if (!symbol || !Array.isArray(candles)) {
       return res.status(400).json({ error: 'symbol e candles são obrigatórios' });
+    }
+    if (process.env.NODE_ENV === 'production' && !isAllowedProductionSymbol(symbol)) {
+      return res.status(403).json({ error: 'Ativo bloqueado pela allowlist de produção.' });
     }
     metaTraderBridge.addMarketData(symbol, candles);
 
@@ -1806,6 +1835,9 @@ router.get('/spike-analysis', (req: Request, res: Response) => {
   try {
     const symbol = (req.query.symbol as string) || '';
     if (!symbol) return res.status(400).json({ error: 'symbol é obrigatório' });
+    if (process.env.NODE_ENV === 'production' && !isAllowedProductionSymbol(symbol)) {
+      return res.status(403).json({ error: 'Ativo bloqueado pela allowlist de produção.' });
+    }
     const candles = metaTraderBridge.getMarketData(symbol);
     const openPositions = metaTraderBridge.getOpenPositions();
     const openPos = openPositions.find((p: any) => p.symbol === symbol);
