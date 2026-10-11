@@ -117,24 +117,25 @@ router.post('/scheduler/:action', isAuthenticated, isTradingAuthorized, asyncErr
   const { action } = req.params;
   
   if (action === 'pause') {
-    console.log('⏸️ [SCHEDULER] Pausando scheduler via API...');
-    autoTradingScheduler.stopScheduler();
+    const userId = String(req.user.id);
+    console.log(`⏸️ [SCHEDULER] Pausando somente a sessão do usuário ${userId}...`);
+    await autoTradingScheduler.disarmUserTrading(userId);
     const status = autoTradingScheduler.getSchedulerStatus();
-    console.log('✅ [SCHEDULER] Scheduler pausado. Status:', status);
-    res.json({ 
-      message: 'Scheduler pausado com sucesso',
+    res.json({
+      message: 'Trading pausado para o usuário autenticado',
       schedulerActive: status.isRunning,
-      status 
+      status
     });
   } else if (action === 'resume') {
-    console.log('▶️ [SCHEDULER] Retomando scheduler via API...');
+    const userId = String(req.user.id);
+    console.log(`▶️ [SCHEDULER] Retomando somente a sessão do usuário ${userId}...`);
+    autoTradingScheduler.armUserTrading(userId);
     await autoTradingScheduler.startScheduler();
     const status = autoTradingScheduler.getSchedulerStatus();
-    console.log('✅ [SCHEDULER] Scheduler retomado. Status:', status);
-    res.json({ 
-      message: 'Scheduler retomado com sucesso',
+    res.json({
+      message: 'Trading retomado para o usuário autenticado',
       schedulerActive: status.isRunning,
-      status 
+      status
     });
   } else {
     res.status(400).json({ message: 'Ação inválida. Use "pause" ou "resume"' });
