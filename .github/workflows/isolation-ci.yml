@@ -138,6 +138,7 @@ jobs:
           HUGGINGFACE_API_KEY: "hf_audit"
           UNIVERSAL_SERVER_URL: "http://127.0.0.1:5123"
           INVISTA_UNIVERSAL_SERVER_KEY: "audit-universal-key"
+          INTERNAL_DESKTOP_CTRL_SECRET: "audit-only-internal-desktop-secret"
         run: |
           set -euo pipefail
           node dist/index.js > /tmp/invista-server.log 2>&1 &
