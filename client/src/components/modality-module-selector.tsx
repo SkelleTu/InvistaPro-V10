@@ -111,7 +111,7 @@ export default function ModalityModuleSelector({ modalityId }: Props) {
 
   const setFixedStake = (idx: number, val: string) => {
     const num = parseFloat(val);
-    if (!isNaN(num) && num > 0) {
+    if (!isNaN(num) && num >= 0.35) {
       setLocalConfigs(prev => prev.map(c => c.slotIndex === idx ? { ...c, fixedStake: num } : c));
       setDirty(true);
     }
@@ -243,11 +243,10 @@ export default function ModalityModuleSelector({ modalityId }: Props) {
                 <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold border-2 ${SLOT_RING[cfg.slotIndex]?.replace("ring-","border-") || "border-muted"} text-foreground shrink-0`}>
                   {cfg.slotIndex + 1}
                 </div>
-                {slot && (
-                  <Badge variant="outline" className={`text-[10px] py-0 px-1 shrink-0 ${slot.accountType === "real" ? "border-orange-500/40 text-orange-300" : "border-blue-500/40 text-blue-300"}`}>
-                    {slot.accountType?.toUpperCase()}
-                  </Badge>
-                )}
+                <Badge variant="outline" className={`text-[10px] py-0 px-1 shrink-0 ${cfg.accountType === "real" ? "border-orange-500/40 text-orange-300" : "border-blue-500/40 text-blue-300"}`}>
+                  {cfg.accountType.toUpperCase()}
+                </Badge>
+                {!hasMatchingToken(cfg.accountType) && <span className="text-[10px] text-red-300">sem token compatível</span>}
                 <div className="flex gap-1">
                   {STAKE_MODES.map(mode => (
                     <button
