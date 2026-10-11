@@ -173,7 +173,7 @@ class IsolatedAutoTradingScheduler {
     // scheduler is actually running. A timeout or worker error fails closed.
     await new Promise<void>((resolve, reject) => {
       let settled = false;
-      const timeout = setTimeout(() => finish(new Error("Play blocked: worker did not confirm the armed state within 30 seconds.")), 30000);
+      const timeout = setTimeout(() => finish(new Error("Play blocked: worker did not confirm the armed state within 90 seconds.")), 90000);
       const finish = (error?: Error) => {
         if (settled) return;
         settled = true;
