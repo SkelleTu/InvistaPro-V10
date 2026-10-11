@@ -12,6 +12,7 @@ interface ModuleSlotConfig {
   enabled: boolean;
   stakeMode: "ai" | "fixed" | "manual";
   fixedStake: number;
+  accountType: "demo" | "real";
 }
 
 interface SlotInfo {
@@ -37,7 +38,7 @@ interface Props { modalityId: string; }
 export default function ModalityModuleSelector({ modalityId }: Props) {
   const { toast } = useToast();
   const [localConfigs, setLocalConfigs] = useState<ModuleSlotConfig[]>(
-    Array.from({ length: 10 }, (_, i) => ({ slotIndex: i, enabled: false, stakeMode: "ai" as const, fixedStake: 0.35 }))
+    Array.from({ length: 10 }, (_, i) => ({ slotIndex: i, enabled: false, stakeMode: "ai" as const, fixedStake: 0.35, accountType: "demo" as const }))
   );
   const [dirty, setDirty] = useState(false);
 
@@ -58,14 +59,23 @@ export default function ModalityModuleSelector({ modalityId }: Props) {
     if (!isLoading) {
       setLocalConfigs(
         Array.from({ length: 10 }, (_, i) => {
-          const saved = (savedConfigs as ModuleSlotConfig[]).find(c => c.slotIndex === i);
-          return saved ?? { slotIndex: i, enabled: false, stakeMode: "ai" as const, fixedStake: 0.35 };
+          const saved = (savedConfigs as Partial<ModuleSlotConfig>[]).find(c => c.slotIndex === i);
+          const slotAccountType = slotData?.slots?.find(s => s.slotIndex === i && s.isActive)?.accountType;
+          return {
+            slotIndex: i,
+            enabled: saved?.enabled ?? false,
+            stakeMode: saved?.stakeMode ?? "ai",
+            fixedStake: saved?.fixedStake ?? 0.35,
+            accountType: saved?.accountType === "real" || saved?.accountType === "demo"
+              ? saved.accountType
+              : slotAccountType === "real" ? "real" : "demo",
+          } as ModuleSlotConfig;
         })
       );
       setDirty(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [savedKey, isLoading]);
+  }, [savedKey, isLoading, slotData]);
 
   const saveMutation = useMutation({
     mutationFn: (configs: ModuleSlotConfig[]) =>
@@ -85,6 +95,7 @@ export default function ModalityModuleSelector({ modalityId }: Props) {
 
   const configuredSlots = slotData?.slots ?? [];
   const hasSlot = (idx: number) => configuredSlots.some(s => s.slotIndex === idx && s.isActive);
+  const hasMatchingToken = (accountType: "demo" | "real") => configuredSlots.some(s => s.isActive && s.accountType === accountType);
   const enabledCount = localConfigs.filter(c => c.enabled).length;
   const tokenTotal = configuredSlots.filter(s => s.isActive).length;
 
@@ -104,6 +115,11 @@ export default function ModalityModuleSelector({ modalityId }: Props) {
       setLocalConfigs(prev => prev.map(c => c.slotIndex === idx ? { ...c, fixedStake: num } : c));
       setDirty(true);
     }
+  };
+
+  const setAccountType = (idx: number, accountType: "demo" | "real") => {
+    setLocalConfigs(prev => prev.map(c => c.slotIndex === idx ? { ...c, accountType } : c));
+    setDirty(true);
   };
 
   if (isLoading) {
@@ -181,6 +197,29 @@ export default function ModalityModuleSelector({ modalityId }: Props) {
             </div>
           );
         })}
+      </div>
+
+      <div className="space-y-1 rounded-lg bg-black/10 p-2">
+        <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wide">Conta Deriv independente por módulo</p>
+        <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
+          {localConfigs.map(cfg => (
+            <div key={cfg.slotIndex} className="flex items-center gap-2 min-w-0">
+              <span className="text-[10px] text-muted-foreground shrink-0">Módulo {cfg.slotIndex + 1}</span>
+              <select
+                aria-label={"Conta Deriv do módulo " + (cfg.slotIndex + 1)}
+                className="h-7 min-w-0 flex-1 rounded border border-border bg-background px-1.5 text-[10px] text-foreground"
+                value={cfg.accountType}
+                onChange={e => setAccountType(cfg.slotIndex, e.target.value as "demo" | "real")}
+                data-testid={"account-type-" + modalityId + "-" + cfg.slotIndex}
+              >
+                <option value="demo">DEMO</option>
+                <option value="real">REAL</option>
+              </select>
+              <span title={hasMatchingToken(cfg.accountType) ? "Token compatível disponível" : "Nenhum token ativo deste tipo"} className={"w-2 h-2 rounded-full shrink-0 " + (hasMatchingToken(cfg.accountType) ? "bg-green-400" : "bg-red-400")} />
+            </div>
+          ))}
+        </div>
+        <p className="text-[10px] text-muted-foreground">A seleção é salva separadamente por modalidade. Sem token ativo do tipo escolhido, o módulo não executa nem troca silenciosamente entre DEMO e REAL.</p>
       </div>
 
       {/* Legenda rápida */}
