@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 export type DerivAccountType = 'demo' | 'real';
 
 export interface ModuleTokenCandidate {
@@ -28,4 +30,16 @@ export function selectModuleTokenForAccount<T extends ModuleTokenCandidate>(
     ?? matching
       .filter(token => token.slotIndex !== null)
       .sort((a, b) => (a.slotIndex ?? Number.MAX_SAFE_INTEGER) - (b.slotIndex ?? Number.MAX_SAFE_INTEGER))[0];
+}
+
+/** Opaque cache identity; the raw API token is never included in keys or logs. */
+export function moduleSessionCacheKey(
+  userId: string,
+  modality: string,
+  slotIndex: number,
+  accountType: DerivAccountType,
+  token: string,
+): string {
+  const fingerprint = createHash('sha256').update(token).digest('hex').slice(0, 16);
+  return userId + ':' + modality + ':' + slotIndex + ':' + accountType + ':' + fingerprint;
 }
