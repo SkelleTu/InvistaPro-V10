@@ -1646,8 +1646,8 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       console.log('🔍 [CDI] Buscando CDI diário no Banco Central (SGS 4389)...');
 
       const [cdiResponse, selicResponse] = await Promise.all([
-        fetch('https://api.bcb.gov.br/dados/serie/bcdata.sgs.4389/dados/ultimos/240?formato=json'),
-        fetch('https://api.bcb.gov.br/dados/serie/bcdata.sgs.11/dados/ultimos/240?formato=json')
+        fetch('https://api.bcb.gov.br/dados/serie/bcdata.sgs.4389/dados/ultimos/20?formato=json'),
+        fetch('https://api.bcb.gov.br/dados/serie/bcdata.sgs.11/dados/ultimos/20?formato=json')
       ]);
 
       if (!cdiResponse.ok) throw new Error(`BCB CDI API error: ${cdiResponse.status}`);
