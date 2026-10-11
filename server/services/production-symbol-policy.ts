@@ -30,11 +30,6 @@ export function assertAllowedProductionSymbol(symbol: unknown, operation: string
 export const ALLOWED_PRODUCTION_CONTRACT_TYPES = new Set([
   "ACCU",
   "DIGITDIFF",
-  "DIGITMATCH",
-  "DIGITEVEN",
-  "DIGITODD",
-  "DIGITOVER",
-  "DIGITUNDER",
 ]);
 
 export function isAllowedProductionContractType(contractType: unknown): boolean {
