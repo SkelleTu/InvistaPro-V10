@@ -462,13 +462,7 @@ app.use((req, res, next) => {
 
   // Executar inicializações pós-listen de forma assíncrona
   (async () => {
-    // 🇧🇷 INICIAR MONITORAMENTO DE NOTICIÁRIO BRASILEIRO
-    try {
-      brazilNewsService.startAutoUpdate();
-    } catch (brazilErr: any) {
-      console.warn('⚠️ [BrazilNews] Falha ao iniciar serviço de notícias BR:', brazilErr?.message);
-    }
-
+    // BrazilNews is started by the per-user manual Play path, never automatically at boot.
     // 🛑 TRADING NÃO INICIA NO BOOT.
     // Scheduler, coleta Deriv e sincronização só podem ser ativados por ação manual
     // de um usuário autenticado. Isso impede processos órfãos e tempestades de dados.
