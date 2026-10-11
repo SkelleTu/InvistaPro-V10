@@ -4,7 +4,7 @@ import { errorTracker } from './error-tracker';
 import { dualStorage as storage } from '../storage-dual';
 import { resilienceSupervisor } from './resilience-supervisor';
 import { connectDerivAccount, type DerivAccountContext } from './deriv-account-gateway';
-import { isAllowedProductionSymbol, isAllowedProductionContractType, minimumStakeForContract } from './production-symbol-policy';
+import { isAllowedProductionSymbol, isAllowedProductionContractType, minimumStakeForContract, isValidProductionStake } from './production-symbol-policy';
 
 // ☠️ PROTOCOLO DE EXECUÇÃO IMEDIATA — tolerância zero para ativos criminosos
 // Qualquer símbolo que viole as regras é executado aqui: blacklistado, logado e morto.
@@ -881,7 +881,7 @@ export class DerivAPIService extends EventEmitter {
 
   async buyDigitDifferContract(params: DigitDifferContract): Promise<DerivContractInfo | null> {
     if (!isAllowedProductionSymbol(params.symbol)) { console.error(`[DERIV_POLICY] Order blocked for disallowed symbol: ${params.symbol}`); return null; }
-    if (!Number.isFinite(params.amount) || params.amount < 0.35) { console.error('[DERIV_POLICY] DIGITDIFF stake must be finite and at least $0.35'); return null; }
+    if (!isValidProductionStake('DIGITDIFF', params.amount)) { console.error('[DERIV_POLICY] DIGITDIFF stake must be finite and at least $0.35'); return null; }
     this.requireAuthenticatedAccountSession('buy');
     if (!this.isConnected) return null;
 
@@ -1097,7 +1097,7 @@ export class DerivAPIService extends EventEmitter {
     if (!isAllowedProductionSymbol(params.symbol)) { console.error(`[DERIV_POLICY] Order blocked for disallowed symbol: ${params.symbol}`); return null; }
     if (!isAllowedProductionContractType(params.contract_type)) { console.error(`[DERIV_POLICY] Contract type blocked: ${params.contract_type}`); return null; }
     const minimumStake = minimumStakeForContract(params.contract_type);
-    if (!Number.isFinite(params.amount) || params.amount < minimumStake) { console.error(`[DERIV_POLICY] Stake must be finite and at least ${minimumStake} for ${params.contract_type}`); return null; }
+    if (!isValidProductionStake(params.contract_type, params.amount)) { console.error(`[DERIV_POLICY] Stake must be finite and at least ${minimumStake} for ${params.contract_type}`); return null; }
     this.requireAuthenticatedAccountSession('buy');
     if (!this.isConnected) return null;
 
@@ -1307,7 +1307,7 @@ export class DerivAPIService extends EventEmitter {
     if (!isAllowedProductionSymbol(params.symbol)) { console.error(`[DERIV_POLICY] Order blocked for disallowed symbol: ${params.symbol}`); return null; }
     if (!isAllowedProductionContractType(params.contract_type)) { console.error(`[DERIV_POLICY] Contract type blocked: ${params.contract_type}`); return null; }
     const minimumStake = minimumStakeForContract(params.contract_type);
-    if (!Number.isFinite(params.amount) || params.amount < minimumStake) { console.error(`[DERIV_POLICY] Stake must be finite and at least ${minimumStake} for ${params.contract_type}`); return null; }
+    if (!isValidProductionStake(params.contract_type, params.amount)) { console.error(`[DERIV_POLICY] Stake must be finite and at least ${minimumStake} for ${params.contract_type}`); return null; }
     this.requireAuthenticatedAccountSession('buy');
     if (!this.isConnected) return null;
 
