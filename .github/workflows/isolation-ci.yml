@@ -82,7 +82,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npm install --package-lock-only --ignore-scripts --dry-run
+          npm install --package-lock-only --ignore-scripts
           git diff --exit-code -- package-lock.json
           echo "package-lock.json is consistent with package.json."
 
