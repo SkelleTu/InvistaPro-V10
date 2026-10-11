@@ -1,7 +1,18 @@
 import { fork, type ChildProcess } from "node:child_process";
 import path from "node:path";
 import crypto from "node:crypto";
-import { brazilNewsService } from "./brazil-news-service";
+let brazilNewsServicePromise: Promise<typeof import("./brazil-news-service")> | null = null;
+
+async function getBrazilNewsService() {
+  brazilNewsServicePromise ??= import("./brazil-news-service");
+  return (await brazilNewsServicePromise).brazilNewsService;
+}
+
+async function stopBrazilNewsUpdatesIfIdle(hasArmedUsers: boolean) {
+  if (hasArmedUsers) return;
+  const service = await getBrazilNewsService();
+  service.stopAutoUpdate();
+}
 
 type UserId = string;
 type WorkerStatus = "ready" | "armed" | "stopped" | "disconnected";
@@ -120,7 +131,8 @@ class IsolatedAutoTradingScheduler {
 
   async startSchedulerForUser(userId: string): Promise<void> {
     this.armUserTrading(userId);
-    brazilNewsService.startAutoUpdate();
+    const service = await getBrazilNewsService();
+    service.startAutoUpdate();
   }
 
   async startScheduler(): Promise<void> {
@@ -148,13 +160,13 @@ class IsolatedAutoTradingScheduler {
   async disarmUserTrading(userId: string): Promise<void> {
     const runtime = this.runtimes.get(String(userId));
     if (!runtime) {
-      if (this.getArmedUserIds().length === 0) brazilNewsService.stopAutoUpdate();
+      await stopBrazilNewsUpdatesIfIdle(this.getArmedUserIds().length > 0);
       return;
     }
     runtime.armed = false;
     runtime.status = "stopped";
     if (runtime.worker.connected) runtime.worker.send({ type: "disarm", userId: runtime.userId, sessionId: runtime.sessionId });
-    if (this.getArmedUserIds().length === 0) brazilNewsService.stopAutoUpdate();
+    await stopBrazilNewsUpdatesIfIdle(this.getArmedUserIds().length > 0);
   }
 
   async stopSchedulerForUser(userId: string): Promise<void> {
@@ -214,7 +226,7 @@ class IsolatedAutoTradingScheduler {
       runtime.armed = false;
       runtime.status = "stopped";
     }
-    if (this.getArmedUserIds().length === 0) brazilNewsService.stopAutoUpdate();
+    await stopBrazilNewsUpdatesIfIdle(this.getArmedUserIds().length > 0);
   }
 
   getAssetHealthStatus() {
