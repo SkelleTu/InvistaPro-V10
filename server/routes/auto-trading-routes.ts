@@ -487,57 +487,30 @@ router.get('/diagnose', isAuthenticated, isTradingAuthorized, asyncErrorHandler(
   res.json(diagnosis);
 }));
 
-// Endpoint de correção automática
+// Endpoint de correção automática: somente diagnóstico, nunca remove travas nem reativa trading.
 router.post('/fix-auto', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
-  const userId = req.user.id;
-  const fixes: string[] = [];
-  
-  // 1. Verificar e corrigir parada de emergência
+  const userId = String(req.user.id);
+  const [userConfig, derivToken] = await Promise.all([
+    storage.getUserTradeConfig(userId),
+    storage.getUserDerivToken(userId),
+  ]);
   const securityStatus = autoTradingScheduler.getSecurityStatus();
-  if (securityStatus.emergencyStop) {
-    const disabled = autoTradingScheduler.disableEmergencyStop(req.user.email);
-    if (disabled) {
-      fixes.push('✅ Parada de emergência desativada');
-    } else {
-      fixes.push('⚠️ Não foi possível desativar parada de emergência (permissão negada)');
-    }
-  }
-  
-  // 2. Verificar e corrigir aprovação admin
-  if (securityStatus.adminApprovalRequired) {
-    const disabled = autoTradingScheduler.disableAdminApproval(req.user.email);
-    if (disabled) {
-      fixes.push('✅ Aprovação administrativa removida');
-    } else {
-      fixes.push('⚠️ Não foi possível remover aprovação administrativa (permissão negada)');
-    }
-  }
-  
-  // 3. Verificar configuração do usuário
-  const userConfig = await storage.getUserTradeConfig(userId);
-  if (!userConfig) {
-    // Criar configuração padrão
-    await storage.updateTradeConfig(userId, 'test_sem_limites');
-    fixes.push('✅ Configuração padrão criada (test_sem_limites)');
-  } else if (!userConfig.isActive) {
-    // Reativar configuração existente
-    await storage.updateTradeConfig(userId, userConfig.mode);
-    fixes.push(`✅ Configuração reativada (${userConfig.mode})`);
-  }
-  
-  // 4. Resetar sessões bloqueadas
-  autoTradingScheduler.resetBlockedSessions();
-  fixes.push('✅ Sessões bloqueadas resetadas');
-  
-  // 5. Aumentar limites para demo
-  autoTradingScheduler.increaseLimitsForDemo();
-  fixes.push('✅ Limites aumentados para modo demo');
-  
-  res.json({
-    success: true,
-    corrigoesAplicadas: fixes.length,
-    detalhes: fixes,
-    proximoPasso: 'Aguarde 10-30 segundos para o sistema começar a executar operações automaticamente'
+  const userArmed = autoTradingScheduler.isUserTradingArmed(userId);
+  const blockers: string[] = [];
+  if (securityStatus.emergencyStop) blockers.push('Parada de emergência ativa; exige revisão administrativa explícita.');
+  if (securityStatus.adminApprovalRequired) blockers.push('Aprovação administrativa obrigatória.');
+  if (!userConfig || !userConfig.isActive) blockers.push('Configuração do usuário ausente ou inativa.');
+  if (!derivToken || !derivToken.isActive) blockers.push('Token Deriv do usuário ausente ou inativo.');
+  if (!userArmed) blockers.push('Trading não foi ativado manualmente pelo usuário.');
+
+  return res.status(409).json({
+    success: false,
+    automaticChangesApplied: 0,
+    message: 'Correção automática desativada por segurança: este endpoint não pode remover travas, reativar configurações nem aumentar limites.',
+    userArmed,
+    blockers,
+    nextStep: 'Corrija os bloqueios identificados e use o controle Play explicitamente. Nenhuma operação foi iniciada.',
+    timestamp: new Date().toISOString(),
   });
 }));
 
