@@ -211,6 +211,7 @@ class IsolatedAutoTradingScheduler {
       runtime.armed = false;
       runtime.status = "stopped";
     }
+    if (this.getArmedUserIds().length === 0) brazilNewsService.stopAutoUpdate();
   }
 
   getAssetHealthStatus() {
@@ -231,6 +232,7 @@ class IsolatedAutoTradingScheduler {
       if (runtime.worker.connected) runtime.worker.kill("SIGTERM");
     }, 5000).unref();
     this.runtimes.delete(id);
+    if (this.getArmedUserIds().length === 0) brazilNewsService.stopAutoUpdate();
     console.log(`🔌 [USER-RUNTIME] destruído | user=${id} | session=${runtime.sessionId}`);
   }
 }
