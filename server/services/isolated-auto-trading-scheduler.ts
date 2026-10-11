@@ -9,7 +9,7 @@ async function getBrazilNewsService() {
 }
 
 async function stopBrazilNewsUpdatesIfIdle(hasArmedUsers: boolean) {
-  if (hasArmedUsers) return;
+  if (hasArmedUsers || !brazilNewsServicePromise) return;
   const service = await getBrazilNewsService();
   service.stopAutoUpdate();
 }
