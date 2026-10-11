@@ -36,21 +36,22 @@ router.get('/status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(as
   const activeConfigsCount = userActiveConfigs.length;
 
   // O sistema só está realmente operando se: scheduler rodando + token configurado + configurações ativas
-  const canExecuteTrades = schedulerStatus.isRunning && derivTokenConfigured && activeConfigsCount > 0;
+  const canExecuteTrades = schedulerActiveForUser && derivTokenConfigured && activeConfigsCount > 0;
 
   // Bloqueios que impedem trading
   const tradingBlockers: string[] = [];
+  if (!schedulerActiveForUser) tradingBlockers.push('Trading não ativado para esta sessão');
   if (!derivTokenConfigured) tradingBlockers.push('Token Deriv não configurado');
   if (activeConfigsCount === 0) tradingBlockers.push('Nenhuma configuração de trading ativa');
 
   res.json({
-    schedulerActive: schedulerStatus.isRunning,
+    schedulerActive: schedulerActiveForUser,
     canExecuteTrades,
     derivTokenConfigured,
     activeConfigsCount,
     tradingBlockers,
     schedulerStatus,
-    stats,
+    stats: { ...stats, activeSessions: activeSessions.length, isolatedUsers: activeSessions.length > 0 ? 1 : 0, armedUsers: schedulerActiveForUser ? 1 : 0 },
     activeSessions: activeSessions.map(session => ({
       userId: session.userId,
       configId: session.configId,
