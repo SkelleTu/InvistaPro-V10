@@ -2582,7 +2582,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       return res.status(400).json({ message: 'slotConfigs deve ser um array com no máximo 10 módulos' });
     }
     const seenSlots = new Set<number>();
-    const normalizedConfigs = [];
+    const normalizedConfigs: Array<{ slotIndex: number; enabled: boolean; stakeMode: 'ai' | 'fixed' | 'manual'; fixedStake: number; accountType: 'demo' | 'real' }> = [];
     for (const raw of slotConfigs) {
       if (!raw || typeof raw !== 'object' ||
           !Number.isInteger(raw.slotIndex) || raw.slotIndex < 0 || raw.slotIndex > 9 ||
