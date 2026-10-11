@@ -89,7 +89,7 @@ class IsolatedAutoTradingScheduler {
     runtime.status = "ready";
 
     let settled = false;
-    let timeout: ReturnType<typeof setTimeout>;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
     let resolveReady!: () => void;
     let rejectReady!: (error: Error) => void;
     const readyPromise = new Promise<void>((resolve, reject) => {
@@ -101,7 +101,7 @@ class IsolatedAutoTradingScheduler {
     const settle = (error?: Error) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timeout);
+      if (timeout) clearTimeout(timeout);
       if (error) rejectReady(error);
       else resolveReady();
     };
@@ -184,6 +184,11 @@ class IsolatedAutoTradingScheduler {
           runtime.status = "stopped";
           try {
             if (worker.connected) worker.send({ type: "disarm", userId: runtime.userId, sessionId: runtime.sessionId });
+          } catch {}
+          // A worker that cannot confirm Play must not remain alive in an
+          // ambiguous state where it could trade without a confirmed response.
+          try {
+            if (worker.connected) worker.kill("SIGTERM");
           } catch {}
           reject(error);
         } else {
