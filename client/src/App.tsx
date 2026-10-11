@@ -4,28 +4,28 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Loader2 } from "lucide-react";
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { initClientObservability } from "./lib/observability";
 import NotFound from "@/pages/not-found";
-import AuthPage from "@/pages/auth-page";
-import ResetPasswordPage from "@/pages/reset-password-page";
-import Home from "@/pages/home";
-import Landing from "@/pages/landing";
-import PendingApprovalPage from "./pages/pending-approval";
-import TermosUso from "@/pages/termos-uso";
-import PoliticaPrivacidade from "@/pages/politica-privacidade";
-import PoliticaCookies from "@/pages/politica-cookies";
-import LGPD from "@/pages/lgpd";
-import QuemSomos from "@/pages/quem-somos";
-import ComoFunciona from "@/pages/como-funciona";
-import Seguranca from "@/pages/seguranca";
-import Transparencia from "@/pages/transparencia";
-import Resultados from "@/pages/resultados";
-import TecnologiaFinanceira from "@/pages/tecnologia-financeira";
-import TradingSystemPage from "@/pages/trading-system";
-import MetaTraderPage from "@/pages/metatrader-page";
-import MetaTrader5Page from "@/pages/metatrader5-page";
-import KeepAliveSetup from "@/pages/KeepAliveSetup";
+const AuthPage = lazy(() => import("@/pages/auth-page"));
+const ResetPasswordPage = lazy(() => import("@/pages/reset-password-page"));
+const Home = lazy(() => import("@/pages/home"));
+const Landing = lazy(() => import("@/pages/landing"));
+const PendingApprovalPage = lazy(() => import("./pages/pending-approval"));
+const TermosUso = lazy(() => import("@/pages/termos-uso"));
+const PoliticaPrivacidade = lazy(() => import("@/pages/politica-privacidade"));
+const PoliticaCookies = lazy(() => import("@/pages/politica-cookies"));
+const LGPD = lazy(() => import("@/pages/lgpd"));
+const QuemSomos = lazy(() => import("@/pages/quem-somos"));
+const ComoFunciona = lazy(() => import("@/pages/como-funciona"));
+const Seguranca = lazy(() => import("@/pages/seguranca"));
+const Transparencia = lazy(() => import("@/pages/transparencia"));
+const Resultados = lazy(() => import("@/pages/resultados"));
+const TecnologiaFinanceira = lazy(() => import("@/pages/tecnologia-financeira"));
+const TradingSystemPage = lazy(() => import("@/pages/trading-system"));
+const MetaTraderPage = lazy(() => import("@/pages/metatrader-page"));
+const MetaTrader5Page = lazy(() => import("@/pages/metatrader5-page"));
+const KeepAliveSetup = lazy(() => import("@/pages/KeepAliveSetup"));
 
 import { useAuth } from "@/hooks/useAuth";
 import { ThemeProvider } from "@/contexts/ThemeContext";
@@ -126,7 +126,9 @@ function AppContent() {
 
   return (
     <>
-      <Router />
+      <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>}>
+        <Router />
+      </Suspense>
       {showAiAssistant && <AiAssistant />}
     </>
   );
