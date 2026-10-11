@@ -22,12 +22,20 @@ const isTradingAuthorized = (req: any, res: any, next: any) => {
 // Obter status do scheduler
 router.get('/status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
   const userId = req.user.id;
-  const stats = autoTradingScheduler.getSessionStats();
   const activeSessions = autoTradingScheduler.getActiveSessions().filter((session: any) => String(session.userId) === String(userId));
-  const schedulerStatus = autoTradingScheduler.getSchedulerStatus();
+  const globalSchedulerStatus = autoTradingScheduler.getSchedulerStatus();
   const schedulerActiveForUser = autoTradingScheduler.isUserTradingArmed(String(userId)) &&
     activeSessions.some((session: any) => session.isActive) &&
-    !schedulerStatus.emergencyStop;
+    !globalSchedulerStatus.emergencyStop;
+  // Expose only this user's session state; never leak global activity logs or other users' totals.
+  const schedulerStatus = {
+    isRunning: schedulerActiveForUser,
+    hasActiveSessions: activeSessions.some((session: any) => session.isActive),
+    emergencyStop: globalSchedulerStatus.emergencyStop,
+    isInitialized: globalSchedulerStatus.isInitialized,
+    currentPhase: schedulerActiveForUser ? globalSchedulerStatus.currentPhase : 'AGUARDANDO_PLAY',
+    currentPhaseDetail: schedulerActiveForUser ? globalSchedulerStatus.currentPhaseDetail : 'Nenhuma atividade ativa para este usuário',
+  };
 
   // Verificar se o token Deriv está configurado para este usuário
   const derivToken = await storage.getUserDerivToken(userId);
@@ -35,7 +43,7 @@ router.get('/status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(as
 
   // Verificar se há configurações ativas no banco
   const activeConfigs = await storage.getActiveTradeConfigurations();
-  const userActiveConfigs = activeConfigs.filter((c: any) => c.userId === userId);
+  const userActiveConfigs = activeConfigs.filter((c: any) => String(c.userId) === String(userId));
   const activeConfigsCount = userActiveConfigs.length;
 
   // O sistema só está realmente operando se: scheduler rodando + token configurado + configurações ativas
@@ -54,7 +62,13 @@ router.get('/status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(as
     activeConfigsCount,
     tradingBlockers,
     schedulerStatus,
-    stats: { ...stats, activeSessions: activeSessions.length, isolatedUsers: activeSessions.length > 0 ? 1 : 0, armedUsers: schedulerActiveForUser ? 1 : 0 },
+    stats: {
+      totalSessions: activeSessions.length,
+      totalExecutedOperations: activeSessions.reduce((sum: number, session: any) => sum + Number(session.executedOperations || 0), 0),
+      activeSessions: activeSessions.length,
+      isolatedUsers: activeSessions.length > 0 ? 1 : 0,
+      armedUsers: schedulerActiveForUser ? 1 : 0,
+    },
     activeSessions: activeSessions.map(session => ({
       userId: session.userId,
       configId: session.configId,
@@ -127,19 +141,37 @@ router.post('/scheduler/:action', isAuthenticated, isTradingAuthorized, asyncErr
     const status = autoTradingScheduler.getSchedulerStatus();
     res.json({
       message: 'Trading pausado para o usuário autenticado',
-      schedulerActive: status.isRunning,
-      status
+      schedulerActive: autoTradingScheduler.isUserTradingArmed(userId) && status.isRunning && !status.emergencyStop,
+      status: {
+        isRunning: autoTradingScheduler.isUserTradingArmed(userId) && status.isRunning && !status.emergencyStop,
+        emergencyStop: status.emergencyStop,
+        isInitialized: status.isInitialized,
+      }
     });
   } else if (action === 'resume') {
     const userId = String(req.user.id);
+    const [userConfig, derivToken] = await Promise.all([
+      storage.getUserTradeConfig(userId),
+      storage.getUserDerivToken(userId),
+    ]);
+    if (!userConfig || !userConfig.isActive || !derivToken || !derivToken.isActive) {
+      return res.status(409).json({
+        message: 'Play bloqueado: configure uma estratégia ativa e um token Deriv ativo para este usuário.',
+        schedulerActive: false,
+      });
+    }
     console.log(`▶️ [SCHEDULER] Retomando somente a sessão do usuário ${userId}...`);
     autoTradingScheduler.armUserTrading(userId);
     await autoTradingScheduler.startScheduler();
     const status = autoTradingScheduler.getSchedulerStatus();
     res.json({
-      message: 'Trading retomado para o usuário autenticado',
-      schedulerActive: status.isRunning,
-      status
+      message: 'Solicitação de Play processada para o usuário autenticado',
+      schedulerActive: autoTradingScheduler.isUserTradingArmed(userId) && !status.emergencyStop,
+      status: {
+        isRunning: autoTradingScheduler.isUserTradingArmed(userId) && status.isRunning && !status.emergencyStop,
+        emergencyStop: status.emergencyStop,
+        isInitialized: status.isInitialized,
+      }
     });
   } else {
     res.status(400).json({ message: 'Ação inválida. Use "pause" ou "resume"' });
@@ -400,11 +432,12 @@ router.post('/increase-demo-limits', isAuthenticated, isTradingAuthorized, async
 
 // Limpar todas as sessões ativas - TEMPORARIAMENTE SEM AUTH PARA DEMO
 router.post('/clear-all-sessions', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
-  const success = autoTradingScheduler.clearAllSessions();
+  const userId = String(req.user.id);
+  await autoTradingScheduler.disarmUserTrading(userId);
   
   res.json({
-    success,
-    message: 'Todas as sessões ativas foram removidas',
+    success: true,
+    message: 'Somente as sessões do usuário autenticado foram removidas',
     timestamp: new Date().toISOString(),
     actionBy: req.user.email
   });
@@ -432,7 +465,7 @@ router.get('/diagnose', isAuthenticated, isTradingAuthorized, asyncErrorHandler(
   const securityStatus = autoTradingScheduler.getSecurityStatus();
   
   // 4. Verificar sessões ativas
-  const activeSessions = autoTradingScheduler.getActiveSessions();
+  const activeSessions = autoTradingScheduler.getActiveSessions().filter((session: any) => String(session.userId) === String(userId));
   
   // 5. Buscar operações recentes
   const recentOps = await storage.getUserTradeOperations(userId, 10);
