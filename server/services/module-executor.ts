@@ -9,7 +9,9 @@
  * É a "central de amplificação" da InvistaPRO.
  */
 
+import { createHash } from 'node:crypto';
 import { DerivAPIService } from './deriv-api';
+import { selectModuleTokenForAccount, type DerivAccountType } from './module-account-routing';
 import { dualStorage as storage } from '../storage-dual';
 import { isAllowedProductionSymbol, isAllowedProductionContractType, isValidProductionStake } from './production-symbol-policy';
 
@@ -18,6 +20,7 @@ export interface ModuleSlotConfig {
   enabled: boolean;
   stakeMode: 'ai' | 'fixed' | 'manual';
   fixedStake: number;
+  accountType?: DerivAccountType;
 }
 
 export interface ModuleExecutionParams {
@@ -52,7 +55,8 @@ export interface ModuleExecutionResult {
   executionDurationMs: number;
 }
 
-// Cache de tokens por slot por usuário para evitar reconexão a cada trade
+// Each modality slot owns an account-scoped Deriv session. The token fingerprint
+// prevents a stale connection from surviving a token change without exposing secrets.
 const slotApiCache: Map<string, { api: DerivAPIService; connectedAt: number }> = new Map();
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutos
 
@@ -60,19 +64,36 @@ async function getSlotApi(
   userId: string,
   slotIndex: number,
   token: string,
-  accountType: string
+  accountType: DerivAccountType
 ): Promise<DerivAPIService | null> {
-  const cacheKey = `${userId}:${slotIndex}`;
-  const cached = slotApiCache.get(cacheKey);
+  const fingerprint = createHash('sha256').update(token).digest('hex').slice(0, 16);
+  const cacheKey = `${userId}:${slotIndex}:${accountType}:${fingerprint}`;
+  const slotPrefix = `${userId}:${slotIndex}:`;
 
-  if (cached && Date.now() - cached.connectedAt < CACHE_TTL_MS) {
-    return cached.api;
+  // Remove any previous account/token session for this module before replacing it.
+  for (const [key, entry] of slotApiCache.entries()) {
+    if (key.startsWith(slotPrefix) && key !== cacheKey) {
+      slotApiCache.delete(key);
+      await entry.api.disconnect().catch(() => undefined);
+    }
   }
 
-  const api = new DerivAPIService();
-  const connected = await api.connect(token, accountType as 'demo' | 'real', `MODULE_SLOT_${slotIndex}`);
+  const cached = slotApiCache.get(cacheKey);
+  if (cached && Date.now() - cached.connectedAt < CACHE_TTL_MS &&
+      cached.api.isSessionFor(token, accountType)) {
+    return cached.api;
+  }
+  if (cached) {
+    slotApiCache.delete(cacheKey);
+    await cached.api.disconnect().catch(() => undefined);
+  }
+
+  // The service itself must be constructed for the requested account type.
+  const api = new DerivAPIService(accountType);
+  const connected = await api.connect(token, accountType, `MODULE_SLOT_${slotIndex}_${accountType.toUpperCase()}`);
   if (!connected) {
-    console.warn(`⚠️ [MODULE] Slot ${slotIndex}: falha na conexão`);
+    await api.disconnect().catch(() => undefined);
+    console.warn(`⚠️ [MODULE] Slot ${slotIndex}: falha na conexão ${accountType.toUpperCase()}`);
     return null;
   }
 
@@ -113,19 +134,24 @@ export async function executeModulesTrade(params: ModuleExecutionParams): Promis
     };
   }
 
-  // 2. Buscar todos os tokens dos slots configurados
+  // 2. Resolve each module's selected account independently. Tokens are never
+  // substituted across Demo/Real; a same-environment token can be shared only as
+  // credentials, while every module still receives its own isolated WebSocket.
   const allTokens = await storage.getAllDerivTokens(params.userId);
-  const tokenMap = new Map<number, { token: string; accountType: string }>();
-  for (const t of allTokens) {
-    if (t.slotIndex !== null && t.slotIndex !== undefined && t.isActive) {
-      tokenMap.set(t.slotIndex, { token: t.token, accountType: t.accountType });
-    }
-  }
 
   // 3. Executar todos os slots em paralelo
   const executeSlot = async (slotConfig: ModuleSlotConfig): Promise<ModuleSlotResult> => {
     const slotStart = Date.now();
-    const tokenInfo = tokenMap.get(slotConfig.slotIndex);
+    const configuredSlotToken = allTokens.find(t =>
+      t.slotIndex === slotConfig.slotIndex && t.isActive === true
+    );
+    // Legacy configs inherit their slot token environment; new configs use the
+    // explicit account selector saved for this modality/module.
+    const accountType: DerivAccountType =
+      slotConfig.accountType === 'demo' || slotConfig.accountType === 'real'
+        ? slotConfig.accountType
+        : (configuredSlotToken?.accountType === 'real' ? 'real' : 'demo');
+    const tokenInfo = selectModuleTokenForAccount(allTokens, slotConfig.slotIndex, accountType);
 
     if (!tokenInfo) {
       return {
@@ -134,7 +160,7 @@ export async function executeModulesTrade(params: ModuleExecutionParams): Promis
         status: 'no_token',
         stakeUsed: 0,
         stakeMode: slotConfig.stakeMode,
-        errorMessage: `Slot ${slotConfig.slotIndex}: nenhum token configurado`,
+        errorMessage: `Slot ${slotConfig.slotIndex}: nenhum token ativo compatível com a conta ${accountType.toUpperCase()}`,
         openTimeMs: Date.now() - slotStart,
       };
     }
@@ -167,7 +193,7 @@ export async function executeModulesTrade(params: ModuleExecutionParams): Promis
     }
 
     try {
-      const api = await getSlotApi(params.userId, slotConfig.slotIndex, tokenInfo.token, tokenInfo.accountType);
+      const api = await getSlotApi(params.userId, slotConfig.slotIndex, tokenInfo.token, accountType);
       if (!api) {
         return {
           slotIndex: slotConfig.slotIndex,
