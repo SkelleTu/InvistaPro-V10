@@ -19,6 +19,16 @@ const isTradingAuthorized = (req: any, res: any, next: any) => {
   next();
 };
 
+// Global safety controls require the explicitly configured system administrator.
+const isSystemAdmin = (req: any, res: any, next: any) => {
+  const adminEmail = String(process.env.ADMIN_EMAIL || '').trim().toLowerCase();
+  const userEmail = String(req.user?.email || '').trim().toLowerCase();
+  if (!adminEmail || !userEmail || userEmail !== adminEmail) {
+    return res.status(403).json({ message: 'Ação global restrita ao administrador do sistema.' });
+  }
+  next();
+};
+
 // Obter status do scheduler
 router.get('/status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
   const userId = req.user.id;
@@ -403,18 +413,18 @@ router.post('/toggle-admin-approval', isAuthenticated, isTradingAuthorized, asyn
 
 // Resetar sessões bloqueadas (para testing) - TEMPORARIAMENTE SEM AUTH PARA DEMO
 router.post('/reset-blocked-sessions', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
-  const success = autoTradingScheduler.resetBlockedSessions();
+  const success = autoTradingScheduler.resetBlockedSessionsForUser(String(req.user.id));
   
   res.json({
     success,
-    message: 'Sessões bloqueadas resetadas para modo demo',
+    message: 'Somente as sessões bloqueadas do usuário autenticado foram resetadas',
     timestamp: new Date().toISOString(),
     actionBy: req.user.email
   });
 }));
 
 // Aumentar limites para modo demo - TEMPORARIAMENTE SEM AUTH PARA DEMO
-router.post('/increase-demo-limits', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+router.post('/increase-demo-limits', isAuthenticated, isTradingAuthorized, isSystemAdmin, asyncErrorHandler(async (req: any, res: any) => {
   const success = autoTradingScheduler.increaseLimitsForDemo();
   const securityStatus = autoTradingScheduler.getSecurityStatus();
   
@@ -572,7 +582,7 @@ router.post('/pause-trading', isAuthenticated, isTradingAuthorized, asyncErrorHa
 }));
 
 // Retomar trading globalmente (afeta todos os remixes)
-router.post('/resume-trading', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+router.post('/resume-trading', isAuthenticated, isTradingAuthorized, isSystemAdmin, asyncErrorHandler(async (req: any, res: any) => {
   const control = await storage.resumeTrading();
   
   console.log(`▶️ [GLOBAL] Trading retomado`);
