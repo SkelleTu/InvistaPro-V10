@@ -9,9 +9,8 @@
  * É a "central de amplificação" da InvistaPRO.
  */
 
-import { createHash } from 'node:crypto';
 import { DerivAPIService } from './deriv-api';
-import { selectModuleTokenForAccount, type DerivAccountType } from './module-account-routing';
+import { moduleSessionCacheKey, selectModuleTokenForAccount, type DerivAccountType } from './module-account-routing';
 import { dualStorage as storage } from '../storage-dual';
 import { isAllowedProductionSymbol, isAllowedProductionContractType, isValidProductionStake } from './production-symbol-policy';
 
@@ -62,13 +61,13 @@ const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutos
 
 async function getSlotApi(
   userId: string,
+  modality: string,
   slotIndex: number,
   token: string,
   accountType: DerivAccountType
 ): Promise<DerivAPIService | null> {
-  const fingerprint = createHash('sha256').update(token).digest('hex').slice(0, 16);
-  const cacheKey = `${userId}:${slotIndex}:${accountType}:${fingerprint}`;
-  const slotPrefix = `${userId}:${slotIndex}:`;
+  const cacheKey = moduleSessionCacheKey(userId, modality, slotIndex, accountType, token);
+  const slotPrefix = `${userId}:${modality}:${slotIndex}:`;
 
   // Remove any previous account/token session for this module before replacing it.
   for (const [key, entry] of slotApiCache.entries()) {
@@ -193,7 +192,7 @@ export async function executeModulesTrade(params: ModuleExecutionParams): Promis
     }
 
     try {
-      const api = await getSlotApi(params.userId, slotConfig.slotIndex, tokenInfo.token, accountType);
+      const api = await getSlotApi(params.userId, params.modality, slotConfig.slotIndex, tokenInfo.token, accountType);
       if (!api) {
         return {
           slotIndex: slotConfig.slotIndex,
