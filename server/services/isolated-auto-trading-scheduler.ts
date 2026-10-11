@@ -173,7 +173,7 @@ class IsolatedAutoTradingScheduler {
     }
     runtime.armed = false;
     runtime.status = "stopped";
-    if (runtime.worker.connected) runtime.worker.send({ type: "disarm", userId: runtime.userId, sessionId: runtime.sessionId });
+    if (runtime.worker?.connected) runtime.worker.send({ type: "disarm", userId: runtime.userId, sessionId: runtime.sessionId });
     await stopBrazilNewsUpdatesIfIdle(this.getArmedUserIds().length > 0);
   }
 
