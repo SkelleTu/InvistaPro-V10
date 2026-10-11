@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
-import { isAllowedProductionSymbol, normalizeDerivSymbol, isAllowedProductionContractType, minimumStakeForContract } from "../server/services/production-symbol-policy";
+import {
+  isAllowedProductionSymbol,
+  normalizeDerivSymbol,
+  isAllowedProductionContractType,
+  minimumStakeForContract,
+} from "../server/services/production-symbol-policy";
 
 const allowed = ["BOOM500", "BOOM1000", "CRASH500", "CRASH1000"];
 const aliases = ["BOOM_500", "BOOM 1000 Index", "CRASH_500", "CRASH 1000 Index"];
@@ -16,10 +21,17 @@ assert.equal(normalizeDerivSymbol("BOOM_1000"), "BOOM1000");
 for (const type of ["ACCU", "DIGITDIFF", "DIGITMATCH", "DIGITEVEN", "DIGITODD", "DIGITOVER", "DIGITUNDER"]) {
   assert.equal(isAllowedProductionContractType(type), true, `Expected allowed contract type: ${type}`);
 }
-for (const type of ["CALL", "PUT", "MULTUP", "MULTDOWN", "ONETOUCH"]) {
+for (const type of ["CALL", "PUT", "MULTUP", "MULTDOWN", "ONETOUCH", "LBFLOATCALL", ""]) {
   assert.equal(isAllowedProductionContractType(type), false, `Expected denied contract type: ${type}`);
 }
 assert.equal(minimumStakeForContract("DIGITDIFF"), 0.35);
 assert.equal(minimumStakeForContract("ACCU"), 1);
+for (const type of ["CALL", "PUT", "MULTUP", "UNKNOWN", "", null, undefined]) {
+  assert.throws(
+    () => minimumStakeForContract(type),
+    /Blocked Deriv contract type/,
+    `Unsupported contract must fail closed: ${String(type)}`,
+  );
+}
 
-console.log(`Production policy passed: ${allowed.length} canonical symbols, ${aliases.length} aliases, ${denied.length} denied symbols, allowed contract types, and minimum stakes.`);
+console.log(`Production policy passed: ${allowed.length} canonical symbols, ${aliases.length} aliases, ${denied.length} denied symbols, contract allowlist, and fail-closed minimum stakes.`);
