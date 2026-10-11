@@ -27,6 +27,7 @@ interface UserRuntime {
   lastHeartbeatAt: number;
   activeSessions: number;
   workerReady: boolean;
+  workerReadyPromise: Promise<void> | null;
 }
 
 class IsolatedAutoTradingScheduler {
@@ -42,7 +43,7 @@ class IsolatedAutoTradingScheduler {
     };
   }
 
-  private ensureRuntime(userId: string, startWorker = false): UserRuntime {
+  private ensureRuntime(userId: string): UserRuntime {
     const id = String(userId);
     let runtime = this.runtimes.get(id);
     if (!runtime) {
@@ -56,19 +57,22 @@ class IsolatedAutoTradingScheduler {
         lastHeartbeatAt: Date.now(),
         activeSessions: 0,
         workerReady: false,
+        workerReadyPromise: null,
       };
       this.runtimes.set(id, runtime);
       console.log(`🧩 [USER-RUNTIME] sessão leve criada | user=${id} | session=${runtime.sessionId}`);
     }
     runtime.lastHeartbeatAt = Date.now();
-    if (startWorker && (!runtime.worker || !runtime.worker.connected)) {
-      this.startWorker(runtime);
-    }
     return runtime;
   }
 
-  private startWorker(runtime: UserRuntime): void {
-    if (runtime.worker?.connected) return;
+  private startWorker(runtime: UserRuntime): Promise<void> {
+    if (runtime.worker?.connected) {
+      if (runtime.workerReady) return Promise.resolve();
+      if (runtime.workerReadyPromise) return runtime.workerReadyPromise;
+      return Promise.reject(new Error("Worker IPC connected without a readiness handshake."));
+    }
+
     const { file, execArgv } = this.workerPath();
     const worker = fork(file, [], {
       execArgv,
@@ -81,43 +85,68 @@ class IsolatedAutoTradingScheduler {
     });
     runtime.worker = worker;
     runtime.workerReady = false;
+    runtime.armed = false;
+    runtime.status = "ready";
+
+    let settled = false;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let resolveReady!: () => void;
+    let rejectReady!: (error: Error) => void;
+    const readyPromise = new Promise<void>((resolve, reject) => {
+      resolveReady = resolve;
+      rejectReady = reject;
+    });
+    runtime.workerReadyPromise = readyPromise;
+
+    const settle = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      if (timeout) clearTimeout(timeout);
+      if (error) rejectReady(error);
+      else resolveReady();
+    };
+
+    timeout = setTimeout(() => {
+      settle(new Error("Worker did not send a ready handshake within 15 seconds."));
+      if (worker.connected) worker.kill("SIGTERM");
+    }, 15000);
+
     worker.on("message", (message: any) => {
       runtime.lastHeartbeatAt = Date.now();
       if (message?.userId !== runtime.userId || message?.sessionId !== runtime.sessionId) return;
       if (message?.type === "ready") {
         runtime.workerReady = true;
         runtime.status = "ready";
+        settle();
       } else if (message?.type === "status") {
         runtime.status = message.status || runtime.status;
         runtime.armed = Boolean(message.armed);
         runtime.activeSessions = Number(message.activeSessions || 0);
       } else if (message?.type === "error") {
         console.error(`❌ [USER-RUNTIME] user=${runtime.userId} session=${runtime.sessionId}: ${message.error}`);
+        if (!settled) settle(new Error(String(message.error || "Worker failed before readiness.")));
       }
     });
-    const cleanup = () => {
+
+    const cleanup = (error?: Error) => {
       if (runtime.worker === worker) {
         runtime.worker = null;
         runtime.workerReady = false;
+        runtime.workerReadyPromise = null;
         runtime.armed = false;
         runtime.status = "stopped";
       }
+      if (!settled) settle(error || new Error("Worker exited before readiness handshake."));
     };
-    worker.once("exit", cleanup);
+    worker.once("exit", (code, signal) => {
+      cleanup(new Error(`Worker exited before readiness confirmation (code=${code}, signal=${signal || "none"}).`));
+    });
     worker.once("error", (error) => {
       console.error(`❌ [USER-RUNTIME] worker error user=${runtime.userId} session=${runtime.sessionId}:`, error);
-      cleanup();
+      cleanup(error);
     });
     console.log(`🧩 [USER-RUNTIME] worker iniciado após comando explícito | user=${runtime.userId} | session=${runtime.sessionId}`);
-  }
-
-  private send(userId: string, command: string, payload: Record<string, unknown> = {}) {
-    const runtime = this.ensureRuntime(userId, true);
-    runtime.lastHeartbeatAt = Date.now();
-    if (runtime.worker?.connected) {
-      runtime.worker.send({ type: command, userId: runtime.userId, sessionId: runtime.sessionId, ...payload });
-    }
-    return runtime;
+    return readyPromise;
   }
 
   prepareAtBoot(): void {
@@ -125,20 +154,70 @@ class IsolatedAutoTradingScheduler {
   }
 
   registerUser(userId: string): string {
-    return this.ensureRuntime(userId, false).sessionId;
+    return this.ensureRuntime(userId).sessionId;
   }
 
-  armUserTrading(userId: string): void {
+  async armUserTrading(userId: string): Promise<void> {
     if (this.emergencyStop) {
       throw new Error("Play blocked: isolated scheduler emergency stop is active.");
     }
-    const runtime = this.send(userId, "arm");
-    runtime.armed = true;
-    runtime.status = "armed";
+
+    const runtime = this.ensureRuntime(userId);
+    await this.startWorker(runtime);
+    const worker = runtime.worker;
+    if (!worker?.connected || !runtime.workerReady) {
+      throw new Error("Play blocked: isolated worker is not ready.");
+    }
+
+    // Do not report Play as active until the worker acknowledges that its
+    // scheduler is actually running. A timeout or worker error fails closed.
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const timeout = setTimeout(() => finish(new Error("Play blocked: worker did not confirm the armed state within 90 seconds.")), 90000);
+      const finish = (error?: Error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        worker.off("message", onMessage);
+        if (error) {
+          runtime.armed = false;
+          runtime.status = "stopped";
+          try {
+            if (worker.connected) worker.send({ type: "disarm", userId: runtime.userId, sessionId: runtime.sessionId });
+          } catch {}
+          // A worker that cannot confirm Play must not remain alive in an
+          // ambiguous state where it could trade without a confirmed response.
+          try {
+            if (worker.connected) worker.kill("SIGTERM");
+          } catch {}
+          reject(error);
+        } else {
+          runtime.armed = true;
+          runtime.status = "armed";
+          resolve();
+        }
+      };
+      const onMessage = (message: any) => {
+        if (message?.userId !== runtime.userId || message?.sessionId !== runtime.sessionId) return;
+        if (message?.type === "error") {
+          finish(new Error(String(message.error || "Isolated worker rejected Play.")));
+        } else if (message?.type === "status" && message?.armed === true && message?.status === "armed") {
+          finish();
+        }
+      };
+      worker.on("message", onMessage);
+      try {
+        worker.send({ type: "arm", userId: runtime.userId, sessionId: runtime.sessionId }, (error) => {
+          if (error) finish(error);
+        });
+      } catch (error) {
+        finish(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
   }
 
   async startSchedulerForUser(userId: string): Promise<void> {
-    this.armUserTrading(userId);
+    await this.armUserTrading(userId);
     const service = await getBrazilNewsService();
     service.startAutoUpdate();
   }
