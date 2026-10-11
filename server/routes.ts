@@ -43,6 +43,7 @@ import { derivAPI, DerivAPIService, getDerivAPI } from './services/deriv-api';
 import { executeFrenetic9TokensBurst, getSlotBalances, closeAllSlotConnections, selectBestAsset } from './services/frenetico-9tokens';
 import { huggingFaceAI } from './services/huggingface-ai';
 import { isolatedAutoTradingScheduler as autoTradingScheduler } from './services/isolated-auto-trading-scheduler';
+import { autoTradingScheduler as legacyTradingScheduler } from './services/auto-trading-scheduler';
 import { realStatsTracker } from './services/real-stats-tracker';
 import { isAuthorizedEmail, ACCESS_DENIED_MESSAGE } from './config/access';
 import { errorTracker } from './services/error-tracker';
@@ -1828,6 +1829,16 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     const userId = String(req.user?.id || '');
     if (!userId) return res.status(401).json({ message: 'Usuário não autenticado' });
 
+    // Respect the global emergency latch before creating any armed runtime.
+    if (legacyTradingScheduler.getSchedulerStatus().emergencyStop) {
+      return res.status(409).json({
+        success: false,
+        active: false,
+        message: 'Play bloqueado: parada de emergência ativa; exige liberação administrativa explícita.',
+        armedUsers: [],
+      });
+    }
+
     // Fail closed before creating any armed runtime. A manual Play requires
     // this user's active strategy and Deriv token; login alone never starts it.
     const [userConfig, derivToken] = await Promise.all([
@@ -1902,15 +1913,17 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     const userId = String(req.user.id);
     const activeForUser = autoTradingScheduler.getArmedUserIds().some((id: string) => String(id) === userId);
     const globalStatus = autoTradingScheduler.getSchedulerStatus();
+    const emergencyStop = legacyTradingScheduler.getSchedulerStatus().emergencyStop;
     res.json({
       success: true,
       status: {
         ...globalStatus,
-        isRunning: activeForUser,
-        schedulerRunning: activeForUser,
-        activeSessions: activeForUser ? 1 : 0,
+        isRunning: activeForUser && !emergencyStop,
+        schedulerRunning: activeForUser && !emergencyStop,
+        emergencyStop,
+        activeSessions: activeForUser && !emergencyStop ? 1 : 0,
         isolatedUsers: activeForUser ? 1 : 0,
-        armedUsers: activeForUser ? [userId] : [],
+        armedUsers: activeForUser && !emergencyStop ? [userId] : [],
       },
       armedUsers: activeForUser ? [userId] : [],
       timestamp: new Date().toISOString(),
