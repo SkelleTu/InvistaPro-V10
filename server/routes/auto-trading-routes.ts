@@ -377,7 +377,7 @@ router.post('/reset-blocked-sessions', asyncErrorHandler(async (req: any, res: a
 }));
 
 // Aumentar limites para modo demo - TEMPORARIAMENTE SEM AUTH PARA DEMO
-router.post('/increase-demo-limits', asyncErrorHandler(async (req: any, res: any) => {
+router.post('/increase-demo-limits', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
   const success = autoTradingScheduler.increaseLimitsForDemo();
   const securityStatus = autoTradingScheduler.getSecurityStatus();
   
@@ -394,7 +394,7 @@ router.post('/increase-demo-limits', asyncErrorHandler(async (req: any, res: any
 }));
 
 // Limpar todas as sessões ativas - TEMPORARIAMENTE SEM AUTH PARA DEMO
-router.post('/clear-all-sessions', asyncErrorHandler(async (req: any, res: any) => {
+router.post('/clear-all-sessions', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
   const success = autoTradingScheduler.clearAllSessions();
   
   res.json({
