@@ -27,7 +27,7 @@ router.post('/heartbeat', (req: Request, res: Response) => {
     const { accountId, broker, balance, equity, freeMargin, openPositions, platform, token } = req.body;
     if (!accountId) return res.status(400).json({ error: 'accountId obrigatório' });
     const config = metaTraderBridge.getConfig();
-    if (config.apiToken && token && token !== config.apiToken) {
+    if (config.apiToken && token !== config.apiToken) {
       return res.status(401).json({ error: 'Token inválido' });
     }
     metaTraderBridge.recordHeartbeat({ accountId, broker: broker || 'Unknown', balance, equity, freeMargin, openPositionsCount: typeof openPositions === 'number' ? openPositions : undefined });
@@ -209,11 +209,22 @@ router.post('/signal-with-indicators', async (req: Request, res: Response) => {
     } = req.body;
 
     const config = metaTraderBridge.getConfig();
-    if (config.apiToken && token && token !== config.apiToken) {
+    if (config.apiToken && token !== config.apiToken) {
       return res.status(401).json({ error: 'Token inválido' });
     }
     if (!symbol) {
       return res.status(400).json({ error: 'symbol é obrigatório' });
+    }
+
+    if (process.env.NODE_ENV === 'production') {
+      return res.json({
+        action: 'HOLD',
+        executionEnabled: false,
+        code: 'PRODUCTION_CONTRACT_TYPE_BLOCKED',
+        reason: 'Sinais MT5 BUY/SELL desativados em produção; somente contratos Deriv ACCU e DIGITDIFF são permitidos.',
+        confidence: 0,
+        timestamp: Date.now(),
+      });
     }
 
     // Registrar heartbeat — EA v5.0 usa este endpoint como canal principal
@@ -1745,6 +1756,16 @@ router.post('/config', (req: Request, res: Response) => {
 
 router.post('/signal/generate', async (req: Request, res: Response) => {
   try {
+    if (process.env.NODE_ENV === 'production') {
+      return res.json({
+        action: 'HOLD',
+        executionEnabled: false,
+        code: 'PRODUCTION_CONTRACT_TYPE_BLOCKED',
+        reason: 'Geração de sinais MT5 BUY/SELL desativada em produção.',
+        confidence: 0,
+        timestamp: Date.now(),
+      });
+    }
     const { symbol } = req.body;
     const config = metaTraderBridge.getConfig();
     const targetSymbol = symbol || config.symbols[0] || 'EURUSD';
