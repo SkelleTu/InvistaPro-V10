@@ -1,6 +1,7 @@
 import { fork, type ChildProcess } from "node:child_process";
 import path from "node:path";
 import crypto from "node:crypto";
+import { brazilNewsService } from "./brazil-news-service";
 
 type UserId = string;
 type WorkerStatus = "ready" | "armed" | "stopped" | "disconnected";
@@ -19,6 +20,7 @@ interface UserRuntime {
 
 class IsolatedAutoTradingScheduler {
   private runtimes = new Map<UserId, UserRuntime>();
+  private emergencyStop = false;
 
   private workerPath(): { file: string; execArgv: string[] } {
     const production = process.env.NODE_ENV === "production";
@@ -108,6 +110,9 @@ class IsolatedAutoTradingScheduler {
   }
 
   armUserTrading(userId: string): void {
+    if (this.emergencyStop) {
+      throw new Error("Play blocked: isolated scheduler emergency stop is active.");
+    }
     const runtime = this.send(userId, "arm");
     runtime.armed = true;
     runtime.status = "armed";
@@ -115,12 +120,23 @@ class IsolatedAutoTradingScheduler {
 
   async startSchedulerForUser(userId: string): Promise<void> {
     this.armUserTrading(userId);
+    brazilNewsService.startAutoUpdate();
   }
 
   async startScheduler(): Promise<void> {
-    for (const runtime of this.runtimes.values()) {
-      if (!runtime.armed) this.armUserTrading(runtime.userId);
-    }
+    // A global start must never arm every logged-in user. Each runtime may
+    // only be armed through startSchedulerForUser after that user's explicit Play.
+    console.warn("🛑 [USER-RUNTIME] Global start ignored; use per-user manual Play.");
+  }
+
+  async emergencyStopAll(): Promise<void> {
+    this.emergencyStop = true;
+    await this.stopScheduler();
+  }
+
+  clearEmergencyStop(): void {
+    // Clearing the latch never starts trading; users must press Play again.
+    this.emergencyStop = false;
   }
 
   async stopScheduler(): Promise<void> {
@@ -131,10 +147,14 @@ class IsolatedAutoTradingScheduler {
 
   async disarmUserTrading(userId: string): Promise<void> {
     const runtime = this.runtimes.get(String(userId));
-    if (!runtime) return;
+    if (!runtime) {
+      if (this.getArmedUserIds().length === 0) brazilNewsService.stopAutoUpdate();
+      return;
+    }
     runtime.armed = false;
     runtime.status = "stopped";
     if (runtime.worker.connected) runtime.worker.send({ type: "disarm", userId: runtime.userId, sessionId: runtime.sessionId });
+    if (this.getArmedUserIds().length === 0) brazilNewsService.stopAutoUpdate();
   }
 
   async stopSchedulerForUser(userId: string): Promise<void> {
@@ -148,11 +168,12 @@ class IsolatedAutoTradingScheduler {
   getSchedulerStatus() {
     const runtimes = [...this.runtimes.values()];
     return {
-      isRunning: runtimes.some(r => r.armed),
-      schedulerRunning: runtimes.some(r => r.armed),
-      activeSessions: runtimes.reduce((n, r) => n + r.activeSessions, 0),
+      isRunning: !this.emergencyStop && runtimes.some(r => r.armed),
+      schedulerRunning: !this.emergencyStop && runtimes.some(r => r.armed),
+      emergencyStop: this.emergencyStop,
+      activeSessions: this.emergencyStop ? 0 : runtimes.reduce((n, r) => n + r.activeSessions, 0),
       isolatedUsers: runtimes.length,
-      armedUsers: runtimes.filter(r => r.armed).map(r => r.userId),
+      armedUsers: this.emergencyStop ? [] : runtimes.filter(r => r.armed).map(r => r.userId),
       totalExecutedOperations: 0,
     };
   }
@@ -193,6 +214,7 @@ class IsolatedAutoTradingScheduler {
       runtime.armed = false;
       runtime.status = "stopped";
     }
+    if (this.getArmedUserIds().length === 0) brazilNewsService.stopAutoUpdate();
   }
 
   getAssetHealthStatus() {
@@ -213,6 +235,7 @@ class IsolatedAutoTradingScheduler {
       if (runtime.worker.connected) runtime.worker.kill("SIGTERM");
     }, 5000).unref();
     this.runtimes.delete(id);
+    if (this.getArmedUserIds().length === 0) brazilNewsService.stopAutoUpdate();
     console.log(`🔌 [USER-RUNTIME] destruído | user=${id} | session=${runtime.sessionId}`);
   }
 }

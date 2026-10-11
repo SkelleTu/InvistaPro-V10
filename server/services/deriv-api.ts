@@ -4,6 +4,7 @@ import { errorTracker } from './error-tracker';
 import { dualStorage as storage } from '../storage-dual';
 import { resilienceSupervisor } from './resilience-supervisor';
 import { connectDerivAccount, type DerivAccountContext } from './deriv-account-gateway';
+import { isAllowedProductionSymbol, isAllowedProductionContractType, minimumStakeForContract, isValidProductionStake } from './production-symbol-policy';
 
 // ☠️ PROTOCOLO DE EXECUÇÃO IMEDIATA — tolerância zero para ativos criminosos
 // Qualquer símbolo que viole as regras é executado aqui: blacklistado, logado e morto.
@@ -590,7 +591,7 @@ export class DerivAPIService extends EventEmitter {
           this.removeListener('message', symbolsHandler);
           if (message.active_symbols) {
             const symbols = message.active_symbols
-              .filter((s: any) => s.exchange_is_open === 1 && s.is_trading_suspended === 0)
+              .filter((s: any) => isAllowedProductionSymbol(s.symbol) && s.exchange_is_open === 1 && s.is_trading_suspended === 0)
               .map((s: any) => ({
                 symbol: s.symbol,
                 display_name: s.display_name,
@@ -654,6 +655,7 @@ export class DerivAPIService extends EventEmitter {
     
     for (const symbolInfo of allSymbols) {
       const symbol = symbolInfo.symbol;
+      if (!isAllowedProductionSymbol(symbol)) continue;
       checked++;
       
       // Log a cada 10 símbolos para rastreamento
@@ -748,18 +750,17 @@ export class DerivAPIService extends EventEmitter {
         console.error('❌ Erro na descoberta dinâmica DIGITDIFF:', error);
         // Fallback básico se a descoberta falhar
         return [
-          { symbol: 'R_10', display_name: 'Volatility 10 Index', market: 'synthetic_index' },
-          { symbol: 'R_25', display_name: 'Volatility 25 Index', market: 'synthetic_index' },
-          { symbol: 'R_50', display_name: 'Volatility 50 Index', market: 'synthetic_index' },
-          { symbol: 'R_75', display_name: 'Volatility 75 Index', market: 'synthetic_index' },
-          { symbol: 'R_100', display_name: 'Volatility 100 Index', market: 'synthetic_index' }
+          { symbol: 'BOOM500', display_name: 'Boom 500 Index', market: 'synthetic_index' },
+          { symbol: 'BOOM1000', display_name: 'Boom 1000 Index', market: 'synthetic_index' },
+          { symbol: 'CRASH500', display_name: 'Crash 500 Index', market: 'synthetic_index' },
+          { symbol: 'CRASH1000', display_name: 'Crash 1000 Index', market: 'synthetic_index' }
         ];
       }
     }
 
     // Fallback para outros modos
     const symbols = await marketApi.getActiveSymbolsCached();
-    return symbols.map(s => ({
+    return symbols.filter(s => isAllowedProductionSymbol(s.symbol)).map(s => ({
       symbol: s.symbol,
       display_name: s.display_name,
       market: s.market
@@ -793,6 +794,10 @@ export class DerivAPIService extends EventEmitter {
 
   // 🔥 NOVO: Buscar contratos disponíveis para um símbolo (conforme docs Deriv)
   async getContractsFor(symbol: string): Promise<any[]> {
+    if (!isAllowedProductionSymbol(symbol)) {
+      console.warn('[DERIV_POLICY] Contract discovery blocked for disallowed symbol: ' + symbol);
+      return [];
+    }
     if (!this.isConnected) return [];
 
     return new Promise((resolve) => {
@@ -828,6 +833,10 @@ export class DerivAPIService extends EventEmitter {
   }
 
   async subscribeToTicks(symbol: string): Promise<void> {
+    if (!isAllowedProductionSymbol(symbol)) {
+      console.warn(`[DERIV_POLICY] Tick subscription blocked for disallowed symbol: ${symbol}`);
+      return;
+    }
     if (!this.isConnected) {
       this.sendMessage({ type: 'subscribe_ticks', symbol });
       return;
@@ -870,69 +879,13 @@ export class DerivAPIService extends EventEmitter {
   }
 
   async buyCallPutContract(symbol: string, direction: 'up' | 'down', duration: number, amount: number): Promise<DerivContractInfo | null> {
-    this.requireAuthenticatedAccountSession('buy');
-    if (!this.isConnected) return null;
-
-    try {
-      // Determinar tipo de contrato baseado na direção
-      const contractType = direction === 'up' ? 'CALL' : 'PUT';
-      
-      // Passo 1: Criar proposta para validar o contrato
-      const proposal = await this.createCallPutProposal(symbol, contractType, duration, amount);
-      if (!proposal) {
-        console.error('❌ Falha ao criar proposta CALL/PUT');
-        return null;
-      }
-
-      // Passo 2: Comprar usando o ID da proposta
-      return new Promise((resolve) => {
-        const reqId = this.generateRequestId();
-        
-        const buyHandler = (message: any) => {
-          if (message.req_id === reqId) {
-            this.removeListener('message', buyHandler);
-            if (message.buy) {
-              const contract: DerivContractInfo = {
-                contract_id: message.buy.contract_id,
-                shortcode: message.buy.shortcode,
-                status: 'active',
-                entry_tick: 0,
-                buy_price: message.buy.buy_price,
-              };
-              
-              console.log(`✅ Contrato ${contractType} comprado: ${contract.contract_id}`);
-              console.log(`🎯 Parâmetros: ${symbol} | ${direction.toUpperCase()} | Duration: ${duration}t | Amount: $${amount}`);
-              resolve(contract);
-            } else {
-              console.error(`❌ Erro ao comprar contrato ${contractType}:`, message.error);
-              resolve(null);
-            }
-          }
-        };
-
-        this.on('message', buyHandler);
-
-        // Comprar usando o ID da proposta
-        // Tolerância de 5%: se o mercado moveu ligeiramente desde a proposta,
-        // a Deriv não rejeita por preço obsoleto
-        const maxPrice = parseFloat((proposal.ask_price * 1.05).toFixed(2));
-        const buyMessage = {
-          buy: proposal.id,
-          price: maxPrice,
-          req_id: reqId
-        };
-
-        console.log(`📝 Comprando contrato ${contractType} com proposta ID: ${proposal.id} | MaxPrice: $${maxPrice}`);
-        this.sendMessage(buyMessage);
-      });
-
-    } catch (error) {
-      console.error('❌ Erro no processo de compra CALL/PUT:', error);
-      return null;
-    }
+    console.warn(`[DERIV_POLICY] CALL/PUT contracts are disabled in production. Rejected ${direction} on ${symbol}.`);
+    return null;
   }
 
   async buyDigitDifferContract(params: DigitDifferContract): Promise<DerivContractInfo | null> {
+    if (!isAllowedProductionSymbol(params.symbol)) { console.error(`[DERIV_POLICY] Order blocked for disallowed symbol: ${params.symbol}`); return null; }
+    if (!isValidProductionStake('DIGITDIFF', params.amount)) { console.error('[DERIV_POLICY] DIGITDIFF stake must be finite and at least $0.35'); return null; }
     this.requireAuthenticatedAccountSession('buy');
     if (!this.isConnected) return null;
 
@@ -1036,54 +989,17 @@ export class DerivAPIService extends EventEmitter {
     return symbol; // Nunca remover underscore para DIGITDIFF
   }
 
-  private async createCallPutProposal(symbol: string, contractType: 'CALL' | 'PUT', duration: number, amount: number): Promise<{id: string, ask_price: number} | null> {    return new Promise((resolve) => {
-      const reqId = this.generateRequestId();
-      const normalizedSymbol = this.normalizeSymbol(symbol);
-      
-      const timer = setTimeout(() => {
-        this.removeListener('message', proposalHandler);
-        console.error(`⏰ Timeout ao criar proposta ${contractType} para ${normalizedSymbol}`);
-        resolve(null);
-      }, 15000);
-
-      const proposalHandler = (message: any) => {
-        if (message.req_id === reqId) {
-          clearTimeout(timer);
-          this.removeListener('message', proposalHandler);
-          if (message.proposal) {
-            console.log(`✅ Proposta ${contractType} criada: ID ${message.proposal.id} | Preço: $${message.proposal.ask_price}`);
-            resolve({
-              id: message.proposal.id,
-              ask_price: message.proposal.ask_price
-            });
-          } else {
-            console.error(`❌ Erro ao criar proposta ${contractType}:`, message.error);
-            resolve(null);
-          }
-        }
-      };
-
-      this.on('message', proposalHandler);
-
-      // Criar proposta CALL/PUT (Rise/Fall)
-      const proposalMessage = {
-        proposal: 1,
-        contract_type: contractType,
-        symbol: normalizedSymbol,
-        duration: duration,
-        duration_unit: 't',
-        currency: 'USD',
-        amount: amount,
-        basis: 'stake',
-        req_id: reqId
-      };
-
-      console.log(`📋 Criando proposta ${contractType}: ${normalizedSymbol} (${symbol}) | Duration: ${duration}t | Amount: $${amount}`);
-      this.sendMessage(proposalMessage);
-    });
+  private async createCallPutProposal(_symbol: string, _contractType: 'CALL' | 'PUT', _duration: number, _amount: number): Promise<{id: string, ask_price: number} | null> {
+    // CALL/PUT are disabled in production; do not even request a proposal.
+    console.warn('[DERIV_POLICY] CALL/PUT proposal blocked by production contract allowlist.');
+    return null;
   }
 
   private async createDigitDifferProposal(params: DigitDifferContract): Promise<{id: string, ask_price: number} | null> {
+    if (!isAllowedProductionSymbol(params.symbol) || !isValidProductionStake('DIGITDIFF', params.amount)) {
+      console.warn('[DERIV_POLICY] DIGITDIFF proposal blocked by production symbol/stake policy.');
+      return null;
+    }
     return new Promise((resolve) => {
       const reqId = this.generateRequestId();
       const normalizedSymbol = this.normalizeSymbol(params.symbol);
@@ -1145,6 +1061,10 @@ export class DerivAPIService extends EventEmitter {
     barrier?: string; // Obrigatório para DIGITDIFF, DIGITMATCH, DIGITOVER, DIGITUNDER
     currency?: string;
   }): Promise<DerivContractInfo | null> {
+    if (!isAllowedProductionSymbol(params.symbol)) { console.error(`[DERIV_POLICY] Order blocked for disallowed symbol: ${params.symbol}`); return null; }
+    if (!isAllowedProductionContractType(params.contract_type)) { console.error(`[DERIV_POLICY] Contract type blocked: ${params.contract_type}`); return null; }
+    const minimumStake = minimumStakeForContract(params.contract_type);
+    if (!isValidProductionStake(params.contract_type, params.amount)) { console.error(`[DERIV_POLICY] Stake must be finite and at least ${minimumStake} for ${params.contract_type}`); return null; }
     this.requireAuthenticatedAccountSession('buy');
     if (!this.isConnected) return null;
 
@@ -1245,50 +1165,21 @@ export class DerivAPIService extends EventEmitter {
    * Retorna o multiplicador (ex: 8.5 significa que $1 stake retorna $8.50 total).
    * Usado para calibrar o tamanho do burst: burst seguro = floor(payout) - 1
    */
-  async getDigitMatchPayoutMultiplier(symbol: string, duration: number, amount: number, barrier: string): Promise<number | null> {
-    if (!this.isConnected) return null;
-    const reqId = this.generateRequestId();
-    const proposalMsg: any = {
-      proposal: 1,
-      contract_type: 'DIGITMATCH',
-      symbol,
-      duration,
-      duration_unit: 't',
-      currency: 'USD',
-      amount,
-      basis: 'stake',
-      barrier,
-      req_id: reqId,
-    };
-    return new Promise<number | null>((resolve) => {
-      const handler = (message: any) => {
-        if (message.req_id === reqId) {
-          this.removeListener('message', handler);
-          clearTimeout(timer);
-          if (message.proposal) {
-            const askPrice = message.proposal.ask_price ?? 0;
-            const payout = message.proposal.payout ?? 0;
-            const multiplier = askPrice > 0 ? payout / askPrice : 0;
-            console.log(`📊 [PAYOUT CHECK] DIGITMATCH ${symbol} | stake=$${amount} | payout=$${payout.toFixed(2)} | ask=$${askPrice.toFixed(2)} | multiplicador=${multiplier.toFixed(2)}x`);
-            resolve(multiplier > 0 ? multiplier : null);
-          } else {
-            resolve(null);
-          }
-        }
-      };
-      const timer = setTimeout(() => {
-        this.removeListener('message', handler);
-        resolve(null);
-      }, 8000);
-      this.on('message', handler);
-      this.sendMessage(proposalMsg);
-    });
+  async getDigitMatchPayoutMultiplier(_symbol: string, _duration: number, _amount: number, _barrier: string): Promise<number | null> {
+    // DIGITMATCH is outside the explicitly approved production contract set.
+    // Keep the method for compatibility, but never request a proposal for it.
+    console.warn('[DERIV_POLICY] DIGITMATCH payout query blocked by production contract allowlist.');
+    return null;
   }
 
   /**
    * Obtém o preço atual de um símbolo via histórico de ticks (request único, sem subscrição)
    */
   async getCurrentPrice(symbol: string): Promise<number | null> {
+    if (!isAllowedProductionSymbol(symbol)) {
+      console.warn('[DERIV_POLICY] Price request blocked for disallowed symbol: ' + symbol);
+      return null;
+    }
     if (!this.isConnected) return null;
 
     // ⚡ CACHE HIT — retornar preço em tempo real se < 3s de idade (zero latência extra)
@@ -1351,6 +1242,10 @@ export class DerivAPIService extends EventEmitter {
     basis?: string;
     minProfitRatio?: number; // Ex: 0.25 = lucro mínimo de 25% sobre o stake. Se payout não atingir, aborta.
   }): Promise<DerivContractInfo | null> {
+    if (!isAllowedProductionSymbol(params.symbol)) { console.error(`[DERIV_POLICY] Order blocked for disallowed symbol: ${params.symbol}`); return null; }
+    if (!isAllowedProductionContractType(params.contract_type)) { console.error(`[DERIV_POLICY] Contract type blocked: ${params.contract_type}`); return null; }
+    const minimumStake = minimumStakeForContract(params.contract_type);
+    if (!isValidProductionStake(params.contract_type, params.amount)) { console.error(`[DERIV_POLICY] Stake must be finite and at least ${minimumStake} for ${params.contract_type}`); return null; }
     this.requireAuthenticatedAccountSession('buy');
     if (!this.isConnected) return null;
 
@@ -1578,7 +1473,7 @@ export class DerivAPIService extends EventEmitter {
     this.emit('message', message);
 
     // Handle specific message types
-    if (message.tick) {
+    if (message.tick && isAllowedProductionSymbol(message.tick.symbol)) {
       const tickData: DerivTickData = {
         symbol: message.tick.symbol,
         quote: message.tick.quote,
@@ -1787,7 +1682,7 @@ export class DerivAPIService extends EventEmitter {
     const subscriptions = Array.from(this.activeSubscriptions)
       .filter((key) => key.startsWith('ticks_'))
       .map((key) => key.slice('ticks_'.length))
-      .filter(Boolean);
+      .filter((symbol) => isAllowedProductionSymbol(symbol));
 
     for (const symbol of subscriptions) {
       try {

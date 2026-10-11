@@ -23,7 +23,6 @@ import { derivTradeSync } from "./services/deriv-trade-sync";
 import { realStatsTracker } from "./services/real-stats-tracker";
 import { runPostgresMigration } from "./migrate-postgres";
 import { initUrlRegistry } from "./services/url-registry";
-import { brazilNewsService } from "./services/brazil-news-service";
 import { startDerivObservabilityBridge } from "./services/deriv-observability-bridge";
 import { startUniversalHeartbeatLoop } from "./services/universal-server-session";
 import { getSecretHealth } from "./services/secret-health";
@@ -116,6 +115,7 @@ app.use((req, res, next) => {
   // Por isso /health é registrado primeiro e o servidor é criado/listening agora.
   app.get('/health', (_req, res) => {
     const obsHealth = observability.getHealth();
+    const secretHealth = getSecretHealth();
     if (!routesReady) {
       return res.status(503).json({
         status: 'degraded',
@@ -128,11 +128,12 @@ app.use((req, res, next) => {
           critical: obsHealth.critical,
           warnings: obsHealth.warnings,
         },
-        secrets: getSecretHealth(),
+        secrets: secretHealth,
       });
     }
-    res.status(200).json({
-      status: 'ok',
+    const healthy = obsHealth.critical === 0 && secretHealth.status === 'healthy';
+    res.status(healthy ? 200 : 503).json({
+      status: healthy ? 'ok' : 'degraded',
       routesReady: true,
       observability: {
         status: obsHealth.status,
@@ -140,20 +141,23 @@ app.use((req, res, next) => {
         critical: obsHealth.critical,
         warnings: obsHealth.warnings,
       },
-      secrets: getSecretHealth(),
+      secrets: secretHealth,
     });
   });
 
-  // Observabilidade de boot fica disponível ANTES de registerRoutes().
-  // Assim uma falha durante o próprio registro das rotas nunca fica escondida.
+  // Boot observability remains available before route registration, but required
+  // production secrets are part of readiness rather than a green-but-degraded response.
   app.get('/api/observability/health', (_req, res) => {
     const health = observability.getHealth();
-    res.status(routesReady && health.critical === 0 ? 200 : 503).json({
-      success: true,
+    const secretHealth = getSecretHealth();
+    const healthy = routesReady && health.critical === 0 && secretHealth.status === 'healthy';
+    res.status(healthy ? 200 : 503).json({
+      success: healthy,
       routesReady,
       bootFailureEventId,
-      secrets: getSecretHealth(),
       ...health,
+      secrets: secretHealth,
+      status: healthy ? 'healthy' : 'degraded',
     });
   });
 
@@ -336,19 +340,24 @@ app.use((req, res, next) => {
   
   // Conectar eventos de restart aos componentes
   resilienceSupervisor.on('restart_scheduler', async () => {
-    // Nunca iniciar trading automaticamente por ação do supervisor.
-    const status = autoTradingScheduler.getSchedulerStatus();
-    if (!status.isRunning) {
-      console.log('🛑 [RESILIENCE] Restart do scheduler ignorado: trading está inativo por política de segurança.');
+    // Preserve only users who explicitly pressed Play before the restart.
+    const armedUsers = autoTradingScheduler.getArmedUserIds();
+    if (armedUsers.length === 0) {
+      console.log('🛑 [RESILIENCE] Restart ignorado: nenhum usuário ativou o trading manualmente.');
       return;
     }
-    console.log('🔄 Reiniciando AutoTradingScheduler de uma sessão já manualmente ativada...');
+    console.log(`🔄 Reiniciando runtimes já ativados manualmente: ${armedUsers.length} usuário(s)...`);
     try {
       await autoTradingScheduler.stopScheduler();
-      await autoTradingScheduler.startScheduler();
-      console.log('✅ AutoTradingScheduler reiniciado');
+      for (const userId of armedUsers) {
+        await autoTradingScheduler.startSchedulerForUser(userId);
+      }
+      console.log('✅ Runtimes isolados reiniciados; nenhum usuário não armado foi iniciado.');
     } catch (error) {
-      console.error('❌ Erro ao reiniciar AutoTradingScheduler:', error);
+      // Fail safe: if restart partially fails, disarm all users rather than
+      // leaving a mixed/unknown trading state.
+      await autoTradingScheduler.stopScheduler().catch(() => {});
+      console.error('❌ Erro ao reiniciar runtimes isolados; todos permaneceram desarmados:', error);
     }
   });
   
@@ -452,13 +461,7 @@ app.use((req, res, next) => {
 
   // Executar inicializações pós-listen de forma assíncrona
   (async () => {
-    // 🇧🇷 INICIAR MONITORAMENTO DE NOTICIÁRIO BRASILEIRO
-    try {
-      brazilNewsService.startAutoUpdate();
-    } catch (brazilErr: any) {
-      console.warn('⚠️ [BrazilNews] Falha ao iniciar serviço de notícias BR:', brazilErr?.message);
-    }
-
+    // BrazilNews is started by the per-user manual Play path, never automatically at boot.
     // 🛑 TRADING NÃO INICIA NO BOOT.
     // Scheduler, coleta Deriv e sincronização só podem ser ativados por ação manual
     // de um usuário autenticado. Isso impede processos órfãos e tempestades de dados.

@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import { autoTradingScheduler } from '../services/auto-trading-scheduler';
+import { isolatedAutoTradingScheduler } from '../services/isolated-auto-trading-scheduler';
+import { setUniversalTradingArmed } from '../services/universal-server-session';
 import { dualStorage as storage } from '../storage-dual';
 import { isAuthenticated } from '../auth';
 import { asyncErrorHandler } from '../middleware/error-handler';
@@ -19,12 +21,38 @@ const isTradingAuthorized = (req: any, res: any, next: any) => {
   next();
 };
 
+// Global safety controls require the explicitly configured system administrator.
+const isSystemAdmin = (req: any, res: any, next: any) => {
+  const adminEmail = String(process.env.ADMIN_EMAIL || '').trim().toLowerCase();
+  const userEmail = String(req.user?.email || '').trim().toLowerCase();
+  if (!adminEmail || !userEmail || userEmail !== adminEmail) {
+    return res.status(403).json({ message: 'Ação global restrita ao administrador do sistema.' });
+  }
+  next();
+};
+
 // Obter status do scheduler
 router.get('/status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
-  const userId = req.user.id;
-  const stats = autoTradingScheduler.getSessionStats();
-  const activeSessions = autoTradingScheduler.getActiveSessions();
-  const schedulerStatus = autoTradingScheduler.getSchedulerStatus();
+  const userId = String(req.user.id);
+  // Runtime state comes from the isolated worker manager, not the legacy
+  // process-global scheduler singleton.
+  const activeSessions = isolatedAutoTradingScheduler.getActiveSessions()
+    .filter((session: any) => String(session.userId) === userId);
+  const legacySafetyStatus = autoTradingScheduler.getSchedulerStatus();
+  const isolatedSafetyStatus = isolatedAutoTradingScheduler.getSchedulerStatus();
+  const emergencyStop = Boolean(legacySafetyStatus.emergencyStop || isolatedSafetyStatus.emergencyStop);
+  const schedulerActiveForUser = isolatedAutoTradingScheduler.getArmedUserIds().includes(userId) &&
+    activeSessions.some((session: any) => session.isActive) &&
+    !emergencyStop;
+  // Expose only this user's runtime; never disclose other users' IDs or counts.
+  const schedulerStatus = {
+    isRunning: schedulerActiveForUser,
+    hasActiveSessions: schedulerActiveForUser,
+    emergencyStop,
+    isInitialized: activeSessions.some((session: any) => session.workerReady),
+    currentPhase: schedulerActiveForUser ? 'ATIVO' : 'AGUARDANDO_PLAY',
+    currentPhaseDetail: schedulerActiveForUser ? 'Runtime isolado ativo para este usuário' : 'Nenhuma atividade ativa para este usuário',
+  };
 
   // Verificar se o token Deriv está configurado para este usuário
   const derivToken = await storage.getUserDerivToken(userId);
@@ -32,46 +60,52 @@ router.get('/status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(as
 
   // Verificar se há configurações ativas no banco
   const activeConfigs = await storage.getActiveTradeConfigurations();
-  const userActiveConfigs = activeConfigs.filter((c: any) => c.userId === userId);
+  const userActiveConfigs = activeConfigs.filter((c: any) => String(c.userId) === String(userId));
   const activeConfigsCount = userActiveConfigs.length;
 
   // O sistema só está realmente operando se: scheduler rodando + token configurado + configurações ativas
-  const canExecuteTrades = schedulerStatus.isRunning && derivTokenConfigured && activeConfigsCount > 0;
+  const canExecuteTrades = schedulerActiveForUser && derivTokenConfigured && activeConfigsCount > 0;
 
   // Bloqueios que impedem trading
   const tradingBlockers: string[] = [];
+  if (!schedulerActiveForUser) tradingBlockers.push('Trading não ativado para esta sessão');
   if (!derivTokenConfigured) tradingBlockers.push('Token Deriv não configurado');
   if (activeConfigsCount === 0) tradingBlockers.push('Nenhuma configuração de trading ativa');
 
   res.json({
-    schedulerActive: schedulerStatus.isRunning,
+    schedulerActive: schedulerActiveForUser,
     canExecuteTrades,
     derivTokenConfigured,
     activeConfigsCount,
     tradingBlockers,
     schedulerStatus,
-    stats,
-    activeSessions: activeSessions.map(session => ({
+    stats: {
+      totalSessions: activeSessions.length,
+      totalExecutedOperations: 0,
+      activeSessions: activeSessions.filter((session: any) => session.isActive).length,
+      isolatedUsers: activeSessions.length > 0 ? 1 : 0,
+      armedUsers: schedulerActiveForUser ? 1 : 0,
+    },
+    activeSessions: activeSessions.map((session: any) => ({
       userId: session.userId,
-      configId: session.configId,
-      mode: session.mode,
-      progress: {
-        executed: session.executedOperations,
-        total: session.operationsCount,
-        percentage: Math.round((session.executedOperations / session.operationsCount) * 100)
-      },
-      lastExecution: session.lastExecutionTime,
-      nextEstimated: session.lastExecutionTime ? 
-        new Date(session.lastExecutionTime.getTime() + (session.intervalValue * (session.intervalType === 'minutes' ? 60000 : session.intervalType === 'hours' ? 3600000 : 86400000))) : 
-        new Date()
+      sessionId: session.sessionId,
+      isActive: Boolean(session.isActive),
+      workerReady: Boolean(session.workerReady),
+      lastHeartbeatAt: session.lastHeartbeatAt,
+      // This isolated runtime does not expose per-trade counters in the parent process.
+      progress: { executed: 0, total: 0, percentage: 0 },
+      lastExecution: null,
+      nextEstimated: null,
     }))
   });
 }));
 
 // Obter configurações ativas
 router.get('/active-configs', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
-  const activeConfigs = await storage.getActiveTradeConfigurations();
-  
+  const allActiveConfigs = await storage.getActiveTradeConfigurations();
+  // Never disclose other users' configuration records to an authenticated client.
+  const activeConfigs = allActiveConfigs.filter((config: any) => String(config.userId) === String(req.user.id));
+
   res.json({
     count: activeConfigs.length,
     configurations: activeConfigs.map(config => ({
@@ -115,24 +149,64 @@ router.post('/scheduler/:action', isAuthenticated, isTradingAuthorized, asyncErr
   const { action } = req.params;
   
   if (action === 'pause') {
-    console.log('⏸️ [SCHEDULER] Pausando scheduler via API...');
-    autoTradingScheduler.stopScheduler();
+    const userId = String(req.user.id);
+    console.log(`⏸️ [SCHEDULER] Pausando somente a sessão isolada do usuário ${userId}...`);
+    // Stop locally first; remote failure must not leave this user's worker armed.
+    await isolatedAutoTradingScheduler.disarmUserTrading(userId);
+    await autoTradingScheduler.disarmUserTrading(userId);
+    let remoteDisarmed = true;
+    try { await setUniversalTradingArmed(userId, false); }
+    catch (error) {
+      remoteDisarmed = false;
+      console.warn('⚠️ [UNIVERSAL] Falha no disarm remoto; o heartbeat repetirá o estado parado:', error);
+    }
+    const schedulerActive = isolatedAutoTradingScheduler.getArmedUserIds().includes(userId);
     const status = autoTradingScheduler.getSchedulerStatus();
-    console.log('✅ [SCHEDULER] Scheduler pausado. Status:', status);
-    res.json({ 
-      message: 'Scheduler pausado com sucesso',
-      schedulerActive: status.isRunning,
-      status 
+    res.json({
+      message: remoteDisarmed ? 'Trading pausado para o usuário autenticado' : 'Trading parado localmente; sincronização remota pendente',
+      schedulerActive,
+      remoteDisarmed,
+      status: {
+        isRunning: schedulerActive,
+        emergencyStop: status.emergencyStop,
+        isInitialized: isolatedAutoTradingScheduler.getActiveSessions().some((session: any) => String(session.userId) === userId && session.workerReady),
+      }
     });
   } else if (action === 'resume') {
-    console.log('▶️ [SCHEDULER] Retomando scheduler via API...');
-    await autoTradingScheduler.startScheduler();
+    const userId = String(req.user.id);
+    const [userConfig, derivToken] = await Promise.all([
+      storage.getUserTradeConfig(userId),
+      storage.getUserDerivToken(userId),
+    ]);
+    if (!userConfig || !userConfig.isActive || !derivToken || !derivToken.isActive) {
+      return res.status(409).json({
+        message: 'Play bloqueado: configure uma estratégia ativa e um token Deriv ativo para este usuário.',
+        schedulerActive: false,
+      });
+    }
+    if (autoTradingScheduler.getSchedulerStatus().emergencyStop || isolatedAutoTradingScheduler.getSchedulerStatus().emergencyStop) {
+      return res.status(409).json({ message: 'Play bloqueado: parada de emergência ativa.', schedulerActive: false });
+    }
+    console.log(`▶️ [SCHEDULER] Ativando somente a sessão isolada do usuário ${userId}...`);
+    // Remote session first. If local startup fails, roll back the remote arm.
+    try {
+      await setUniversalTradingArmed(userId, true);
+      await isolatedAutoTradingScheduler.startSchedulerForUser(userId);
+    } catch (error) {
+      try { await isolatedAutoTradingScheduler.disarmUserTrading(userId); } catch {}
+      try { await setUniversalTradingArmed(userId, false); } catch {}
+      throw error;
+    }
+    const schedulerActive = isolatedAutoTradingScheduler.getArmedUserIds().includes(userId);
     const status = autoTradingScheduler.getSchedulerStatus();
-    console.log('✅ [SCHEDULER] Scheduler retomado. Status:', status);
-    res.json({ 
-      message: 'Scheduler retomado com sucesso',
-      schedulerActive: status.isRunning,
-      status 
+    res.json({
+      message: schedulerActive ? 'Play processado para a sessão isolada do usuário' : 'Play recebido, mas o runtime não confirmou ativação',
+      schedulerActive,
+      status: {
+        isRunning: schedulerActive,
+        emergencyStop: status.emergencyStop,
+        isInitialized: isolatedAutoTradingScheduler.getActiveSessions().some((session: any) => String(session.userId) === userId && session.workerReady),
+      }
     });
   } else {
     res.status(400).json({ message: 'Ação inválida. Use "pause" ou "resume"' });
@@ -298,11 +372,20 @@ router.get('/security-status', isAuthenticated, isTradingAuthorized, asyncErrorH
 
 // PARADA DE EMERGÊNCIA - Controle administrativo
 router.post('/emergency-stop', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+  const armedUsers = isolatedAutoTradingScheduler.getArmedUserIds();
+  // Latch both managers and disarm every isolated worker immediately.
+  await isolatedAutoTradingScheduler.emergencyStopAll();
   autoTradingScheduler.emergencyStopAll();
-  
+  // Best-effort remote disarm cannot delay or undo the local emergency stop.
+  void Promise.allSettled(armedUsers.map((userId: string) => setUniversalTradingArmed(userId, false)))
+    .then((results) => {
+      const failures = results.filter((result) => result.status === 'rejected').length;
+      if (failures) console.warn(`⚠️ [UNIVERSAL] ${failures} sessão(ões) remota(s) aguardam reconciliação por heartbeat.`);
+    });
+
   res.json({
     success: true,
-    message: 'PARADA DE EMERGÊNCIA ATIVADA - Todas as operações foram interrompidas',
+    message: 'PARADA DE EMERGÊNCIA ATIVADA - todos os runtimes isolados foram desarmados',
     timestamp: new Date().toISOString(),
     activatedBy: req.user.email
   });
@@ -318,6 +401,8 @@ router.post('/disable-emergency-stop', isAuthenticated, isTradingAuthorized, asy
       message: 'Apenas administradores específicos podem desativar a parada de emergência'
     });
   }
+  // Clear the isolated latch only after the authorized legacy latch is cleared.
+  isolatedAutoTradingScheduler.clearEmergencyStop();
   
   res.json({
     success: true,
@@ -363,19 +448,19 @@ router.post('/toggle-admin-approval', isAuthenticated, isTradingAuthorized, asyn
 // =================== CONTROLES PARA CONTA DEMO/TESTING ===================
 
 // Resetar sessões bloqueadas (para testing) - TEMPORARIAMENTE SEM AUTH PARA DEMO
-router.post('/reset-blocked-sessions', asyncErrorHandler(async (req: any, res: any) => {
-  const success = autoTradingScheduler.resetBlockedSessions();
+router.post('/reset-blocked-sessions', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+  const success = autoTradingScheduler.resetBlockedSessionsForUser(String(req.user.id));
   
   res.json({
     success,
-    message: 'Sessões bloqueadas resetadas para modo demo',
+    message: 'Somente as sessões bloqueadas do usuário autenticado foram resetadas',
     timestamp: new Date().toISOString(),
     actionBy: req.user.email
   });
 }));
 
 // Aumentar limites para modo demo - TEMPORARIAMENTE SEM AUTH PARA DEMO
-router.post('/increase-demo-limits', asyncErrorHandler(async (req: any, res: any) => {
+router.post('/increase-demo-limits', isAuthenticated, isTradingAuthorized, isSystemAdmin, asyncErrorHandler(async (req: any, res: any) => {
   const success = autoTradingScheduler.increaseLimitsForDemo();
   const securityStatus = autoTradingScheduler.getSecurityStatus();
   
@@ -392,12 +477,13 @@ router.post('/increase-demo-limits', asyncErrorHandler(async (req: any, res: any
 }));
 
 // Limpar todas as sessões ativas - TEMPORARIAMENTE SEM AUTH PARA DEMO
-router.post('/clear-all-sessions', asyncErrorHandler(async (req: any, res: any) => {
-  const success = autoTradingScheduler.clearAllSessions();
+router.post('/clear-all-sessions', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+  const userId = String(req.user.id);
+  await autoTradingScheduler.disarmUserTrading(userId);
   
   res.json({
-    success,
-    message: 'Todas as sessões ativas foram removidas',
+    success: true,
+    message: 'Somente as sessões do usuário autenticado foram removidas',
     timestamp: new Date().toISOString(),
     actionBy: req.user.email
   });
@@ -415,7 +501,7 @@ router.get('/diagnose', isAuthenticated, isTradingAuthorized, asyncErrorHandler(
   const userId = req.user.id;
   
   // 1. Verificar configurações ativas
-  const activeConfigs = await storage.getActiveTradeConfigurations();
+  const activeConfigs = (await storage.getActiveTradeConfigurations()).filter((config: any) => String(config.userId) === String(userId));
   const userConfig = await storage.getUserTradeConfig(userId);
   
   // 2. Verificar token Deriv
@@ -425,7 +511,7 @@ router.get('/diagnose', isAuthenticated, isTradingAuthorized, asyncErrorHandler(
   const securityStatus = autoTradingScheduler.getSecurityStatus();
   
   // 4. Verificar sessões ativas
-  const activeSessions = autoTradingScheduler.getActiveSessions();
+  const activeSessions = autoTradingScheduler.getActiveSessions().filter((session: any) => String(session.userId) === String(userId));
   
   // 5. Buscar operações recentes
   const recentOps = await storage.getUserTradeOperations(userId, 10);
@@ -480,57 +566,30 @@ router.get('/diagnose', isAuthenticated, isTradingAuthorized, asyncErrorHandler(
   res.json(diagnosis);
 }));
 
-// Endpoint de correção automática
+// Endpoint de correção automática: somente diagnóstico, nunca remove travas nem reativa trading.
 router.post('/fix-auto', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
-  const userId = req.user.id;
-  const fixes: string[] = [];
-  
-  // 1. Verificar e corrigir parada de emergência
+  const userId = String(req.user.id);
+  const [userConfig, derivToken] = await Promise.all([
+    storage.getUserTradeConfig(userId),
+    storage.getUserDerivToken(userId),
+  ]);
   const securityStatus = autoTradingScheduler.getSecurityStatus();
-  if (securityStatus.emergencyStop) {
-    const disabled = autoTradingScheduler.disableEmergencyStop(req.user.email);
-    if (disabled) {
-      fixes.push('✅ Parada de emergência desativada');
-    } else {
-      fixes.push('⚠️ Não foi possível desativar parada de emergência (permissão negada)');
-    }
-  }
-  
-  // 2. Verificar e corrigir aprovação admin
-  if (securityStatus.adminApprovalRequired) {
-    const disabled = autoTradingScheduler.disableAdminApproval(req.user.email);
-    if (disabled) {
-      fixes.push('✅ Aprovação administrativa removida');
-    } else {
-      fixes.push('⚠️ Não foi possível remover aprovação administrativa (permissão negada)');
-    }
-  }
-  
-  // 3. Verificar configuração do usuário
-  const userConfig = await storage.getUserTradeConfig(userId);
-  if (!userConfig) {
-    // Criar configuração padrão
-    await storage.updateTradeConfig(userId, 'test_sem_limites');
-    fixes.push('✅ Configuração padrão criada (test_sem_limites)');
-  } else if (!userConfig.isActive) {
-    // Reativar configuração existente
-    await storage.updateTradeConfig(userId, userConfig.mode);
-    fixes.push(`✅ Configuração reativada (${userConfig.mode})`);
-  }
-  
-  // 4. Resetar sessões bloqueadas
-  autoTradingScheduler.resetBlockedSessions();
-  fixes.push('✅ Sessões bloqueadas resetadas');
-  
-  // 5. Aumentar limites para demo
-  autoTradingScheduler.increaseLimitsForDemo();
-  fixes.push('✅ Limites aumentados para modo demo');
-  
-  res.json({
-    success: true,
-    corrigoesAplicadas: fixes.length,
-    detalhes: fixes,
-    proximoPasso: 'Aguarde 10-30 segundos para o sistema começar a executar operações automaticamente'
+  const userArmed = autoTradingScheduler.isUserTradingArmed(userId);
+  const blockers: string[] = [];
+  if (securityStatus.emergencyStop) blockers.push('Parada de emergência ativa; exige revisão administrativa explícita.');
+  if (securityStatus.adminApprovalRequired) blockers.push('Aprovação administrativa obrigatória.');
+  if (!userConfig || !userConfig.isActive) blockers.push('Configuração do usuário ausente ou inativa.');
+  if (!derivToken || !derivToken.isActive) blockers.push('Token Deriv do usuário ausente ou inativo.');
+  if (!userArmed) blockers.push('Trading não foi ativado manualmente pelo usuário.');
+
+  return res.status(409).json({
+    success: false,
+    automaticChangesApplied: 0,
+    message: 'Correção automática desativada por segurança: este endpoint não pode remover travas, reativar configurações nem aumentar limites.',
+    userArmed,
+    blockers,
+    nextStep: 'Corrija os bloqueios identificados e use o controle Play explicitamente. Nenhuma operação foi iniciada.',
+    timestamp: new Date().toISOString(),
   });
 }));
 
@@ -559,21 +618,15 @@ router.post('/pause-trading', isAuthenticated, isTradingAuthorized, asyncErrorHa
 }));
 
 // Retomar trading globalmente (afeta todos os remixes)
-router.post('/resume-trading', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+router.post('/resume-trading', isAuthenticated, isTradingAuthorized, isSystemAdmin, asyncErrorHandler(async (req: any, res: any) => {
   const control = await storage.resumeTrading();
   
   console.log(`▶️ [GLOBAL] Trading retomado`);
   
-  // ⚠️ CRITICAL FIX: Reiniciar o scheduler quando trading é retomado
-  console.log('▶️ [SCHEDULER] Iniciando scheduler após resume...');
-  try {
-    await autoTradingScheduler.startScheduler();
-  } catch (error) {
-    console.error('❌ [SCHEDULER] Erro ao iniciar scheduler após resume:', error);
-  }
-  
+  // Retomar a permissão global não equivale ao Play individual de cada usuário.
+  // Nenhum scheduler é iniciado aqui; cada usuário precisa rearmar sua própria sessão.
   res.json({
-    message: 'Trading retomado globalmente para TODOS os remixes - Scheduler iniciado',
+    message: 'Bloqueio global removido. Trading continua inativo até o Play individual de cada usuário.',
     status: 'resumed',
     resumedAt: control.resumedAt,
   });

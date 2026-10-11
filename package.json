@@ -11,7 +11,8 @@
     "build": "npm rebuild better-sqlite3 --build-from-source && vite build && esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist && esbuild server/services/trading-user-worker.ts --platform=node --packages=external --bundle --format=esm --outfile=dist/trading-user-worker.js",
     "start": "NODE_ENV=production node dist/index.js",
     "check": "tsc --noEmit",
-    "db:push": "drizzle-kit push"
+    "db:push": "drizzle-kit push",
+    "test": "tsx scripts/test-production-symbol-policy.ts && tsx scripts/test-sensitive-data-redaction.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
@@ -129,13 +130,13 @@
     "@types/react-dom": "^18.3.1",
     "@types/ws": "^8.18.1",
     "autoprefixer": "^10.4.20",
-    "drizzle-kit": "^0.30.4",
+    "drizzle-kit": "^0.31.11",
     "esbuild": "^0.28.2",
     "postcss": "^8.5.28",
     "tailwindcss": "^3.4.17",
     "tsx": "^4.19.1",
     "typescript": "5.6.3",
-    "vite": "^5.4.19",
+    "vite": "^6.4.3",
     "@vitejs/plugin-react": "^4.3.4",
     "tailwindcss-animate": "^1.0.0"
   },
@@ -144,6 +145,8 @@
   },
   "description": "Invista PRO V10",
   "overrides": {
+    "@esbuild-kit/esm-loader": "npm:tsx@^4.21.0",
+    "postcss-selector-parser": "^7.1.6",
     "whatsapp-web.js": {
       "puppeteer": "^25.8.0"
     }

@@ -18,6 +18,7 @@ import { analyzeCrashBoomSpike } from './crash-boom-spike-engine';
 import { setSignal } from './signal-store';
 import { classifyAsset, getGateThreshold } from '../utils/asset-classifier';
 import { consensusCache } from './consensus-cache';
+import { isAllowedProductionSymbol } from './production-symbol-policy';
 
 function derivToMT5Name(derivSymbol: string): string | null {
   const map: Record<string, string> = {
@@ -91,15 +92,15 @@ export class AutoTradingScheduler {
    * ☠️ EXECUÇÃO: qualquer tentativa é registrada com máxima severidade
    */
   private isSymbolBlocked(symbol: string, contexto?: string): boolean {
-    const bloqueado = AutoTradingScheduler.BLOCKED_SYMBOLS_PATTERN.test(symbol);
+    const bloqueado = AutoTradingScheduler.BLOCKED_SYMBOLS_PATTERN.test(symbol) || !isAllowedProductionSymbol(symbol);
     if (bloqueado && contexto) {
       const ts = new Date().toISOString();
       console.error(`\n☠️ ══════════════════════════════════════════════════════`);
-      console.error(`☠️  EXECUÇÃO — TENTATIVA DE CRIME INTERCEPTADA`);
+      console.error(`☠️  EXECUÇÃO — SÍMBOLO FORA DA POLÍTICA INTERCEPTADO`);
       console.error(`☠️  Símbolo criminoso : ${symbol}`);
       console.error(`☠️  Interceptado em   : ${contexto}`);
       console.error(`☠️  Timestamp         : ${ts}`);
-      console.error(`☠️  Sentença          : SELEÇÃO ABORTADA — nunca chegará à execução`);
+      console.error(`☠️  Sentença          : SELEÇÃO ABORTADA — fora da allowlist de produção`);
       console.error(`☠️ ══════════════════════════════════════════════════════\n`);
     }
     return bloqueado;
@@ -583,8 +584,11 @@ export class AutoTradingScheduler {
       
       // BUSCAR TODOS OS ATIVOS DISPONÍVEIS DA API DA DERIV
       console.log('📊 [INIT] Buscando ativos disponíveis...');
-      const activeSymbols = await tempDerivAPI.getActiveSymbols();
-      console.log(`✅ [INIT] Recuperados ${activeSymbols.length} símbolos ativos da Deriv API`);
+      const discoveredSymbols = await tempDerivAPI.getActiveSymbols();
+      const activeSymbols = discoveredSymbols.filter((entry: any) =>
+        isAllowedProductionSymbol(typeof entry === 'string' ? entry : entry?.symbol)
+      );
+      console.log(`✅ [INIT] Recuperados ${activeSymbols.length} símbolos permitidos da Deriv API (de ${discoveredSymbols.length} descobertos)`);
       
       if (activeSymbols.length === 0) {
         console.warn('⚠️ [INIT] AVISO: getActiveSymbols() retornou 0 ativos!');
@@ -613,15 +617,9 @@ export class AutoTradingScheduler {
 
       // Fallback caso a API não retorne nenhum Crash/Boom (ex: conta demo limitada)
       // Inclui variantes com e sem underscore (Deriv usa ambos dependendo do ambiente)
-      const CRASH_BOOM_FALLBACK = [
-        'CRASH300',  'CRASH_300',
-        'CRASH500',  'CRASH_500',
-        'CRASH1000', 'CRASH_1000',
-        'BOOM300',   'BOOM_300',
-        'BOOM500',   'BOOM_500',
-        'BOOM1000',  'BOOM_1000',
-      ];
-      const crashBoomSymbols = crashBoomFromApi.length > 0 ? crashBoomFromApi : CRASH_BOOM_FALLBACK;
+      const CRASH_BOOM_FALLBACK = ['CRASH500', 'CRASH1000', 'BOOM500', 'BOOM1000'];
+      const crashBoomSymbols = (crashBoomFromApi.length > 0 ? crashBoomFromApi : CRASH_BOOM_FALLBACK)
+        .filter((symbol: string) => isAllowedProductionSymbol(symbol));
       console.log(`⚡ [INIT] Crash/Boom adicionados à coleta: ${crashBoomSymbols.join(', ')}`);
       
       // Desconectar a conexão temporária
@@ -630,10 +628,9 @@ export class AutoTradingScheduler {
       console.log('✅ [INIT] Desconectado');
       
       // Unir DigitDiff + Crash/Boom (sem duplicatas)
-      const baseSymbols = digitdiffSymbols.length > 0
-        ? digitdiffSymbols
-        : ['R_10', 'R_25', 'R_50', 'R_75', 'R_100']; // Fallback - sempre suportados
-      const symbolsToUse = Array.from(new Set([...baseSymbols, ...crashBoomSymbols]));
+      const baseSymbols = digitdiffSymbols.filter((symbol: string) => isAllowedProductionSymbol(symbol));
+      const symbolsToUse = Array.from(new Set([...baseSymbols, ...crashBoomSymbols]))
+        .filter((symbol: string) => isAllowedProductionSymbol(symbol));
       
       console.log(`🎯 [INIT] Usando ${symbolsToUse.length} símbolos para coleta (DigitDiff + Crash/Boom)`);
       console.log(`🎯 [INIT] Símbolos: ${symbolsToUse.join(', ')}`);
@@ -655,20 +652,18 @@ export class AutoTradingScheduler {
    * Login/heartbeat e o botão Play continuam sendo as únicas portas para execução financeira.
    */
   async prepareAtBoot(): Promise<void> {
-    if (this.isInitialized) return;
-    try {
-      console.log('🔥 [TRADING] Pré-aquecimento no boot: preparando análise e mercado, sem executar trades...');
-      await this.setupAnaliseNaturalSystem();
-      this.isInitialized = true;
-      console.log('✅ [TRADING] Motor pronto no boot. Nenhuma conta está armada e nenhum trade pode ser executado até Play.');
-    } catch (error) {
-      console.error('❌ [TRADING] Falha no pré-aquecimento do boot:', error);
-    }
+    // Boot is deliberately passive: no Deriv connection, market collection, or trading
+    // initialization occurs until an authenticated user explicitly presses Play.
+    console.log('🛡️ [TRADING] Boot passivo concluído. Coleta e trading aguardam ativação manual.');
   }
 
   /**
    * Arma o trading para um usuário autenticado após ação manual explícita.
    */
+  isUserTradingArmed(userId: string): boolean {
+    return !!userId && this.armedUserIds.has(String(userId));
+  }
+
   armUserTrading(userId: string): void {
     if (!userId) return;
     this.armedUserIds.add(String(userId));
@@ -841,11 +836,8 @@ export class AutoTradingScheduler {
     }
 
     // 3. Escanear todos os ativos com análise recente (< 90s) buscando condição excepcional
-    const ACCU_SYMBOLS = [
-      'R_10','R_25','R_50','R_75','R_100',
-      'JD10','JD25','JD50','JD75','JD100',
-      'RDBULL','RDBEAR',
-    ];
+    const ACCU_SYMBOLS = ['BOOM500', 'BOOM1000', 'CRASH500', 'CRASH1000']
+      .filter((symbol) => isAllowedProductionSymbol(symbol));
     const STALE_THRESHOLD_MS = 90 * 1000;
 
     type Candidate = { symbol: string; consensus: number; hurst: number; regime: string };
@@ -1084,7 +1076,7 @@ export class AutoTradingScheduler {
       // VERIFICAÇÃO DE ATIVOS BLOQUEADOS
       let isBlocked = false;
       try {
-        isBlocked = await storage.isUserBlockedAsset(userId, config.symbol || "R_100", "digit_diff");
+        isBlocked = await storage.isUserBlockedAsset(userId, config.symbol || "BOOM500", "digit_diff");
       } catch (blockedErr) {
         console.warn(`⚠️ [${operationId}] Erro ao verificar ativo bloqueado, assumindo NÃO bloqueado:`, blockedErr instanceof Error ? blockedErr.message : String(blockedErr));
         isBlocked = false;
@@ -1302,7 +1294,7 @@ export class AutoTradingScheduler {
       // ⚠️ DIGIT CB BYPASS: Modalidades de dígito NÃO usam circuit breaker.
       // Perdas consecutivas em índices pseudoaleatórios são variância normal,
       // não sinal de mercado adverso. O CB interromperia janelas de frequência favoráveis.
-      const DIGIT_MODALITY_KEYS_CB = new Set(['digit_differs','digit_matches','digit_even','digit_odd','digit_over','digit_under']);
+      const DIGIT_MODALITY_KEYS_CB = new Set(['digit_differs']);
       let _cbModalitiesRaw: string[] = [];
       try {
         if (config.selectedModalities) {
@@ -1739,31 +1731,16 @@ export class AutoTradingScheduler {
         console.warn(`⚠️ [${operationId}] Erro na verificação de recovery mode:`, recoveryCheckError);
       }
 
-      // Buscar dados de mercado
-      let marketDataInfo = await storage.getMarketData(selectedSymbol);
-      if (!marketDataInfo) {
-        // Tentar gerar dados de mercado simulados se não existirem
-        console.log(`📊 [${operationId}] Gerando dados de mercado simulados para ${selectedSymbol}...`);
-        try {
-          await this.createMockMarketData(selectedSymbol);
-          marketDataInfo = await storage.getMarketData(selectedSymbol);
-        } catch (error) {
-          console.error(`❌ [${operationId}] Erro ao gerar dados de mercado:`, error);
-        }
-        
-        if (!marketDataInfo) {
-          return { success: false, error: 'Dados de mercado não disponíveis' };
-        }
-      }
-
-      // Verificação de segurança: não permitir trading real com dados simulados
-      if (marketDataInfo.isSimulated && tokenData.accountType === 'real') {
-        return { 
-          success: false, 
-          error: 'SEGURANÇA: Não é possível executar trades em conta real com dados simulados' 
+      // Fail closed: trading exige dados reais recebidos da Deriv.
+      // Não criar histórico aleatório nem permitir ordens (demo ou real) com dados simulados.
+      const marketDataInfo = await storage.getMarketData(selectedSymbol);
+      if (!marketDataInfo || marketDataInfo.isSimulated) {
+        return {
+          success: false,
+          error: 'SEGURANÇA: dados reais de mercado da Deriv indisponíveis; execução bloqueada (dados simulados nunca são aceitos).'
         };
       }
-
+      
       // Verificação de qualidade dos dados
       // 🔥 AUMENTADO para 15 minutos para aguentar reconexões temporárias do WebSocket
       const lastUpdateTime = marketDataInfo.lastUpdate ? new Date(marketDataInfo.lastUpdate).getTime() : 0;
@@ -2214,11 +2191,6 @@ export class AutoTradingScheduler {
         // Escolher modalidade por rotação: pega baseado na hora atual para distribuir
         const DIGIT_TYPES: Record<string, string> = {
           'digit_differs': 'DIGITDIFF',
-          'digit_matches': 'DIGITMATCH',
-          'digit_even': 'DIGITEVEN',
-          'digit_odd': 'DIGITODD',
-          'digit_over': 'DIGITOVER',
-          'digit_under': 'DIGITUNDER',
         };
         // 'rise'/'fall' → CALL/PUT (contrato de ticks simples, sem barreira)
         // 'higher'/'lower' → CALLE/PUTE (contrato com barreira — preço termina acima/abaixo do barrier)
@@ -2253,18 +2225,8 @@ export class AutoTradingScheduler {
           'lookback_high_low': 'LBHIGHLOW',
         };
 
-        const ALL_SUPPORTED = new Set([
-          ...Object.keys(DIGIT_TYPES),
-          ...Array.from(RISFALL_TYPES),
-          ...Object.keys(HIGHER_LOWER_TYPES),  // higher, lower → CALLE/PUTE
-          ...Object.keys(IN_OUT_TYPES),
-          ...Object.keys(TOUCH_TYPES),
-          ...Object.keys(MULTIPLIER_TYPES),
-          'accumulator',
-          ...Object.keys(TURBO_TYPES),
-          ...Object.keys(VANILLA_TYPES),
-          ...Object.keys(LOOKBACK_TYPES),
-        ]);
+        // Production allowlist is intentionally narrower than legacy UI mappings.
+        const ALL_SUPPORTED = new Set(['digit_differs', 'accumulator']);
 
         // ─── MATRIZ DE COMPATIBILIDADE SÍMBOLO × MODALIDADE ──────────────
         // Define quais modalidades são suportadas por cada grupo de símbolo.
@@ -4303,23 +4265,18 @@ export class AutoTradingScheduler {
   private getSymbolsForMode(mode: string): string[] {
     // 🔥 TODOS OS ATIVOS SUPORTADOS - DESCOBERTA DINÂMICA
     // Sistema agora carrega automaticamente TODOS os ativos da Deriv em tempo real
-    const supportedSymbols = marketDataCollector.getSupportedSymbols();
+    const supportedSymbols = marketDataCollector.getSupportedSymbols()
+      .filter((symbol) => isAllowedProductionSymbol(symbol));
     
     if (supportedSymbols.length > 0) {
-      console.log(`🎯 [getSymbolsForMode] Usando ${supportedSymbols.length} ativos descobertos dinamicamente`);
+      console.log(`🎯 [getSymbolsForMode] Usando ${supportedSymbols.length} ativos permitidos descobertos dinamicamente`);
       return supportedSymbols;
     }
     
     // Fallback se descoberta dinâmica não tiver funcionado ainda
     console.warn('⚠️ [getSymbolsForMode] Nenhum símbolo descoberto - usando fallback');
-    const fallbackSymbols = [
-      'R_10', 'R_25', 'R_50', 'R_75', 'R_100',
-      'EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'AUDUSD', 'USDCAD', 'NZDUSD',
-      'XAUUSD', 'XAGUSD', 'BTCUSD', 'ETHUSD',
-      'SPX500', 'UK100', 'DE40', 'FR40'
-    ];
-    
-    return fallbackSymbols;
+    const fallbackSymbols = ['BOOM500', 'BOOM1000', 'CRASH500', 'CRASH1000'];
+    return fallbackSymbols.filter((symbol) => isAllowedProductionSymbol(symbol));
   }
 
   // ===== FLEXIBILIDADE DINÂMICA: STAKE + TICKS =====
@@ -4692,7 +4649,7 @@ export class AutoTradingScheduler {
       let reason = '';
 
       if (m.startsWith('digit_')) {
-        const barrierData = digitFrequencyAnalyzer.getBestBarrier(m === 'digit_differs' ? digitAnalysis?.symbol || 'R_50' : '');
+        const barrierData = digitFrequencyAnalyzer.getBestBarrier(m === 'digit_differs' ? digitAnalysis?.symbol || 'BOOM500' : '');
         // Digits são bons quando há desvio estatístico claro
         if (digitAnalysis && digitAnalysis.confidence > 60) {
           score = 60 + digitAnalysis.confidence * 0.3;
@@ -5217,12 +5174,24 @@ export class AutoTradingScheduler {
    */
   emergencyStopAll(): void {
     console.log('🚨 PARADA DE EMERGÊNCIA ATIVADA - Parando todas as operações!');
+    // Disarm every user first so clearing the emergency flag later cannot
+    // accidentally re-arm a session that was active before the emergency.
     this.emergencyStop = true;
+    this.armedUserIds.clear();
     this.activeSessions.clear();
-    
-    this.continuousLoopActive = false; // Sinaliza o loop contínuo para encerrar
-    
-    console.log('✅ Sistema de trading totalmente parado por segurança');
+    this.continuousLoopActive = false;
+    this.schedulerRunning = false;
+    this.loopSleepUntil = 0;
+    this.lastOperationId = null;
+    this.lastOperationStartTime = 0;
+
+    // Best-effort async cleanup; the emergency latch and local disarm happen
+    // synchronously before any collector/network shutdown can reject.
+    void this.stopScheduler().catch((error) => {
+      console.error('❌ [TRADING] Falha na limpeza após parada de emergência:', error);
+    });
+
+    console.log('✅ Parada de emergência aplicada: usuários desarmados e limpeza iniciada');
   }
   
   /**
@@ -5309,6 +5278,18 @@ export class AutoTradingScheduler {
   /**
    * Resetar sessões bloqueadas para conta demo (testing)
    */
+  resetBlockedSessionsForUser(userId: string): boolean {
+    const normalizedUserId = String(userId);
+    const blockedSessions = Array.from(this.activeSessions.entries())
+      .filter(([, session]) => String(session.userId) === normalizedUserId && session.executedOperations >= this.maxOperationsPerSession);
+    blockedSessions.forEach(([key, session]) => {
+      console.log(`🔄 Resetando sessão bloqueada do usuário ${normalizedUserId}: ${key}`);
+      session.executedOperations = 0;
+      session.lastExecutionTime = null;
+    });
+    return true;
+  }
+
   resetBlockedSessions(): boolean {
     console.log('🔄 Resetando sessões bloqueadas para modo demo...');
     

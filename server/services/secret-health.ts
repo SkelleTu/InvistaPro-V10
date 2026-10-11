@@ -20,6 +20,7 @@ export function getSecretHealth() {
     state("HUGGINGFACE_API_KEY"),
     state("UNIVERSAL_SERVER_URL", v => /^https?:\/\//i.test(v)),
     state("INVISTA_UNIVERSAL_SERVER_KEY", v => v.length >= 16),
+    state("INTERNAL_DESKTOP_CTRL_SECRET", v => v.length >= 32),
   ];
 
   const missing = checks.filter(c => c.state === "missing").map(c => c.name);

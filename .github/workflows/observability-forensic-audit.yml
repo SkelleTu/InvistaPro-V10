@@ -39,7 +39,7 @@ jobs:
 
       - name: Verify production health endpoints
         env:
-          PRODUCTION_URL: https://invista-pro-v10-aura-system-style.onrender.com
+          PRODUCTION_URL: https://invista-pro-v10-kzlv.onrender.com
         run: |
           set -euo pipefail
           curl --fail --silent --show-error --retry 4 --retry-delay 3 "$PRODUCTION_URL/health" | tee /tmp/health.json
@@ -49,17 +49,17 @@ jobs:
 
       - name: Verify production observability headers
         env:
-          PRODUCTION_URL: https://invista-pro-v10-aura-system-style.onrender.com
+          PRODUCTION_URL: https://invista-pro-v10-kzlv.onrender.com
         run: |
           set -euo pipefail
           headers=$(curl -sS -D - -o /dev/null "$PRODUCTION_URL/health")
           echo "$headers"
           echo "$headers" | grep -qi "^x-request-id:"
-          echo "$headers" | grep -qi "^x-observability-trace-id:" || true
+          echo "$headers" | grep -qi "^x-observability-trace-id:"
 
       - name: Verify deterministic API 404 instrumentation
         env:
-          PRODUCTION_URL: https://invista-pro-v10-aura-system-style.onrender.com
+          PRODUCTION_URL: https://invista-pro-v10-kzlv.onrender.com
         run: |
           code=$(curl -sS -o /tmp/404.json -w "%{http_code}" "$PRODUCTION_URL/api/__observability_audit_missing_route__")
           test "$code" = "404"

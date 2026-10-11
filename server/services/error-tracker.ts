@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { observability } from './production-observability';
+import { sanitizeSensitiveData } from './sensitive-data-redaction';
 
 export interface ErrorContext {
   userId?: string;
@@ -74,6 +75,7 @@ class ErrorTracker {
     category: DetailedError['category'] = 'UNKNOWN',
     context: Partial<ErrorContext> = {}
   ): string {
+    const safeContext = sanitizeSensitiveData(context) as Partial<ErrorContext>;
     const errorId = this.generateErrorId();
     const timestamp = new Date().toISOString();
 
@@ -87,9 +89,9 @@ class ErrorTracker {
       context: {
         timestamp,
         errorId,
-        ...context
+        ...safeContext
       },
-      originalError: this.sanitizeError(error),
+      originalError: sanitizeSensitiveData(this.sanitizeError(error)),
       solved: false
     };
 
@@ -99,16 +101,16 @@ class ErrorTracker {
         level,
         category: category as any,
         message: detailedError.message,
-        requestId: String(context.requestHeaders?.['x-request-id'] || context.requestHeaders?.['rndr-id'] || ''),
-        method: context.requestMethod,
-        path: context.requestPath,
-        userId: context.userId,
-        userEmail: context.userEmail,
+        requestId: String(safeContext.requestHeaders?.['x-request-id'] || safeContext.requestHeaders?.['rndr-id'] || ''),
+        method: safeContext.requestMethod,
+        path: safeContext.requestPath,
+        userId: safeContext.userId,
+        userEmail: safeContext.userEmail,
         details: {
-          requestBody: context.requestBody,
-          requestQuery: context.requestQuery,
-          requestParams: context.requestParams,
-          sessionData: context.sessionData,
+          requestBody: safeContext.requestBody,
+          requestQuery: safeContext.requestQuery,
+          requestParams: safeContext.requestParams,
+          sessionData: safeContext.sessionData,
           errorId,
         },
       });
@@ -245,42 +247,18 @@ class ErrorTracker {
       requestBody: this.sanitizeRequestBody(req.body),
       requestHeaders: this.sanitizeHeaders(req.headers),
       sessionData: req.session ? {
-        id: req.session.id,
+        sessionId: req.session.id,
         passport: req.session.passport
       } : undefined
     };
   }
 
   private sanitizeRequestBody(body: any): any {
-    if (!body) return body;
-    
-    const sanitized = { ...body };
-    
-    // Remove campos sensíveis
-    const sensitiveFields = ['password', 'token', 'secret', 'key', 'auth', 'credential'];
-    sensitiveFields.forEach(field => {
-      if (sanitized[field]) {
-        sanitized[field] = '[REDACTED]';
-      }
-    });
-    
-    return sanitized;
+    return sanitizeSensitiveData(body);
   }
 
   private sanitizeHeaders(headers: any): any {
-    if (!headers) return headers;
-    
-    const sanitized = { ...headers };
-    
-    // Remove headers sensíveis
-    const sensitiveHeaders = ['authorization', 'cookie', 'x-api-key', 'x-auth-token'];
-    sensitiveHeaders.forEach(header => {
-      if (sanitized[header]) {
-        sanitized[header] = '[REDACTED]';
-      }
-    });
-    
-    return sanitized;
+    return sanitizeSensitiveData(headers);
   }
 
   // Método para capturar erros não tratados
