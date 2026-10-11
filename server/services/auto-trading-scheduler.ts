@@ -18,6 +18,7 @@ import { analyzeCrashBoomSpike } from './crash-boom-spike-engine';
 import { setSignal } from './signal-store';
 import { classifyAsset, getGateThreshold } from '../utils/asset-classifier';
 import { consensusCache } from './consensus-cache';
+import { isAllowedProductionSymbol } from './production-symbol-policy';
 
 function derivToMT5Name(derivSymbol: string): string | null {
   const map: Record<string, string> = {
@@ -91,15 +92,15 @@ export class AutoTradingScheduler {
    * ☠️ EXECUÇÃO: qualquer tentativa é registrada com máxima severidade
    */
   private isSymbolBlocked(symbol: string, contexto?: string): boolean {
-    const bloqueado = AutoTradingScheduler.BLOCKED_SYMBOLS_PATTERN.test(symbol);
+    const bloqueado = AutoTradingScheduler.BLOCKED_SYMBOLS_PATTERN.test(symbol) || !isAllowedProductionSymbol(symbol);
     if (bloqueado && contexto) {
       const ts = new Date().toISOString();
       console.error(`\n☠️ ══════════════════════════════════════════════════════`);
-      console.error(`☠️  EXECUÇÃO — TENTATIVA DE CRIME INTERCEPTADA`);
+      console.error(`☠️  EXECUÇÃO — SÍMBOLO FORA DA POLÍTICA INTERCEPTADO`);
       console.error(`☠️  Símbolo criminoso : ${symbol}`);
       console.error(`☠️  Interceptado em   : ${contexto}`);
       console.error(`☠️  Timestamp         : ${ts}`);
-      console.error(`☠️  Sentença          : SELEÇÃO ABORTADA — nunca chegará à execução`);
+      console.error(`☠️  Sentença          : SELEÇÃO ABORTADA — fora da allowlist de produção`);
       console.error(`☠️ ══════════════════════════════════════════════════════\n`);
     }
     return bloqueado;
