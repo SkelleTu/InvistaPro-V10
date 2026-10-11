@@ -11,7 +11,7 @@ const allowed = ["BOOM500", "BOOM1000", "CRASH500", "CRASH1000"];
 const aliases = ["BOOM_500", "BOOM 1000 Index", "CRASH_500", "CRASH 1000 Index"];
 const denied = [
   "R_10", "R_100", "1HZ100V", "BOOM300", "CRASH300",
-  "EURUSD", "WIN$", "", "undefined",
+  "EURUSD", "WIN$", "BOOM1000 (1s)", "CRASH500_1S", "1HZ100V", "", "undefined",
 ];
 
 for (const symbol of allowed) assert.equal(isAllowedProductionSymbol(symbol), true, `Expected allow: ${symbol}`);
@@ -46,5 +46,8 @@ for (const amount of [NaN, Infinity, -Infinity, -1, 0, "1", null, undefined]) {
   assert.equal(isValidProductionStake("DIGITDIFF", amount), false, `Invalid stake must fail closed: ${String(amount)}`);
 }
 assert.equal(isValidProductionStake("CALL", 10), false);
+for (const type of ["DIGITMATCH", "DIGITEVEN", "DIGITODD", "DIGITOVER", "DIGITUNDER", "CALL", "PUT", "MULTUP"]) {
+  assert.equal(isValidProductionStake(type, 100), false, `Disallowed contract must fail closed: ${type}`);
+}
 
 console.log(`Production policy passed: ${allowed.length} canonical symbols, ${aliases.length} aliases, ${denied.length} denied symbols, ACCU/DIGITDIFF-only contract allowlist, and fail-closed minimum stakes.`);
