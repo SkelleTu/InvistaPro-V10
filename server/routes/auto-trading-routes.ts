@@ -186,9 +186,15 @@ router.post('/scheduler/:action', isAuthenticated, isTradingAuthorized, asyncErr
       return res.status(409).json({ message: 'Play bloqueado: parada de emergência ativa.', schedulerActive: false });
     }
     console.log(`▶️ [SCHEDULER] Ativando somente a sessão isolada do usuário ${userId}...`);
-    // Remote session first. If Universal Server is unavailable, do not arm local trading.
-    await setUniversalTradingArmed(userId, true);
-    await isolatedAutoTradingScheduler.startSchedulerForUser(userId);
+    // Remote session first. If local startup fails, roll back the remote arm.
+    try {
+      await setUniversalTradingArmed(userId, true);
+      await isolatedAutoTradingScheduler.startSchedulerForUser(userId);
+    } catch (error) {
+      try { await isolatedAutoTradingScheduler.disarmUserTrading(userId); } catch {}
+      try { await setUniversalTradingArmed(userId, false); } catch {}
+      throw error;
+    }
     const schedulerActive = isolatedAutoTradingScheduler.getArmedUserIds().includes(userId);
     const status = autoTradingScheduler.getSchedulerStatus();
     res.json({
