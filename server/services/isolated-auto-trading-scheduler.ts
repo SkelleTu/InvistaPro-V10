@@ -20,7 +20,7 @@ type WorkerStatus = "ready" | "armed" | "stopped" | "disconnected";
 interface UserRuntime {
   userId: UserId;
   sessionId: string;
-  worker: ChildProcess;
+  worker: ChildProcess | null;
   status: WorkerStatus;
   armed: boolean;
   createdAt: number;
@@ -42,40 +42,48 @@ class IsolatedAutoTradingScheduler {
     };
   }
 
-  private ensureRuntime(userId: string): UserRuntime {
+  private ensureRuntime(userId: string, startWorker = false): UserRuntime {
     const id = String(userId);
-    const existing = this.runtimes.get(id);
-    if (existing && existing.worker.connected) {
-      existing.lastHeartbeatAt = Date.now();
-      return existing;
+    let runtime = this.runtimes.get(id);
+    if (!runtime) {
+      runtime = {
+        userId: id,
+        sessionId: crypto.randomUUID(),
+        worker: null,
+        status: "ready",
+        armed: false,
+        createdAt: Date.now(),
+        lastHeartbeatAt: Date.now(),
+        activeSessions: 0,
+        workerReady: false,
+      };
+      this.runtimes.set(id, runtime);
+      console.log(`🧩 [USER-RUNTIME] sessão leve criada | user=${id} | session=${runtime.sessionId}`);
     }
+    runtime.lastHeartbeatAt = Date.now();
+    if (startWorker && (!runtime.worker || !runtime.worker.connected)) {
+      this.startWorker(runtime);
+    }
+    return runtime;
+  }
 
-    const sessionId = crypto.randomUUID();
+  private startWorker(runtime: UserRuntime): void {
+    if (runtime.worker?.connected) return;
     const { file, execArgv } = this.workerPath();
     const worker = fork(file, [], {
       execArgv,
       stdio: ["ignore", "inherit", "inherit", "ipc"],
       env: {
         ...process.env,
-        INVISTA_RUNTIME_USER_ID: id,
-        INVISTA_RUNTIME_SESSION_ID: sessionId,
+        INVISTA_RUNTIME_USER_ID: runtime.userId,
+        INVISTA_RUNTIME_SESSION_ID: runtime.sessionId,
       },
     });
-
-    const runtime: UserRuntime = {
-      userId: id,
-      sessionId,
-      worker,
-      status: "ready",
-      armed: false,
-      createdAt: Date.now(),
-      lastHeartbeatAt: Date.now(),
-      activeSessions: 0,
-      workerReady: false,
-    };
-
+    runtime.worker = worker;
+    runtime.workerReady = false;
     worker.on("message", (message: any) => {
       runtime.lastHeartbeatAt = Date.now();
+      if (message?.userId !== runtime.userId || message?.sessionId !== runtime.sessionId) return;
       if (message?.type === "ready") {
         runtime.workerReady = true;
         runtime.status = "ready";
@@ -84,29 +92,29 @@ class IsolatedAutoTradingScheduler {
         runtime.armed = Boolean(message.armed);
         runtime.activeSessions = Number(message.activeSessions || 0);
       } else if (message?.type === "error") {
-        console.error(`❌ [USER-RUNTIME] user=${id} session=${sessionId}: ${message.error}`);
+        console.error(`❌ [USER-RUNTIME] user=${runtime.userId} session=${runtime.sessionId}: ${message.error}`);
       }
     });
-
     const cleanup = () => {
-      const current = this.runtimes.get(id);
-      if (current?.worker === worker) this.runtimes.delete(id);
+      if (runtime.worker === worker) {
+        runtime.worker = null;
+        runtime.workerReady = false;
+        runtime.armed = false;
+        runtime.status = "stopped";
+      }
     };
     worker.once("exit", cleanup);
     worker.once("error", (error) => {
-      console.error(`❌ [USER-RUNTIME] worker error user=${id} session=${sessionId}:`, error);
+      console.error(`❌ [USER-RUNTIME] worker error user=${runtime.userId} session=${runtime.sessionId}:`, error);
       cleanup();
     });
-
-    this.runtimes.set(id, runtime);
-    console.log(`🧩 [USER-RUNTIME] criado | user=${id} | session=${sessionId}`);
-    return runtime;
+    console.log(`🧩 [USER-RUNTIME] worker iniciado após comando explícito | user=${runtime.userId} | session=${runtime.sessionId}`);
   }
 
   private send(userId: string, command: string, payload: Record<string, unknown> = {}) {
-    const runtime = this.ensureRuntime(userId);
+    const runtime = this.ensureRuntime(userId, true);
     runtime.lastHeartbeatAt = Date.now();
-    if (runtime.worker.connected) {
+    if (runtime.worker?.connected) {
       runtime.worker.send({ type: command, userId: runtime.userId, sessionId: runtime.sessionId, ...payload });
     }
     return runtime;
@@ -117,7 +125,7 @@ class IsolatedAutoTradingScheduler {
   }
 
   registerUser(userId: string): string {
-    return this.ensureRuntime(userId).sessionId;
+    return this.ensureRuntime(userId, false).sessionId;
   }
 
   armUserTrading(userId: string): void {
@@ -222,7 +230,7 @@ class IsolatedAutoTradingScheduler {
 
   clearAllSessions(): void {
     for (const runtime of this.runtimes.values()) {
-      if (runtime.worker.connected) runtime.worker.send({ type: "clearAllSessions", userId: runtime.userId, sessionId: runtime.sessionId });
+      if (runtime.worker?.connected) runtime.worker.send({ type: "clearAllSessions", userId: runtime.userId, sessionId: runtime.sessionId });
       runtime.armed = false;
       runtime.status = "stopped";
     }
@@ -242,9 +250,9 @@ class IsolatedAutoTradingScheduler {
     const id = String(userId);
     const runtime = this.runtimes.get(id);
     if (!runtime) return;
-    if (runtime.worker.connected) runtime.worker.send({ type: "shutdown", userId: id, sessionId: runtime.sessionId });
+    if (runtime.worker?.connected) runtime.worker.send({ type: "shutdown", userId: id, sessionId: runtime.sessionId });
     setTimeout(() => {
-      if (runtime.worker.connected) runtime.worker.kill("SIGTERM");
+      if (runtime.worker?.connected) runtime.worker.kill("SIGTERM");
     }, 5000).unref();
     this.runtimes.delete(id);
     await stopBrazilNewsUpdatesIfIdle(this.getArmedUserIds().length > 0);
