@@ -19,8 +19,11 @@ for (const symbol of aliases) assert.equal(isAllowedProductionSymbol(symbol), tr
 for (const symbol of denied) assert.equal(isAllowedProductionSymbol(symbol), false, `Expected deny: ${symbol}`);
 assert.equal(normalizeDerivSymbol("BOOM_1000"), "BOOM1000");
 
-for (const type of ["ACCU", "DIGITDIFF", "DIGITMATCH", "DIGITEVEN", "DIGITODD", "DIGITOVER", "DIGITUNDER"]) {
+for (const type of ["ACCU", "DIGITDIFF"]) {
   assert.equal(isAllowedProductionContractType(type), true, `Expected allowed contract type: ${type}`);
+}
+for (const type of ["DIGITMATCH", "DIGITEVEN", "DIGITODD", "DIGITOVER", "DIGITUNDER"]) {
+  assert.equal(isAllowedProductionContractType(type), false, `Expected denied contract type: ${type}`);
 }
 for (const type of ["CALL", "PUT", "MULTUP", "MULTDOWN", "ONETOUCH", "LBFLOATCALL", ""]) {
   assert.equal(isAllowedProductionContractType(type), false, `Expected denied contract type: ${type}`);
@@ -44,4 +47,4 @@ for (const amount of [NaN, Infinity, -Infinity, -1, 0, "1", null, undefined]) {
 }
 assert.equal(isValidProductionStake("CALL", 10), false);
 
-console.log(`Production policy passed: ${allowed.length} canonical symbols, ${aliases.length} aliases, ${denied.length} denied symbols, contract allowlist, and fail-closed minimum stakes.`);
+console.log(`Production policy passed: ${allowed.length} canonical symbols, ${aliases.length} aliases, ${denied.length} denied symbols, ACCU/DIGITDIFF-only contract allowlist, and fail-closed minimum stakes.`);
