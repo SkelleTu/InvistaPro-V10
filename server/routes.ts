@@ -1830,7 +1830,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     if (!userId) return res.status(401).json({ message: 'Usuário não autenticado' });
 
     // Respect the global emergency latch before creating any armed runtime.
-    if (legacyTradingScheduler.getSchedulerStatus().emergencyStop) {
+    if (legacyTradingScheduler.getSchedulerStatus().emergencyStop || autoTradingScheduler.getSchedulerStatus().emergencyStop) {
       return res.status(409).json({
         success: false,
         active: false,
@@ -1913,7 +1913,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     const userId = String(req.user.id);
     const activeForUser = autoTradingScheduler.getArmedUserIds().some((id: string) => String(id) === userId);
     const globalStatus = autoTradingScheduler.getSchedulerStatus();
-    const emergencyStop = legacyTradingScheduler.getSchedulerStatus().emergencyStop;
+    const emergencyStop = Boolean(legacyTradingScheduler.getSchedulerStatus().emergencyStop || globalStatus.emergencyStop);
     res.json({
       success: true,
       status: {
