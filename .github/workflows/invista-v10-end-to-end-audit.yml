@@ -1,0 +1,69 @@
+name: Invista Pro V10 - Ponta a Ponta
+
+on:
+  push:
+    branches:
+      - audit/invista-v10-login-memory-worker
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: invista-v10-audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: TypeScript check
+        run: npm run check
+
+      - name: Existing safety tests
+        run: npm test
+
+      - name: Production build
+        run: npm run build
+
+      - name: Verify worker artifact exists
+        shell: bash
+        run: |
+          test -s dist/trading-user-worker.js
+          node --check dist/trading-user-worker.js
+          test -s dist/index.js
+
+      - name: Verify trading starts disabled in source
+        shell: bash
+        run: |
+          grep -R -n -E 'trading DESATIVADO|trading.*disabled|aguardando login' server || {
+            echo "Could not find explicit boot guard; manual review required."
+            exit 1
+          }
+
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: invista-v10-build-diagnostics
+          path: |
+            dist/trading-user-worker.js
+            dist/index.js
+          if-no-files-found: warn
+          retention-days: 7
