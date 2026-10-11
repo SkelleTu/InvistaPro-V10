@@ -39,14 +39,16 @@ router.get('/status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(as
   const activeSessions = isolatedAutoTradingScheduler.getActiveSessions()
     .filter((session: any) => String(session.userId) === userId);
   const legacySafetyStatus = autoTradingScheduler.getSchedulerStatus();
+  const isolatedSafetyStatus = isolatedAutoTradingScheduler.getSchedulerStatus();
+  const emergencyStop = Boolean(legacySafetyStatus.emergencyStop || isolatedSafetyStatus.emergencyStop);
   const schedulerActiveForUser = isolatedAutoTradingScheduler.getArmedUserIds().includes(userId) &&
     activeSessions.some((session: any) => session.isActive) &&
-    !legacySafetyStatus.emergencyStop;
+    !emergencyStop;
   // Expose only this user's runtime; never disclose other users' IDs or counts.
   const schedulerStatus = {
     isRunning: schedulerActiveForUser,
     hasActiveSessions: schedulerActiveForUser,
-    emergencyStop: legacySafetyStatus.emergencyStop,
+    emergencyStop,
     isInitialized: activeSessions.some((session: any) => session.workerReady),
     currentPhase: schedulerActiveForUser ? 'ATIVO' : 'AGUARDANDO_PLAY',
     currentPhaseDetail: schedulerActiveForUser ? 'Runtime isolado ativo para este usuário' : 'Nenhuma atividade ativa para este usuário',
@@ -182,7 +184,7 @@ router.post('/scheduler/:action', isAuthenticated, isTradingAuthorized, asyncErr
         schedulerActive: false,
       });
     }
-    if (autoTradingScheduler.getSchedulerStatus().emergencyStop) {
+    if (autoTradingScheduler.getSchedulerStatus().emergencyStop || isolatedAutoTradingScheduler.getSchedulerStatus().emergencyStop) {
       return res.status(409).json({ message: 'Play bloqueado: parada de emergência ativa.', schedulerActive: false });
     }
     console.log(`▶️ [SCHEDULER] Ativando somente a sessão isolada do usuário ${userId}...`);
@@ -371,8 +373,8 @@ router.get('/security-status', isAuthenticated, isTradingAuthorized, asyncErrorH
 // PARADA DE EMERGÊNCIA - Controle administrativo
 router.post('/emergency-stop', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
   const armedUsers = isolatedAutoTradingScheduler.getArmedUserIds();
-  // Disarm every isolated worker immediately and latch the legacy safety stop.
-  await isolatedAutoTradingScheduler.stopScheduler();
+  // Latch both managers and disarm every isolated worker immediately.
+  await isolatedAutoTradingScheduler.emergencyStopAll();
   autoTradingScheduler.emergencyStopAll();
   // Best-effort remote disarm cannot delay or undo the local emergency stop.
   void Promise.allSettled(armedUsers.map((userId: string) => setUniversalTradingArmed(userId, false)))
@@ -399,6 +401,8 @@ router.post('/disable-emergency-stop', isAuthenticated, isTradingAuthorized, asy
       message: 'Apenas administradores específicos podem desativar a parada de emergência'
     });
   }
+  // Clear the isolated latch only after the authorized legacy latch is cleared.
+  isolatedAutoTradingScheduler.clearEmergencyStop();
   
   res.json({
     success: true,
