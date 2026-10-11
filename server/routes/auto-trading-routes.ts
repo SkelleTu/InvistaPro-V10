@@ -365,7 +365,7 @@ router.post('/toggle-admin-approval', isAuthenticated, isTradingAuthorized, asyn
 // =================== CONTROLES PARA CONTA DEMO/TESTING ===================
 
 // Resetar sessões bloqueadas (para testing) - TEMPORARIAMENTE SEM AUTH PARA DEMO
-router.post('/reset-blocked-sessions', asyncErrorHandler(async (req: any, res: any) => {
+router.post('/reset-blocked-sessions', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
   const success = autoTradingScheduler.resetBlockedSessions();
   
   res.json({
