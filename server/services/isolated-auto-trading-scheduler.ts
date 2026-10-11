@@ -247,7 +247,7 @@ class IsolatedAutoTradingScheduler {
       if (runtime.worker.connected) runtime.worker.kill("SIGTERM");
     }, 5000).unref();
     this.runtimes.delete(id);
-    if (this.getArmedUserIds().length === 0) brazilNewsService.stopAutoUpdate();
+    await stopBrazilNewsUpdatesIfIdle(this.getArmedUserIds().length > 0);
     console.log(`🔌 [USER-RUNTIME] destruído | user=${id} | session=${runtime.sessionId}`);
   }
 }
