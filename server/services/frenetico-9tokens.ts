@@ -274,6 +274,10 @@ export async function executeFrenetic9TokensBurst(
   digitCount?: number,
   currentBalance?: number
 ): Promise<BurstResult> {
+  // Defense in depth: this legacy engine executes DIGITMATCH, which is not
+  // part of the production allowlist. Never connect slot tokens or place orders.
+  throw new Error("PRODUCTION_CONTRACT_TYPE_BLOCKED: DIGITMATCH burst execution is disabled.");
+
   const startTime = Date.now();
 
   if (slots.length === 0) {
