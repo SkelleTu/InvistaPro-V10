@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import { autoTradingScheduler } from '../services/auto-trading-scheduler';
+import { isolatedAutoTradingScheduler } from '../services/isolated-auto-trading-scheduler';
+import { setUniversalTradingArmed } from '../services/universal-server-session';
 import { dualStorage as storage } from '../storage-dual';
 import { isAuthenticated } from '../auth';
 import { asyncErrorHandler } from '../middleware/error-handler';
@@ -31,20 +33,23 @@ const isSystemAdmin = (req: any, res: any, next: any) => {
 
 // Obter status do scheduler
 router.get('/status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
-  const userId = req.user.id;
-  const activeSessions = autoTradingScheduler.getActiveSessions().filter((session: any) => String(session.userId) === String(userId));
-  const globalSchedulerStatus = autoTradingScheduler.getSchedulerStatus();
-  const schedulerActiveForUser = autoTradingScheduler.isUserTradingArmed(String(userId)) &&
+  const userId = String(req.user.id);
+  // Runtime state comes from the isolated worker manager, not the legacy
+  // process-global scheduler singleton.
+  const activeSessions = isolatedAutoTradingScheduler.getActiveSessions()
+    .filter((session: any) => String(session.userId) === userId);
+  const legacySafetyStatus = autoTradingScheduler.getSchedulerStatus();
+  const schedulerActiveForUser = isolatedAutoTradingScheduler.getArmedUserIds().includes(userId) &&
     activeSessions.some((session: any) => session.isActive) &&
-    !globalSchedulerStatus.emergencyStop;
-  // Expose only this user's session state; never leak global activity logs or other users' totals.
+    !legacySafetyStatus.emergencyStop;
+  // Expose only this user's runtime; never disclose other users' IDs or counts.
   const schedulerStatus = {
     isRunning: schedulerActiveForUser,
-    hasActiveSessions: activeSessions.some((session: any) => session.isActive),
-    emergencyStop: globalSchedulerStatus.emergencyStop,
-    isInitialized: globalSchedulerStatus.isInitialized,
-    currentPhase: schedulerActiveForUser ? globalSchedulerStatus.currentPhase : 'AGUARDANDO_PLAY',
-    currentPhaseDetail: schedulerActiveForUser ? globalSchedulerStatus.currentPhaseDetail : 'Nenhuma atividade ativa para este usuário',
+    hasActiveSessions: schedulerActiveForUser,
+    emergencyStop: legacySafetyStatus.emergencyStop,
+    isInitialized: activeSessions.some((session: any) => session.workerReady),
+    currentPhase: schedulerActiveForUser ? 'ATIVO' : 'AGUARDANDO_PLAY',
+    currentPhaseDetail: schedulerActiveForUser ? 'Runtime isolado ativo para este usuário' : 'Nenhuma atividade ativa para este usuário',
   };
 
   // Verificar se o token Deriv está configurado para este usuário
@@ -146,16 +151,26 @@ router.post('/scheduler/:action', isAuthenticated, isTradingAuthorized, asyncErr
   
   if (action === 'pause') {
     const userId = String(req.user.id);
-    console.log(`⏸️ [SCHEDULER] Pausando somente a sessão do usuário ${userId}...`);
+    console.log(`⏸️ [SCHEDULER] Pausando somente a sessão isolada do usuário ${userId}...`);
+    // Stop locally first; remote failure must not leave this user's worker armed.
+    await isolatedAutoTradingScheduler.disarmUserTrading(userId);
     await autoTradingScheduler.disarmUserTrading(userId);
+    let remoteDisarmed = true;
+    try { await setUniversalTradingArmed(userId, false); }
+    catch (error) {
+      remoteDisarmed = false;
+      console.warn('⚠️ [UNIVERSAL] Falha no disarm remoto; o heartbeat repetirá o estado parado:', error);
+    }
+    const schedulerActive = isolatedAutoTradingScheduler.getArmedUserIds().includes(userId);
     const status = autoTradingScheduler.getSchedulerStatus();
     res.json({
-      message: 'Trading pausado para o usuário autenticado',
-      schedulerActive: autoTradingScheduler.isUserTradingArmed(userId) && status.isRunning && !status.emergencyStop,
+      message: remoteDisarmed ? 'Trading pausado para o usuário autenticado' : 'Trading parado localmente; sincronização remota pendente',
+      schedulerActive,
+      remoteDisarmed,
       status: {
-        isRunning: autoTradingScheduler.isUserTradingArmed(userId) && status.isRunning && !status.emergencyStop,
+        isRunning: schedulerActive,
         emergencyStop: status.emergencyStop,
-        isInitialized: status.isInitialized,
+        isInitialized: isolatedAutoTradingScheduler.getActiveSessions().some((session: any) => String(session.userId) === userId && session.workerReady),
       }
     });
   } else if (action === 'resume') {
@@ -170,17 +185,22 @@ router.post('/scheduler/:action', isAuthenticated, isTradingAuthorized, asyncErr
         schedulerActive: false,
       });
     }
-    console.log(`▶️ [SCHEDULER] Retomando somente a sessão do usuário ${userId}...`);
-    autoTradingScheduler.armUserTrading(userId);
-    await autoTradingScheduler.startScheduler();
+    if (autoTradingScheduler.getSchedulerStatus().emergencyStop) {
+      return res.status(409).json({ message: 'Play bloqueado: parada de emergência ativa.', schedulerActive: false });
+    }
+    console.log(`▶️ [SCHEDULER] Ativando somente a sessão isolada do usuário ${userId}...`);
+    // Remote session first. If Universal Server is unavailable, do not arm local trading.
+    await setUniversalTradingArmed(userId, true);
+    await isolatedAutoTradingScheduler.startSchedulerForUser(userId);
+    const schedulerActive = isolatedAutoTradingScheduler.getArmedUserIds().includes(userId);
     const status = autoTradingScheduler.getSchedulerStatus();
     res.json({
-      message: 'Solicitação de Play processada para o usuário autenticado',
-      schedulerActive: autoTradingScheduler.isUserTradingArmed(userId) && !status.emergencyStop,
+      message: schedulerActive ? 'Play processado para a sessão isolada do usuário' : 'Play recebido, mas o runtime não confirmou ativação',
+      schedulerActive,
       status: {
-        isRunning: autoTradingScheduler.isUserTradingArmed(userId) && status.isRunning && !status.emergencyStop,
+        isRunning: schedulerActive,
         emergencyStop: status.emergencyStop,
-        isInitialized: status.isInitialized,
+        isInitialized: isolatedAutoTradingScheduler.getActiveSessions().some((session: any) => String(session.userId) === userId && session.workerReady),
       }
     });
   } else {
@@ -347,11 +367,20 @@ router.get('/security-status', isAuthenticated, isTradingAuthorized, asyncErrorH
 
 // PARADA DE EMERGÊNCIA - Controle administrativo
 router.post('/emergency-stop', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+  const armedUsers = isolatedAutoTradingScheduler.getArmedUserIds();
+  // Disarm every isolated worker immediately and latch the legacy safety stop.
+  await isolatedAutoTradingScheduler.stopScheduler();
   autoTradingScheduler.emergencyStopAll();
-  
+  // Best-effort remote disarm cannot delay or undo the local emergency stop.
+  void Promise.allSettled(armedUsers.map((userId: string) => setUniversalTradingArmed(userId, false)))
+    .then((results) => {
+      const failures = results.filter((result) => result.status === 'rejected').length;
+      if (failures) console.warn(`⚠️ [UNIVERSAL] ${failures} sessão(ões) remota(s) aguardam reconciliação por heartbeat.`);
+    });
+
   res.json({
     success: true,
-    message: 'PARADA DE EMERGÊNCIA ATIVADA - Todas as operações foram interrompidas',
+    message: 'PARADA DE EMERGÊNCIA ATIVADA - todos os runtimes isolados foram desarmados',
     timestamp: new Date().toISOString(),
     activatedBy: req.user.email
   });
