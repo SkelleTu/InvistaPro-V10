@@ -41,6 +41,14 @@ export function isAllowedProductionContractType(contractType: unknown): boolean 
   return ALLOWED_PRODUCTION_CONTRACT_TYPES.has(String(contractType ?? "").trim().toUpperCase());
 }
 
+/**
+ * Return a stake only for a contract type explicitly allowed by production policy.
+ * Unknown contract types must fail closed instead of inheriting the Digit minimum.
+ */
 export function minimumStakeForContract(contractType: unknown): number {
-  return String(contractType ?? "").trim().toUpperCase() === "ACCU" ? 1 : 0.35;
+  const normalizedType = String(contractType ?? "").trim().toUpperCase();
+  if (!ALLOWED_PRODUCTION_CONTRACT_TYPES.has(normalizedType)) {
+    throw new Error(`Blocked Deriv contract type "${String(contractType ?? "")}"; no production minimum stake is defined.`);
+  }
+  return normalizedType === "ACCU" ? 1 : 0.35;
 }
