@@ -23,7 +23,6 @@ import { derivTradeSync } from "./services/deriv-trade-sync";
 import { realStatsTracker } from "./services/real-stats-tracker";
 import { runPostgresMigration } from "./migrate-postgres";
 import { initUrlRegistry } from "./services/url-registry";
-import { brazilNewsService } from "./services/brazil-news-service";
 import { startDerivObservabilityBridge } from "./services/deriv-observability-bridge";
 import { startUniversalHeartbeatLoop } from "./services/universal-server-session";
 import { getSecretHealth } from "./services/secret-health";
