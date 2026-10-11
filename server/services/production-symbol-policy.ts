@@ -52,3 +52,11 @@ export function minimumStakeForContract(contractType: unknown): number {
   }
   return normalizedType === "ACCU" ? 1 : 0.35;
 }
+
+/** Validate stake shape and contract-specific minimum before any Deriv order is sent. */
+export function isValidProductionStake(contractType: unknown, amount: unknown): boolean {
+  if (!isAllowedProductionContractType(contractType) || typeof amount !== "number" || !Number.isFinite(amount)) {
+    return false;
+  }
+  return amount >= minimumStakeForContract(contractType);
+}
