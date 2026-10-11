@@ -25,6 +25,9 @@ router.get('/status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(as
   const stats = autoTradingScheduler.getSessionStats();
   const activeSessions = autoTradingScheduler.getActiveSessions().filter((session: any) => String(session.userId) === String(userId));
   const schedulerStatus = autoTradingScheduler.getSchedulerStatus();
+  const schedulerActiveForUser = autoTradingScheduler.isUserTradingArmed(String(userId)) &&
+    activeSessions.some((session: any) => session.isActive) &&
+    !schedulerStatus.emergencyStop;
 
   // Verificar se o token Deriv está configurado para este usuário
   const derivToken = await storage.getUserDerivToken(userId);
