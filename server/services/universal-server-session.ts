@@ -29,16 +29,18 @@ async function call(path: string, body: any) {
 }
 
 export async function registerUniversalSession(userId: string) {
-  if (!enabled() || !userId) return null;
+  if (!userId) throw new Error("Universal session requires an authenticated user ID.");
+  if (!enabled()) throw new Error("Universal Server integration is not configured; refusing to create an untracked trading session.");
   const result = await call("/api/invista/session/register", { userId: String(userId), platform });
   const session = result?.session;
-  if (session?.sessionId) sessions.set(String(userId), {
+  if (!session?.sessionId) throw new Error("Universal Server did not confirm session registration.");
+  sessions.set(String(userId), {
     sessionId: session.sessionId,
     userId: String(userId),
     platform,
     tradingArmed: Boolean(session.tradingArmed),
   });
-  console.log(`💓 [UNIVERSAL] Sessão registrada | user=${userId} | platform=${platform} | session=${session?.sessionId || "n/a"}`);
+  console.log(`💓 [UNIVERSAL] Sessão registrada | user=${userId} | platform=${platform} | session=${session.sessionId}`);
   return session;
 }
 
@@ -60,16 +62,21 @@ export async function heartbeatUniversalSession(userId: string, tradingArmed = f
 }
 
 export async function setUniversalTradingArmed(userId: string, armed: boolean) {
+  if (!enabled()) throw new Error("Universal Server integration is not configured; Play/Stop synchronization is required.");
   const state = sessions.get(String(userId));
   if (!state) await registerUniversalSession(String(userId));
   const current = sessions.get(String(userId));
-  if (!current) return null;
+  if (!current) throw new Error("Universal Server session is not registered; refusing to change local trading state.");
+  // Store the desired state before the network call so the heartbeat retries
+  // the latest intent if the remote request fails.
   current.tradingArmed = armed;
-  return (await call("/api/invista/session/arm", {
+  const result = await call("/api/invista/session/arm", {
     sessionId: current.sessionId,
     userId: current.userId,
     armed,
-  }))?.session || null;
+  });
+  if (!result?.session?.sessionId) throw new Error("Universal Server did not confirm the requested armed state.");
+  return result.session;
 }
 
 export async function disconnectUniversalSession(userId: string) {
