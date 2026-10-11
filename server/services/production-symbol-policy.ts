@@ -26,3 +26,21 @@ export function assertAllowedProductionSymbol(symbol: unknown, operation: string
     throw new Error(`Blocked Deriv symbol "${String(symbol ?? "")}" in ${operation}; production allowlist is BOOM500, BOOM1000, CRASH500, CRASH1000.`);
   }
 }
+
+export const ALLOWED_PRODUCTION_CONTRACT_TYPES = new Set([
+  "ACCU",
+  "DIGITDIFF",
+  "DIGITMATCH",
+  "DIGITEVEN",
+  "DIGITODD",
+  "DIGITOVER",
+  "DIGITUNDER",
+]);
+
+export function isAllowedProductionContractType(contractType: unknown): boolean {
+  return ALLOWED_PRODUCTION_CONTRACT_TYPES.has(String(contractType ?? "").trim().toUpperCase());
+}
+
+export function minimumStakeForContract(contractType: unknown): number {
+  return String(contractType ?? "").trim().toUpperCase() === "ACCU" ? 1 : 0.35;
+}
