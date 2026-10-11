@@ -118,9 +118,9 @@ class IsolatedAutoTradingScheduler {
   }
 
   async startScheduler(): Promise<void> {
-    for (const runtime of this.runtimes.values()) {
-      if (!runtime.armed) this.armUserTrading(runtime.userId);
-    }
+    // A global start must never arm every logged-in user. Each runtime may
+    // only be armed through startSchedulerForUser after that user's explicit Play.
+    console.warn("🛑 [USER-RUNTIME] Global start ignored; use per-user manual Play.");
   }
 
   async stopScheduler(): Promise<void> {
