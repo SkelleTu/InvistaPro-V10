@@ -1,0 +1,44 @@
+name: Deriv Module Account Routing Audit
+
+on:
+  pull_request:
+    paths:
+      - "server/services/module-account-routing.ts"
+      - "server/services/module-executor.ts"
+      - "server/routes.ts"
+      - "shared/schema.ts"
+      - "scripts/test-module-account-routing.ts"
+      - "package.json"
+      - ".github/workflows/module-account-routing-audit.yml"
+  push:
+    branches: [main]
+    paths:
+      - "server/services/module-account-routing.ts"
+      - "server/services/module-executor.ts"
+      - "server/routes.ts"
+      - "shared/schema.ts"
+      - "scripts/test-module-account-routing.ts"
+      - "package.json"
+      - ".github/workflows/module-account-routing-audit.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  routing-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: TypeScript validation
+        run: npm run check
+      - name: Unit and policy tests
+        run: npm test
