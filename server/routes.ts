@@ -2578,8 +2578,33 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     const userId = req.user.id;
     const { modality } = req.params;
     const { slotConfigs } = req.body;
-    if (!Array.isArray(slotConfigs)) return res.status(400).json({ message: 'slotConfigs deve ser um array' });
-    const saved = await dbStorage.upsertModalityModuleConfig(userId, modality, slotConfigs);
+    if (!Array.isArray(slotConfigs) || slotConfigs.length > 10) {
+      return res.status(400).json({ message: 'slotConfigs deve ser um array com no máximo 10 módulos' });
+    }
+    const seenSlots = new Set<number>();
+    const normalizedConfigs = [];
+    for (const raw of slotConfigs) {
+      if (!raw || typeof raw !== 'object' ||
+          !Number.isInteger(raw.slotIndex) || raw.slotIndex < 0 || raw.slotIndex > 9 ||
+          seenSlots.has(raw.slotIndex) ||
+          typeof raw.enabled !== 'boolean' ||
+          !['ai', 'fixed', 'manual'].includes(raw.stakeMode) ||
+          typeof raw.fixedStake !== 'number' || !Number.isFinite(raw.fixedStake) || raw.fixedStake < 0.35 ||
+          (raw.accountType !== undefined && !['demo', 'real'].includes(raw.accountType))) {
+        return res.status(400).json({
+          message: 'Configuração inválida: cada módulo exige slot único (1-10), enabled booleano, stakeMode válido, stake mínimo de 0,35 e conta demo/real válida.',
+        });
+      }
+      seenSlots.add(raw.slotIndex);
+      normalizedConfigs.push({
+        slotIndex: raw.slotIndex,
+        enabled: raw.enabled,
+        stakeMode: raw.stakeMode,
+        fixedStake: raw.fixedStake,
+        accountType: raw.accountType === 'real' ? 'real' : 'demo',
+      });
+    }
+    const saved = await dbStorage.upsertModalityModuleConfig(userId, modality, normalizedConfigs);
     res.json({ success: true, modality, slotConfigs: JSON.parse(saved.slotConfigs) });
   }));
 
