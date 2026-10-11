@@ -1825,47 +1825,77 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   // =========================== TRADING MANUAL / SEGURANÇA ===========================
   // Login NÃO inicia trading. O usuário precisa ativar manualmente.
   app.post('/api/trading/scheduler/start', isAuthenticated, isTradingAuthorized, async (req: any, res) => {
+    const userId = String(req.user?.id || '');
+    if (!userId) return res.status(401).json({ message: 'Usuário não autenticado' });
+
+    // Fail closed before creating any armed runtime. A manual Play requires
+    // this user's active strategy and Deriv token; login alone never starts it.
+    const [userConfig, derivToken] = await Promise.all([
+      dbStorage.getUserTradeConfig(userId),
+      dbStorage.getUserDerivToken(userId),
+    ]);
+    if (!userConfig || !userConfig.isActive || !derivToken || !derivToken.isActive) {
+      return res.status(409).json({
+        success: false,
+        active: false,
+        message: 'Play bloqueado: configure uma estratégia ativa e um token Deriv ativo para este usuário.',
+        armedUsers: [],
+      });
+    }
+
     try {
-      const userId = req.user?.id;
-      if (!userId) return res.status(401).json({ message: 'Usuário não autenticado' });
-
-      autoTradingScheduler.armUserTrading(String(userId));
-      await setUniversalTradingArmed(String(userId), true);
-      await autoTradingScheduler.startScheduler();
-
+      // Synchronize the remote session first; if it fails, this user's worker
+      // remains disarmed. Start only this user's worker, never every logged-in user.
+      await setUniversalTradingArmed(userId, true);
+      await autoTradingScheduler.startSchedulerForUser(userId);
+      const active = autoTradingScheduler.getArmedUserIds().includes(userId);
       res.json({
-        success: true,
-        active: true,
-        message: 'Trading ativado manualmente para o usuário autenticado.',
-        userId: String(userId),
-        armedUsers: autoTradingScheduler.getArmedUserIds(),
+        success: active,
+        active,
+        message: active
+          ? 'Trading ativado manualmente para o usuário autenticado.'
+          : 'Play recebido, mas o runtime não confirmou ativação.',
+        userId,
+        armedUsers: active ? [userId] : [],
         timestamp: new Date().toISOString(),
       });
     } catch (error) {
+      // Roll back any remote arm if local startup fails. Local worker remains
+      // unarmed because the remote synchronization precedes the local Play.
+      try { await setUniversalTradingArmed(userId, false); } catch {}
+      await autoTradingScheduler.disarmUserTrading(userId).catch(() => {});
       console.error('❌ Erro ao ativar trading manualmente:', error);
-      res.status(500).json({ success: false, message: 'Não foi possível ativar o trading.' });
+      res.status(502).json({ success: false, active: false, message: 'Play bloqueado: não foi possível sincronizar e iniciar a sessão isolada.' });
     }
   });
 
   app.post('/api/trading/scheduler/stop', isAuthenticated, isTradingAuthorized, async (req: any, res) => {
+    const userId = String(req.user?.id || '');
+    if (!userId) return res.status(401).json({ message: 'Usuário não autenticado' });
+
+    // Local stop is authoritative and immediate; a network failure must never
+    // leave this user's worker armed. The heartbeat retries the false state.
+    await autoTradingScheduler.disarmUserTrading(userId);
+    let remoteDisarmed = true;
     try {
-      const userId = req.user?.id;
-      if (!userId) return res.status(401).json({ message: 'Usuário não autenticado' });
-
-      await setUniversalTradingArmed(String(userId), false);
-      await autoTradingScheduler.disarmUserTrading(String(userId));
-
-      res.json({
-        success: true,
-        active: autoTradingScheduler.getSchedulerStatus().isRunning,
-        message: 'Trading desativado manualmente para o usuário.',
-        armedUsers: autoTradingScheduler.getArmedUserIds(),
-        timestamp: new Date().toISOString(),
-      });
+      await setUniversalTradingArmed(userId, false);
     } catch (error) {
-      console.error('❌ Erro ao desativar trading manualmente:', error);
-      res.status(500).json({ success: false, message: 'Não foi possível desativar o trading.' });
+      remoteDisarmed = false;
+      console.error('⚠️ [UNIVERSAL] Remote disarm falhou; local worker já está parado:', error);
     }
+
+    const active = autoTradingScheduler.getArmedUserIds().includes(userId);
+    res.json({
+      success: !active,
+      active,
+      localStopped: !active,
+      remoteDisarmed,
+      message: remoteDisarmed
+        ? 'Trading desativado para o usuário autenticado.'
+        : 'Trading parado localmente; a sincronização remota será repetida pelo heartbeat.',
+      armedUsers: active ? [userId] : [],
+      timestamp: new Date().toISOString(),
+    });
   });
 
   app.get('/api/trading/scheduler/status', isAuthenticated, isTradingAuthorized, async (req: any, res) => {
@@ -1879,6 +1909,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         isRunning: activeForUser,
         schedulerRunning: activeForUser,
         activeSessions: activeForUser ? 1 : 0,
+        isolatedUsers: activeForUser ? 1 : 0,
         armedUsers: activeForUser ? [userId] : [],
       },
       armedUsers: activeForUser ? [userId] : [],
