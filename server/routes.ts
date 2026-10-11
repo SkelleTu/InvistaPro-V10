@@ -2503,55 +2503,16 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
   }));
 
-  // POST /api/trading/frenetico-9tokens/burst — dispara uma rajada manual sincronizada com digit_matches
-  app.post('/api/trading/frenetico-9tokens/burst', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
-    if (!req.user?.id) return res.status(401).json({ message: 'Não autenticado' });
-    const userId = req.user.id;
-    const { amount = 0.35, duration = 1, stakeMode = 'kelly', digitCount } = req.body;
-
-    const validModes = ['uniform', 'kelly', 'aggressive'];
-    const mode = validModes.includes(stakeMode) ? stakeMode : 'kelly';
-
-    const allTokens = await dbStorage.getAllDerivTokens(userId);
-    if (allTokens.length === 0) {
-      return res.status(400).json({ message: 'Nenhum token de slot configurado. Configure ao menos 1 slot.' });
-    }
-
-    const slots = allTokens.map(t => ({
-      slotIndex: t.slotIndex ?? 0,
-      token: t.token,
-      accountType: t.accountType as 'demo' | 'real',
-    }));
-
-    const parsedDigitCount = digitCount ? Math.min(10, Math.max(1, parseInt(digitCount))) : undefined;
-
-    // 🛡️ BURST GUARD: buscar saldo real antes de disparar para limitar exposição
-    let liveBalance: number | undefined;
-    try {
-      const balances: number[] = [];
-      for (const slot of slots) {
-        const slotApi = new DerivAPIService(slot.accountType);
-        try {
-          if (await slotApi.connect(slot.token, slot.accountType, `BURST_BALANCE_${userId}_${slot.slotIndex}`)) {
-            const balData = await slotApi.getBalance();
-            if (typeof balData?.balance === "number" && balData.balance > 0) balances.push(balData.balance);
-          }
-        } finally {
-          await slotApi.disconnect().catch(() => {});
-        }
-      }
-      if (balances.length > 0) {
-        liveBalance = Math.min(...balances);
-        console.log(`💰 [BURST ROUTE] Saldo conservador para proteção: ${liveBalance.toFixed(2)}`);
-      }
-    } catch (balErr: any) {
-      console.warn(`⚠️ [BURST ROUTE] Falha ao buscar saldo por slot — BURST GUARD sem referência de banca:`, balErr?.message);
-    }
-
-    const operationId = `MANUAL_BURST_${Date.now()}`;
-    const result = await executeFrenetic9TokensBurst(userId, slots, amount, duration, operationId, mode as any, parsedDigitCount, liveBalance);
-    res.json(result);
-  }));
+  // Legacy DIGITMATCH burst is explicitly disabled by the production contract allowlist.
+  // Return before reading tokens, connecting accounts, or starting any execution work.
+  app.post('/api/trading/frenetico-9tokens/burst', isAuthenticated, isTradingAuthorized, (_req, res) => {
+    return res.status(409).json({
+      success: false,
+      blocked: true,
+      code: 'PRODUCTION_CONTRACT_TYPE_BLOCKED',
+      message: 'Rajada DIGITMATCH desativada pela política de produção. Permitidos apenas ACCU e DIGITDIFF.',
+    });
+  });
 
   // GET /api/trading/frenetico-9tokens/conditions — verifica se momento é propício para rajada (sem disparar)
   app.get('/api/trading/frenetico-9tokens/conditions', isAuthenticated, asyncErrorHandler(async (req: any, res: any) => {
