@@ -1869,10 +1869,19 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   });
 
   app.get('/api/trading/scheduler/status', isAuthenticated, isTradingAuthorized, async (req: any, res) => {
+    const userId = String(req.user.id);
+    const activeForUser = autoTradingScheduler.getArmedUserIds().some((id: string) => String(id) === userId);
+    const globalStatus = autoTradingScheduler.getSchedulerStatus();
     res.json({
       success: true,
-      status: autoTradingScheduler.getSchedulerStatus(),
-      armedUsers: autoTradingScheduler.getArmedUserIds(),
+      status: {
+        ...globalStatus,
+        isRunning: activeForUser,
+        schedulerRunning: activeForUser,
+        activeSessions: activeForUser ? 1 : 0,
+        armedUsers: activeForUser ? [userId] : [],
+      },
+      armedUsers: activeForUser ? [userId] : [],
       timestamp: new Date().toISOString(),
     });
   });
