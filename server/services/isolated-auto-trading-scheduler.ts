@@ -147,7 +147,10 @@ class IsolatedAutoTradingScheduler {
 
   async disarmUserTrading(userId: string): Promise<void> {
     const runtime = this.runtimes.get(String(userId));
-    if (!runtime) return;
+    if (!runtime) {
+      if (this.getArmedUserIds().length === 0) brazilNewsService.stopAutoUpdate();
+      return;
+    }
     runtime.armed = false;
     runtime.status = "stopped";
     if (runtime.worker.connected) runtime.worker.send({ type: "disarm", userId: runtime.userId, sessionId: runtime.sessionId });
