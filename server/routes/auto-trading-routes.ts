@@ -587,16 +587,10 @@ router.post('/resume-trading', isAuthenticated, isTradingAuthorized, isSystemAdm
   
   console.log(`▶️ [GLOBAL] Trading retomado`);
   
-  // ⚠️ CRITICAL FIX: Reiniciar o scheduler quando trading é retomado
-  console.log('▶️ [SCHEDULER] Iniciando scheduler após resume...');
-  try {
-    await autoTradingScheduler.startScheduler();
-  } catch (error) {
-    console.error('❌ [SCHEDULER] Erro ao iniciar scheduler após resume:', error);
-  }
-  
+  // Retomar a permissão global não equivale ao Play individual de cada usuário.
+  // Nenhum scheduler é iniciado aqui; cada usuário precisa rearmar sua própria sessão.
   res.json({
-    message: 'Trading retomado globalmente para TODOS os remixes - Scheduler iniciado',
+    message: 'Bloqueio global removido. Trading continua inativo até o Play individual de cada usuário.',
     status: 'resumed',
     resumedAt: control.resumedAt,
   });
