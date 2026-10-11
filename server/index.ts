@@ -116,6 +116,7 @@ app.use((req, res, next) => {
   // Por isso /health é registrado primeiro e o servidor é criado/listening agora.
   app.get('/health', (_req, res) => {
     const obsHealth = observability.getHealth();
+    const secretHealth = getSecretHealth();
     if (!routesReady) {
       return res.status(503).json({
         status: 'degraded',
@@ -128,11 +129,12 @@ app.use((req, res, next) => {
           critical: obsHealth.critical,
           warnings: obsHealth.warnings,
         },
-        secrets: getSecretHealth(),
+        secrets: secretHealth,
       });
     }
-    res.status(200).json({
-      status: 'ok',
+    const healthy = obsHealth.critical === 0 && secretHealth.status === 'healthy';
+    res.status(healthy ? 200 : 503).json({
+      status: healthy ? 'ok' : 'degraded',
       routesReady: true,
       observability: {
         status: obsHealth.status,
@@ -140,20 +142,23 @@ app.use((req, res, next) => {
         critical: obsHealth.critical,
         warnings: obsHealth.warnings,
       },
-      secrets: getSecretHealth(),
+      secrets: secretHealth,
     });
   });
 
-  // Observabilidade de boot fica disponível ANTES de registerRoutes().
-  // Assim uma falha durante o próprio registro das rotas nunca fica escondida.
+  // Boot observability remains available before route registration, but required
+  // production secrets are part of readiness rather than a green-but-degraded response.
   app.get('/api/observability/health', (_req, res) => {
     const health = observability.getHealth();
-    res.status(routesReady && health.critical === 0 ? 200 : 503).json({
-      success: true,
+    const secretHealth = getSecretHealth();
+    const healthy = routesReady && health.critical === 0 && secretHealth.status === 'healthy';
+    res.status(healthy ? 200 : 503).json({
+      success: healthy,
       routesReady,
       bootFailureEventId,
-      secrets: getSecretHealth(),
       ...health,
+      secrets: secretHealth,
+      status: healthy ? 'healthy' : 'degraded',
     });
   });
 
