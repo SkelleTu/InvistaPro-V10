@@ -23,5 +23,5 @@ A Tailwind 4 migration could remove this legacy dependency chain, but it changes
 Production dependency audit: PASS  
 TypeScript / policy tests / dependency-remediation build: PASS  
 Full development dependency audit: NOT CLEAN (7 high, upstream remediation needed)  
-UI chunk-splitting change: awaiting the latest CI run  
+UI chunk-splitting: build passed; Vite still warns that the main JavaScript chunk is about 1.13 MB (276.5 KB gzip). Icons, Radix, and React are split into separate chunks; additional lazy-loading remains a performance follow-up  
 Production merge/deploy: not performed
