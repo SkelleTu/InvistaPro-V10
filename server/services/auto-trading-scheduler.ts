@@ -836,11 +836,8 @@ export class AutoTradingScheduler {
     }
 
     // 3. Escanear todos os ativos com análise recente (< 90s) buscando condição excepcional
-    const ACCU_SYMBOLS = [
-      'R_10','R_25','R_50','R_75','R_100',
-      'JD10','JD25','JD50','JD75','JD100',
-      'RDBULL','RDBEAR',
-    ];
+    const ACCU_SYMBOLS = ['BOOM500', 'BOOM1000', 'CRASH500', 'CRASH1000']
+      .filter((symbol) => isAllowedProductionSymbol(symbol));
     const STALE_THRESHOLD_MS = 90 * 1000;
 
     type Candidate = { symbol: string; consensus: number; hurst: number; regime: string };
@@ -1079,7 +1076,7 @@ export class AutoTradingScheduler {
       // VERIFICAÇÃO DE ATIVOS BLOQUEADOS
       let isBlocked = false;
       try {
-        isBlocked = await storage.isUserBlockedAsset(userId, config.symbol || "R_100", "digit_diff");
+        isBlocked = await storage.isUserBlockedAsset(userId, config.symbol || "BOOM500", "digit_diff");
       } catch (blockedErr) {
         console.warn(`⚠️ [${operationId}] Erro ao verificar ativo bloqueado, assumindo NÃO bloqueado:`, blockedErr instanceof Error ? blockedErr.message : String(blockedErr));
         isBlocked = false;
@@ -1297,7 +1294,7 @@ export class AutoTradingScheduler {
       // ⚠️ DIGIT CB BYPASS: Modalidades de dígito NÃO usam circuit breaker.
       // Perdas consecutivas em índices pseudoaleatórios são variância normal,
       // não sinal de mercado adverso. O CB interromperia janelas de frequência favoráveis.
-      const DIGIT_MODALITY_KEYS_CB = new Set(['digit_differs','digit_matches','digit_even','digit_odd','digit_over','digit_under']);
+      const DIGIT_MODALITY_KEYS_CB = new Set(['digit_differs']);
       let _cbModalitiesRaw: string[] = [];
       try {
         if (config.selectedModalities) {
@@ -2194,11 +2191,6 @@ export class AutoTradingScheduler {
         // Escolher modalidade por rotação: pega baseado na hora atual para distribuir
         const DIGIT_TYPES: Record<string, string> = {
           'digit_differs': 'DIGITDIFF',
-          'digit_matches': 'DIGITMATCH',
-          'digit_even': 'DIGITEVEN',
-          'digit_odd': 'DIGITODD',
-          'digit_over': 'DIGITOVER',
-          'digit_under': 'DIGITUNDER',
         };
         // 'rise'/'fall' → CALL/PUT (contrato de ticks simples, sem barreira)
         // 'higher'/'lower' → CALLE/PUTE (contrato com barreira — preço termina acima/abaixo do barrier)
@@ -2233,18 +2225,8 @@ export class AutoTradingScheduler {
           'lookback_high_low': 'LBHIGHLOW',
         };
 
-        const ALL_SUPPORTED = new Set([
-          ...Object.keys(DIGIT_TYPES),
-          ...Array.from(RISFALL_TYPES),
-          ...Object.keys(HIGHER_LOWER_TYPES),  // higher, lower → CALLE/PUTE
-          ...Object.keys(IN_OUT_TYPES),
-          ...Object.keys(TOUCH_TYPES),
-          ...Object.keys(MULTIPLIER_TYPES),
-          'accumulator',
-          ...Object.keys(TURBO_TYPES),
-          ...Object.keys(VANILLA_TYPES),
-          ...Object.keys(LOOKBACK_TYPES),
-        ]);
+        // Production allowlist is intentionally narrower than legacy UI mappings.
+        const ALL_SUPPORTED = new Set(['digit_differs', 'accumulator']);
 
         // ─── MATRIZ DE COMPATIBILIDADE SÍMBOLO × MODALIDADE ──────────────
         // Define quais modalidades são suportadas por cada grupo de símbolo.
@@ -4283,23 +4265,18 @@ export class AutoTradingScheduler {
   private getSymbolsForMode(mode: string): string[] {
     // 🔥 TODOS OS ATIVOS SUPORTADOS - DESCOBERTA DINÂMICA
     // Sistema agora carrega automaticamente TODOS os ativos da Deriv em tempo real
-    const supportedSymbols = marketDataCollector.getSupportedSymbols();
+    const supportedSymbols = marketDataCollector.getSupportedSymbols()
+      .filter((symbol) => isAllowedProductionSymbol(symbol));
     
     if (supportedSymbols.length > 0) {
-      console.log(`🎯 [getSymbolsForMode] Usando ${supportedSymbols.length} ativos descobertos dinamicamente`);
+      console.log(`🎯 [getSymbolsForMode] Usando ${supportedSymbols.length} ativos permitidos descobertos dinamicamente`);
       return supportedSymbols;
     }
     
     // Fallback se descoberta dinâmica não tiver funcionado ainda
     console.warn('⚠️ [getSymbolsForMode] Nenhum símbolo descoberto - usando fallback');
-    const fallbackSymbols = [
-      'R_10', 'R_25', 'R_50', 'R_75', 'R_100',
-      'EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'AUDUSD', 'USDCAD', 'NZDUSD',
-      'XAUUSD', 'XAGUSD', 'BTCUSD', 'ETHUSD',
-      'SPX500', 'UK100', 'DE40', 'FR40'
-    ];
-    
-    return fallbackSymbols;
+    const fallbackSymbols = ['BOOM500', 'BOOM1000', 'CRASH500', 'CRASH1000'];
+    return fallbackSymbols.filter((symbol) => isAllowedProductionSymbol(symbol));
   }
 
   // ===== FLEXIBILIDADE DINÂMICA: STAKE + TICKS =====
@@ -4672,7 +4649,7 @@ export class AutoTradingScheduler {
       let reason = '';
 
       if (m.startsWith('digit_')) {
-        const barrierData = digitFrequencyAnalyzer.getBestBarrier(m === 'digit_differs' ? digitAnalysis?.symbol || 'R_50' : '');
+        const barrierData = digitFrequencyAnalyzer.getBestBarrier(m === 'digit_differs' ? digitAnalysis?.symbol || 'BOOM500' : '');
         // Digits são bons quando há desvio estatístico claro
         if (digitAnalysis && digitAnalysis.confidence > 60) {
           score = 60 + digitAnalysis.confidence * 0.3;
