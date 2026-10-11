@@ -220,12 +220,19 @@ class IsolatedAutoTradingScheduler {
   }
 
   trackAssetUsage(userId: string, symbol: string): void {
-    this.send(userId, "trackAssetUsage", { symbol });
+    const runtime = this.runtimes.get(String(userId));
+    if (runtime?.worker?.connected) {
+      runtime.worker.send({ type: "trackAssetUsage", userId: runtime.userId, sessionId: runtime.sessionId, symbol });
+    }
   }
 
   resetCooldownSystem(userId: string): { cleared: number; reason: string } {
-    this.send(userId, "resetCooldownSystem");
-    return { cleared: 0, reason: "reset solicitado ao runtime isolado" };
+    const runtime = this.runtimes.get(String(userId));
+    if (runtime?.worker?.connected) {
+      runtime.worker.send({ type: "resetCooldownSystem", userId: runtime.userId, sessionId: runtime.sessionId });
+      return { cleared: 0, reason: "reset solicitado ao runtime isolado" };
+    }
+    return { cleared: 0, reason: "runtime ainda não iniciado; nenhum motor carregado" };
   }
 
   clearAllSessions(): void {
