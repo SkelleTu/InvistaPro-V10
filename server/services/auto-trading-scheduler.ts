@@ -5289,6 +5289,18 @@ export class AutoTradingScheduler {
   /**
    * Resetar sessões bloqueadas para conta demo (testing)
    */
+  resetBlockedSessionsForUser(userId: string): boolean {
+    const normalizedUserId = String(userId);
+    const blockedSessions = Array.from(this.activeSessions.entries())
+      .filter(([, session]) => String(session.userId) === normalizedUserId && session.executedOperations >= this.maxOperationsPerSession);
+    blockedSessions.forEach(([key, session]) => {
+      console.log(`🔄 Resetando sessão bloqueada do usuário ${normalizedUserId}: ${key}`);
+      session.executedOperations = 0;
+      session.lastExecutionTime = null;
+    });
+    return true;
+  }
+
   resetBlockedSessions(): boolean {
     console.log('🔄 Resetando sessões bloqueadas para modo demo...');
     
