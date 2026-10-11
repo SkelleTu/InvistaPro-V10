@@ -875,67 +875,8 @@ export class DerivAPIService extends EventEmitter {
   }
 
   async buyCallPutContract(symbol: string, direction: 'up' | 'down', duration: number, amount: number): Promise<DerivContractInfo | null> {
-    if (!isAllowedProductionSymbol(symbol)) { console.error(`[DERIV_POLICY] Order blocked for disallowed symbol: ${symbol}`); return null; }
-    this.requireAuthenticatedAccountSession('buy');
-    if (!this.isConnected) return null;
-
-    try {
-      // Determinar tipo de contrato baseado na direção
-      const contractType = direction === 'up' ? 'CALL' : 'PUT';
-      
-      // Passo 1: Criar proposta para validar o contrato
-      const proposal = await this.createCallPutProposal(symbol, contractType, duration, amount);
-      if (!proposal) {
-        console.error('❌ Falha ao criar proposta CALL/PUT');
-        return null;
-      }
-
-      // Passo 2: Comprar usando o ID da proposta
-      return new Promise((resolve) => {
-        const reqId = this.generateRequestId();
-        
-        const buyHandler = (message: any) => {
-          if (message.req_id === reqId) {
-            this.removeListener('message', buyHandler);
-            if (message.buy) {
-              const contract: DerivContractInfo = {
-                contract_id: message.buy.contract_id,
-                shortcode: message.buy.shortcode,
-                status: 'active',
-                entry_tick: 0,
-                buy_price: message.buy.buy_price,
-              };
-              
-              console.log(`✅ Contrato ${contractType} comprado: ${contract.contract_id}`);
-              console.log(`🎯 Parâmetros: ${symbol} | ${direction.toUpperCase()} | Duration: ${duration}t | Amount: $${amount}`);
-              resolve(contract);
-            } else {
-              console.error(`❌ Erro ao comprar contrato ${contractType}:`, message.error);
-              resolve(null);
-            }
-          }
-        };
-
-        this.on('message', buyHandler);
-
-        // Comprar usando o ID da proposta
-        // Tolerância de 5%: se o mercado moveu ligeiramente desde a proposta,
-        // a Deriv não rejeita por preço obsoleto
-        const maxPrice = parseFloat((proposal.ask_price * 1.05).toFixed(2));
-        const buyMessage = {
-          buy: proposal.id,
-          price: maxPrice,
-          req_id: reqId
-        };
-
-        console.log(`📝 Comprando contrato ${contractType} com proposta ID: ${proposal.id} | MaxPrice: $${maxPrice}`);
-        this.sendMessage(buyMessage);
-      });
-
-    } catch (error) {
-      console.error('❌ Erro no processo de compra CALL/PUT:', error);
-      return null;
-    }
+    console.warn(`[DERIV_POLICY] CALL/PUT contracts are disabled in production. Rejected ${direction} on ${symbol}.`);
+    return null;
   }
 
   async buyDigitDifferContract(params: DigitDifferContract): Promise<DerivContractInfo | null> {
