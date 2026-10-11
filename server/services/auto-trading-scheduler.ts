@@ -5197,12 +5197,24 @@ export class AutoTradingScheduler {
    */
   emergencyStopAll(): void {
     console.log('🚨 PARADA DE EMERGÊNCIA ATIVADA - Parando todas as operações!');
+    // Disarm every user first so clearing the emergency flag later cannot
+    // accidentally re-arm a session that was active before the emergency.
     this.emergencyStop = true;
+    this.armedUserIds.clear();
     this.activeSessions.clear();
-    
-    this.continuousLoopActive = false; // Sinaliza o loop contínuo para encerrar
-    
-    console.log('✅ Sistema de trading totalmente parado por segurança');
+    this.continuousLoopActive = false;
+    this.schedulerRunning = false;
+    this.loopSleepUntil = 0;
+    this.lastOperationId = null;
+    this.lastOperationStartTime = 0;
+
+    // Best-effort async cleanup; the emergency latch and local disarm happen
+    // synchronously before any collector/network shutdown can reject.
+    void this.stopScheduler().catch((error) => {
+      console.error('❌ [TRADING] Falha na limpeza após parada de emergência:', error);
+    });
+
+    console.log('✅ Parada de emergência aplicada: usuários desarmados e limpeza iniciada');
   }
   
   /**
