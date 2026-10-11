@@ -4,6 +4,7 @@ import { errorTracker } from './error-tracker';
 import { dualStorage as storage } from '../storage-dual';
 import { resilienceSupervisor } from './resilience-supervisor';
 import { connectDerivAccount, type DerivAccountContext } from './deriv-account-gateway';
+import { isAllowedProductionSymbol } from './production-symbol-policy';
 
 // ☠️ PROTOCOLO DE EXECUÇÃO IMEDIATA — tolerância zero para ativos criminosos
 // Qualquer símbolo que viole as regras é executado aqui: blacklistado, logado e morto.
@@ -654,6 +655,7 @@ export class DerivAPIService extends EventEmitter {
     
     for (const symbolInfo of allSymbols) {
       const symbol = symbolInfo.symbol;
+      if (!isAllowedProductionSymbol(symbol)) continue;
       checked++;
       
       // Log a cada 10 símbolos para rastreamento
@@ -828,6 +830,10 @@ export class DerivAPIService extends EventEmitter {
   }
 
   async subscribeToTicks(symbol: string): Promise<void> {
+    if (!isAllowedProductionSymbol(symbol)) {
+      console.warn(`[DERIV_POLICY] Tick subscription blocked for disallowed symbol: ${symbol}`);
+      return;
+    }
     if (!this.isConnected) {
       this.sendMessage({ type: 'subscribe_ticks', symbol });
       return;
@@ -870,6 +876,7 @@ export class DerivAPIService extends EventEmitter {
   }
 
   async buyCallPutContract(symbol: string, direction: 'up' | 'down', duration: number, amount: number): Promise<DerivContractInfo | null> {
+    if (!isAllowedProductionSymbol(symbol)) { console.error(`[DERIV_POLICY] Order blocked for disallowed symbol: ${symbol}`); return null; }
     this.requireAuthenticatedAccountSession('buy');
     if (!this.isConnected) return null;
 
@@ -933,6 +940,7 @@ export class DerivAPIService extends EventEmitter {
   }
 
   async buyDigitDifferContract(params: DigitDifferContract): Promise<DerivContractInfo | null> {
+    if (!isAllowedProductionSymbol(params.symbol)) { console.error(`[DERIV_POLICY] Order blocked for disallowed symbol: ${params.symbol}`); return null; }
     this.requireAuthenticatedAccountSession('buy');
     if (!this.isConnected) return null;
 
@@ -1145,6 +1153,7 @@ export class DerivAPIService extends EventEmitter {
     barrier?: string; // Obrigatório para DIGITDIFF, DIGITMATCH, DIGITOVER, DIGITUNDER
     currency?: string;
   }): Promise<DerivContractInfo | null> {
+    if (!isAllowedProductionSymbol(params.symbol)) { console.error(`[DERIV_POLICY] Order blocked for disallowed symbol: ${params.symbol}`); return null; }
     this.requireAuthenticatedAccountSession('buy');
     if (!this.isConnected) return null;
 
@@ -1351,6 +1360,7 @@ export class DerivAPIService extends EventEmitter {
     basis?: string;
     minProfitRatio?: number; // Ex: 0.25 = lucro mínimo de 25% sobre o stake. Se payout não atingir, aborta.
   }): Promise<DerivContractInfo | null> {
+    if (!isAllowedProductionSymbol(params.symbol)) { console.error(`[DERIV_POLICY] Order blocked for disallowed symbol: ${params.symbol}`); return null; }
     this.requireAuthenticatedAccountSession('buy');
     if (!this.isConnected) return null;
 
