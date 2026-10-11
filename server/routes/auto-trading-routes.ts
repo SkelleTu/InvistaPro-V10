@@ -70,8 +70,10 @@ router.get('/status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(as
 
 // Obter configurações ativas
 router.get('/active-configs', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
-  const activeConfigs = await storage.getActiveTradeConfigurations();
-  
+  const allActiveConfigs = await storage.getActiveTradeConfigurations();
+  // Never disclose other users' configuration records to an authenticated client.
+  const activeConfigs = allActiveConfigs.filter((config: any) => String(config.userId) === String(req.user.id));
+
   res.json({
     count: activeConfigs.length,
     configurations: activeConfigs.map(config => ({
