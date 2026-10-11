@@ -154,7 +154,7 @@ class IsolatedAutoTradingScheduler {
   }
 
   registerUser(userId: string): string {
-    return this.ensureRuntime(userId, false).sessionId;
+    return this.ensureRuntime(userId).sessionId;
   }
 
   async armUserTrading(userId: string): Promise<void> {
