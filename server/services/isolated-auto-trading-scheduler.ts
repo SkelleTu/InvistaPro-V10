@@ -226,7 +226,7 @@ class IsolatedAutoTradingScheduler {
       runtime.armed = false;
       runtime.status = "stopped";
     }
-    await stopBrazilNewsUpdatesIfIdle(this.getArmedUserIds().length > 0);
+    void stopBrazilNewsUpdatesIfIdle(this.getArmedUserIds().length > 0).catch((error) => console.warn("[USER-RUNTIME] failed to stop news updates:", error));
   }
 
   getAssetHealthStatus() {
