@@ -15,9 +15,9 @@ concurrency:
 
 jobs:
   static-and-build:
-    name: TypeScript and production build
+    name: TypeScript, policy tests, dependency audit and production build
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,6 +30,10 @@ jobs:
         run: npm ci --include=dev
       - name: TypeScript check
         run: npm run check
+      - name: Production symbol policy tests
+        run: npm test
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
       - name: Production build
         run: npm run build
       - name: Verify expected build artifacts
@@ -37,5 +41,6 @@ jobs:
         run: |
           set -euo pipefail
           test -d dist
-          test -f dist/index.js
+          test -s dist/index.js
+          test -s dist/trading-user-worker.js
           echo "Production build artifacts verified."
