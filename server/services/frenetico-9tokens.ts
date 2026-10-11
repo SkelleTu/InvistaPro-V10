@@ -189,9 +189,7 @@ export function computeBurstStats(
 // ─────────────────────────────────────────────────────────────────────────────
 
 const CANDIDATE_ASSETS = [
-  'R_10', 'R_25', 'R_50', 'R_75', 'R_100',
-  'JD10', 'JD25', 'JD50', 'JD75', 'JD100',
-  'RDBULL', 'RDBEAR',
+  'BOOM500', 'BOOM1000', 'CRASH500', 'CRASH1000',
 ];
 
 /**
