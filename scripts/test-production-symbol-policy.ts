@@ -4,6 +4,7 @@ import {
   normalizeDerivSymbol,
   isAllowedProductionContractType,
   minimumStakeForContract,
+  isValidProductionStake,
 } from "../server/services/production-symbol-policy";
 
 const allowed = ["BOOM500", "BOOM1000", "CRASH500", "CRASH1000"];
@@ -33,5 +34,14 @@ for (const type of ["CALL", "PUT", "MULTUP", "UNKNOWN", "", null, undefined]) {
     `Unsupported contract must fail closed: ${String(type)}`,
   );
 }
+
+assert.equal(isValidProductionStake("DIGITDIFF", 0.35), true);
+assert.equal(isValidProductionStake("DIGITDIFF", 0.34), false);
+assert.equal(isValidProductionStake("ACCU", 1), true);
+assert.equal(isValidProductionStake("ACCU", 0.99), false);
+for (const amount of [NaN, Infinity, -Infinity, -1, 0, "1", null, undefined]) {
+  assert.equal(isValidProductionStake("DIGITDIFF", amount), false, `Invalid stake must fail closed: ${String(amount)}`);
+}
+assert.equal(isValidProductionStake("CALL", 10), false);
 
 console.log(`Production policy passed: ${allowed.length} canonical symbols, ${aliases.length} aliases, ${denied.length} denied symbols, contract allowlist, and fail-closed minimum stakes.`);
