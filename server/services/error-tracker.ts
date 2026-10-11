@@ -247,7 +247,7 @@ class ErrorTracker {
       requestBody: this.sanitizeRequestBody(req.body),
       requestHeaders: this.sanitizeHeaders(req.headers),
       sessionData: req.session ? {
-        id: req.session.id,
+        sessionId: req.session.id,
         passport: req.session.passport
       } : undefined
     };
