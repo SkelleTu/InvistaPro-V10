@@ -311,16 +311,22 @@ class BrazilNewsService {
     return { blocksBuy, blocksSell, confidenceModifier, reason };
   }
 
-  // Inicia atualização periódica automática (a cada 60 segundos)
+  // O coletor só fica ativo enquanto existe trading explicitamente armado.
+  private autoUpdateInterval: ReturnType<typeof setInterval> | null = null;
+
   startAutoUpdate(): void {
-    // Primeira coleta imediata
+    if (this.autoUpdateInterval) return;
     this.updateSentiment().catch(() => {});
-    // Intervalo regular
-    setInterval(() => {
+    this.autoUpdateInterval = setInterval(() => {
       this.updateSentiment().catch(() => {});
     }, this.CACHE_TTL_MS);
-    console.log('🇧🇷 [BrazilNews] Monitoramento de noticiário brasileiro ATIVO (atualização a cada 60s)');
-    console.log('📰 [BrazilNews] Fontes: Google News BR | Câmbio | Bolsa | SELIC | Economia | Política');
+    console.log('🇧🇷 [BrazilNews] Monitoramento ativado por sessão de trading.');
+  }
+
+  stopAutoUpdate(): void {
+    if (this.autoUpdateInterval) clearInterval(this.autoUpdateInterval);
+    this.autoUpdateInterval = null;
+    console.log('🛑 [BrazilNews] Monitoramento pausado: nenhuma sessão de trading armada.');
   }
 
   // Resumo formatado para log
