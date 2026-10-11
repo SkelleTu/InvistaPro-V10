@@ -163,6 +163,14 @@ jobs:
               code=$(curl -s -o /tmp/setup-admin-anon.json -w "%{http_code}" -X POST -H "Content-Type: application/json" -d '{"email":"audit@example.invalid","password":"audit-only","nomeCompleto":"Audit"}' http://127.0.0.1:5123/api/setup-admin)
               case "$code" in 401|403) echo "Anonymous admin setup correctly denied: HTTP $code" ;; *) cat /tmp/setup-admin-anon.json; echo "Expected 401/403 for anonymous admin setup, got $code"; exit 1 ;; esac
 
+              for route in clear-all-sessions reset-blocked-sessions increase-demo-limits; do
+                code=$(curl -s -o "/tmp/anonymous-$route.json" -w "%{http_code}" -X POST "http://127.0.0.1:5123/api/auto-trading/$route")
+                case "$code" in
+                  401|403) echo "Anonymous destructive endpoint correctly denied: $route (HTTP $code)" ;;
+                  *) cat "/tmp/anonymous-$route.json"; echo "Expected 401/403 for $route, got $code"; exit 1 ;;
+                esac
+              done
+
               code=$(curl -s -o /tmp/not-found.json -w "%{http_code}" http://127.0.0.1:5123/api/__audit_nonexistent__)
               test "$code" = "404" || { cat /tmp/not-found.json; echo "Expected 404 for unknown API route, got $code"; exit 1; }
 
