@@ -79,24 +79,21 @@ router.get('/status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(as
     schedulerStatus,
     stats: {
       totalSessions: activeSessions.length,
-      totalExecutedOperations: activeSessions.reduce((sum: number, session: any) => sum + Number(session.executedOperations || 0), 0),
-      activeSessions: activeSessions.length,
+      totalExecutedOperations: 0,
+      activeSessions: activeSessions.filter((session: any) => session.isActive).length,
       isolatedUsers: activeSessions.length > 0 ? 1 : 0,
       armedUsers: schedulerActiveForUser ? 1 : 0,
     },
-    activeSessions: activeSessions.map(session => ({
+    activeSessions: activeSessions.map((session: any) => ({
       userId: session.userId,
-      configId: session.configId,
-      mode: session.mode,
-      progress: {
-        executed: session.executedOperations,
-        total: session.operationsCount,
-        percentage: Math.round((session.executedOperations / session.operationsCount) * 100)
-      },
-      lastExecution: session.lastExecutionTime,
-      nextEstimated: session.lastExecutionTime ? 
-        new Date(session.lastExecutionTime.getTime() + (session.intervalValue * (session.intervalType === 'minutes' ? 60000 : session.intervalType === 'hours' ? 3600000 : 86400000))) : 
-        new Date()
+      sessionId: session.sessionId,
+      isActive: Boolean(session.isActive),
+      workerReady: Boolean(session.workerReady),
+      lastHeartbeatAt: session.lastHeartbeatAt,
+      // This isolated runtime does not expose per-trade counters in the parent process.
+      progress: { executed: 0, total: 0, percentage: 0 },
+      lastExecution: null,
+      nextEstimated: null,
     }))
   });
 }));
