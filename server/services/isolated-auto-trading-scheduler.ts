@@ -1,6 +1,7 @@
 import { fork, type ChildProcess } from "node:child_process";
 import path from "node:path";
 import crypto from "node:crypto";
+import { brazilNewsService } from "./brazil-news-service";
 
 type UserId = string;
 type WorkerStatus = "ready" | "armed" | "stopped" | "disconnected";
@@ -119,6 +120,7 @@ class IsolatedAutoTradingScheduler {
 
   async startSchedulerForUser(userId: string): Promise<void> {
     this.armUserTrading(userId);
+    brazilNewsService.startAutoUpdate();
   }
 
   async startScheduler(): Promise<void> {
@@ -149,6 +151,7 @@ class IsolatedAutoTradingScheduler {
     runtime.armed = false;
     runtime.status = "stopped";
     if (runtime.worker.connected) runtime.worker.send({ type: "disarm", userId: runtime.userId, sessionId: runtime.sessionId });
+    if (this.getArmedUserIds().length === 0) brazilNewsService.stopAutoUpdate();
   }
 
   async stopSchedulerForUser(userId: string): Promise<void> {
