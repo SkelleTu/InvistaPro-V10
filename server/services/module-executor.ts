@@ -11,6 +11,7 @@
 
 import { DerivAPIService } from './deriv-api';
 import { dualStorage as storage } from '../storage-dual';
+import { isAllowedProductionSymbol, isAllowedProductionContractType, isValidProductionStake } from './production-symbol-policy';
 
 export interface ModuleSlotConfig {
   slotIndex: number;
@@ -87,6 +88,12 @@ export async function executeModulesTrade(params: ModuleExecutionParams): Promis
   const startTime = Date.now();
   const results: ModuleSlotResult[] = [];
 
+  // Defense in depth: reject unsupported symbols/contracts before reading
+  // slot tokens, opening Deriv connections, or scheduling any order.
+  if (!isAllowedProductionSymbol(params.symbol) || !isAllowedProductionContractType(params.contractType)) {
+    throw new Error('PRODUCTION_POLICY_BLOCKED: symbol or contract type is not allowlisted.');
+  }
+
   // 1. Buscar configuração de módulos para esta modalidade
   let slotConfigs: ModuleSlotConfig[] = [];
   try {
@@ -146,6 +153,18 @@ export async function executeModulesTrade(params: ModuleExecutionParams): Promis
     }
 
     stake = Math.max(0.35, Math.round(stake * 100) / 100);
+
+    if (!isValidProductionStake(params.contractType, stake)) {
+      return {
+        slotIndex: slotConfig.slotIndex,
+        contractId: null,
+        status: 'failed',
+        stakeUsed: stake,
+        stakeMode: slotConfig.stakeMode,
+        errorMessage: `Stake mínimo inválido para o contrato ${params.contractType}; mínimo de produção não atendido.`,
+        openTimeMs: Date.now() - slotStart,
+      };
+    }
 
     try {
       const api = await getSlotApi(params.userId, slotConfig.slotIndex, tokenInfo.token, tokenInfo.accountType);
