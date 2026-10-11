@@ -4,6 +4,7 @@ import { storage } from '../storage.js';
 import { microscopicAnalyzer } from './microscopic-technical-analysis.js';
 import { digitFrequencyAnalyzer } from './digit-frequency-analyzer.js';
 import { supremeAnalyzer } from './supreme-market-analyzer.js';
+import { isAllowedProductionSymbol } from './production-symbol-policy.js';
 
 interface TickBuffer {
   symbol: string;
