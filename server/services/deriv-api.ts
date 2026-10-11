@@ -750,18 +750,17 @@ export class DerivAPIService extends EventEmitter {
         console.error('❌ Erro na descoberta dinâmica DIGITDIFF:', error);
         // Fallback básico se a descoberta falhar
         return [
-          { symbol: 'R_10', display_name: 'Volatility 10 Index', market: 'synthetic_index' },
-          { symbol: 'R_25', display_name: 'Volatility 25 Index', market: 'synthetic_index' },
-          { symbol: 'R_50', display_name: 'Volatility 50 Index', market: 'synthetic_index' },
-          { symbol: 'R_75', display_name: 'Volatility 75 Index', market: 'synthetic_index' },
-          { symbol: 'R_100', display_name: 'Volatility 100 Index', market: 'synthetic_index' }
+          { symbol: 'BOOM500', display_name: 'Boom 500 Index', market: 'synthetic_index' },
+          { symbol: 'BOOM1000', display_name: 'Boom 1000 Index', market: 'synthetic_index' },
+          { symbol: 'CRASH500', display_name: 'Crash 500 Index', market: 'synthetic_index' },
+          { symbol: 'CRASH1000', display_name: 'Crash 1000 Index', market: 'synthetic_index' }
         ];
       }
     }
 
     // Fallback para outros modos
     const symbols = await marketApi.getActiveSymbolsCached();
-    return symbols.map(s => ({
+    return symbols.filter(s => isAllowedProductionSymbol(s.symbol)).map(s => ({
       symbol: s.symbol,
       display_name: s.display_name,
       market: s.market
