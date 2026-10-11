@@ -3338,9 +3338,9 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
 
       // Get AI analysis first
       const marketDataInfo = await dbStorage.getMarketData(symbol);
-      if (!marketDataInfo) {
-        return res.status(400).json({ 
-          message: 'Dados de mercado não disponíveis para análise' 
+      if (!marketDataInfo || marketDataInfo.isSimulated) {
+        return res.status(400).json({
+          message: 'Execução bloqueada: são obrigatórios dados reais de mercado da Deriv; dados simulados não podem autorizar trades.'
         });
       }
 
