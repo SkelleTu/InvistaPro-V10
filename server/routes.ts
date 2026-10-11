@@ -2514,61 +2514,15 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     });
   });
 
-  // GET /api/trading/frenetico-9tokens/conditions — verifica se momento é propício para rajada (sem disparar)
-  app.get('/api/trading/frenetico-9tokens/conditions', isAuthenticated, asyncErrorHandler(async (req: any, res: any) => {
-    const { nDigits = '10' } = req.query as any;
-    const n = Math.min(10, Math.max(1, parseInt(nDigits) || 10));
-
-    const { digitFrequencyAnalyzer } = await import('./services/digit-frequency-analyzer');
-    const { digitPatternEngine } = await import('./services/digit-pattern-engine');
-    const { selectBestAsset } = await import('./services/frenetico-9tokens');
-
-    const targetSymbol = selectBestAsset();
-    const PAYOUT = 8.5;
-
-    const evGate = digitFrequencyAnalyzer.computeEVGate(targetSymbol, PAYOUT, n);
-    const alignment = digitPatternEngine.getEntryAlignmentScore(targetSymbol);
-    const singleSignal = digitFrequencyAnalyzer.getSingleMatchEntrySignal(targetSymbol, PAYOUT);
-
-    // Condições para disparar:
-    // 1. EV matematicamente positivo (Σf² > 1/P), OU
-    // 2. Alinhamento Markov+Freq forte (≥70%), OU
-    // 3. Alinhamento moderado (≥40%) com pelo menos 2 dígitos acima do limiar EV
-    const evPositive = evGate.isPositiveEV;
-    const alignmentStrong = alignment.entryQuality === 'strong';
-    const alignmentModerateWithHotDigits = alignment.entryQuality === 'moderate' && evGate.hotDigitCount >= 2;
-    const singleStrongSignal = singleSignal.shouldEnter && singleSignal.trendUp;
-
-    const ready = evPositive || alignmentStrong || alignmentModerateWithHotDigits || singleStrongSignal;
-
-    let reason: string;
-    if (ready) {
-      if (evPositive) reason = `✅ EV positivo (Σf²=${evGate.freqSumSq.toFixed(4)} > limiar ${evGate.evThreshold.toFixed(4)}) · ${evGate.hotDigitCount} dígitos quentes`;
-      else if (alignmentStrong) reason = `✅ Alinhamento Markov forte (${alignment.alignmentScore.toFixed(0)}%) · dígitos [${alignment.topAlignedDigits.join(',')}]`;
-      else if (alignmentModerateWithHotDigits) reason = `✅ Alinhamento moderado (${alignment.alignmentScore.toFixed(0)}%) + ${evGate.hotDigitCount} dígitos acima do limiar`;
-      else reason = `✅ Sinal único forte: dígito ${singleSignal.digit} (${(singleSignal.frequency*100).toFixed(1)}% · trend↑)`;
-    } else {
-      const evStr = `Σf²=${evGate.freqSumSq.toFixed(4)} < ${evGate.evThreshold.toFixed(4)}`;
-      const alStr = `alinhamento=${alignment.alignmentScore.toFixed(0)}% (${alignment.entryQuality})`;
-      const hotStr = `dígitos quentes=${evGate.hotDigitCount}`;
-      reason = `⏳ Aguardando: ${evStr} · ${alStr} · ${hotStr}`;
-    }
-
-    res.json({
-      ready,
-      symbol: targetSymbol,
-      evScore: evGate.evScore,
-      freqSumSq: evGate.freqSumSq,
-      isPositiveEV: evPositive,
-      hotDigitCount: evGate.hotDigitCount,
-      alignmentScore: alignment.alignmentScore,
-      entryQuality: alignment.entryQuality,
-      topAlignedDigits: alignment.topAlignedDigits,
-      singleDigitReady: singleSignal.shouldEnter,
-      singleDigit: singleSignal.digit,
-      reason,
+  // Legacy DIGITMATCH condition analysis is disabled with its execution engine.
+  app.get('/api/trading/frenetico-9tokens/conditions', isAuthenticated, (_req, res) => {
+    return res.status(409).json({
+      success: false,
+      blocked: true,
+      code: 'PRODUCTION_CONTRACT_TYPE_BLOCKED',
+      message: 'Análise de rajada DIGITMATCH desativada. Use somente modalidades de produção permitidas.',
     });
-  }));
+  });
 
   // GET /api/trading/frenetico-9tokens/history — histórico de rajadas
   app.get('/api/trading/frenetico-9tokens/history', isAuthenticated, asyncErrorHandler(async (req: any, res: any) => {
@@ -2578,153 +2532,25 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     res.json({ history: history.slice(-20).reverse() });
   }));
 
-  // GET /api/trading/frenetico-9tokens/preview — pré-visualiza stakes sem disparar
-  app.get('/api/trading/frenetico-9tokens/preview', isAuthenticated, asyncErrorHandler(async (req: any, res: any) => {
-    const { amount = '0.35', stakeMode = 'kelly' } = req.query as any;
-    const { computeSmartStakes, computeBurstStats, selectBestAsset } = await import('./services/frenetico-9tokens');
-    const { digitFrequencyAnalyzer } = await import('./services/digit-frequency-analyzer');
-
-    const baseAmount = parseFloat(amount) || 0.35;
-    const validModes = ['uniform', 'kelly', 'aggressive'];
-    const mode = validModes.includes(stakeMode) ? stakeMode : 'kelly';
-
-    const targetSymbol = selectBestAsset();
-    const analysis = digitFrequencyAnalyzer.analyzeSymbolMultiWindow(targetSymbol);
-
-    const digitHeats = Array.from({ length: 10 }, (_, d) => {
-      const freq = analysis?.digits.find((x: any) => x.digit === d)?.frequency ?? 0.10;
-      const label = freq >= 0.13 ? 'hot' : freq <= 0.07 ? 'cold' : 'neutral';
-      const ratio = freq / 0.10;
-      return {
-        digit: d, frequency: freq, label,
-        recommendedStakeMultiplier: parseFloat(ratio.toFixed(2)),
-      };
+  // Legacy DIGITMATCH stake preview is disabled to avoid advertising a blocked contract.
+  app.get('/api/trading/frenetico-9tokens/preview', isAuthenticated, (_req, res) => {
+    return res.status(409).json({
+      success: false,
+      blocked: true,
+      code: 'PRODUCTION_CONTRACT_TYPE_BLOCKED',
+      message: 'Prévia de rajada DIGITMATCH desativada pela política de produção.',
     });
+  });
 
-    const stakeDistribution = computeSmartStakes(digitHeats as any, baseAmount, mode as any);
-    const burstStats = computeBurstStats(digitHeats as any, stakeDistribution);
-
-    res.json({ targetSymbol, digitHeats, stakeDistribution, burstStats, stakeMode: mode });
-  }));
-
-  // GET /api/trading/digit-matches/strategy-preview — prévia de estratégia por cobertura N dígitos
-  app.get('/api/trading/digit-matches/strategy-preview', isAuthenticated, asyncErrorHandler(async (req: any, res: any) => {
-    const { count = '7', amount = '0.35' } = req.query as any;
-    const { digitFrequencyAnalyzer } = await import('./services/digit-frequency-analyzer');
-    const { selectBestAsset } = await import('./services/frenetico-9tokens');
-
-    const N = Math.min(10, Math.max(1, parseInt(count) || 7));
-    const baseAmount = Math.max(0.35, parseFloat(amount) || 0.35);
-    const MIN_STAKE = 0.35;
-    const PAYOUT = 9.0; // estimativa conservadora do payout DIGITMATCH
-
-    const targetSymbol = selectBestAsset();
-    const analysis = digitFrequencyAnalyzer.analyzeSymbolMultiWindow(targetSymbol);
-
-    // Monta heat map completo de todos os 10 dígitos
-    const allDigits = Array.from({ length: 10 }, (_, d) => {
-      const freq = analysis?.digits?.find((x: any) => x.digit === d)?.frequency ?? 0.10;
-      const label: 'hot' | 'neutral' | 'cold' = freq >= 0.13 ? 'hot' : freq <= 0.07 ? 'cold' : 'neutral';
-      return { digit: d, frequency: freq, label };
-    }).sort((a, b) => b.frequency - a.frequency);
-
-    // ── Calcula stakes por estratégia dependendo do N ──────────────────────
-    let stakeDist: Record<number, number> = {};
-    let strategyName = '';
-    let strategyDesc = '';
-    let strategyColor: 'blue' | 'indigo' | 'orange' | 'red' | 'violet' = 'blue';
-    let selectedDigits: typeof allDigits = [];
-
-    if (N === 10) {
-      // KELLY AGRESSIVO: todos os dígitos, stakes por calor
-      // EV = Σ freq_i × PAYOUT × stake_i - Σ stake_i
-      // Foco: maximizar stake nos dígitos EV+ (freq_i > 1/PAYOUT)
-      strategyName = 'Cobertura Total Kelly';
-      strategyDesc = 'Todos os 10 dígitos cobertos. Stakes concentrados nos mais quentes. Sempre vence — EV positivo se dígitos quentes têm frequência > 11%.';
-      strategyColor = 'violet';
-      selectedDigits = allDigits;
-      const avgFreq = 0.10;
-      for (const d of allDigits) {
-        const ratio = d.frequency / avgFreq;
-        if (d.label === 'hot') {
-          stakeDist[d.digit] = parseFloat(Math.max(MIN_STAKE, baseAmount * Math.pow(ratio, 1.5) * 2.0).toFixed(2));
-        } else if (d.label === 'cold') {
-          stakeDist[d.digit] = MIN_STAKE;
-        } else {
-          stakeDist[d.digit] = parseFloat(Math.max(MIN_STAKE, baseAmount * ratio).toFixed(2));
-        }
-      }
-    } else if (N >= 7) {
-      // CALIBRADO POR PAYOUT: uniform, burst seguro = floor(payout) - 1
-      strategyName = N === 9 ? 'Alta Cobertura' : 'Cobertura Ampla';
-      strategyDesc = `Stake uniforme. A vitória de 1 contrato retorna ${PAYOUT}× o stake — cobrindo os ${N} investidos com lucro mínimo garantido.`;
-      strategyColor = N === 9 ? 'orange' : 'red';
-      selectedDigits = allDigits.slice(0, N);
-      for (const d of selectedDigits) { stakeDist[d.digit] = baseAmount; }
-    } else if (N >= 4) {
-      // KELLY MODERADO: top N quentes, kelly proporcional
-      strategyName = 'Kelly Moderado';
-      strategyDesc = `Top ${N} dígitos mais quentes. Stakes proporcionais à frequência — mais stake onde a probabilidade é maior.`;
-      strategyColor = N <= 5 ? 'orange' : 'indigo';
-      selectedDigits = allDigits.slice(0, N);
-      const totalFreq = selectedDigits.reduce((s, d) => s + d.frequency, 0);
-      for (const d of selectedDigits) {
-        const w = d.frequency / totalFreq;
-        stakeDist[d.digit] = parseFloat(Math.max(MIN_STAKE, baseAmount * N * w).toFixed(2));
-      }
-    } else {
-      // PRECISÃO: top N quentes, kelly agressivo (N=1-3)
-      strategyName = N === 1 ? 'Precisão Máxima' : 'Alta Precisão Kelly';
-      strategyDesc = N === 1
-        ? 'Aposta no único dígito mais quente. EV máximo quando a edge é real. Maior risco, maior retorno.'
-        : `Top ${N} dígitos mais quentes com Kelly agressivo. Máxima concentração de edge.`;
-      strategyColor = 'blue';
-      selectedDigits = allDigits.slice(0, N);
-      const totalFreq = selectedDigits.reduce((s, d) => s + d.frequency, 0);
-      for (const d of selectedDigits) {
-        const w = d.frequency / totalFreq;
-        stakeDist[d.digit] = parseFloat(Math.max(MIN_STAKE, baseAmount * N * w * 1.2).toFixed(2));
-      }
-    }
-
-    // ── Calcula stats da estratégia ────────────────────────────────────────
-    const totalInvested = Object.values(stakeDist).reduce((s, v) => s + v, 0);
-    let ev = 0;
-    let winProb = 0;
-    for (const d of allDigits) {
-      const stake = stakeDist[d.digit] ?? 0;
-      if (stake > 0) {
-        ev += d.frequency * PAYOUT * stake - stake;
-        winProb += d.frequency;
-      }
-    }
-    // Retorno esperado na vitória: payout × stake do dígito vencedor (ponderado por probabilidade)
-    let expectedReturn = 0;
-    for (const d of allDigits) {
-      const stake = stakeDist[d.digit] ?? 0;
-      if (stake > 0) {
-        expectedReturn += (d.frequency / winProb) * (PAYOUT * stake);
-      }
-    }
-
-    res.json({
-      count: N,
-      symbol: targetSymbol,
-      payout: PAYOUT,
-      strategyName,
-      strategyDesc,
-      strategyColor,
-      stakeDist,
-      selectedDigits: selectedDigits.map(d => ({ ...d, stake: stakeDist[d.digit] ?? 0 })),
-      allDigits: allDigits.map(d => ({ ...d, stake: stakeDist[d.digit] ?? 0 })),
-      totalInvested: parseFloat(totalInvested.toFixed(2)),
-      expectedReturn: parseFloat(expectedReturn.toFixed(2)),
-      returnOnWin: totalInvested > 0 ? parseFloat(((expectedReturn / totalInvested) * 100).toFixed(1)) : 0,
-      ev: parseFloat(ev.toFixed(3)),
-      evPercent: totalInvested > 0 ? parseFloat(((ev / totalInvested) * 100).toFixed(1)) : 0,
-      winProbPercent: parseFloat((winProb * 100).toFixed(1)),
+  // Legacy DIGITMATCH strategy preview is disabled; only ACCU and DIGITDIFF are allowed.
+  app.get('/api/trading/digit-matches/strategy-preview', isAuthenticated, (_req, res) => {
+    return res.status(409).json({
+      success: false,
+      blocked: true,
+      code: 'PRODUCTION_CONTRACT_TYPE_BLOCKED',
+      message: 'DIGITMATCH não está habilitado neste ambiente de produção.',
     });
-  }));
+  });
 
   // =========================== MÓDULOS DE CÓPIA SIMULTÂNEA ===========================
 
