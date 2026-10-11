@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { selectModuleTokenForAccount } from '../server/services/module-account-routing';
+import { moduleSessionCacheKey, selectModuleTokenForAccount } from '../server/services/module-account-routing';
 
 const tokens = [
   { slotIndex: 0, token: 'demo-slot-0', accountType: 'demo', isActive: true },
@@ -15,4 +15,9 @@ assert.equal(selectModuleTokenForAccount(tokens, 8, 'demo')?.token, 'main-demo',
 assert.equal(selectModuleTokenForAccount(tokens, 8, 'real')?.token, 'real-slot-1', 'never select a Demo token for Real');
 assert.equal(selectModuleTokenForAccount(tokens, 8, 'demo')?.accountType, 'demo');
 assert.equal(selectModuleTokenForAccount([{ slotIndex: 0, token: 'only-demo', accountType: 'demo', isActive: true }], 0, 'real'), undefined, 'no cross-environment fallback');
+const demoKey = moduleSessionCacheKey('user-1', 'digit_differs', 0, 'demo', 'token-a');
+assert.notEqual(demoKey, moduleSessionCacheKey('user-1', 'digit_differs', 0, 'real', 'token-a'), 'cache must isolate Demo and Real');
+assert.notEqual(demoKey, moduleSessionCacheKey('user-1', 'accumulator', 0, 'demo', 'token-a'), 'cache must isolate modalities');
+assert.notEqual(demoKey, moduleSessionCacheKey('user-2', 'digit_differs', 0, 'demo', 'token-a'), 'cache must isolate users');
+assert.notEqual(demoKey, moduleSessionCacheKey('user-1', 'digit_differs', 0, 'demo', 'token-b'), 'cache must isolate changed credentials');
 console.log('Module account routing tests passed.');
