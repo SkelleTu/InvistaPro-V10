@@ -341,19 +341,24 @@ app.use((req, res, next) => {
   
   // Conectar eventos de restart aos componentes
   resilienceSupervisor.on('restart_scheduler', async () => {
-    // Nunca iniciar trading automaticamente por ação do supervisor.
-    const status = autoTradingScheduler.getSchedulerStatus();
-    if (!status.isRunning) {
-      console.log('🛑 [RESILIENCE] Restart do scheduler ignorado: trading está inativo por política de segurança.');
+    // Preserve only users who explicitly pressed Play before the restart.
+    const armedUsers = autoTradingScheduler.getArmedUserIds();
+    if (armedUsers.length === 0) {
+      console.log('🛑 [RESILIENCE] Restart ignorado: nenhum usuário ativou o trading manualmente.');
       return;
     }
-    console.log('🔄 Reiniciando AutoTradingScheduler de uma sessão já manualmente ativada...');
+    console.log(`🔄 Reiniciando runtimes já ativados manualmente: ${armedUsers.length} usuário(s)...`);
     try {
       await autoTradingScheduler.stopScheduler();
-      await autoTradingScheduler.startScheduler();
-      console.log('✅ AutoTradingScheduler reiniciado');
+      for (const userId of armedUsers) {
+        await autoTradingScheduler.startSchedulerForUser(userId);
+      }
+      console.log('✅ Runtimes isolados reiniciados; nenhum usuário não armado foi iniciado.');
     } catch (error) {
-      console.error('❌ Erro ao reiniciar AutoTradingScheduler:', error);
+      // Fail safe: if restart partially fails, disarm all users rather than
+      // leaving a mixed/unknown trading state.
+      await autoTradingScheduler.stopScheduler().catch(() => {});
+      console.error('❌ Erro ao reiniciar runtimes isolados; todos permaneceram desarmados:', error);
     }
   });
   
