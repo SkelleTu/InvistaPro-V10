@@ -91,7 +91,7 @@ class ErrorTracker {
         errorId,
         ...safeContext
       },
-      originalError: this.sanitizeError(error),
+      originalError: sanitizeSensitiveData(this.sanitizeError(error)),
       solved: false
     };
 
