@@ -13,6 +13,6 @@ assert.equal(selectModuleTokenForAccount(tokens, 0, 'real')?.token, 'real-slot-1
 assert.equal(selectModuleTokenForAccount(tokens, 1, 'real')?.token, 'real-slot-1', 'prefer slot with matching account type');
 assert.equal(selectModuleTokenForAccount(tokens, 8, 'demo')?.token, 'main-demo', 'use same-type primary token before another slot');
 assert.equal(selectModuleTokenForAccount(tokens, 8, 'real')?.token, 'real-slot-1', 'never select a Demo token for Real');
-assert.equal(selectModuleTokenForAccount(tokens, 8, 'demo').accountType, 'demo');
+assert.equal(selectModuleTokenForAccount(tokens, 8, 'demo')?.accountType, 'demo');
 assert.equal(selectModuleTokenForAccount([{ slotIndex: 0, token: 'only-demo', accountType: 'demo', isActive: true }], 0, 'real'), undefined, 'no cross-environment fallback');
 console.log('Module account routing tests passed.');
