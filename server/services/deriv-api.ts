@@ -591,7 +591,7 @@ export class DerivAPIService extends EventEmitter {
           this.removeListener('message', symbolsHandler);
           if (message.active_symbols) {
             const symbols = message.active_symbols
-              .filter((s: any) => s.exchange_is_open === 1 && s.is_trading_suspended === 0)
+              .filter((s: any) => isAllowedProductionSymbol(s.symbol) && s.exchange_is_open === 1 && s.is_trading_suspended === 0)
               .map((s: any) => ({
                 symbol: s.symbol,
                 display_name: s.display_name,
@@ -794,6 +794,10 @@ export class DerivAPIService extends EventEmitter {
 
   // 🔥 NOVO: Buscar contratos disponíveis para um símbolo (conforme docs Deriv)
   async getContractsFor(symbol: string): Promise<any[]> {
+    if (!isAllowedProductionSymbol(symbol)) {
+      console.warn('[DERIV_POLICY] Contract discovery blocked for disallowed symbol: ' + symbol);
+      return [];
+    }
     if (!this.isConnected) return [];
 
     return new Promise((resolve) => {
@@ -1198,50 +1202,21 @@ export class DerivAPIService extends EventEmitter {
    * Retorna o multiplicador (ex: 8.5 significa que $1 stake retorna $8.50 total).
    * Usado para calibrar o tamanho do burst: burst seguro = floor(payout) - 1
    */
-  async getDigitMatchPayoutMultiplier(symbol: string, duration: number, amount: number, barrier: string): Promise<number | null> {
-    if (!this.isConnected) return null;
-    const reqId = this.generateRequestId();
-    const proposalMsg: any = {
-      proposal: 1,
-      contract_type: 'DIGITMATCH',
-      symbol,
-      duration,
-      duration_unit: 't',
-      currency: 'USD',
-      amount,
-      basis: 'stake',
-      barrier,
-      req_id: reqId,
-    };
-    return new Promise<number | null>((resolve) => {
-      const handler = (message: any) => {
-        if (message.req_id === reqId) {
-          this.removeListener('message', handler);
-          clearTimeout(timer);
-          if (message.proposal) {
-            const askPrice = message.proposal.ask_price ?? 0;
-            const payout = message.proposal.payout ?? 0;
-            const multiplier = askPrice > 0 ? payout / askPrice : 0;
-            console.log(`📊 [PAYOUT CHECK] DIGITMATCH ${symbol} | stake=$${amount} | payout=$${payout.toFixed(2)} | ask=$${askPrice.toFixed(2)} | multiplicador=${multiplier.toFixed(2)}x`);
-            resolve(multiplier > 0 ? multiplier : null);
-          } else {
-            resolve(null);
-          }
-        }
-      };
-      const timer = setTimeout(() => {
-        this.removeListener('message', handler);
-        resolve(null);
-      }, 8000);
-      this.on('message', handler);
-      this.sendMessage(proposalMsg);
-    });
+  async getDigitMatchPayoutMultiplier(_symbol: string, _duration: number, _amount: number, _barrier: string): Promise<number | null> {
+    // DIGITMATCH is outside the explicitly approved production contract set.
+    // Keep the method for compatibility, but never request a proposal for it.
+    console.warn('[DERIV_POLICY] DIGITMATCH payout query blocked by production contract allowlist.');
+    return null;
   }
 
   /**
    * Obtém o preço atual de um símbolo via histórico de ticks (request único, sem subscrição)
    */
   async getCurrentPrice(symbol: string): Promise<number | null> {
+    if (!isAllowedProductionSymbol(symbol)) {
+      console.warn('[DERIV_POLICY] Price request blocked for disallowed symbol: ' + symbol);
+      return null;
+    }
     if (!this.isConnected) return null;
 
     // ⚡ CACHE HIT — retornar preço em tempo real se < 3s de idade (zero latência extra)
@@ -1535,7 +1510,7 @@ export class DerivAPIService extends EventEmitter {
     this.emit('message', message);
 
     // Handle specific message types
-    if (message.tick) {
+    if (message.tick && isAllowedProductionSymbol(message.tick.symbol)) {
       const tickData: DerivTickData = {
         symbol: message.tick.symbol,
         quote: message.tick.quote,
@@ -1744,7 +1719,7 @@ export class DerivAPIService extends EventEmitter {
     const subscriptions = Array.from(this.activeSubscriptions)
       .filter((key) => key.startsWith('ticks_'))
       .map((key) => key.slice('ticks_'.length))
-      .filter(Boolean);
+      .filter((symbol) => isAllowedProductionSymbol(symbol));
 
     for (const symbol of subscriptions) {
       try {
