@@ -880,7 +880,7 @@ export class PostgresStorage implements IStorage {
 
   async getAllDerivTokens(userId: string): Promise<DerivToken[]> {
     const rows = await db.select().from(pgSchema.derivTokens)
-      .where(and(eq(pgSchema.derivTokens.userId, userId), eq(pgSchema.derivTokens.isActive, true), isNotNull(pgSchema.derivTokens.slotIndex)));
+      .where(and(eq(pgSchema.derivTokens.userId, userId), eq(pgSchema.derivTokens.isActive, true), eq(pgSchema.derivTokens.isPrimary, false), isNotNull(pgSchema.derivTokens.slotIndex)));
     return rows.map((row: any) => ({ ...row, token: EncryptionService.decrypt(row.token) })) as DerivToken[];
   }
 
