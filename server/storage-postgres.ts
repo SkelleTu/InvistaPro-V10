@@ -282,9 +282,16 @@ export class PostgresStorage implements IStorage {
       isActive: true,
     };
     const newToken = await db.transaction(async (tx: any) => {
-      await tx.update(pgSchema.derivTokens)
-        .set({ isActive: false, updatedAt: new Date() })
-        .where(and(eq(pgSchema.derivTokens.userId, tokenData.userId), isNull(pgSchema.derivTokens.slotIndex)));
+      const [currentPrimary] = await tx.select({ id: pgSchema.derivTokens.id })
+        .from(pgSchema.derivTokens)
+        .where(and(eq(pgSchema.derivTokens.userId, tokenData.userId), eq(pgSchema.derivTokens.isActive, true), isNull(pgSchema.derivTokens.slotIndex)))
+        .orderBy(desc(pgSchema.derivTokens.updatedAt), desc(pgSchema.derivTokens.createdAt), desc(pgSchema.derivTokens.id))
+        .limit(1);
+      if (currentPrimary) {
+        await tx.update(pgSchema.derivTokens)
+          .set({ isActive: false, updatedAt: new Date() })
+          .where(eq(pgSchema.derivTokens.id, currentPrimary.id));
+      }
       const [row] = await tx.insert(pgSchema.derivTokens).values(encryptedTokenData).returning();
       return row;
     });
@@ -295,7 +302,9 @@ export class PostgresStorage implements IStorage {
     const [token] = await db
       .select()
       .from(pgSchema.derivTokens)
-      .where(and(eq(pgSchema.derivTokens.userId, userId), eq(pgSchema.derivTokens.isActive, true), isNull(pgSchema.derivTokens.slotIndex)));
+      .where(and(eq(pgSchema.derivTokens.userId, userId), eq(pgSchema.derivTokens.isActive, true), isNull(pgSchema.derivTokens.slotIndex)))
+      .orderBy(desc(pgSchema.derivTokens.updatedAt), desc(pgSchema.derivTokens.createdAt), desc(pgSchema.derivTokens.id))
+      .limit(1);
     
     if (!token) return undefined;
     
@@ -309,9 +318,16 @@ export class PostgresStorage implements IStorage {
     // Encrypt before opening the transaction so a key/configuration error cannot deactivate the current token.
     const encrypted = EncryptionService.encrypt(token);
     const newToken = await db.transaction(async (tx: any) => {
-      await tx.update(pgSchema.derivTokens)
-        .set({ isActive: false, updatedAt: new Date() })
-        .where(and(eq(pgSchema.derivTokens.userId, userId), isNull(pgSchema.derivTokens.slotIndex)));
+      const [currentPrimary] = await tx.select({ id: pgSchema.derivTokens.id })
+        .from(pgSchema.derivTokens)
+        .where(and(eq(pgSchema.derivTokens.userId, userId), eq(pgSchema.derivTokens.isActive, true), isNull(pgSchema.derivTokens.slotIndex)))
+        .orderBy(desc(pgSchema.derivTokens.updatedAt), desc(pgSchema.derivTokens.createdAt), desc(pgSchema.derivTokens.id))
+        .limit(1);
+      if (currentPrimary) {
+        await tx.update(pgSchema.derivTokens)
+          .set({ isActive: false, updatedAt: new Date() })
+          .where(eq(pgSchema.derivTokens.id, currentPrimary.id));
+      }
       const [row] = await tx.insert(pgSchema.derivTokens)
         .values({ id, userId, token: encrypted, accountType, isActive: true, slotIndex: null } as any)
         .returning();
@@ -321,10 +337,15 @@ export class PostgresStorage implements IStorage {
   }
 
   async deactivateDerivToken(userId: string): Promise<void> {
-    await db
-      .update(pgSchema.derivTokens)
+    const [currentPrimary] = await db.select({ id: pgSchema.derivTokens.id })
+      .from(pgSchema.derivTokens)
+      .where(and(eq(pgSchema.derivTokens.userId, userId), eq(pgSchema.derivTokens.isActive, true), isNull(pgSchema.derivTokens.slotIndex)))
+      .orderBy(desc(pgSchema.derivTokens.updatedAt), desc(pgSchema.derivTokens.createdAt), desc(pgSchema.derivTokens.id))
+      .limit(1);
+    if (!currentPrimary) return;
+    await db.update(pgSchema.derivTokens)
       .set({ isActive: false, updatedAt: new Date() })
-      .where(and(eq(pgSchema.derivTokens.userId, userId), isNull(pgSchema.derivTokens.slotIndex)));
+      .where(eq(pgSchema.derivTokens.id, currentPrimary.id));
   }
 
   // Trade configuration operations
