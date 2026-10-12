@@ -18,6 +18,20 @@ jobs:
   full-platform-audit:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: audit
+          POSTGRES_PASSWORD: auditaudit
+          POSTGRES_DB: audit
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U audit -d audit"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -133,6 +147,7 @@ jobs:
           DERIV_API_KEY_DEMO: "audit-demo-token"
           DERIV_API_KEY_REAL: "audit-real-token"
           DATABASE_URL: "postgresql://audit:auditaudit@127.0.0.1:5432/audit"
+          INVISTA_PLATFORM: "v10"
           ADMIN_EMAIL: "audit@example.invalid"
           SENDGRID_API_KEY: "SG.audit"
           HUGGINGFACE_API_KEY: "hf_audit"
