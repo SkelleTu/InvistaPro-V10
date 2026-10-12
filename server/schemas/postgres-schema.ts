@@ -12,7 +12,7 @@ import {
   serial,
 } from "drizzle-orm/pg-core";
 
-// A Neon database must belong to exactly one visual platform deployment.
+// One shared Neon database backs both V10 and Aura visual deployments.
 export const invistaDatabaseIdentity = pgTable("invista_database_identity", {
   id: integer("id").primaryKey(),
   platformId: varchar("platform_id", { length: 20 }).notNull(),
