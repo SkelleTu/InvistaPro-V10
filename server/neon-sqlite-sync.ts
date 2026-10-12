@@ -1,5 +1,6 @@
 import { pgDb, pgSchema, isPostgresAvailable } from "./db-postgres";
 import { db as sqliteDb, sqlite } from "./db";
+import { DatabaseStorage } from "./storage";
 import * as localSchema from "@shared/schema";
 import { eq } from "drizzle-orm";
 import { createCipheriv, randomBytes } from "crypto";
@@ -37,10 +38,15 @@ export async function backfillMissingEssentialDataToNeon(): Promise<{ importedUs
   if (identity.essentialBackfillCompletedAt) return { importedUsers: 0, skippedUsers: 0 };
 
   const localUsers = await sqliteDb.select().from(localSchema.users);
+  const localStorage = new DatabaseStorage();
   let importedUsers = 0;
   let skippedUsers = 0;
 
   for (const user of localUsers as any[]) {
+    // Run the existing legacy-token compatibility migration before classifying token slots.
+    // This prevents an old primary token (historically stored with slot_index=0) from being
+    // imported as a duplicate Frenetico slot.
+    await localStorage.getUserDerivToken(user.id);
     const [localTokens, localConfigs, localModules] = await Promise.all([
       sqliteDb.select().from(localSchema.derivTokens).where(eq(localSchema.derivTokens.userId, user.id)),
       sqliteDb.select().from(localSchema.tradeConfigurations).where(eq(localSchema.tradeConfigurations.userId, user.id)),
