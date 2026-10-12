@@ -399,6 +399,9 @@ export class PostgresStorage implements IStorage {
     if (!config) {
       throw new Error(`Invalid mode: ${mode}`);
     }
+    if (config.operations > 50) throw new Error("SEGURANÇA: Máximo de 50 operações por sessão");
+    if (config.interval === "minutes" && config.value < 5) throw new Error("SEGURANÇA: Mínimo de 5 minutos entre operações");
+    if (config.interval === "hours" && config.value < 1) throw new Error("SEGURANÇA: Mínimo de 1 hora entre operações se usando horas");
     
     await db
       .update(pgSchema.tradeConfigurations)
