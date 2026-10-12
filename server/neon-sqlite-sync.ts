@@ -110,7 +110,11 @@ export async function backfillMissingEssentialDataToNeon(): Promise<{ importedUs
         .where(eq(pgSchema.tradeConfigurations.userId, targetUserId));
       if (!neonConfigs.some((row: any) => Boolean(row.isActive))) {
         const existingConfigIds = new Set(neonConfigs.map((row: any) => row.id));
-        for (const config of (localConfigs as any[]).filter(row => Boolean(row.isActive) && !existingConfigIds.has(row.id))) {
+        const localActiveConfig = (localConfigs as any[])
+          .filter(row => Boolean(row.isActive) && !existingConfigIds.has(row.id))
+          .sort((a, b) => (toPgDate(b.updatedAt)?.getTime() ?? 0) - (toPgDate(a.updatedAt)?.getTime() ?? 0))
+          .slice(0, 1);
+        for (const config of localActiveConfig) {
           await tx.insert(pgSchema.tradeConfigurations).values({
             ...config, userId: targetUserId,
             createdAt: toPgDate(config.createdAt), updatedAt: toPgDate(config.updatedAt),
