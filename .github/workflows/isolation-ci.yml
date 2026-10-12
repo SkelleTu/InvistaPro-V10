@@ -160,7 +160,7 @@ jobs:
           pid=$!
           trap 'kill $pid 2>/dev/null || true' EXIT
           for i in $(seq 1 45); do
-            if curl -fsS http://127.0.0.1:5123/health > /tmp/health.json; then
+            if curl -fsS http://127.0.0.1:5123/health > /tmp/health.json && grep -q '"readiness":"ready"' /tmp/health.json && grep -q '"persistenceReady":true' /tmp/health.json; then
               cat /tmp/health.json
               node -e 'const fs=require("fs"); const d=JSON.parse(fs.readFileSync("/tmp/health.json","utf8")); if(d.status!=="ok" || d.readiness!=="ready" || d.routesReady!==true || d.persistenceReady!==true || d.observability?.critical!==0){console.error("Production readiness check failed:",JSON.stringify(d,null,2));process.exit(1)}'
 
