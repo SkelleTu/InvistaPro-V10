@@ -7,12 +7,20 @@ function state(name: string, validator?: (value: string) => boolean): { name: st
   return { name, state: "configured" };
 }
 
+function optionalState(name: string, validator?: (value: string) => boolean): { name: string; state: SecretState } {
+  const value = process.env[name];
+  // Demo/REAL credentials are user-scoped and encrypted in Neon; global tokens are legacy fallbacks.
+  if (!value || !value.trim()) return { name, state: "not_applicable" };
+  if (validator && !validator(value.trim())) return { name, state: "invalid_format" };
+  return { name, state: "configured" };
+}
+
 export function getSecretHealth() {
   const checks = [
     state("ENCRYPTION_KEY", v => /^[0-9a-fA-F]{64}$/.test(v)),
     state("DERIV_APP_ID", v => /^\d+$/.test(v)),
-    state("DERIV_API_KEY_DEMO"),
-    state("DERIV_API_KEY_REAL"),
+    optionalState("DERIV_API_KEY_DEMO"),
+    optionalState("DERIV_API_KEY_REAL"),
     state("DATABASE_URL", v => /^(postgres|postgresql|file|libsql|https?):/i.test(v)),
     state("SESSION_SECRET", v => v.length >= 32 && !/^your-very-secure/i.test(v)),
     state("ADMIN_EMAIL", v => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)),
