@@ -115,29 +115,26 @@ app.use((req, res, next) => {
   // O servidor HTTP precisa abrir ANTES de qualquer inicialização pesada.
   // O Render pode reiniciar uma instância que demora para aceitar a porta.
   // Por isso /health é registrado primeiro e o servidor é criado/listening agora.
+  // Liveness endpoint: keep Render from restarting a live process while Neon is
+  // being migrated. Readiness is reported separately by /api/observability/health.
   app.get('/health', (_req, res) => {
     const obsHealth = observability.getHealth();
     const secretHealth = getSecretHealth();
-    if (!routesReady || !persistenceReady) {
+    if (!routesReady) {
       return res.status(503).json({
-        status: 'degraded',
+        status: 'starting',
         routesReady,
         persistenceReady,
-        error: routeRegistrationError || (!persistenceReady ? 'Persistência Neon ainda não está pronta' : 'Routes ainda não registradas'),
+        error: routeRegistrationError || 'Routes ainda não registradas',
         bootFailureEventId,
-        observability: {
-          status: obsHealth.status,
-          errors: obsHealth.errors,
-          critical: obsHealth.critical,
-          warnings: obsHealth.warnings,
-        },
-        secrets: secretHealth,
       });
     }
-    const healthy = routesReady && persistenceReady && obsHealth.critical === 0 && secretHealth.status === 'healthy';
-    res.status(healthy ? 200 : 503).json({
+    const healthy = persistenceReady && obsHealth.critical === 0 && secretHealth.status === 'healthy';
+    return res.status(200).json({
       status: healthy ? 'ok' : 'degraded',
-      routesReady: true,
+      routesReady,
+      persistenceReady,
+      error: persistenceReady ? undefined : 'Persistência Neon ainda não está pronta',
       observability: {
         status: obsHealth.status,
         errors: obsHealth.errors,
@@ -157,6 +154,7 @@ app.use((req, res, next) => {
     res.status(healthy ? 200 : 503).json({
       success: healthy,
       routesReady,
+      persistenceReady,
       bootFailureEventId,
       ...health,
       secrets: secretHealth,
