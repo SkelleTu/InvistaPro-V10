@@ -165,13 +165,27 @@ app.use((req, res, next) => {
 
   app.get('/api/observability/errors', (_req, res) => {
     const errors = observability.getUnresolved();
-    res.status(routesReady && errors.length === 0 ? 200 : 503).json({
+    res.status(routesReady && persistenceReady && errors.length === 0 ? 200 : 503).json({
       success: true,
       routesReady,
+      persistenceReady,
       bootFailureEventId,
       count: errors.length,
       errors,
     });
+  });
+
+  // This guard must be registered before the application routes so no API
+  // handler can accept writes before Neon migration and local restoration finish.
+  app.use('/api', (req, res, next) => {
+    if (!persistenceReady && !req.path.startsWith('/observability/')) {
+      return res.status(503).json({
+        success: false,
+        error: 'Persistência indisponível: Neon não foi migrada/restaurada com sucesso.',
+        persistenceReady: false,
+      });
+    }
+    next();
   });
 
   const server = createServer(app);
