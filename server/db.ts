@@ -164,6 +164,7 @@ export function initializeDatabase() {
         token TEXT NOT NULL,
         account_type TEXT NOT NULL,
         is_active INTEGER DEFAULT 1,
+        is_primary INTEGER NOT NULL DEFAULT 0,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (user_id) REFERENCES users(id)
@@ -672,9 +673,12 @@ export function initializeDatabase() {
       sqlite.exec(`ALTER TABLE trade_configurations ADD COLUMN fixed_stake REAL DEFAULT 0.35`);
     } catch {}
 
-    // Frenético 10-Tokens: slot_index para múltiplos tokens por usuário
+    // Idempotent SQLite upgrades for primary-token identity and slot metadata.
     try {
       sqlite.exec(`ALTER TABLE deriv_tokens ADD COLUMN slot_index INTEGER DEFAULT 0`);
+    } catch {}
+    try {
+      sqlite.exec(`ALTER TABLE deriv_tokens ADD COLUMN is_primary INTEGER NOT NULL DEFAULT 0`);
     } catch {}
 
     // MT5 Bridge persistence tables
