@@ -214,7 +214,7 @@ export class DualStorage implements IStorage {
 
   // ─── Tokens Deriv ─────────────────────────────────────────────────────────
 
-  async createDerivToken(t: InsertDerivToken) { const payload = { ...t, id: t.id ?? randomBytes(16).toString('hex'), slotIndex: t.slotIndex ?? null } as InsertDerivToken; return this.writeEssential(() => this.neon!.createDerivToken(payload), () => this.sqlite.createDerivToken(payload), 'createDerivToken'); }
+  async createDerivToken(t: InsertDerivToken) { const payload = { ...t, id: (t as any).id ?? randomBytes(16).toString('hex'), slotIndex: t.slotIndex ?? null } as InsertDerivToken; return this.writeEssential(() => this.neon!.createDerivToken(payload), () => this.sqlite.createDerivToken(payload), 'createDerivToken'); }
   async getUserDerivToken(uid: string) {
     return this.localRead(() => this.turso!.getUserDerivToken(uid), () => this.sqlite.getUserDerivToken(uid), 'getUserDerivToken');
   }
@@ -260,7 +260,7 @@ export class DualStorage implements IStorage {
 
   // ─── Configurações de Trade ───────────────────────────────────────────────
 
-  async createTradeConfig(c: InsertTradeConfiguration) { const payload = { ...c, id: c.id ?? randomBytes(16).toString('hex') } as InsertTradeConfiguration; return this.writeEssential(() => this.neon!.createTradeConfig(payload), () => this.sqlite.createTradeConfig(payload), 'createTradeConfig'); }
+  async createTradeConfig(c: InsertTradeConfiguration) { const payload = { ...c, id: (c as any).id ?? randomBytes(16).toString('hex') } as InsertTradeConfiguration; return this.writeEssential(() => this.neon!.createTradeConfig(payload), () => this.sqlite.createTradeConfig(payload), 'createTradeConfig'); }
   async getUserTradeConfig(uid: string) {
     return this.localRead(() => this.turso!.getUserTradeConfig(uid), () => this.sqlite.getUserTradeConfig(uid), 'getUserTradeConfig');
   }
