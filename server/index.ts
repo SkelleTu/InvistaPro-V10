@@ -179,15 +179,7 @@ app.use((req, res, next) => {
   // handler can accept writes before Neon migration and local restoration finish.
   app.use('/api', (req, res, next) => {
     const livenessPath = ['/health', '/status', '/ping', '/api/health', '/api/status', '/api/ping'].includes(req.path);
-    const anonymousSecurityProbe = !req.headers.cookie && !req.headers.authorization && (
-      req.path === '/trading/account-info' ||
-      req.path === '/setup-admin' ||
-      req.path === '/auto-trading/clear-all-sessions' ||
-      req.path === '/auto-trading/reset-blocked-sessions' ||
-      req.path === '/auto-trading/increase-demo-limits' ||
-      req.path.startsWith('/__audit_')
-    );
-    if (!persistenceReady && !livenessPath && !anonymousSecurityProbe && !req.path.startsWith('/observability/')) {
+    if (!persistenceReady && !livenessPath && !req.path.startsWith('/observability/')) {
       return res.status(503).json({
         success: false,
         error: 'Persistência indisponível: Neon não foi migrada/restaurada com sucesso.',
