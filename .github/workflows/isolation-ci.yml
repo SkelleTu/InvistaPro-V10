@@ -154,8 +154,10 @@ jobs:
           UNIVERSAL_SERVER_URL: "http://127.0.0.1:5123"
           INVISTA_UNIVERSAL_SERVER_KEY: "audit-universal-key"
           INTERNAL_DESKTOP_CTRL_SECRET: "audit-only-internal-desktop-secret"
+          CI_STORAGE_SMOKE: "1"
         run: |
           set -euo pipefail
+          npx tsx scripts/seed-neon-sqlite-smoke.ts
           node dist/index.js > /tmp/invista-server.log 2>&1 &
           pid=$!
           trap 'kill $pid 2>/dev/null || true' EXIT
@@ -172,6 +174,10 @@ jobs:
 
               curl -fsS http://127.0.0.1:5123/api/status > /tmp/status.json
               node -e 'const fs=require("fs"); const d=JSON.parse(fs.readFileSync("/tmp/status.json","utf8")); if(d.status!=="online"){console.error("Status endpoint invalid:",JSON.stringify(d));process.exit(1)}'
+
+              node --input-type=module -e 'import Database from "better-sqlite3"; const db=new Database("database/investpro.db",{readonly:true}); const user=db.prepare("SELECT id FROM users WHERE id = ?").get("audit-neon-user-0000000000000000"); const token=db.prepare("SELECT is_active FROM deriv_tokens WHERE id = ?").get("audit-neon-token-000000000000000"); const config=db.prepare("SELECT id FROM trade_configurations WHERE id = ?").get("audit-neon-config-00000000000000"); const moduleConfig=db.prepare("SELECT id FROM modality_module_configs WHERE id = ?").get("audit-neon-module-000000000000"); db.close(); if(!user || !token || Number(token.is_active)!==0 || !config || !moduleConfig){console.error("Neon-to-SQLite restore failed:",JSON.stringify({user:!!user,token:!!token,tokenInactive:token?Number(token.is_active)===0:false,config:!!config,moduleConfig:!!moduleConfig}));process.exit(1)} console.log("Neon-to-SQLite restore smoke passed: user, inactive encrypted token, trade configuration, and modality configuration restored.");'
+
+              node --input-type=module -e 'import postgres from "postgres"; const sql=postgres(process.env.DATABASE_URL); const rows=await sql.unsafe("SELECT platform_id, essential_backfill_completed_at FROM invista_database_identity WHERE id=1"); await sql.end(); const identity=rows[0]; if(identity?.platform_id!=="invista-core" || !identity.essential_backfill_completed_at){console.error("Neon identity/backfill marker invalid:",JSON.stringify({platformId:identity?.platform_id,backfillComplete:!!identity?.essential_backfill_completed_at}));process.exit(1)} console.log("Neon shared identity and backfill marker verified.");'
 
               code=$(curl -s -o /tmp/admin-anon.json -w "%{http_code}" http://127.0.0.1:5123/api/trading/account-info)
               case "$code" in 401|403) echo "Anonymous trading access correctly denied: HTTP $code" ;; *) cat /tmp/admin-anon.json; echo "Expected 401/403 for anonymous trading route, got $code"; exit 1 ;; esac
