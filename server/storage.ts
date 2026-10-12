@@ -450,12 +450,19 @@ export class DatabaseStorage implements IStorage {
   async createDerivToken(tokenData: InsertDerivToken): Promise<DerivToken> {
     // Atomic operation: deactivate existing and create new in transaction
     return db.transaction((tx) => {
-      // Deactivate existing active tokens first to maintain single-active invariant
-      tx
-        .update(derivTokens)
-        .set({ isActive: false, updatedAt: new Date().toISOString() })
-        .where(and(eq(derivTokens.userId, tokenData.userId), isNull(derivTokens.slotIndex)))
-        .run();
+      // Older Neon schemas may contain active Frenético tokens without slotIndex.
+      // Only deactivate the deterministic current primary row, never every legacy row.
+      const [currentPrimary] = tx.select({ id: derivTokens.id })
+        .from(derivTokens)
+        .where(and(eq(derivTokens.userId, tokenData.userId), eq(derivTokens.isActive, true), isNull(derivTokens.slotIndex)))
+        .orderBy(desc(derivTokens.updatedAt), desc(derivTokens.createdAt), desc(derivTokens.id))
+        .limit(1).all();
+      if (currentPrimary) {
+        tx.update(derivTokens)
+          .set({ isActive: false, updatedAt: new Date().toISOString() })
+          .where(eq(derivTokens.id, currentPrimary.id))
+          .run();
+      }
       
       // Encrypt the token before storing
       const encryptedTokenData = {
@@ -483,7 +490,9 @@ export class DatabaseStorage implements IStorage {
     let [token] = await db
       .select()
       .from(derivTokens)
-      .where(and(eq(derivTokens.userId, userId), eq(derivTokens.isActive, true), isNull(derivTokens.slotIndex)));
+      .where(and(eq(derivTokens.userId, userId), eq(derivTokens.isActive, true), isNull(derivTokens.slotIndex)))
+      .orderBy(desc(derivTokens.updatedAt), desc(derivTokens.createdAt), desc(derivTokens.id))
+      .limit(1);
     
     // Retrocompatibilidade: se não encontrar token null, migrar o mais antigo ativo para slotIndex=null
     // (ocorre quando o token foi salvo antes da separação slot/principal)
@@ -517,15 +526,18 @@ export class DatabaseStorage implements IStorage {
   async updateDerivToken(userId: string, token: string, accountType: string, id?: string): Promise<DerivToken> {
     // CORREÇÃO: Remover async da função de transação - better-sqlite3 não suporta async em transactions
     return db.transaction((tx) => {
-      // Desativar apenas o token PRINCIPAL (slotIndex IS NULL) — não tocar nos slots do Frenético
-      tx
-        .update(derivTokens)
-        .set({
-          isActive: false,
-          updatedAt: new Date().toISOString(),
-        })
-        .where(and(eq(derivTokens.userId, userId), isNull(derivTokens.slotIndex)))
-        .run();
+      // Preserve legacy active tokens with no slotIndex; update only the selected primary row.
+      const [currentPrimary] = tx.select({ id: derivTokens.id })
+        .from(derivTokens)
+        .where(and(eq(derivTokens.userId, userId), eq(derivTokens.isActive, true), isNull(derivTokens.slotIndex)))
+        .orderBy(desc(derivTokens.updatedAt), desc(derivTokens.createdAt), desc(derivTokens.id))
+        .limit(1).all();
+      if (currentPrimary) {
+        tx.update(derivTokens)
+          .set({ isActive: false, updatedAt: new Date().toISOString() })
+          .where(eq(derivTokens.id, currentPrimary.id))
+          .run();
+      }
       
       // Inserir novo token principal com slotIndex = null (distingue dos slots 0-9 do Frenético)
       const [newToken] = tx
@@ -550,14 +562,16 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deactivateDerivToken(userId: string): Promise<void> {
-    // Desativar apenas o token PRINCIPAL (slotIndex IS NULL) — preservar slots do Frenético
-    await db
-      .update(derivTokens)
-      .set({
-        isActive: false,
-        updatedAt: new Date().toISOString(),
-      })
-      .where(and(eq(derivTokens.userId, userId), isNull(derivTokens.slotIndex)));
+    // Preserve legacy active slotless tokens; deactivate only the selected primary row.
+    const [currentPrimary] = await db.select({ id: derivTokens.id })
+      .from(derivTokens)
+      .where(and(eq(derivTokens.userId, userId), eq(derivTokens.isActive, true), isNull(derivTokens.slotIndex)))
+      .orderBy(desc(derivTokens.updatedAt), desc(derivTokens.createdAt), desc(derivTokens.id))
+      .limit(1);
+    if (!currentPrimary) return;
+    await db.update(derivTokens)
+      .set({ isActive: false, updatedAt: new Date().toISOString() })
+      .where(eq(derivTokens.id, currentPrimary.id));
   }
 
   // Frenético 10-Tokens: retorna TODOS os tokens ativos do usuário (um por slot)
