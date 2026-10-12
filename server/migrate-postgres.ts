@@ -336,9 +336,14 @@ async function migratePostgres() {
       WHERE token.id IN (SELECT id FROM ranked WHERE row_num > 1)
     `);
     await pgDb.execute(sql`
-      CREATE UNIQUE INDEX IF NOT EXISTS uq_deriv_tokens_one_active_per_slot
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_deriv_tokens_one_active_slot
       ON deriv_tokens (user_id, slot_index)
-      WHERE is_active = TRUE
+      WHERE is_active = TRUE AND slot_index IS NOT NULL
+    `);
+    await pgDb.execute(sql`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_deriv_tokens_one_active_primary
+      ON deriv_tokens (user_id)
+      WHERE is_active = TRUE AND slot_index IS NULL
     `);
 
     await pgDb.execute(sql`
