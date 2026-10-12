@@ -1,5 +1,5 @@
 import { pgDb as db, pgSchema, isPostgresAvailable } from "./db-postgres";
-import { eq, desc, and, isNull } from "drizzle-orm";
+import { eq, desc, and, isNull, isNotNull } from "drizzle-orm";
 import { createHash, randomBytes, createCipheriv, createDecipheriv } from "crypto";
 import type {
   User,
@@ -284,7 +284,7 @@ export class PostgresStorage implements IStorage {
     const newToken = await db.transaction(async (tx: any) => {
       const [currentPrimary] = await tx.select({ id: pgSchema.derivTokens.id })
         .from(pgSchema.derivTokens)
-        .where(and(eq(pgSchema.derivTokens.userId, tokenData.userId), eq(pgSchema.derivTokens.isActive, true), isNull(pgSchema.derivTokens.slotIndex)))
+        .where(and(eq(pgSchema.derivTokens.userId, tokenData.userId), eq(pgSchema.derivTokens.isActive, true), eq(pgSchema.derivTokens.isPrimary, true)))
         .orderBy(desc(pgSchema.derivTokens.updatedAt), desc(pgSchema.derivTokens.createdAt), desc(pgSchema.derivTokens.id))
         .limit(1);
       if (currentPrimary) {
@@ -292,7 +292,7 @@ export class PostgresStorage implements IStorage {
           .set({ isActive: false, updatedAt: new Date() })
           .where(eq(pgSchema.derivTokens.id, currentPrimary.id));
       }
-      const [row] = await tx.insert(pgSchema.derivTokens).values(encryptedTokenData).returning();
+      const [row] = await tx.insert(pgSchema.derivTokens).values({ ...encryptedTokenData, isPrimary: true, slotIndex: null } as any).returning();
       return row;
     });
     return { ...newToken, token: EncryptionService.decrypt(newToken.token) } as DerivToken;
@@ -302,7 +302,7 @@ export class PostgresStorage implements IStorage {
     const [token] = await db
       .select()
       .from(pgSchema.derivTokens)
-      .where(and(eq(pgSchema.derivTokens.userId, userId), eq(pgSchema.derivTokens.isActive, true), isNull(pgSchema.derivTokens.slotIndex)))
+      .where(and(eq(pgSchema.derivTokens.userId, userId), eq(pgSchema.derivTokens.isActive, true), eq(pgSchema.derivTokens.isPrimary, true)))
       .orderBy(desc(pgSchema.derivTokens.updatedAt), desc(pgSchema.derivTokens.createdAt), desc(pgSchema.derivTokens.id))
       .limit(1);
     
@@ -886,7 +886,7 @@ export class PostgresStorage implements IStorage {
 
   async getAllDerivTokens(userId: string): Promise<DerivToken[]> {
     const rows = await db.select().from(pgSchema.derivTokens)
-      .where(and(eq(pgSchema.derivTokens.userId, userId), eq(pgSchema.derivTokens.isActive, true)));
+      .where(and(eq(pgSchema.derivTokens.userId, userId), eq(pgSchema.derivTokens.isActive, true), isNotNull(pgSchema.derivTokens.slotIndex)));
     return rows.map((row: any) => ({ ...row, token: EncryptionService.decrypt(row.token) })) as DerivToken[];
   }
 
@@ -897,7 +897,7 @@ export class PostgresStorage implements IStorage {
       await tx.update(pgSchema.derivTokens).set({ isActive: false, updatedAt: new Date() })
         .where(and(eq(pgSchema.derivTokens.userId, userId), eq(pgSchema.derivTokens.slotIndex, slotIndex)));
       const [row] = await tx.insert(pgSchema.derivTokens)
-        .values({ id: id ?? randomBytes(16).toString("hex"), userId, token: encrypted, accountType, isActive: true, slotIndex })
+        .values({ id: id ?? randomBytes(16).toString("hex"), userId, token: encrypted, accountType, isActive: true, isPrimary: false, slotIndex })
         .returning();
       return row;
     });
