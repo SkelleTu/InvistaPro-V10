@@ -3,9 +3,11 @@ import { readFileSync } from "node:fs";
 
 const read = (path: string) => readFileSync(path, "utf8");
 const storage = read("server/storage-dual.ts");
+const storagePostgres = read("server/storage-postgres.ts");
 const migration = read("server/migrate-postgres.ts");
 const restore = read("server/neon-sqlite-sync.ts");
 const boot = read("server/index.ts");
+const deploymentDocs = read("docs/neon-sqlite-storage.md");
 
 assert.match(storage, /private async writeEssential/);
 assert.match(storage, /NEON_REQUIRED/);
@@ -24,10 +26,17 @@ assert.match(restore, /pgSchema\.users/);
 assert.match(restore, /pgSchema\.derivTokens/);
 assert.match(restore, /pgSchema\.tradeConfigurations/);
 assert.match(restore, /pgSchema\.modalityModuleConfigs/);
+assert.match(restore, /rankedTokens/);
 assert.doesNotMatch(restore, /pgSchema\.(tradeOperations|marketData|aiLogs)/);
 
+assert.match(storagePostgres, /async updateDerivToken[\s\S]*?db\.transaction/);
+assert.match(storagePostgres, /async upsertDerivTokenBySlot[\s\S]*?db\.transaction/);
+assert.match(storagePostgres, /async createTradeConfig[\s\S]*?db\.transaction/);
+assert.match(storagePostgres, /async updateTradeConfig[\s\S]*?db\.transaction/);
 assert.match(boot, /restoreEssentialDataToSqlite/);
-assert.match(boot, /if \(!persistenceReady/);
+assert.match(boot, /maxPersistenceAttempts = 3/);
 assert.match(boot, /persistenceReady = true/);
+assert.match(boot, /process\.exit\(1\)/);
+assert.match(deploymentDocs, /Do not share the key between platforms/);
 
 console.log("NEON + SQLITE STORAGE CONTRACT PASSED");
