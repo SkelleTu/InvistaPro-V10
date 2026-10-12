@@ -10,6 +10,7 @@ const restore = read("server/neon-sqlite-sync.ts");
 const boot = read("server/index.ts");
 const sqliteDb = read("server/db.ts");
 const deploymentDocs = read("docs/neon-sqlite-storage.md");
+const secretHealth = read("server/services/secret-health.ts");
 
 assert.match(storage, /private async writeEssential/);
 assert.match(storage, /NEON_REQUIRED/);
@@ -58,6 +59,10 @@ for (const column of ["shortcode", "buy_price", "sell_price", "entry_epoch", "ex
 assert.match(storagePostgres, /async upsertDerivTokenBySlot[\s\S]*?db\.transaction/);
 assert.match(storagePostgres, /async createTradeConfig[\s\S]*?db\.transaction/);
 assert.match(storagePostgres, /async updateTradeConfig[\s\S]*?db\.transaction/);
+assert.doesNotMatch(secretHealth, /state\(["']DERIV_API_KEY_(?:DEMO|REAL)["']/);
+assert.match(secretHealth, /Static API keys are not used by the current account-routing implementation/);
+assert.match(secretHealth, /state\(["']DERIV_APP_ID["'], v => \/\^\\d\+\$\/\.test\(v\)\)/);
+
 assert.match(boot, /restoreEssentialDataToSqlite/);
 assert.match(boot, /maxPersistenceAttempts = 3/);
 assert.match(boot, /persistenceReady = true/);
