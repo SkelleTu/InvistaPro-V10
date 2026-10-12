@@ -25,7 +25,7 @@ assert.match(migration, /ADD COLUMN IF NOT EXISTS is_primary BOOLEAN NOT NULL DE
 assert.match(migration, /uq_deriv_tokens_one_active_primary/);
 assert.match(migration, /platform mismatch/);
 assert.match(migration, /WHERE is_active = TRUE AND slot_index IS NOT NULL/);
-assert.doesNotMatch(migration, /uq_deriv_tokens_one_active_primary/);
+assert.match(migration, /WHERE is_active = TRUE AND is_primary = TRUE/);
 assert.doesNotMatch(migration, /sqliteDb\.select\(\)\.from/);
 assert.doesNotMatch(migration, /SINCRONIZAR USUÁRIOS DO SQLITE/i);
 
