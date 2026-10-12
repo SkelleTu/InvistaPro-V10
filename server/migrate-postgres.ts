@@ -321,6 +321,45 @@ async function migratePostgres() {
       )
     `);
 
+    // Normalize legacy duplicates before adding database-level active-slot invariants.
+    await pgDb.execute(sql`
+      WITH ranked AS (
+        SELECT id, ROW_NUMBER() OVER (
+          PARTITION BY user_id, slot_index
+          ORDER BY COALESCE(updated_at, created_at) DESC NULLS LAST, id DESC
+        ) AS row_num
+        FROM deriv_tokens
+        WHERE is_active = TRUE
+      )
+      UPDATE deriv_tokens AS token
+      SET is_active = FALSE, updated_at = NOW()
+      WHERE token.id IN (SELECT id FROM ranked WHERE row_num > 1)
+    `);
+    await pgDb.execute(sql`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_deriv_tokens_one_active_per_slot
+      ON deriv_tokens (user_id, slot_index)
+      WHERE is_active = TRUE
+    `);
+
+    await pgDb.execute(sql`
+      WITH ranked AS (
+        SELECT id, ROW_NUMBER() OVER (
+          PARTITION BY user_id
+          ORDER BY COALESCE(updated_at, created_at) DESC NULLS LAST, id DESC
+        ) AS row_num
+        FROM trade_configurations
+        WHERE is_active = TRUE
+      )
+      UPDATE trade_configurations AS config
+      SET is_active = FALSE, updated_at = NOW()
+      WHERE config.id IN (SELECT id FROM ranked WHERE row_num > 1)
+    `);
+    await pgDb.execute(sql`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_trade_configurations_one_active_per_user
+      ON trade_configurations (user_id)
+      WHERE is_active = TRUE
+    `);
+
     console.log('✅ Tabelas PostgreSQL criadas com sucesso!');
 
     // Neon is the durable source of truth. Missing essential local records are
