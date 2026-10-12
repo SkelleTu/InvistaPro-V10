@@ -337,15 +337,9 @@ export class PostgresStorage implements IStorage {
   }
 
   async deactivateDerivToken(userId: string): Promise<void> {
-    const [currentPrimary] = await db.select({ id: pgSchema.derivTokens.id })
-      .from(pgSchema.derivTokens)
-      .where(and(eq(pgSchema.derivTokens.userId, userId), eq(pgSchema.derivTokens.isActive, true), isNull(pgSchema.derivTokens.slotIndex)))
-      .orderBy(desc(pgSchema.derivTokens.updatedAt), desc(pgSchema.derivTokens.createdAt), desc(pgSchema.derivTokens.id))
-      .limit(1);
-    if (!currentPrimary) return;
     await db.update(pgSchema.derivTokens)
       .set({ isActive: false, updatedAt: new Date() })
-      .where(eq(pgSchema.derivTokens.id, currentPrimary.id));
+      .where(and(eq(pgSchema.derivTokens.userId, userId), eq(pgSchema.derivTokens.isPrimary, true)));
   }
 
   // Trade configuration operations
