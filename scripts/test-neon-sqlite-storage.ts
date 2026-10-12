@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 
 const read = (path: string) => readFileSync(path, "utf8");
 const storage = read("server/storage-dual.ts");
+const storageSqlite = read("server/storage.ts");
 const storagePostgres = read("server/storage-postgres.ts");
 const migration = read("server/migrate-postgres.ts");
 const restore = read("server/neon-sqlite-sync.ts");
@@ -48,8 +49,8 @@ assert.doesNotMatch(restore, /pgSchema\.(tradeOperations|marketData|aiLogs)/);
 assert.match(storagePostgres, /async updateDerivToken[\s\S]*?db\.transaction/);
 assert.match(storagePostgres, /currentPrimary/);
 assert.match(storagePostgres, /eq\(pgSchema\.derivTokens\.isPrimary, true\)/);
-assert.match(storage, /eq\(derivTokens\.isPrimary, true\)/);
-assert.match(storage, /isPrimary: true/);
+assert.match(storageSqlite, /eq\(derivTokens\.isPrimary, true\)/);
+assert.match(storageSqlite, /isPrimary: true/);
 assert.match(storagePostgres, /async upsertDerivTokenBySlot[\s\S]*?db\.transaction/);
 assert.match(storagePostgres, /async createTradeConfig[\s\S]*?db\.transaction/);
 assert.match(storagePostgres, /async updateTradeConfig[\s\S]*?db\.transaction/);
