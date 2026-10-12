@@ -178,7 +178,7 @@ app.use((req, res, next) => {
   // This guard must be registered before the application routes so no API
   // handler can accept writes before Neon migration and local restoration finish.
   app.use('/api', (req, res, next) => {
-    const livenessPath = req.path === '/health' || req.path === '/status';
+    const livenessPath = req.path === '/health' || req.path === '/status' || req.path === '/ping';
     if (!persistenceReady && !livenessPath && !req.path.startsWith('/observability/')) {
       return res.status(503).json({
         success: false,
