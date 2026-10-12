@@ -302,7 +302,7 @@ export class PostgresStorage implements IStorage {
     const [token] = await db
       .select()
       .from(pgSchema.derivTokens)
-      .where(and(eq(pgSchema.derivTokens.userId, userId), eq(pgSchema.derivTokens.isActive, true)));
+      .where(and(eq(pgSchema.derivTokens.userId, userId), eq(pgSchema.derivTokens.isActive, true), isNull(pgSchema.derivTokens.slotIndex)));
     
     if (!token) return undefined;
     
@@ -900,19 +900,11 @@ export class PostgresStorage implements IStorage {
 
   async upsertDerivTokenBySlot(userId: string, slotIndex: number, token: string, accountType: string, id?: string): Promise<DerivToken> {
     if (!Number.isInteger(slotIndex) || slotIndex < 0 || slotIndex > 9) throw new Error("slotIndex must be an integer from 0 to 9");
-    const encrypted = EncryptionService.encrypt(token);
-    const [existing] = await db.select().from(pgSchema.derivTokens)
+    await db.update(pgSchema.derivTokens).set({ isActive: false, updatedAt: new Date() })
       .where(and(eq(pgSchema.derivTokens.userId, userId), eq(pgSchema.derivTokens.slotIndex, slotIndex)));
-    let saved: any;
-    if (existing) {
-      [saved] = await db.update(pgSchema.derivTokens)
-        .set({ token: encrypted, accountType, isActive: true, updatedAt: new Date() })
-        .where(eq(pgSchema.derivTokens.id, existing.id)).returning();
-    } else {
-      [saved] = await db.insert(pgSchema.derivTokens)
-        .values({ id: id ?? randomBytes(16).toString("hex"), userId, token: encrypted, accountType, isActive: true, slotIndex })
-        .returning();
-    }
+    const [saved] = await db.insert(pgSchema.derivTokens)
+      .values({ id: id ?? randomBytes(16).toString("hex"), userId, token: EncryptionService.encrypt(token), accountType, isActive: true, slotIndex })
+      .returning();
     return { ...saved, token: EncryptionService.decrypt(saved.token) } as DerivToken;
   }
 
@@ -942,10 +934,6 @@ export class PostgresStorage implements IStorage {
       .values({ userId, modality, slotConfigs: JSON.stringify(slotConfigs) }).returning();
     return row;
   }
-
-  async getModalityModuleConfigs(_userId: string): Promise<any[]> { return []; }
-  async getModalityModuleConfig(_userId: string, _modality: string): Promise<any> { return undefined; }
-  async upsertModalityModuleConfig(_userId: string, _modality: string, _slotConfigs: any[]): Promise<any> { return {}; }
 
   async updateRiskSettings(userId: string, settings: any): Promise<void> {
     const patch: Record<string, any> = {};
