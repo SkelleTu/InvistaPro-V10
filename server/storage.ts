@@ -517,7 +517,7 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
-  async updateDerivToken(userId: string, token: string, accountType: string): Promise<DerivToken> {
+  async updateDerivToken(userId: string, token: string, accountType: string, id?: string): Promise<DerivToken> {
     // CORREÇÃO: Remover async da função de transação - better-sqlite3 não suporta async em transactions
     return db.transaction((tx) => {
       // Desativar apenas o token PRINCIPAL (slotIndex IS NULL) — não tocar nos slots do Frenético
@@ -534,6 +534,7 @@ export class DatabaseStorage implements IStorage {
       const [newToken] = tx
         .insert(derivTokens)
         .values({
+          id,
           userId,
           token: EncryptionService.encrypt(token),
           accountType,
@@ -575,7 +576,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Frenético 10-Tokens: insere ou atualiza o token de um slot específico (0-9)
-  async upsertDerivTokenBySlot(userId: string, slotIndex: number, token: string, accountType: string): Promise<DerivToken> {
+  async upsertDerivTokenBySlot(userId: string, slotIndex: number, token: string, accountType: string, id?: string): Promise<DerivToken> {
     return db.transaction((tx: any) => {
       // Desativa o slot anterior se existir
       tx.update(derivTokens)
@@ -585,6 +586,7 @@ export class DatabaseStorage implements IStorage {
 
       const newToken = tx.insert(derivTokens)
         .values({
+          id,
           userId,
           token: EncryptionService.encrypt(token),
           accountType,
@@ -671,7 +673,7 @@ export class DatabaseStorage implements IStorage {
     return config;
   }
 
-  async updateTradeConfig(userId: string, mode: string): Promise<TradeConfiguration> {
+  async updateTradeConfig(userId: string, mode: string, id?: string): Promise<TradeConfiguration> {
     // Validate inputs first
     if (!userId?.trim()) {
       throw new Error('Invalid userId: cannot be empty');
@@ -729,6 +731,7 @@ export class DatabaseStorage implements IStorage {
       const newConfig = tx
         .insert(tradeConfigurations)
         .values({
+          id,
           userId,
           mode,
           isActive: true,
