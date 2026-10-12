@@ -184,7 +184,8 @@ app.use((req, res, next) => {
       req.path === '/setup-admin' ||
       req.path === '/auto-trading/clear-all-sessions' ||
       req.path === '/auto-trading/reset-blocked-sessions' ||
-      req.path === '/auto-trading/increase-demo-limits'
+      req.path === '/auto-trading/increase-demo-limits' ||
+      req.path.startsWith('/__audit_')
     );
     if (!persistenceReady && !livenessPath && !anonymousSecurityProbe && !req.path.startsWith('/observability/')) {
       return res.status(503).json({
