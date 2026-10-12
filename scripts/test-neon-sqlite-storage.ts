@@ -10,6 +10,7 @@ const restore = read("server/neon-sqlite-sync.ts");
 const boot = read("server/index.ts");
 const sqliteDb = read("server/db.ts");
 const secretHealth = read("server/services/secret-health.ts");
+const productionObservability = read("server/services/production-observability.ts");
 const deploymentDocs = read("docs/neon-sqlite-storage.md");
 
 assert.match(storage, /private async writeEssential/);
@@ -24,6 +25,8 @@ assert.match(storage, /async upsertMarketData\(data: InsertMarketData\) \{ retur
 assert.match(secretHealth, /optionalState\("DERIV_API_KEY_DEMO"\)/);
 assert.match(secretHealth, /optionalState\("DERIV_API_KEY_REAL"\)/);
 assert.match(secretHealth, /state\("DERIV_APP_ID"/);
+assert.match(productionObservability, /isReadinessProbe/);
+assert.match(productionObservability, /status >= 500 && !isReadinessProbe/);
 assert.match(migration, /invista_database_identity/);
 assert.match(migration, /INVISTA_PLATFORM/);
 assert.match(migration, /const platformId = "invista-core"/);
