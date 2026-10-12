@@ -21,6 +21,8 @@ assert.match(storage, /async upsertMarketData\(data: InsertMarketData\) \{ retur
 assert.match(migration, /invista_database_identity/);
 assert.match(migration, /INVISTA_PLATFORM/);
 assert.match(migration, /const platformId = "invista-core"/);
+assert.match(migration, /ADD COLUMN IF NOT EXISTS is_primary BOOLEAN NOT NULL DEFAULT FALSE/);
+assert.match(migration, /uq_deriv_tokens_one_active_primary/);
 assert.match(migration, /platform mismatch/);
 assert.match(migration, /WHERE is_active = TRUE AND slot_index IS NOT NULL/);
 assert.doesNotMatch(migration, /uq_deriv_tokens_one_active_primary/);
@@ -32,6 +34,8 @@ assert.match(restore, /pgSchema\.derivTokens/);
 assert.match(restore, /pgSchema\.tradeConfigurations/);
 assert.match(restore, /pgSchema\.modalityModuleConfigs/);
 assert.match(restore, /rankedTokens/);
+assert.match(restore, /is_primary/);
+assert.match(restore, /isPrimary/);
 assert.match(restore, /function isEncryptedTokenFormat/);
 assert.match(restore, /function tokenFingerprint/);
 assert.match(restore, /localActiveTokens/);
@@ -43,7 +47,9 @@ assert.doesNotMatch(restore, /pgSchema\.(tradeOperations|marketData|aiLogs)/);
 
 assert.match(storagePostgres, /async updateDerivToken[\s\S]*?db\.transaction/);
 assert.match(storagePostgres, /currentPrimary/);
-assert.match(storage, /currentPrimary/);
+assert.match(storagePostgres, /eq\(pgSchema\.derivTokens\.isPrimary, true\)/);
+assert.match(storage, /eq\(derivTokens\.isPrimary, true\)/);
+assert.match(storage, /isPrimary: true/);
 assert.match(storagePostgres, /async upsertDerivTokenBySlot[\s\S]*?db\.transaction/);
 assert.match(storagePostgres, /async createTradeConfig[\s\S]*?db\.transaction/);
 assert.match(storagePostgres, /async updateTradeConfig[\s\S]*?db\.transaction/);
