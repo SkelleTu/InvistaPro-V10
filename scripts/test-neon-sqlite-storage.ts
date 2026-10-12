@@ -22,6 +22,8 @@ assert.match(migration, /invista_database_identity/);
 assert.match(migration, /INVISTA_PLATFORM/);
 assert.match(migration, /const platformId = "invista-core"/);
 assert.match(migration, /platform mismatch/);
+assert.match(migration, /WHERE is_active = TRUE AND slot_index IS NOT NULL/);
+assert.doesNotMatch(migration, /uq_deriv_tokens_one_active_primary/);
 assert.doesNotMatch(migration, /sqliteDb\.select\(\)\.from/);
 assert.doesNotMatch(migration, /SINCRONIZAR USUÁRIOS DO SQLITE/i);
 
@@ -36,6 +38,8 @@ assert.doesNotMatch(restore, /token\.includes\(\s*['"]:['"]\s*\)/);
 assert.doesNotMatch(restore, /pgSchema\.(tradeOperations|marketData|aiLogs)/);
 
 assert.match(storagePostgres, /async updateDerivToken[\s\S]*?db\.transaction/);
+assert.match(storagePostgres, /currentPrimary/);
+assert.match(storage, /currentPrimary/);
 assert.match(storagePostgres, /async upsertDerivTokenBySlot[\s\S]*?db\.transaction/);
 assert.match(storagePostgres, /async createTradeConfig[\s\S]*?db\.transaction/);
 assert.match(storagePostgres, /async updateTradeConfig[\s\S]*?db\.transaction/);
