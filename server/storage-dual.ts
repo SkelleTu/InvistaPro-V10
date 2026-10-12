@@ -57,18 +57,16 @@ export class DualStorage implements IStorage {
 
   constructor() {
     this.sqlite = new DatabaseStorage();
-    this.turso  = isTursoAvailable  ? new TursoStorage()    : null;
-    this.neon   = isPostgresAvailable ? new PostgresStorage() : null;
+    // Turso is intentionally disabled: this deployment uses only Neon + SQLite.
+    this.turso = null;
+    this.neon = isPostgresAvailable ? new PostgresStorage() : null;
 
-    if (this.turso)
-      console.log('✅ [STORAGE] Turso ATIVO — banco de escritas + fallback de leituras críticas');
-    else
-      console.warn('⚠️ [STORAGE] Turso indisponível — escritas vão para SQLite');
-
-    if (this.neon)
-      console.log('🔍 [STORAGE] Neon ATIVO — banco de leituras primário (sem escritas)');
-    else
-      console.warn('⚠️ [STORAGE] Neon indisponível — leituras vão para SQLite/Turso');
+    console.log('🗄️ [STORAGE] SQLite local ativo para cache, dados transitórios e diagnósticos.');
+    if (this.neon) {
+      console.log('☁️ [STORAGE] Neon ativo como fonte durável dos dados essenciais.');
+    } else {
+      console.error('❌ [STORAGE] Neon indisponível: gravações essenciais serão recusadas para evitar perda silenciosa.');
+    }
   }
 
   // ─── Circuit breaker do Neon ──────────────────────────────────────────────
@@ -118,20 +116,42 @@ export class DualStorage implements IStorage {
   // ─── Primitivas ───────────────────────────────────────────────────────────
 
   /**
-   * ESCRITA: Turso → (SQLite em background)
-   * Neon nunca recebe escritas.
+   * Operações locais/transitórias são confirmadas no SQLite antes de retornar.
+   * Não grava automaticamente logs, trades ou ticks no Neon.
    */
-  private async write<T>(tursoFn: () => Promise<T>, sqliteFn: () => Promise<T>, op: string): Promise<T> {
-    if (this.turso) {
-      try {
-        const r = await tursoFn();
-        sqliteFn().catch(e => console.warn(`⚠️ [SQLITE SYNC] ${op}:`, e.message));
-        return r;
-      } catch (e: any) {
-        console.warn(`⚠️ [TURSO] ${op} falhou, fallback SQLite:`, e.message);
-      }
+  private async write<T>(_legacyRemoteFn: () => Promise<T>, sqliteFn: () => Promise<T>, op: string): Promise<T> {
+    try {
+      return await sqliteFn();
+    } catch (error: any) {
+      console.error(`❌ [SQLITE] Falha na gravação local ${op}:`, error?.message || String(error));
+      throw error;
     }
-    return sqliteFn();
+  }
+
+  /**
+   * Dados essenciais só são considerados salvos depois da confirmação do Neon.
+   * SQLite recebe a cópia local de forma síncrona; se essa cópia falhar, a Neon
+   * continua sendo a fonte recuperável e o próximo boot tentará restaurá-la.
+   */
+  private async writeEssential<T>(neonFn: () => Promise<T>, sqliteFn: () => Promise<unknown>, op: string): Promise<T> {
+    if (!this.neonOk || !this.neon) {
+      throw new Error(`NEON_REQUIRED: gravação essencial "${op}" recusada porque a Neon não está disponível.`);
+    }
+    let durable: T;
+    try {
+      durable = await neonFn();
+      this.neonOk_reset();
+    } catch (error: any) {
+      this.onNeonError(error, op);
+      console.error(`❌ [NEON] Gravação essencial ${op} falhou; operação não será confirmada:`, error?.message || String(error));
+      throw error;
+    }
+    try {
+      await sqliteFn();
+    } catch (error: any) {
+      console.warn(`⚠️ [SQLITE CACHE] ${op} foi confirmado na Neon, mas a cópia local falhou; será restaurada no próximo sync.`, error?.message || String(error));
+    }
+    return durable;
   }
 
   /**
@@ -140,26 +160,18 @@ export class DualStorage implements IStorage {
    */
   private async read<T>(
     neonFn: (() => Promise<T>) | null,
-    tursoFn: () => Promise<T>,
+    _legacyRemoteFn: () => Promise<T>,
     sqliteFn: () => Promise<T>,
     op: string
   ): Promise<T> {
     if (neonFn && this.neonOk) {
       try {
-        const r = await neonFn();
+        const result = await neonFn();
         this.neonOk_reset();
-        return r;
-      } catch (e: any) {
-        this.onNeonError(e, op);
-      }
-    }
-    if (this.tursoReadOk) {
-      try {
-        const r = await tursoFn();
-        this.tursoReadFailCount = 0;
-        return r;
-      } catch (e: any) {
-        this.onTursoReadError(e, op);
+        return result;
+      } catch (error: any) {
+        this.onNeonError(error, op);
+        // Reads may fall back to local cache for availability; writes never do.
       }
     }
     return sqliteFn();
@@ -171,25 +183,11 @@ export class DualStorage implements IStorage {
    * PRESERVA COTA DO TURSO: evita chamadas remotas desnecessárias.
    */
   private async localRead<T>(
-    tursoFn: () => Promise<T>,
+    _legacyRemoteFn: () => Promise<T>,
     sqliteFn: () => Promise<T>,
-    op: string
+    _op: string
   ): Promise<T> {
-    try {
-      return await sqliteFn();
-    } catch (e: any) {
-      // SQLite falhou, tenta Turso como fallback
-      if (this.tursoReadOk) {
-        try {
-          const r = await tursoFn();
-          this.tursoReadFailCount = 0;
-          return r;
-        } catch (te: any) {
-          this.onTursoReadError(te, op);
-        }
-      }
-      throw e;
-    }
+    return sqliteFn();
   }
 
   // ─── Usuários ─────────────────────────────────────────────────────────────
@@ -206,11 +204,11 @@ export class DualStorage implements IStorage {
   async getAllUsers() {
     return this.read(() => this.neon!.getAllUsers(), () => this.turso!.getAllUsers(), () => this.sqlite.getAllUsers(), 'getAllUsers');
   }
-  async createUser(user: InsertUser)                                     { return this.write(() => this.turso!.createUser(user), () => this.sqlite.createUser(user), 'createUser'); }
-  async updateUser(id: string, data: UpdateUser)                         { return this.write(() => this.turso!.updateUser(id, data), () => this.sqlite.updateUser(id, data), 'updateUser'); }
-  async updateVerificationCode(uid: string, code: string, exp: Date)     { return this.write(() => this.turso!.updateVerificationCode(uid, code, exp), () => this.sqlite.updateVerificationCode(uid, code, exp), 'updateVerificationCode'); }
-  async verifyPhone(uid: string)                                         { return this.write(() => this.turso!.verifyPhone(uid), () => this.sqlite.verifyPhone(uid), 'verifyPhone'); }
-  async approveAccount(uid: string, by: string)                          { return this.write(() => this.turso!.approveAccount(uid, by), () => this.sqlite.approveAccount(uid, by), 'approveAccount'); }
+  async createUser(user: InsertUser) { return this.writeEssential(() => this.neon!.createUser(user), () => this.sqlite.createUser(user), 'createUser'); }
+  async updateUser(id: string, data: UpdateUser) { return this.writeEssential(() => this.neon!.updateUser(id, data), () => this.sqlite.updateUser(id, data), 'updateUser'); }
+  async updateVerificationCode(uid: string, code: string, exp: Date) { return this.writeEssential(() => this.neon!.updateVerificationCode(uid, code, exp), () => this.sqlite.updateVerificationCode(uid, code, exp), 'updateVerificationCode'); }
+  async verifyPhone(uid: string) { return this.writeEssential(() => this.neon!.verifyPhone(uid), () => this.sqlite.verifyPhone(uid), 'verifyPhone'); }
+  async approveAccount(uid: string, by: string) { return this.writeEssential(() => this.neon!.approveAccount(uid, by), () => this.sqlite.approveAccount(uid, by), 'approveAccount'); }
 
   // ─── Movimentos ───────────────────────────────────────────────────────────
 
@@ -230,7 +228,7 @@ export class DualStorage implements IStorage {
 
   // ─── Tokens Deriv ─────────────────────────────────────────────────────────
 
-  async createDerivToken(t: InsertDerivToken) { return this.write(() => this.turso!.createDerivToken(t), () => this.sqlite.createDerivToken(t), 'createDerivToken'); }
+  async createDerivToken(t: InsertDerivToken) { return this.writeEssential(() => this.neon!.createDerivToken(t), () => this.sqlite.createDerivToken(t), 'createDerivToken'); }
   async getUserDerivToken(uid: string) {
     return this.localRead(() => this.turso!.getUserDerivToken(uid), () => this.sqlite.getUserDerivToken(uid), 'getUserDerivToken');
   }
@@ -238,24 +236,13 @@ export class DualStorage implements IStorage {
   // O write() genérico sincroniza SQLite em background; isso causava corrida: o POST retornava
   // sucesso, mas GET /account-info lia SQLite antes da cópia terminar e dizia "token não configurado".
   async updateDerivToken(uid: string, token: string, accountType: string) {
-    if (this.turso) {
-      try {
-        const saved = await this.turso.updateDerivToken(uid, token, accountType);
-        await this.sqlite.updateDerivToken(uid, token, accountType);
-        console.info('[STORAGE] Deriv token persisted in primary + local store', { accountType });
-        return saved;
-      } catch (err: any) {
-        console.warn('[STORAGE] Deriv token primary write failed; using local fallback', {
-          accountType,
-          error: err?.message || String(err),
-        });
-      }
-    }
-    const saved = await this.sqlite.updateDerivToken(uid, token, accountType);
-    console.info('[STORAGE] Deriv token persisted in local store', { accountType });
-    return saved;
+    return this.writeEssential(
+      () => this.neon!.updateDerivToken(uid, token, accountType),
+      () => this.sqlite.updateDerivToken(uid, token, accountType),
+      'updateDerivToken'
+    );
   }
-  async deactivateDerivToken(uid: string)                                  { return this.write(() => this.turso!.deactivateDerivToken(uid), () => this.sqlite.deactivateDerivToken(uid), 'deactivateDerivToken'); }
+  async deactivateDerivToken(uid: string) { return this.writeEssential(() => this.neon!.deactivateDerivToken(uid), () => this.sqlite.deactivateDerivToken(uid), 'deactivateDerivToken'); }
 
   // ─── Frenético 10-Tokens ──────────────────────────────────────────────────
   async getAllDerivTokens(uid: string) {
@@ -276,12 +263,12 @@ export class DualStorage implements IStorage {
     return this.sqlite.getModalityModuleConfig(uid, modality);
   }
   async upsertModalityModuleConfig(uid: string, modality: string, slotConfigs: import('@shared/schema').ModuleSlotConfig[]) {
-    return this.sqlite.upsertModalityModuleConfig(uid, modality, slotConfigs);
+    return this.writeEssential(() => this.neon!.upsertModalityModuleConfig(uid, modality, slotConfigs), () => this.sqlite.upsertModalityModuleConfig(uid, modality, slotConfigs), 'upsertModalityModuleConfig');
   }
 
   // ─── Configurações de Trade ───────────────────────────────────────────────
 
-  async createTradeConfig(c: InsertTradeConfiguration) { return this.write(() => this.turso!.createTradeConfig(c), () => this.sqlite.createTradeConfig(c), 'createTradeConfig'); }
+  async createTradeConfig(c: InsertTradeConfiguration) { return this.writeEssential(() => this.neon!.createTradeConfig(c), () => this.sqlite.createTradeConfig(c), 'createTradeConfig'); }
   async getUserTradeConfig(uid: string) {
     return this.localRead(() => this.turso!.getUserTradeConfig(uid), () => this.sqlite.getUserTradeConfig(uid), 'getUserTradeConfig');
   }
@@ -292,16 +279,16 @@ export class DualStorage implements IStorage {
     // Alta frequência (chamado a cada 60s) → SQLite first
     return this.localRead(() => this.turso!.getActiveTradeConfigurations(), () => this.sqlite.getActiveTradeConfigurations(), 'getActiveTradeConfigurations');
   }
-  async updateTradeConfig(uid: string, mode: string)               { return this.write(() => this.turso!.updateTradeConfig(uid, mode), () => this.sqlite.updateTradeConfig(uid, mode), 'updateTradeConfig'); }
-  async updateSelectedModalities(uid: string, modalities: string[]) { return this.write(() => this.turso!.updateSelectedModalities(uid, modalities), () => this.sqlite.updateSelectedModalities(uid, modalities), 'updateSelectedModalities'); }
-  async updateAccuGrowthRates(uid: string, rates: string[]) { return this.write(() => this.turso!.updateAccuGrowthRates(uid, rates), () => this.sqlite.updateAccuGrowthRates(uid, rates), 'updateAccuGrowthRates'); }
-  async updateModalityFrequency(uid: string, freq: Record<string, string>) { return this.write(() => this.turso!.updateModalityFrequency(uid, freq), () => this.sqlite.updateModalityFrequency(uid, freq), 'updateModalityFrequency'); }
-  async updateAccuTicksPerRate(uid: string, ticks: Record<string, number>) { return this.write(() => this.turso!.updateAccuTicksPerRate(uid, ticks), () => this.sqlite.updateAccuTicksPerRate(uid, ticks), 'updateAccuTicksPerRate'); }
-  async updateAccuFrequencyPerRate(uid: string, freq: Record<string, string>) { return this.write(() => this.turso!.updateAccuFrequencyPerRate(uid, freq), () => this.sqlite.updateAccuFrequencyPerRate(uid, freq), 'updateAccuFrequencyPerRate'); }
-  async updateModalityTicks(uid: string, ticks: Record<string, number>) { return this.write(() => this.turso!.updateModalityTicks(uid, ticks), () => this.sqlite.updateModalityTicks(uid, ticks), 'updateModalityTicks'); }
-  async deactivateAllTradeConfigs(uid: string)                      { return this.write(() => this.turso!.deactivateAllTradeConfigs(uid), () => this.sqlite.deactivateAllTradeConfigs(uid), 'deactivateAllTradeConfigs'); }
-  async reactivateTradeConfiguration(id: string)                    { return this.write(() => this.turso!.reactivateTradeConfiguration(id), () => this.sqlite.reactivateTradeConfiguration(id), 'reactivateTradeConfiguration'); }
-  async deactivateTradeConfiguration(id: string)                    { return this.write(() => this.turso!.deactivateTradeConfiguration(id), () => this.sqlite.deactivateTradeConfiguration(id), 'deactivateTradeConfiguration'); }
+  async updateTradeConfig(uid: string, mode: string) { return this.writeEssential(() => this.neon!.updateTradeConfig(uid, mode), () => this.sqlite.updateTradeConfig(uid, mode), 'updateTradeConfig'); }
+  async updateSelectedModalities(uid: string, modalities: string[]) { return this.writeEssential(() => this.neon!.updateSelectedModalities(uid, modalities), () => this.sqlite.updateSelectedModalities(uid, modalities), 'updateSelectedModalities'); }
+  async updateAccuGrowthRates(uid: string, rates: string[]) { return this.writeEssential(() => this.neon!.updateAccuGrowthRates(uid, rates), () => this.sqlite.updateAccuGrowthRates(uid, rates), 'updateAccuGrowthRates'); }
+  async updateModalityFrequency(uid: string, freq: Record<string, string>) { return this.writeEssential(() => this.neon!.updateModalityFrequency(uid, freq), () => this.sqlite.updateModalityFrequency(uid, freq), 'updateModalityFrequency'); }
+  async updateAccuTicksPerRate(uid: string, ticks: Record<string, number>) { return this.writeEssential(() => this.neon!.updateAccuTicksPerRate(uid, ticks), () => this.sqlite.updateAccuTicksPerRate(uid, ticks), 'updateAccuTicksPerRate'); }
+  async updateAccuFrequencyPerRate(uid: string, freq: Record<string, string>) { return this.writeEssential(() => this.neon!.updateAccuFrequencyPerRate(uid, freq), () => this.sqlite.updateAccuFrequencyPerRate(uid, freq), 'updateAccuFrequencyPerRate'); }
+  async updateModalityTicks(uid: string, ticks: Record<string, number>) { return this.writeEssential(() => this.neon!.updateModalityTicks(uid, ticks), () => this.sqlite.updateModalityTicks(uid, ticks), 'updateModalityTicks'); }
+  async deactivateAllTradeConfigs(uid: string) { return this.writeEssential(() => this.neon!.deactivateAllTradeConfigs(uid), () => this.sqlite.deactivateAllTradeConfigs(uid), 'deactivateAllTradeConfigs'); }
+  async reactivateTradeConfiguration(id: string) { return this.writeEssential(() => this.neon!.reactivateTradeConfiguration(id), () => this.sqlite.reactivateTradeConfiguration(id), 'reactivateTradeConfiguration'); }
+  async deactivateTradeConfiguration(id: string) { return this.writeEssential(() => this.neon!.deactivateTradeConfiguration(id), () => this.sqlite.deactivateTradeConfiguration(id), 'deactivateTradeConfiguration'); }
 
   // ─── Sincronização de usuário para satisfazer FK do Turso ─────────────────
 
