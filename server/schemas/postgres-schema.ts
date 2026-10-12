@@ -12,6 +12,13 @@ import {
   serial,
 } from "drizzle-orm/pg-core";
 
+// A Neon database must belong to exactly one visual platform deployment.
+export const invistaDatabaseIdentity = pgTable("invista_database_identity", {
+  id: integer("id").primaryKey(),
+  platformId: varchar("platform_id", { length: 20 }).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 // Session storage table for express sessions
 export const sessions = pgTable(
   "sessions",
