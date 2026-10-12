@@ -12,6 +12,14 @@ import {
   serial,
 } from "drizzle-orm/pg-core";
 
+// One shared Neon database backs both V10 and Aura visual deployments.
+export const invistaDatabaseIdentity = pgTable("invista_database_identity", {
+  id: integer("id").primaryKey(),
+  platformId: varchar("platform_id", { length: 20 }).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  essentialBackfillCompletedAt: timestamp("essential_backfill_completed_at"),
+});
+
 // Session storage table for express sessions
 export const sessions = pgTable(
   "sessions",
@@ -125,6 +133,8 @@ export const derivTokens = pgTable("deriv_tokens", {
   token: text("token").notNull(),
   accountType: varchar("account_type", { length: 20 }).notNull(),
   isActive: boolean("is_active").default(true),
+  isPrimary: boolean("is_primary").notNull().default(false),
+  slotIndex: integer("slot_index"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -138,9 +148,31 @@ export const tradeConfigurations = pgTable("trade_configurations", {
   intervalType: varchar("interval_type", { length: 20 }).notNull(),
   intervalValue: integer("interval_value").notNull(),
   selectedModalities: text("selected_modalities").default('digit_differs'),
+  accuGrowthRates: text("accu_growth_rates").default('["1","2","3","4","5"]'),
+  modalityFrequency: text("modality_frequency").default('{}'),
+  accuTicksPerRate: text("accu_ticks_per_rate").default('{"1":10,"2":7,"3":5,"4":4,"5":3}'),
+  accuFrequencyPerRate: text("accu_frequency_per_rate").default('{}'),
+  modalityTicks: text("modality_ticks").default('{}'),
+  enableMartingale: boolean("enable_martingale").default(true),
+  enableLeverage: boolean("enable_leverage").default(true),
+  enableCircuitBreaker: boolean("enable_circuit_breaker").default(true),
+  enableRecoveryMode: boolean("enable_recovery_mode").default(true),
+  martingaleMultipliers: text("martingale_multipliers").default('[1.3,1.6,2.0]'),
+  circuitBreakerLosses: integer("circuit_breaker_losses").default(1),
+  circuitBreakerPauseMinutes: integer("circuit_breaker_pause_minutes").default(2),
+  stakeMode: text("stake_mode").default('ai'),
+  fixedStake: real("fixed_stake").default(0.35),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
+
+export const modalityModuleConfigs = pgTable("modality_module_configs", {
+  id: varchar("id", { length: 32 }).primaryKey().default(sql`replace(gen_random_uuid()::text, '-', '')`),
+  userId: varchar("user_id", { length: 32 }).notNull().references(() => users.id),
+  modality: varchar("modality", { length: 100 }).notNull(),
+  slotConfigs: text("slot_configs").notNull().default('[]'),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (table) => [index("IDX_modality_module_user_modality").on(table.userId, table.modality)]);
 
 export const aiLogs = pgTable("ai_logs", {
   id: varchar("id", { length: 32 }).primaryKey().default(sql`replace(gen_random_uuid()::text, '-', '')`),

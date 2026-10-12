@@ -17,8 +17,7 @@ try {
     isPostgresAvailable = true;
     
     // Detectar tipo de database
-    const isReplit = databaseUrl.includes('helium') || databaseUrl.includes('replit') || databaseUrl.includes('neon');
-    const dbType = isReplit ? 'Replit PostgreSQL (Neon)' : 'PostgreSQL';
+    const dbType = databaseUrl.includes('neon.tech') ? 'Neon PostgreSQL' : 'PostgreSQL';
     
     console.log(`✅ ${dbType} conectado - Sistema Dual Database ativo`);
     
@@ -29,8 +28,7 @@ try {
       console.log(`   • Database: ${urlObj.pathname.substring(1)}`);
     } catch {}
     
-    // IMPORTANTE: Com PostgreSQL, o flag de pausa é compartilhado entre TODOS os remixes!
-    console.log('🔗 [PAUSE/RESUME] Flag de pausa centralizado ATIVO - compartilhado entre remixes');
+    console.log('🔐 [NEON] O isolamento da plataforma será validado pela identidade persistida durante a migração.');
   } else {
     console.warn('⚠️ DATABASE_URL PostgreSQL não configurada. Usando apenas SQLite.');
     console.warn('⚠️ ATENÇÃO: Sem PostgreSQL, o controle de pausa NÃO será compartilhado entre remixes!');

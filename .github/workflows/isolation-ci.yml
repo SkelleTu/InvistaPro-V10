@@ -18,6 +18,20 @@ jobs:
   full-platform-audit:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: audit
+          POSTGRES_PASSWORD: auditaudit
+          POSTGRES_DB: audit
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U audit -d audit"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -133,21 +147,24 @@ jobs:
           DERIV_API_KEY_DEMO: "audit-demo-token"
           DERIV_API_KEY_REAL: "audit-real-token"
           DATABASE_URL: "postgresql://audit:auditaudit@127.0.0.1:5432/audit"
+          INVISTA_PLATFORM: "v10"
           ADMIN_EMAIL: "audit@example.invalid"
           SENDGRID_API_KEY: "SG.audit"
           HUGGINGFACE_API_KEY: "hf_audit"
           UNIVERSAL_SERVER_URL: "http://127.0.0.1:5123"
           INVISTA_UNIVERSAL_SERVER_KEY: "audit-universal-key"
           INTERNAL_DESKTOP_CTRL_SECRET: "audit-only-internal-desktop-secret"
+          CI_STORAGE_SMOKE: "1"
         run: |
           set -euo pipefail
+          npx tsx scripts/seed-neon-sqlite-smoke.ts
           node dist/index.js > /tmp/invista-server.log 2>&1 &
           pid=$!
           trap 'kill $pid 2>/dev/null || true' EXIT
           for i in $(seq 1 45); do
-            if curl -fsS http://127.0.0.1:5123/health > /tmp/health.json; then
+            if curl -fsS http://127.0.0.1:5123/health > /tmp/health.json && grep -q '"readiness":"ready"' /tmp/health.json && grep -q '"persistenceReady":true' /tmp/health.json; then
               cat /tmp/health.json
-              node -e 'const fs=require("fs"); const d=JSON.parse(fs.readFileSync("/tmp/health.json","utf8")); if(d.status!=="ok" || d.routesReady!==true || d.observability?.critical!==0){console.error("Health check is degraded:",JSON.stringify(d,null,2));process.exit(1)}'
+              node -e 'const fs=require("fs"); const d=JSON.parse(fs.readFileSync("/tmp/health.json","utf8")); if(d.status!=="ok" || d.readiness!=="ready" || d.routesReady!==true || d.persistenceReady!==true || d.observability?.critical!==0){console.error("Production readiness check failed:",JSON.stringify(d,null,2));process.exit(1)}'
 
               curl -fsS http://127.0.0.1:5123/api/ping > /tmp/ping.txt
               test "$(cat /tmp/ping.txt)" = "OK" || { cat /tmp/ping.txt; echo "Ping endpoint invalid: expected OK"; exit 1; }
@@ -157,6 +174,10 @@ jobs:
 
               curl -fsS http://127.0.0.1:5123/api/status > /tmp/status.json
               node -e 'const fs=require("fs"); const d=JSON.parse(fs.readFileSync("/tmp/status.json","utf8")); if(d.status!=="online"){console.error("Status endpoint invalid:",JSON.stringify(d));process.exit(1)}'
+
+              node --input-type=module -e 'import Database from "better-sqlite3"; const db=new Database("database/investpro.db",{readonly:true}); const user=db.prepare("SELECT id FROM users WHERE id = ?").get("audit-neon-user-0000000000000000"); const token=db.prepare("SELECT is_active,is_primary FROM deriv_tokens WHERE id = ?").get("audit-neon-token-000000000000000"); const config=db.prepare("SELECT id FROM trade_configurations WHERE id = ?").get("audit-neon-config-00000000000000"); const moduleConfig=db.prepare("SELECT id FROM modality_module_configs WHERE id = ?").get("audit-neon-module-000000000000"); db.close(); if(!user || !token || Number(token.is_active)!==0 || Number(token.is_primary)!==1 || !config || !moduleConfig){console.error("Neon-to-SQLite restore failed:",JSON.stringify({user:!!user,token:!!token,tokenInactive:token?Number(token.is_active)===0:false,tokenPrimary:token?Number(token.is_primary)===1:false,config:!!config,moduleConfig:!!moduleConfig}));process.exit(1)} console.log("Neon-to-SQLite restore smoke passed: user, inactive primary-marked encrypted token, trade configuration, and modality configuration restored.");'
+
+              node --input-type=module -e 'import postgres from "postgres"; const sql=postgres(process.env.DATABASE_URL); const rows=await sql.unsafe("SELECT platform_id, essential_backfill_completed_at FROM invista_database_identity WHERE id=1"); await sql.end(); const identity=rows[0]; if(identity?.platform_id!=="invista-core" || !identity.essential_backfill_completed_at){console.error("Neon identity/backfill marker invalid:",JSON.stringify({platformId:identity?.platform_id,backfillComplete:!!identity?.essential_backfill_completed_at}));process.exit(1)} console.log("Neon shared identity and backfill marker verified.");'
 
               code=$(curl -s -o /tmp/admin-anon.json -w "%{http_code}" http://127.0.0.1:5123/api/trading/account-info)
               case "$code" in 401|403) echo "Anonymous trading access correctly denied: HTTP $code" ;; *) cat /tmp/admin-anon.json; echo "Expected 401/403 for anonymous trading route, got $code"; exit 1 ;; esac

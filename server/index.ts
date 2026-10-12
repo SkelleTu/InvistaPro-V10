@@ -22,6 +22,7 @@ import { dualStorage as storage } from "./storage-dual";
 import { derivTradeSync } from "./services/deriv-trade-sync";
 import { realStatsTracker } from "./services/real-stats-tracker";
 import { runPostgresMigration } from "./migrate-postgres";
+import { backfillMissingEssentialDataToNeon, restoreEssentialDataToSqlite } from "./neon-sqlite-sync";
 import { initUrlRegistry } from "./services/url-registry";
 import { startDerivObservabilityBridge } from "./services/deriv-observability-bridge";
 import { startUniversalHeartbeatLoop } from "./services/universal-server-session";
@@ -29,6 +30,7 @@ import { getSecretHealth } from "./services/secret-health";
 
 const app = express();
 let routesReady = false;
+let persistenceReady = false;
 let routeRegistrationError: string | null = null;
 let bootFailureEventId: string | null = null;
 app.use(express.json());
@@ -113,28 +115,27 @@ app.use((req, res, next) => {
   // O servidor HTTP precisa abrir ANTES de qualquer inicialização pesada.
   // O Render pode reiniciar uma instância que demora para aceitar a porta.
   // Por isso /health é registrado primeiro e o servidor é criado/listening agora.
+  // Liveness endpoint: keep Render from restarting a live process while Neon is
+  // being migrated. Readiness is reported separately by /api/observability/health.
   app.get('/health', (_req, res) => {
     const obsHealth = observability.getHealth();
     const secretHealth = getSecretHealth();
     if (!routesReady) {
       return res.status(503).json({
-        status: 'degraded',
-        routesReady: false,
+        status: 'starting',
+        routesReady,
+        persistenceReady,
         error: routeRegistrationError || 'Routes ainda não registradas',
         bootFailureEventId,
-        observability: {
-          status: obsHealth.status,
-          errors: obsHealth.errors,
-          critical: obsHealth.critical,
-          warnings: obsHealth.warnings,
-        },
-        secrets: secretHealth,
       });
     }
-    const healthy = obsHealth.critical === 0 && secretHealth.status === 'healthy';
-    res.status(healthy ? 200 : 503).json({
-      status: healthy ? 'ok' : 'degraded',
-      routesReady: true,
+    const healthy = persistenceReady && obsHealth.critical === 0 && secretHealth.status === 'healthy';
+    return res.status(200).json({
+      status: 'ok',
+      readiness: healthy ? 'ready' : 'degraded',
+      routesReady,
+      persistenceReady,
+      error: persistenceReady ? undefined : 'Persistência Neon ainda não está pronta',
       observability: {
         status: obsHealth.status,
         errors: obsHealth.errors,
@@ -150,10 +151,11 @@ app.use((req, res, next) => {
   app.get('/api/observability/health', (_req, res) => {
     const health = observability.getHealth();
     const secretHealth = getSecretHealth();
-    const healthy = routesReady && health.critical === 0 && secretHealth.status === 'healthy';
+    const healthy = routesReady && persistenceReady && health.critical === 0 && secretHealth.status === 'healthy';
     res.status(healthy ? 200 : 503).json({
       success: healthy,
       routesReady,
+      persistenceReady,
       bootFailureEventId,
       ...health,
       secrets: secretHealth,
@@ -163,13 +165,28 @@ app.use((req, res, next) => {
 
   app.get('/api/observability/errors', (_req, res) => {
     const errors = observability.getUnresolved();
-    res.status(routesReady && errors.length === 0 ? 200 : 503).json({
+    res.status(routesReady && persistenceReady && errors.length === 0 ? 200 : 503).json({
       success: true,
       routesReady,
+      persistenceReady,
       bootFailureEventId,
       count: errors.length,
       errors,
     });
+  });
+
+  // This guard must be registered before the application routes so no API
+  // handler can accept writes before Neon migration and local restoration finish.
+  app.use('/api', (req, res, next) => {
+    const livenessPath = ['/health', '/status', '/ping', '/api/health', '/api/status', '/api/ping'].includes(req.path);
+    if (!persistenceReady && !livenessPath && !req.path.startsWith('/observability/')) {
+      return res.status(503).json({
+        success: false,
+        error: 'Persistência indisponível: Neon não foi migrada/restaurada com sucesso.',
+        persistenceReady: false,
+      });
+    }
+    next();
   });
 
   const server = createServer(app);
@@ -232,6 +249,13 @@ app.use((req, res, next) => {
         detail: routeRegistrationError || 'Falha de inicialização não especificada',
       });
     }
+    if (!persistenceReady) {
+      return res.status(503).json({
+        success: false,
+        error: 'Persistência indisponível: Neon não foi migrada/restaurada com sucesso.',
+        persistenceReady: false,
+      });
+    }
     next();
   });
 
@@ -270,43 +294,64 @@ app.use((req, res, next) => {
     console.error("❌ [BOOT] Banco local não pôde ser inicializado; servidor HTTP continuará ativo:", dbError?.message || dbError);
   }
   
-  app.locals.serviceReady = routesReady;
-  console.log(`✅ [BOOT] Serviço HTTP finalizado. routesReady=${routesReady}`);
+  app.locals.serviceReady = false;
+  console.log(`⏳ [BOOT] Rotas registradas; aguardando migração e restauração da persistência. routesReady=${routesReady}`);
 
   // 🗄️ EXECUTAR MIGRAÇÃO POSTGRESQL - SUPORTE A QUALQUER BANCO (REPLIT, SUPABASE, ETC)
   console.log('🗄️ Verificando sincronização com PostgreSQL...');
   const hasPostgres = process.env.DATABASE_URL && (process.env.DATABASE_URL.startsWith('postgresql://') || process.env.DATABASE_URL.startsWith('postgres://'));
   
   if (hasPostgres) {
-    const isReplit = process.env.DATABASE_URL!.includes('helium') || process.env.DATABASE_URL!.includes('replit');
-    const dbType = isReplit ? 'Replit PostgreSQL (Neon)' : 'PostgreSQL';
-    
-    console.log(`✨ ${dbType} configurado! Criando schema SQL...`);
-    const migrationSuccess = await runPostgresMigration();
-    if (migrationSuccess) {
-      console.log('✅ ✅ ✅ SINCRONIZAÇÃO COMPLETA!');
-      console.log(`   • ${dbType} conectado`);
-      console.log('   • Tabelas SQL criadas');
-      console.log('   • Dados sincronizados (users, trades, sessions, etc)');
-      console.log('   • 2 bancos harmônicos: SQLite (local) + Neon PostgreSQL');
-      console.log('   🎉 Sistema Dual-Database 100% OPERACIONAL');
-    } else {
-      console.warn('⚠️ Não foi possível criar tabelas no PostgreSQL - continuando com SQLite');
+    const dbType = process.env.DATABASE_URL!.includes('neon.tech') ? 'Neon PostgreSQL' : 'PostgreSQL';
+    const maxPersistenceAttempts = 3;
+    console.log(`✨ ${dbType} configurado! Iniciando migração e restauração verificáveis...`);
+
+    for (let attempt = 1; attempt <= maxPersistenceAttempts; attempt++) {
+      try {
+        await runPostgresMigration();
+        const backfill = await backfillMissingEssentialDataToNeon();
+        console.log('✅ [SQLITE→NEON] Backfill aditivo de essenciais concluído', backfill);
+        const restored = await restoreEssentialDataToSqlite();
+        console.log('✅ [NEON→SQLITE] Dados essenciais restaurados', restored);
+        persistenceReady = true;
+        app.locals.persistenceReady = true;
+        app.locals.serviceReady = routesReady;
+        console.log('✅ Migração e restauração concluídas.');
+        console.log(`   • ${dbType} conectado e identidade de plataforma validada`);
+        console.log('   • Identidade, tokens e configurações essenciais restaurados da Neon');
+        console.log('   • Histórico operacional, logs de IA e dados de mercado permanecem locais');
+        console.log('   🎉 Persistência pronta para uso.');
+        break;
+      } catch (persistenceError: any) {
+        const message = persistenceError?.message || String(persistenceError);
+        const nonRetryable = /platform mismatch|INVISTA_PLATFORM must be set|NEON_PLATFORM_IDENTITY_MISSING|LOCAL_USER_ID_CONFLICT|LOCAL_USER_IMPORT_CONFLICT|ENCRYPTION_KEY|TOKEN_CIPHERTEXT_FORMAT_INVALID/i.test(message);
+        persistenceReady = false;
+        app.locals.persistenceReady = false;
+        app.locals.serviceReady = false;
+        console.error(`❌ [PERSISTÊNCIA] Tentativa ${attempt}/${maxPersistenceAttempts} falhou:`, message);
+
+        if (nonRetryable || attempt === maxPersistenceAttempts) {
+          console.error(nonRetryable
+            ? '❌ Erro de identidade/configuração/integridade: não será repetido.'
+            : '❌ Persistência não recuperada após tentativas limitadas; encerrando para permitir reinício controlado pelo Render.');
+          if (process.env.NODE_ENV === 'production') process.exit(1);
+          break;
+        }
+        const delayMs = 1000 * (2 ** (attempt - 1));
+        console.warn(`⏳ [PERSISTÊNCIA] Nova tentativa em ${delayMs} ms.`);
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      }
     }
   } else {
+    persistenceReady = false;
+    app.locals.persistenceReady = false;
+    app.locals.serviceReady = false;
+    console.error('❌ DATABASE_URL PostgreSQL não configurada. API bloqueada para proteger dados essenciais.');
     console.log('ℹ️ DATABASE_URL PostgreSQL não está configurado');
-    console.log('   ⚠️ Sistema funcionando apenas em MODO LOCAL (SQLite)');
-    console.log('');
-    console.log('   📋 PARA ATIVAR NEON POSTGRESQL:');
-    console.log('      1. Obtenha a URL de conexão do Replit Database');
-    console.log('      2. Acesse Replit > Secrets (cadeado no painel esquerdo)');
-    console.log('      3. Clique em "Create Secret"');
-    console.log('      4. Nome: DATABASE_URL');
-    console.log('      5. Valor: (cole a URL PostgreSQL)');
-    console.log('      6. Clique em "Add Secret"');
-    console.log('      7. Reinicie o app');
-    console.log('');
-    console.log('   ✅ Sistema sincronizará automaticamente SQLite + Neon!');
+    console.log('   📋 Configure DATABASE_URL com a Neon exclusiva desta plataforma.');
+    console.log('   📋 Configure INVISTA_PLATFORM=v10 ou INVISTA_PLATFORM=aura.');
+    console.log('   📋 Configure uma base Neon diferente para cada plataforma e reinicie.');
+    if (process.env.NODE_ENV === 'production') process.exit(1);
   }
   
   // 🛡️ SISTEMA DE BACKUP AUTOMÁTICO DO BANCO DE DADOS

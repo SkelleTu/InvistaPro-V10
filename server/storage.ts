@@ -450,21 +450,27 @@ export class DatabaseStorage implements IStorage {
   async createDerivToken(tokenData: InsertDerivToken): Promise<DerivToken> {
     // Atomic operation: deactivate existing and create new in transaction
     return db.transaction((tx) => {
-      // Deactivate existing active tokens first to maintain single-active invariant
-      tx
-        .update(derivTokens)
-        .set({
-          isActive: false,
-          updatedAt: new Date().toISOString(),
-        })
-        .where(eq(derivTokens.userId, tokenData.userId))
-        .run();
+      // Older Neon schemas may contain active Frenético tokens without slotIndex.
+      // Only deactivate the deterministic current primary row, never every legacy row.
+      const [currentPrimary] = tx.select({ id: derivTokens.id })
+        .from(derivTokens)
+        .where(and(eq(derivTokens.userId, tokenData.userId), eq(derivTokens.isActive, true), eq(derivTokens.isPrimary, true)))
+        .orderBy(desc(derivTokens.updatedAt), desc(derivTokens.createdAt), desc(derivTokens.id))
+        .limit(1).all();
+      if (currentPrimary) {
+        tx.update(derivTokens)
+          .set({ isActive: false, updatedAt: new Date().toISOString() })
+          .where(eq(derivTokens.id, currentPrimary.id))
+          .run();
+      }
       
       // Encrypt the token before storing
       const encryptedTokenData = {
         ...tokenData,
         token: EncryptionService.encrypt(tokenData.token),
         isActive: true,
+        isPrimary: true,
+        slotIndex: null,
       };
       
       const newToken = tx
@@ -482,29 +488,27 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getUserDerivToken(userId: string): Promise<DerivToken | undefined> {
-    // Primeiro: buscar token principal com slotIndex IS NULL (novo formato)
     let [token] = await db
       .select()
       .from(derivTokens)
-      .where(and(eq(derivTokens.userId, userId), eq(derivTokens.isActive, true), isNull(derivTokens.slotIndex)));
-    
-    // Retrocompatibilidade: se não encontrar token null, migrar o mais antigo ativo para slotIndex=null
-    // (ocorre quando o token foi salvo antes da separação slot/principal)
+      .where(and(eq(derivTokens.userId, userId), eq(derivTokens.isActive, true), eq(derivTokens.isPrimary, true)))
+      .orderBy(desc(derivTokens.updatedAt), desc(derivTokens.createdAt), desc(derivTokens.id))
+      .limit(1);
+
+    // Safe legacy recovery: promote only one unambiguous active slotless token.
+    // Never infer that slot 0 is a primary credential from row count or ordering.
     if (!token) {
-      const legacyTokens = await db
+      const slotless = await db
         .select()
         .from(derivTokens)
-        .where(and(eq(derivTokens.userId, userId), eq(derivTokens.isActive, true)))
-        .orderBy(derivTokens.createdAt);
-      
-      const legacy = legacyTokens[0];
-      if (legacy) {
-        // Migrar: atualizar slotIndex para null para marcar como token principal
+        .where(and(eq(derivTokens.userId, userId), eq(derivTokens.isActive, true), isNull(derivTokens.slotIndex)))
+        .orderBy(desc(derivTokens.updatedAt), desc(derivTokens.createdAt), desc(derivTokens.id));
+      if (slotless.length === 1) {
+        const legacy = slotless[0];
         await db.update(derivTokens)
-          .set({ slotIndex: null } as any)
+          .set({ isPrimary: true, slotIndex: null } as any)
           .where(eq(derivTokens.id, legacy.id));
-        token = { ...legacy, slotIndex: null };
-        console.log(`🔄 [MIGRATION] Token principal do userId=${userId} migrado para slotIndex=null`);
+        token = { ...legacy, isPrimary: true, slotIndex: null };
       }
     }
 
@@ -517,28 +521,33 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
-  async updateDerivToken(userId: string, token: string, accountType: string): Promise<DerivToken> {
+  async updateDerivToken(userId: string, token: string, accountType: string, id?: string): Promise<DerivToken> {
     // CORREÇÃO: Remover async da função de transação - better-sqlite3 não suporta async em transactions
     return db.transaction((tx) => {
-      // Desativar apenas o token PRINCIPAL (slotIndex IS NULL) — não tocar nos slots do Frenético
-      tx
-        .update(derivTokens)
-        .set({
-          isActive: false,
-          updatedAt: new Date().toISOString(),
-        })
-        .where(and(eq(derivTokens.userId, userId), isNull(derivTokens.slotIndex)))
-        .run();
+      // Preserve legacy active tokens with no slotIndex; update only the selected primary row.
+      const [currentPrimary] = tx.select({ id: derivTokens.id })
+        .from(derivTokens)
+        .where(and(eq(derivTokens.userId, userId), eq(derivTokens.isActive, true), eq(derivTokens.isPrimary, true)))
+        .orderBy(desc(derivTokens.updatedAt), desc(derivTokens.createdAt), desc(derivTokens.id))
+        .limit(1).all();
+      if (currentPrimary) {
+        tx.update(derivTokens)
+          .set({ isActive: false, updatedAt: new Date().toISOString() })
+          .where(eq(derivTokens.id, currentPrimary.id))
+          .run();
+      }
       
       // Inserir novo token principal com slotIndex = null (distingue dos slots 0-9 do Frenético)
       const [newToken] = tx
         .insert(derivTokens)
         .values({
+          id,
           userId,
           token: EncryptionService.encrypt(token),
           accountType,
           isActive: true,
           slotIndex: null,
+          isPrimary: true,
         } as any)
         .returning()
         .all();
@@ -552,14 +561,9 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deactivateDerivToken(userId: string): Promise<void> {
-    // Desativar apenas o token PRINCIPAL (slotIndex IS NULL) — preservar slots do Frenético
-    await db
-      .update(derivTokens)
-      .set({
-        isActive: false,
-        updatedAt: new Date().toISOString(),
-      })
-      .where(and(eq(derivTokens.userId, userId), isNull(derivTokens.slotIndex)));
+    await db.update(derivTokens)
+      .set({ isActive: false, updatedAt: new Date().toISOString() })
+      .where(and(eq(derivTokens.userId, userId), eq(derivTokens.isPrimary, true)));
   }
 
   // Frenético 10-Tokens: retorna TODOS os tokens ativos do usuário (um por slot)
@@ -567,7 +571,7 @@ export class DatabaseStorage implements IStorage {
     const tokens = await db
       .select()
       .from(derivTokens)
-      .where(and(eq(derivTokens.userId, userId), eq(derivTokens.isActive, true)));
+      .where(and(eq(derivTokens.userId, userId), eq(derivTokens.isActive, true), eq(derivTokens.isPrimary, false), isNotNull(derivTokens.slotIndex)));
     return tokens.map(t => ({
       ...t,
       token: EncryptionService.decrypt(t.token),
@@ -575,7 +579,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Frenético 10-Tokens: insere ou atualiza o token de um slot específico (0-9)
-  async upsertDerivTokenBySlot(userId: string, slotIndex: number, token: string, accountType: string): Promise<DerivToken> {
+  async upsertDerivTokenBySlot(userId: string, slotIndex: number, token: string, accountType: string, id?: string): Promise<DerivToken> {
     return db.transaction((tx: any) => {
       // Desativa o slot anterior se existir
       tx.update(derivTokens)
@@ -585,10 +589,12 @@ export class DatabaseStorage implements IStorage {
 
       const newToken = tx.insert(derivTokens)
         .values({
+          id,
           userId,
           token: EncryptionService.encrypt(token),
           accountType,
           isActive: true,
+          isPrimary: false,
           slotIndex,
         })
         .returning()
@@ -671,7 +677,7 @@ export class DatabaseStorage implements IStorage {
     return config;
   }
 
-  async updateTradeConfig(userId: string, mode: string): Promise<TradeConfiguration> {
+  async updateTradeConfig(userId: string, mode: string, id?: string): Promise<TradeConfiguration> {
     // Validate inputs first
     if (!userId?.trim()) {
       throw new Error('Invalid userId: cannot be empty');
@@ -729,6 +735,7 @@ export class DatabaseStorage implements IStorage {
       const newConfig = tx
         .insert(tradeConfigurations)
         .values({
+          id,
           userId,
           mode,
           isActive: true,

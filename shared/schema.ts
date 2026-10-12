@@ -232,7 +232,8 @@ export const derivTokens = sqliteTable("deriv_tokens", {
   token: text("token").notNull(), // Encrypted Deriv API token
   accountType: text("account_type").notNull(), // 'demo' or 'real'
   isActive: integer("is_active", { mode: 'boolean' }).default(true),
-  slotIndex: integer("slot_index").default(0), // 0-9 para modo Frenético 10-Tokens (null = token principal)
+  isPrimary: integer("is_primary", { mode: 'boolean' }).notNull().default(false),
+  slotIndex: integer("slot_index").default(0), // 0-9 para modo Frenético 10-Tokens; primary is tracked separately
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`),
 });
