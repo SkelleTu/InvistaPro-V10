@@ -301,8 +301,7 @@ app.use((req, res, next) => {
   const hasPostgres = process.env.DATABASE_URL && (process.env.DATABASE_URL.startsWith('postgresql://') || process.env.DATABASE_URL.startsWith('postgres://'));
   
   if (hasPostgres) {
-    const isReplit = process.env.DATABASE_URL!.includes('helium') || process.env.DATABASE_URL!.includes('replit');
-    const dbType = isReplit ? 'Replit PostgreSQL (Neon)' : 'PostgreSQL';
+    const dbType = process.env.DATABASE_URL!.includes('neon.tech') ? 'Neon PostgreSQL' : 'PostgreSQL';
     
     console.log(`✨ ${dbType} configurado! Criando schema SQL...`);
     const migrationSuccess = await runPostgresMigration();
@@ -313,18 +312,22 @@ app.use((req, res, next) => {
         persistenceReady = true;
         app.locals.persistenceReady = true;
         app.locals.serviceReady = routesReady;
+        console.log('✅ Migração e restauração concluídas.');
+        console.log(`   • ${dbType} conectado e identidade de plataforma validada`);
+        console.log('   • Identidade, tokens e configurações essenciais restaurados da Neon');
+        console.log('   • Histórico operacional, logs de IA e dados de mercado permanecem locais');
+        console.log('   🎉 Persistência pronta para uso.');
       } catch (restoreError: any) {
         console.error('❌ [NEON→SQLITE] Restauração essencial falhou:', restoreError?.message || restoreError);
+        persistenceReady = false;
+        app.locals.persistenceReady = false;
         app.locals.serviceReady = false;
       }
-      console.log('✅ ✅ ✅ SINCRONIZAÇÃO COMPLETA!');
-      console.log(`   • ${dbType} conectado`);
-      console.log('   • Tabelas SQL criadas');
-      console.log('   • Identidade, tokens e configurações essenciais restaurados da Neon');
-      console.log('   • Neon durável + SQLite local; histórico de trading e dados de mercado ficam locais');
-      console.log('   🎉 Sistema Dual-Database 100% OPERACIONAL');
     } else {
-      console.warn('⚠️ Não foi possível criar tabelas no PostgreSQL - continuando com SQLite');
+      persistenceReady = false;
+      app.locals.persistenceReady = false;
+      app.locals.serviceReady = false;
+      console.error('❌ Migração Neon falhou; API permanece bloqueada para proteger dados essenciais.');
     }
   } else {
     persistenceReady = false;
@@ -332,18 +335,9 @@ app.use((req, res, next) => {
     app.locals.serviceReady = false;
     console.error('❌ DATABASE_URL PostgreSQL não configurada. API bloqueada para proteger dados essenciais.');
     console.log('ℹ️ DATABASE_URL PostgreSQL não está configurado');
-    console.log('   ⚠️ Sistema funcionando apenas em MODO LOCAL (SQLite)');
-    console.log('');
-    console.log('   📋 PARA ATIVAR NEON POSTGRESQL:');
-    console.log('      1. Obtenha a URL de conexão do Replit Database');
-    console.log('      2. Acesse Replit > Secrets (cadeado no painel esquerdo)');
-    console.log('      3. Clique em "Create Secret"');
-    console.log('      4. Nome: DATABASE_URL');
-    console.log('      5. Valor: (cole a URL PostgreSQL)');
-    console.log('      6. Clique em "Add Secret"');
-    console.log('      7. Reinicie o app');
-    console.log('');
-    console.log('   ✅ Sistema sincronizará automaticamente SQLite + Neon!');
+    console.log('   📋 Configure DATABASE_URL com a Neon exclusiva desta plataforma.');
+    console.log('   📋 Configure INVISTA_PLATFORM=v10 ou INVISTA_PLATFORM=aura.');
+    console.log('   📋 Configure uma base Neon diferente para cada plataforma e reinicie.');
   }
   
   // 🛡️ SISTEMA DE BACKUP AUTOMÁTICO DO BANCO DE DADOS
