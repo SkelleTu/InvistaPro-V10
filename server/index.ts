@@ -22,7 +22,7 @@ import { dualStorage as storage } from "./storage-dual";
 import { derivTradeSync } from "./services/deriv-trade-sync";
 import { realStatsTracker } from "./services/real-stats-tracker";
 import { runPostgresMigration } from "./migrate-postgres";
-import { restoreEssentialDataToSqlite } from "./neon-sqlite-sync";
+import { backfillMissingEssentialDataToNeon, restoreEssentialDataToSqlite } from "./neon-sqlite-sync";
 import { initUrlRegistry } from "./services/url-registry";
 import { startDerivObservabilityBridge } from "./services/deriv-observability-bridge";
 import { startUniversalHeartbeatLoop } from "./services/universal-server-session";
@@ -121,7 +121,8 @@ app.use((req, res, next) => {
     if (!routesReady || !persistenceReady) {
       return res.status(503).json({
         status: 'degraded',
-        routesReady: false,
+        routesReady,
+        persistenceReady,
         error: routeRegistrationError || (!persistenceReady ? 'Persistência Neon ainda não está pronta' : 'Routes ainda não registradas'),
         bootFailureEventId,
         observability: {
@@ -307,6 +308,8 @@ app.use((req, res, next) => {
     const migrationSuccess = await runPostgresMigration();
     if (migrationSuccess) {
       try {
+        const backfill = await backfillMissingEssentialDataToNeon();
+        console.log('✅ [SQLITE→NEON] Backfill aditivo de essenciais concluído', backfill);
         const restored = await restoreEssentialDataToSqlite();
         console.log('✅ [NEON→SQLITE] Dados essenciais restaurados', restored);
         persistenceReady = true;
