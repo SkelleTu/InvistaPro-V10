@@ -11,6 +11,8 @@ const deploymentDocs = read("docs/neon-sqlite-storage.md");
 
 assert.match(storage, /private async writeEssential/);
 assert.match(storage, /NEON_REQUIRED/);
+assert.match(storage, /NEON_RETRY_COOLDOWN_MS = 30_000/);
+assert.match(storage, /neonQuotaBlocked/);
 assert.match(storage, /this\.turso = null/);
 assert.doesNotMatch(storage, /storage-turso/);
 assert.match(storage, /async createAiLog\(log: InsertAiLog\)\s+\{ return this\.sqlite\.createAiLog\(log\); \}/);
