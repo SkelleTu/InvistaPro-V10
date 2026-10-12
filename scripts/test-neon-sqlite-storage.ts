@@ -29,6 +29,9 @@ assert.match(restore, /pgSchema\.derivTokens/);
 assert.match(restore, /pgSchema\.tradeConfigurations/);
 assert.match(restore, /pgSchema\.modalityModuleConfigs/);
 assert.match(restore, /rankedTokens/);
+assert.match(restore, /function isEncryptedTokenFormat/);
+assert.match(restore, /parts\.length === 3[\s\S]*?\{32\}[\s\S]*?\{32\}/);
+assert.doesNotMatch(restore, /token\.includes\(\s*['"]:['"]\s*\)/);
 assert.doesNotMatch(restore, /pgSchema\.(tradeOperations|marketData|aiLogs)/);
 
 assert.match(storagePostgres, /async updateDerivToken[\s\S]*?db\.transaction/);
