@@ -459,13 +459,18 @@ export class PostgresStorage implements IStorage {
   }
 
   async reactivateTradeConfiguration(configId: string): Promise<void> {
-    await db
-      .update(pgSchema.tradeConfigurations)
-      .set({
-        isActive: true,
-        updatedAt: new Date(),
-      })
-      .where(eq(pgSchema.tradeConfigurations.id, configId));
+    await db.transaction(async (tx: any) => {
+      const [target] = await tx.select({ userId: pgSchema.tradeConfigurations.userId })
+        .from(pgSchema.tradeConfigurations)
+        .where(eq(pgSchema.tradeConfigurations.id, configId));
+      if (!target) return;
+      await tx.update(pgSchema.tradeConfigurations)
+        .set({ isActive: false, updatedAt: new Date() })
+        .where(eq(pgSchema.tradeConfigurations.userId, target.userId));
+      await tx.update(pgSchema.tradeConfigurations)
+        .set({ isActive: true, updatedAt: new Date() })
+        .where(eq(pgSchema.tradeConfigurations.id, configId));
+    });
   }
 
   async getAllTradeConfigurations(): Promise<TradeConfiguration[]> {
