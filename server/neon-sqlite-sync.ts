@@ -99,6 +99,13 @@ export async function restoreEssentialDataToSqlite(): Promise<{ users: number; t
         created_at:localValue(u.createdAt),updated_at:localValue(u.updatedAt)
       });
     }
+    // Reconcile canonical per-user token/config snapshots before rehydrating them.
+    // Only users present in Neon are reconciled; trade history and transient tables are untouched.
+    for (const u of users as any[]) {
+      sqlite.prepare("DELETE FROM deriv_tokens WHERE user_id = ?").run(u.id);
+      sqlite.prepare("DELETE FROM trade_configurations WHERE user_id = ?").run(u.id);
+      sqlite.prepare("DELETE FROM modality_module_configs WHERE user_id = ?").run(u.id);
+    }
     for (const t of tokens as any[]) {
       tokenUpsert.run({id:t.id,user_id:t.userId,token:t.token,account_type:t.accountType,is_active:localValue(t.isActive),
         slot_index:t.slotIndex ?? null,created_at:localValue(t.createdAt),updated_at:localValue(t.updatedAt)});
