@@ -78,10 +78,11 @@ export async function backfillMissingEssentialDataToNeon(): Promise<{ importedUs
     // This prevents an old primary token (historically stored with slot_index=0) from being
     // imported as a duplicate Frenetico slot.
     await localStorage.getUserDerivToken(user.id);
-    const [localTokens, localConfigs, localModules] = await Promise.all([
+    const [localTokens, localConfigs, localModules, localPrimaryToken] = await Promise.all([
       sqliteDb.select().from(localSchema.derivTokens).where(eq(localSchema.derivTokens.userId, user.id)),
       sqliteDb.select().from(localSchema.tradeConfigurations).where(eq(localSchema.tradeConfigurations.userId, user.id)),
       sqliteDb.select().from(localSchema.modalityModuleConfigs).where(eq(localSchema.modalityModuleConfigs.userId, user.id)),
+      localStorage.getUserDerivToken(user.id),
     ]);
 
     const outcome = await pgDb.transaction(async (tx: any) => {
@@ -130,6 +131,19 @@ export async function backfillMissingEssentialDataToNeon(): Promise<{ importedUs
       // existed, recover slot identity only by exact token match against local SQLite.
       // Never guess a slot from row order or timestamps.
       const localActiveTokens = await localStorage.getAllDerivTokens(user.id);
+      if (localPrimaryToken) {
+        const primaryFingerprint = tokenFingerprint(String(localPrimaryToken.token));
+        const matchingPrimary = (neonTokens as any[]).find((row: any) =>
+          row.isActive && tokenFingerprint(decryptTokenForMatching(String(row.token))) === primaryFingerprint
+        );
+        if (matchingPrimary) {
+          await tx.update(pgSchema.derivTokens)
+            .set({ isPrimary: true, slotIndex: null })
+            .where(eq(pgSchema.derivTokens.id, matchingPrimary.id));
+          matchingPrimary.isPrimary = true;
+          matchingPrimary.slotIndex = null;
+        }
+      }
       for (const localToken of localActiveTokens as any[]) {
         if (localToken.slotIndex === null || localToken.slotIndex === undefined) continue;
         const localFingerprint = tokenFingerprint(String(localToken.token));
@@ -154,13 +168,20 @@ export async function backfillMissingEssentialDataToNeon(): Promise<{ importedUs
       );
       for (const token of rankedTokens) {
         const slotIndex = token.slotIndex ?? null;
-        if (neonTokens.some((row: any) => (row.slotIndex ?? null) === slotIndex)) continue;
+        const isPrimary = Boolean(token.isPrimary);
+        if ((neonTokens as any[]).some((row: any) => row.id === token.id)) continue;
+        if (isPrimary && (neonTokens as any[]).some((row: any) => row.isPrimary && row.isActive)) continue;
+        if (slotIndex !== null && (neonTokens as any[]).some((row: any) => (row.slotIndex ?? null) === slotIndex)) continue;
+        if (slotIndex === null && !isPrimary) {
+          const fingerprint = tokenFingerprint(decryptTokenForMatching(String(token.token)));
+          if ((neonTokens as any[]).some((row: any) => tokenFingerprint(decryptTokenForMatching(String(row.token))) === fingerprint)) continue;
+        }
         await tx.insert(pgSchema.derivTokens).values({
           id: token.id, userId: targetUserId, token: encryptLegacyPlainToken(String(token.token)),
-          accountType: token.accountType, isActive: Boolean(token.isActive), slotIndex,
+          accountType: token.accountType, isActive: Boolean(token.isActive), isPrimary, slotIndex,
           createdAt: toPgDate(token.createdAt), updatedAt: toPgDate(token.updatedAt),
         }).onConflictDoNothing();
-        neonTokens.push({ slotIndex } as any);
+        neonTokens.push({ id: token.id, isPrimary, isActive: Boolean(token.isActive), slotIndex, token: token.token } as any);
       }
 
       // Current strategy settings are essential, but old/inactive config history is not.
