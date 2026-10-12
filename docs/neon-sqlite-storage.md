@@ -7,9 +7,9 @@ Each Render web service must set `INVISTA_PLATFORM` to exactly one of:
 - `v10` for Invista Pro V10
 - `aura` for Aura System Style
 
-Each service's `DATABASE_URL` must point to its own Neon PostgreSQL database. Do not reuse the same Neon database for both services. At boot, the migration claims the database with a singleton identity row and fails closed if the stored platform does not match the service. This prevents silent cross-platform sharing.
+These are two visual deployments of the same platform, not separate trading systems. Both services must use the same `DATABASE_URL` and the same valid `ENCRYPTION_KEY`, so users, sessions, Deriv tokens, account associations, strategies, and preferences remain consistent whichever visual version a user opens. The migration claims the database with the shared `invista-core` identity and fails closed if that identity conflicts with an existing claim.
 
-Each service must keep the same valid `ENCRYPTION_KEY` across restarts and redeploys of that platform so encrypted Deriv tokens remain decryptable. Do not share the key between platforms. Never log or commit connection strings or keys.
+Keep the same valid `ENCRYPTION_KEY` across restarts and redeploys of both services so encrypted Deriv tokens remain decryptable. Never log or commit connection strings or keys.
 
 ## Data placement
 
@@ -25,10 +25,10 @@ The SQLite file is stored at `database/investpro.db`. On Render instances withou
 
 ## Verification before production
 
-1. Set the correct `INVISTA_PLATFORM` and a distinct Neon `DATABASE_URL` for each service.
+1. Set `INVISTA_PLATFORM=v10` for V10 and `INVISTA_PLATFORM=aura` for Aura; confirm both use the same Neon `DATABASE_URL` and `ENCRYPTION_KEY`.
 2. Confirm the database identity row matches that platform.
 3. Register/update a test user, DEMO token, selected modalities, risk preferences, and module-slot preferences.
 4. Restart the service and confirm those records are restored from Neon into SQLite.
 5. Confirm trades, ticks, AI logs, and WebSocket events do not create Neon rows.
 6. Confirm a database-identity mismatch blocks API readiness and never silently switches to the other platform's data.
-7. Keep Render auto-deploy disabled until CI and a controlled staging verification pass.
+7. Keep Render auto-deploy disabled until CI and a controlled verification pass; deploy V10 and Aura from the same validated core commit.
