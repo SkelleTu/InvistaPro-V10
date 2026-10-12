@@ -454,7 +454,7 @@ export class DatabaseStorage implements IStorage {
       // Only deactivate the deterministic current primary row, never every legacy row.
       const [currentPrimary] = tx.select({ id: derivTokens.id })
         .from(derivTokens)
-        .where(and(eq(derivTokens.userId, tokenData.userId), eq(derivTokens.isActive, true), isNull(derivTokens.slotIndex)))
+        .where(and(eq(derivTokens.userId, tokenData.userId), eq(derivTokens.isActive, true), eq(derivTokens.isPrimary, true)))
         .orderBy(desc(derivTokens.updatedAt), desc(derivTokens.createdAt), desc(derivTokens.id))
         .limit(1).all();
       if (currentPrimary) {
@@ -469,6 +469,8 @@ export class DatabaseStorage implements IStorage {
         ...tokenData,
         token: EncryptionService.encrypt(tokenData.token),
         isActive: true,
+        isPrimary: true,
+        slotIndex: null,
       };
       
       const newToken = tx
@@ -486,31 +488,28 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getUserDerivToken(userId: string): Promise<DerivToken | undefined> {
-    // Primeiro: buscar token principal com slotIndex IS NULL (novo formato)
     let [token] = await db
       .select()
       .from(derivTokens)
-      .where(and(eq(derivTokens.userId, userId), eq(derivTokens.isActive, true), isNull(derivTokens.slotIndex)))
+      .where(and(eq(derivTokens.userId, userId), eq(derivTokens.isActive, true), eq(derivTokens.isPrimary, true)))
       .orderBy(desc(derivTokens.updatedAt), desc(derivTokens.createdAt), desc(derivTokens.id))
       .limit(1);
-    
-    // Retrocompatibilidade: se não encontrar token null, migrar o mais antigo ativo para slotIndex=null
-    // (ocorre quando o token foi salvo antes da separação slot/principal)
+
+    // Safe legacy recovery: promote only one unambiguous active slotless token,
+    // or the sole active token in a pre-slot database. Never guess among 10 slots.
     if (!token) {
-      const legacyTokens = await db
+      const activeTokens = await db
         .select()
         .from(derivTokens)
         .where(and(eq(derivTokens.userId, userId), eq(derivTokens.isActive, true)))
-        .orderBy(derivTokens.createdAt);
-      
-      const legacy = legacyTokens[0];
+        .orderBy(desc(derivTokens.updatedAt), desc(derivTokens.createdAt), desc(derivTokens.id));
+      const slotless = activeTokens.filter((row: any) => row.slotIndex === null || row.slotIndex === undefined);
+      const legacy = slotless.length === 1 ? slotless[0] : (activeTokens.length === 1 ? activeTokens[0] : undefined);
       if (legacy) {
-        // Migrar: atualizar slotIndex para null para marcar como token principal
         await db.update(derivTokens)
-          .set({ slotIndex: null } as any)
+          .set({ isPrimary: true, slotIndex: null } as any)
           .where(eq(derivTokens.id, legacy.id));
-        token = { ...legacy, slotIndex: null };
-        console.log(`🔄 [MIGRATION] Token principal do userId=${userId} migrado para slotIndex=null`);
+        token = { ...legacy, isPrimary: true, slotIndex: null };
       }
     }
 
@@ -529,7 +528,7 @@ export class DatabaseStorage implements IStorage {
       // Preserve legacy active tokens with no slotIndex; update only the selected primary row.
       const [currentPrimary] = tx.select({ id: derivTokens.id })
         .from(derivTokens)
-        .where(and(eq(derivTokens.userId, userId), eq(derivTokens.isActive, true), isNull(derivTokens.slotIndex)))
+        .where(and(eq(derivTokens.userId, userId), eq(derivTokens.isActive, true), eq(derivTokens.isPrimary, true)))
         .orderBy(desc(derivTokens.updatedAt), desc(derivTokens.createdAt), desc(derivTokens.id))
         .limit(1).all();
       if (currentPrimary) {
@@ -549,6 +548,7 @@ export class DatabaseStorage implements IStorage {
           accountType,
           isActive: true,
           slotIndex: null,
+          isPrimary: true,
         } as any)
         .returning()
         .all();
@@ -579,7 +579,7 @@ export class DatabaseStorage implements IStorage {
     const tokens = await db
       .select()
       .from(derivTokens)
-      .where(and(eq(derivTokens.userId, userId), eq(derivTokens.isActive, true)));
+      .where(and(eq(derivTokens.userId, userId), eq(derivTokens.isActive, true), eq(derivTokens.isPrimary, false), isNotNull(derivTokens.slotIndex)));
     return tokens.map(t => ({
       ...t,
       token: EncryptionService.decrypt(t.token),
@@ -602,6 +602,7 @@ export class DatabaseStorage implements IStorage {
           token: EncryptionService.encrypt(token),
           accountType,
           isActive: true,
+          isPrimary: false,
           slotIndex,
         })
         .returning()
