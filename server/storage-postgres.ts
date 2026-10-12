@@ -320,7 +320,7 @@ export class PostgresStorage implements IStorage {
         isActive: false,
         updatedAt: new Date(),
       })
-      .where(and(eq(pgSchema.derivTokens.userId, userId), eq(pgSchema.derivTokens.slotIndex, null as any)));
+      .where(and(eq(pgSchema.derivTokens.userId, userId), isNull(pgSchema.derivTokens.slotIndex)));
     
     // Create new active token with encryption
     const [newToken] = await db
