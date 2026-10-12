@@ -9,7 +9,6 @@
 import { randomBytes } from "crypto";
 import { DatabaseStorage } from "./storage";
 import { PostgresStorage } from "./storage-postgres";
-import { TursoStorage } from "./storage-turso";
 import { isPostgresAvailable } from "./db-postgres";
 import type { IStorage } from "./storage";
 import type {
@@ -37,7 +36,7 @@ function isQuotaOrBlockError(msg: string): boolean {
 
 export class DualStorage implements IStorage {
   private sqlite: DatabaseStorage;
-  private turso: TursoStorage | null;
+  private turso: any | null;
   private neon: PostgresStorage | null;
 
   private neonDisabled = false;
