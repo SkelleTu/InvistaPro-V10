@@ -20,6 +20,7 @@ assert.match(storage, /async upsertMarketData\(data: InsertMarketData\) \{ retur
 
 assert.match(migration, /invista_database_identity/);
 assert.match(migration, /INVISTA_PLATFORM/);
+assert.match(migration, /const platformId = "invista-core"/);
 assert.match(migration, /platform mismatch/);
 assert.doesNotMatch(migration, /sqliteDb\.select\(\)\.from/);
 assert.doesNotMatch(migration, /SINCRONIZAR USUÁRIOS DO SQLITE/i);
@@ -43,6 +44,8 @@ assert.match(boot, /maxPersistenceAttempts = 3/);
 assert.match(boot, /persistenceReady = true/);
 assert.doesNotMatch(boot, /anonymousSecurityProbe|req\.path\.startsWith\(['"]\/__audit_/);
 assert.match(boot, /process\.exit\(1\)/);
-assert.match(deploymentDocs, /Do not share the key between platforms/);
+assert.match(deploymentDocs, /same `DATABASE_URL` and the same valid `ENCRYPTION_KEY`/);
+assert.match(deploymentDocs, /shared `invista-core` identity/);
+assert.doesNotMatch(deploymentDocs, /separate Neon database per platform/i);
 
 console.log("NEON + SQLITE STORAGE CONTRACT PASSED");
