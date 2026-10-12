@@ -17,6 +17,7 @@ export const invistaDatabaseIdentity = pgTable("invista_database_identity", {
   id: integer("id").primaryKey(),
   platformId: varchar("platform_id", { length: 20 }).notNull(),
   createdAt: timestamp("created_at").defaultNow(),
+  essentialBackfillCompletedAt: timestamp("essential_backfill_completed_at"),
 });
 
 // Session storage table for express sessions
