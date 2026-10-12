@@ -52,9 +52,10 @@ assert.match(storagePostgres, /currentPrimary/);
 assert.match(storagePostgres, /eq\(pgSchema\.derivTokens\.isPrimary, true\)/);
 assert.match(storageSqlite, /eq\(derivTokens\.isPrimary, true\)/);
 assert.match(storageSqlite, /isPrimary: true/);
-for (const column of ["shortcode", "buy_price", "sell_price", "entry_epoch", "exit_epoch", "contract_type", "barrier", "deriv_status", "deriv_profit", "payout", "status_changed_at", "last_sync_at", "sync_count", "is_conservative_forced", "operation_mode"]) {
+for (const column of ["shortcode", "buy_price", "sell_price", "entry_epoch", "exit_epoch", "contract_type", "barrier", "deriv_status", "deriv_profit", "payout", "status_changed_at", "last_sync_at", "sync_count", "is_conservative_forced"]) {
   assert.match(sqliteDb, new RegExp(`\\['${column}',`), `SQLite migration must add missing trade_operations column: ${column}`);
 }
+assert.match(sqliteDb, /ALTER TABLE trade_operations ADD COLUMN operation_mode TEXT/);
 assert.match(storagePostgres, /async upsertDerivTokenBySlot[\s\S]*?db\.transaction/);
 assert.match(storagePostgres, /async createTradeConfig[\s\S]*?db\.transaction/);
 assert.match(storagePostgres, /async updateTradeConfig[\s\S]*?db\.transaction/);
