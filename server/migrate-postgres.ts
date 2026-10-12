@@ -291,6 +291,7 @@ async function migratePostgres() {
     
     // Idempotent upgrades for Neon databases created by earlier releases.
     await pgDb.execute(sql`ALTER TABLE deriv_tokens ADD COLUMN IF NOT EXISTS slot_index INTEGER`);
+    await pgDb.execute(sql`ALTER TABLE deriv_tokens ADD COLUMN IF NOT EXISTS is_primary BOOLEAN NOT NULL DEFAULT FALSE`);
     await pgDb.execute(sql`ALTER TABLE trade_configurations ADD COLUMN IF NOT EXISTS selected_modalities TEXT DEFAULT 'digit_differs'`);
     await pgDb.execute(sql`ALTER TABLE trade_configurations ADD COLUMN IF NOT EXISTS accu_growth_rates TEXT DEFAULT '["1","2","3","4","5"]'`);
     await pgDb.execute(sql`ALTER TABLE trade_configurations ADD COLUMN IF NOT EXISTS modality_frequency TEXT DEFAULT '{}'`);
@@ -317,7 +318,29 @@ async function migratePostgres() {
       )
     `);
 
-    // Normalize legacy duplicates before adding database-level active-slot invariants.
+    // Promote a legacy primary only when it is unambiguous: exactly one active
+    // slotless token exists for that user. Never classify a group of legacy slots as primary.
+    await pgDb.execute(sql`
+      UPDATE deriv_tokens AS token
+      SET is_primary = TRUE
+      WHERE token.is_active = TRUE
+        AND token.slot_index IS NULL
+        AND token.is_primary = FALSE
+        AND (
+          SELECT COUNT(*) FROM deriv_tokens AS candidate
+          WHERE candidate.user_id = token.user_id
+            AND candidate.is_active = TRUE
+            AND candidate.slot_index IS NULL
+        ) = 1
+        AND NOT EXISTS (
+          SELECT 1 FROM deriv_tokens AS existing_primary
+          WHERE existing_primary.user_id = token.user_id
+            AND existing_primary.is_active = TRUE
+            AND existing_primary.is_primary = TRUE
+        )
+    `);
+
+    // Normalize legacy duplicates only for explicitly assigned slots.
     await pgDb.execute(sql`
       WITH ranked AS (
         SELECT id, ROW_NUMBER() OVER (
@@ -336,10 +359,12 @@ async function migratePostgres() {
       ON deriv_tokens (user_id, slot_index)
       WHERE is_active = TRUE AND slot_index IS NOT NULL
     `);
-    // Legacy active tokens without slot_index are deliberately preserved.
-    // They may be Frenético slots from a schema predating slot_index, so treating
-    // them as duplicate primary tokens would deactivate valid accounts.
-    // The primary-token path chooses one deterministic row and only deactivates that row.
+    await pgDb.execute(sql`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_deriv_tokens_one_active_primary
+      ON deriv_tokens (user_id)
+      WHERE is_active = TRUE AND is_primary = TRUE
+    `);
+    // Legacy active tokens without slot_index/is_primary remain active but unassigned..
 
     await pgDb.execute(sql`
       WITH ranked AS (
