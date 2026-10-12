@@ -133,6 +133,7 @@ export const derivTokens = pgTable("deriv_tokens", {
   token: text("token").notNull(),
   accountType: varchar("account_type", { length: 20 }).notNull(),
   isActive: boolean("is_active").default(true),
+  isPrimary: boolean("is_primary").notNull().default(false),
   slotIndex: integer("slot_index"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
