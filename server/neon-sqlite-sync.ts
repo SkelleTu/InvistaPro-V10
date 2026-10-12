@@ -25,7 +25,7 @@ function encryptLegacyPlainToken(token: string): string {
 
 /**
  * One-time additive migration for essential records that may exist only in the old local DB.
- * Existing Neon users always win; their local tokens/settings are never used to overwrite Neon.
+ * Existing Neon user records always win; local token/config records fill only missing slots/settings.
  * The marker is written only after the whole backfill succeeds. Each user is migrated in a
  * Neon transaction so an interrupted import can safely retry without half-imported accounts.
  */
@@ -53,63 +53,88 @@ export async function backfillMissingEssentialDataToNeon(): Promise<{ importedUs
       sqliteDb.select().from(localSchema.modalityModuleConfigs).where(eq(localSchema.modalityModuleConfigs.userId, user.id)),
     ]);
 
-    const imported = await pgDb.transaction(async (tx: any) => {
+    const outcome = await pgDb.transaction(async (tx: any) => {
       const [byId] = await tx.select().from(pgSchema.users).where(eq(pgSchema.users.id, user.id));
       const [byEmail] = await tx.select().from(pgSchema.users).where(eq(pgSchema.users.email, user.email));
       const [byCpf] = await tx.select().from(pgSchema.users).where(eq(pgSchema.users.cpf, user.cpf));
-      if (byId) return false;
-      if (byEmail || byCpf) {
+      if (!byId && (byEmail || byCpf)) {
         throw new Error("LOCAL_USER_ID_CONFLICT: existe uma conta local com identificador diferente da conta durável na Neon; backfill interrompido para evitar misturar identidades.");
       }
 
-      const userValues: any = {
-        ...user,
-        createdAt: toPgDate(user.createdAt),
-        updatedAt: toPgDate(user.updatedAt),
-        codigoExpiresAt: toPgDate(user.codigoExpiresAt),
-        passwordResetTokenExpiresAt: toPgDate(user.passwordResetTokenExpiresAt),
-        aprovadaEm: toPgDate(user.aprovadaEm),
-        documentosAprovadosEm: toPgDate(user.documentosAprovadosEm),
-        depositoData: toPgDate(user.depositoData),
-        telefoneVerificado: Boolean(user.telefoneVerificado),
-        contaAprovada: Boolean(user.contaAprovada),
-        documentosVerificados: Boolean(user.documentosVerificados),
-        isAdmin: Boolean(user.isAdmin),
-        usarSenhaFallback: Boolean(user.usarSenhaFallback),
-        biometriaConfigurada: Boolean(user.biometriaConfigurada),
-        rendimentoSaqueAutomatico: Boolean(user.rendimentoSaqueAutomatico),
-      };
-      const [insertedUser] = await tx.insert(pgSchema.users).values(userValues).onConflictDoNothing().returning();
-      if (!insertedUser) return false;
+      let targetUserId = byId?.id as string | undefined;
+      let insertedUser = false;
+      if (!byId) {
+        const userValues: any = {
+          ...user,
+          createdAt: toPgDate(user.createdAt),
+          updatedAt: toPgDate(user.updatedAt),
+          codigoExpiresAt: toPgDate(user.codigoExpiresAt),
+          passwordResetTokenExpiresAt: toPgDate(user.passwordResetTokenExpiresAt),
+          aprovadaEm: toPgDate(user.aprovadaEm),
+          documentosAprovadosEm: toPgDate(user.documentosAprovadosEm),
+          depositoData: toPgDate(user.depositoData),
+          telefoneVerificado: Boolean(user.telefoneVerificado),
+          contaAprovada: Boolean(user.contaAprovada),
+          documentosVerificados: Boolean(user.documentosVerificados),
+          isAdmin: Boolean(user.isAdmin),
+          usarSenhaFallback: Boolean(user.usarSenhaFallback),
+          biometriaConfigurada: Boolean(user.biometriaConfigurada),
+          rendimentoSaqueAutomatico: Boolean(user.rendimentoSaqueAutomatico),
+        };
+        const [inserted] = await tx.insert(pgSchema.users).values(userValues).onConflictDoNothing().returning();
+        if (!inserted) {
+          throw new Error("LOCAL_USER_IMPORT_CONFLICT: conta local não pôde ser migrada sem colisão de identidade.");
+        }
+        targetUserId = inserted.id;
+        insertedUser = true;
+      }
+      if (!targetUserId) throw new Error("LOCAL_USER_IMPORT_FAILED: ID de usuário ausente durante a migração.");
 
+      // Import only missing token slots. Any existing Neon row, including an inactive row,
+      // is authoritative and must not be resurrected from a stale local copy.
+      const neonTokens = await tx.select().from(pgSchema.derivTokens)
+        .where(eq(pgSchema.derivTokens.userId, targetUserId));
       for (const token of localTokens as any[]) {
+        const slotIndex = token.slotIndex ?? null;
+        if (neonTokens.some((row: any) => (row.slotIndex ?? null) === slotIndex)) continue;
         await tx.insert(pgSchema.derivTokens).values({
-          id: token.id, userId: token.userId, token: encryptLegacyPlainToken(String(token.token)),
-          accountType: token.accountType, isActive: Boolean(token.isActive), slotIndex: token.slotIndex ?? null,
+          id: token.id, userId: targetUserId, token: encryptLegacyPlainToken(String(token.token)),
+          accountType: token.accountType, isActive: Boolean(token.isActive), slotIndex,
           createdAt: toPgDate(token.createdAt), updatedAt: toPgDate(token.updatedAt),
         }).onConflictDoNothing();
+        neonTokens.push({ slotIndex } as any);
       }
 
-      for (const config of localConfigs as any[]) {
-        await tx.insert(pgSchema.tradeConfigurations).values({
-          ...config,
-          createdAt: toPgDate(config.createdAt), updatedAt: toPgDate(config.updatedAt),
-          isActive: Boolean(config.isActive), enableMartingale: Boolean(config.enableMartingale),
-          enableLeverage: Boolean(config.enableLeverage), enableCircuitBreaker: Boolean(config.enableCircuitBreaker),
-          enableRecoveryMode: Boolean(config.enableRecoveryMode),
-        }).onConflictDoNothing();
+      // Current strategy settings are essential, but old/inactive config history is not.
+      const neonConfigs = await tx.select().from(pgSchema.tradeConfigurations)
+        .where(eq(pgSchema.tradeConfigurations.userId, targetUserId));
+      if (!neonConfigs.some((row: any) => Boolean(row.isActive))) {
+        const existingConfigIds = new Set(neonConfigs.map((row: any) => row.id));
+        for (const config of (localConfigs as any[]).filter(row => Boolean(row.isActive) && !existingConfigIds.has(row.id))) {
+          await tx.insert(pgSchema.tradeConfigurations).values({
+            ...config, userId: targetUserId,
+            createdAt: toPgDate(config.createdAt), updatedAt: toPgDate(config.updatedAt),
+            isActive: true, enableMartingale: Boolean(config.enableMartingale),
+            enableLeverage: Boolean(config.enableLeverage), enableCircuitBreaker: Boolean(config.enableCircuitBreaker),
+            enableRecoveryMode: Boolean(config.enableRecoveryMode),
+          }).onConflictDoNothing();
+        }
       }
 
+      const neonModules = await tx.select().from(pgSchema.modalityModuleConfigs)
+        .where(eq(pgSchema.modalityModuleConfigs.userId, targetUserId));
+      const existingModalities = new Set(neonModules.map((row: any) => row.modality));
       for (const moduleConfig of localModules as any[]) {
+        if (existingModalities.has(moduleConfig.modality)) continue;
         await tx.insert(pgSchema.modalityModuleConfigs).values({
-          id: moduleConfig.id, userId: moduleConfig.userId, modality: moduleConfig.modality,
+          id: moduleConfig.id, userId: targetUserId, modality: moduleConfig.modality,
           slotConfigs: moduleConfig.slotConfigs ?? "[]", updatedAt: toPgDate(moduleConfig.updatedAt),
         }).onConflictDoNothing();
+        existingModalities.add(moduleConfig.modality);
       }
-      return true;
+      return { insertedUser };
     });
-
-    if (imported) importedUsers++;
+    if (outcome.insertedUser) importedUsers++;
     else skippedUsers++;
   }
 
