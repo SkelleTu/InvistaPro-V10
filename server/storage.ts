@@ -495,17 +495,16 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(derivTokens.updatedAt), desc(derivTokens.createdAt), desc(derivTokens.id))
       .limit(1);
 
-    // Safe legacy recovery: promote only one unambiguous active slotless token,
-    // or the sole active token in a pre-slot database. Never guess among 10 slots.
+    // Safe legacy recovery: promote only one unambiguous active slotless token.
+    // Never infer that slot 0 is a primary credential from row count or ordering.
     if (!token) {
-      const activeTokens = await db
+      const slotless = await db
         .select()
         .from(derivTokens)
-        .where(and(eq(derivTokens.userId, userId), eq(derivTokens.isActive, true)))
+        .where(and(eq(derivTokens.userId, userId), eq(derivTokens.isActive, true), isNull(derivTokens.slotIndex)))
         .orderBy(desc(derivTokens.updatedAt), desc(derivTokens.createdAt), desc(derivTokens.id));
-      const slotless = activeTokens.filter((row: any) => row.slotIndex === null || row.slotIndex === undefined);
-      const legacy = slotless.length === 1 ? slotless[0] : (activeTokens.length === 1 ? activeTokens[0] : undefined);
-      if (legacy) {
+      if (slotless.length === 1) {
+        const legacy = slotless[0];
         await db.update(derivTokens)
           .set({ isPrimary: true, slotIndex: null } as any)
           .where(eq(derivTokens.id, legacy.id));
