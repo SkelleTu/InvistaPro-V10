@@ -134,7 +134,7 @@ export async function backfillMissingEssentialDataToNeon(): Promise<{ importedUs
       if (localPrimaryToken) {
         const primaryFingerprint = tokenFingerprint(String(localPrimaryToken.token));
         const matchingPrimary = (neonTokens as any[]).find((row: any) =>
-          row.isActive && tokenFingerprint(decryptTokenForMatching(String(row.token))) === primaryFingerprint
+          row.isActive && !row.isPrimary && (row.slotIndex === null || row.slotIndex === undefined) && tokenFingerprint(decryptTokenForMatching(String(row.token))) === primaryFingerprint
         );
         if (matchingPrimary) {
           await tx.update(pgSchema.derivTokens)
