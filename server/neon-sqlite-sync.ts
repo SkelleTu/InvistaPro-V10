@@ -1,5 +1,115 @@
 import { pgDb, pgSchema, isPostgresAvailable } from "./db-postgres";
-import { sqlite } from "./db";
+import { db as sqliteDb, sqlite } from "./db";
+import * as localSchema from "@shared/schema";
+import { eq } from "drizzle-orm";
+import { createCipheriv, randomBytes } from "crypto";
+
+function toPgDate(value: any): Date | null {
+  if (value === null || value === undefined || value === "") return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function encryptLegacyPlainToken(token: string): string {
+  if (token.includes(":")) return token;
+  const rawKey = process.env.ENCRYPTION_KEY?.trim();
+  if (!rawKey || !/^[0-9a-fA-F]{64}$/.test(rawKey)) {
+    throw new Error("ENCRYPTION_KEY válida é obrigatória para migrar tokens legados.");
+  }
+  const iv = randomBytes(16);
+  const cipher = createCipheriv("aes-256-gcm", Buffer.from(rawKey, "hex"), iv);
+  const encrypted = cipher.update(token, "utf8", "hex") + cipher.final("hex");
+  return `${iv.toString("hex")}:${cipher.getAuthTag().toString("hex")}:${encrypted}`;
+}
+
+/**
+ * One-time additive migration for essential records that may exist only in the old local DB.
+ * Existing Neon users always win; their local tokens/settings are never used to overwrite Neon.
+ * The marker is written only after the whole backfill succeeds. Each user is migrated in a
+ * Neon transaction so an interrupted import can safely retry without half-imported accounts.
+ */
+export async function backfillMissingEssentialDataToNeon(): Promise<{ importedUsers: number; skippedUsers: number }> {
+  if (!isPostgresAvailable || !pgDb) throw new Error("NEON_REQUIRED: Neon indisponível para migração essencial.");
+
+  const [identity] = await pgDb.select().from(pgSchema.invistaDatabaseIdentity)
+    .where(eq(pgSchema.invistaDatabaseIdentity.id, 1));
+  if (!identity) throw new Error("NEON_PLATFORM_IDENTITY_MISSING: identidade da base não foi validada.");
+  if (identity.essentialBackfillCompletedAt) return { importedUsers: 0, skippedUsers: 0 };
+
+  const localUsers = await sqliteDb.select().from(localSchema.users);
+  let importedUsers = 0;
+  let skippedUsers = 0;
+
+  for (const user of localUsers as any[]) {
+    const [localTokens, localConfigs, localModules] = await Promise.all([
+      sqliteDb.select().from(localSchema.derivTokens).where(eq(localSchema.derivTokens.userId, user.id)),
+      sqliteDb.select().from(localSchema.tradeConfigurations).where(eq(localSchema.tradeConfigurations.userId, user.id)),
+      sqliteDb.select().from(localSchema.modalityModuleConfigs).where(eq(localSchema.modalityModuleConfigs.userId, user.id)),
+    ]);
+
+    const imported = await pgDb.transaction(async (tx: any) => {
+      const [byId] = await tx.select().from(pgSchema.users).where(eq(pgSchema.users.id, user.id));
+      const [byEmail] = await tx.select().from(pgSchema.users).where(eq(pgSchema.users.email, user.email));
+      if (byId || byEmail) return false;
+
+      const userValues: any = {
+        ...user,
+        createdAt: toPgDate(user.createdAt),
+        updatedAt: toPgDate(user.updatedAt),
+        codigoExpiresAt: toPgDate(user.codigoExpiresAt),
+        passwordResetTokenExpiresAt: toPgDate(user.passwordResetTokenExpiresAt),
+        aprovadaEm: toPgDate(user.aprovadaEm),
+        documentosAprovadosEm: toPgDate(user.documentosAprovadosEm),
+        depositoData: toPgDate(user.depositoData),
+        telefoneVerificado: Boolean(user.telefoneVerificado),
+        contaAprovada: Boolean(user.contaAprovada),
+        documentosVerificados: Boolean(user.documentosVerificados),
+        isAdmin: Boolean(user.isAdmin),
+        usarSenhaFallback: Boolean(user.usarSenhaFallback),
+        biometriaConfigurada: Boolean(user.biometriaConfigurada),
+        rendimentoSaqueAutomatico: Boolean(user.rendimentoSaqueAutomatico),
+      };
+      const [insertedUser] = await tx.insert(pgSchema.users).values(userValues).onConflictDoNothing().returning();
+      if (!insertedUser) return false;
+
+      for (const token of localTokens as any[]) {
+        await tx.insert(pgSchema.derivTokens).values({
+          id: token.id, userId: token.userId, token: encryptLegacyPlainToken(String(token.token)),
+          accountType: token.accountType, isActive: Boolean(token.isActive), slotIndex: token.slotIndex ?? null,
+          createdAt: toPgDate(token.createdAt), updatedAt: toPgDate(token.updatedAt),
+        }).onConflictDoNothing();
+      }
+
+      for (const config of localConfigs as any[]) {
+        await tx.insert(pgSchema.tradeConfigurations).values({
+          ...config,
+          createdAt: toPgDate(config.createdAt), updatedAt: toPgDate(config.updatedAt),
+          isActive: Boolean(config.isActive), enableMartingale: Boolean(config.enableMartingale),
+          enableLeverage: Boolean(config.enableLeverage), enableCircuitBreaker: Boolean(config.enableCircuitBreaker),
+          enableRecoveryMode: Boolean(config.enableRecoveryMode),
+        }).onConflictDoNothing();
+      }
+
+      for (const moduleConfig of localModules as any[]) {
+        await tx.insert(pgSchema.modalityModuleConfigs).values({
+          id: moduleConfig.id, userId: moduleConfig.userId, modality: moduleConfig.modality,
+          slotConfigs: moduleConfig.slotConfigs ?? "[]", updatedAt: toPgDate(moduleConfig.updatedAt),
+        }).onConflictDoNothing();
+      }
+      return true;
+    });
+
+    if (imported) importedUsers++;
+    else skippedUsers++;
+  }
+
+  await pgDb.update(pgSchema.invistaDatabaseIdentity)
+    .set({ essentialBackfillCompletedAt: new Date() })
+    .where(eq(pgSchema.invistaDatabaseIdentity.id, 1));
+
+  console.info("[SQLITE→NEON] Migração aditiva de dados essenciais concluída", { importedUsers, skippedUsers });
+  return { importedUsers, skippedUsers };
+}
 
 /**
  * Restore only durable configuration/identity data from Neon to the local SQLite cache.
