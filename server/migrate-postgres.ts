@@ -318,28 +318,9 @@ async function migratePostgres() {
       )
     `);
 
-    // Promote a legacy primary only when it is unambiguous: exactly one active
-    // slotless token exists for that user. Never classify a group of legacy slots as primary.
-    await pgDb.execute(sql`
-      UPDATE deriv_tokens AS token
-      SET is_primary = TRUE
-      WHERE token.is_active = TRUE
-        AND token.slot_index IS NULL
-        AND token.is_primary = FALSE
-        AND (
-          SELECT COUNT(*) FROM deriv_tokens AS candidate
-          WHERE candidate.user_id = token.user_id
-            AND candidate.is_active = TRUE
-            AND candidate.slot_index IS NULL
-        ) = 1
-        AND NOT EXISTS (
-          SELECT 1 FROM deriv_tokens AS existing_primary
-          WHERE existing_primary.user_id = token.user_id
-            AND existing_primary.is_active = TRUE
-            AND existing_primary.is_primary = TRUE
-        )
-    `);
-
+    // Do not infer primary identity from a row count in Neon: a legacy slot may
+    // also have a NULL slot_index. Primary identity is recovered only by exact
+    // token match with the explicitly primary local SQLite row.
     // Normalize legacy duplicates only for explicitly assigned slots.
     await pgDb.execute(sql`
       WITH ranked AS (
