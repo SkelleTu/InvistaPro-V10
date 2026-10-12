@@ -562,16 +562,9 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deactivateDerivToken(userId: string): Promise<void> {
-    // Preserve legacy active slotless tokens; deactivate only the selected primary row.
-    const [currentPrimary] = await db.select({ id: derivTokens.id })
-      .from(derivTokens)
-      .where(and(eq(derivTokens.userId, userId), eq(derivTokens.isActive, true), isNull(derivTokens.slotIndex)))
-      .orderBy(desc(derivTokens.updatedAt), desc(derivTokens.createdAt), desc(derivTokens.id))
-      .limit(1);
-    if (!currentPrimary) return;
     await db.update(derivTokens)
       .set({ isActive: false, updatedAt: new Date().toISOString() })
-      .where(eq(derivTokens.id, currentPrimary.id));
+      .where(and(eq(derivTokens.userId, userId), eq(derivTokens.isPrimary, true)));
   }
 
   // Frenético 10-Tokens: retorna TODOS os tokens ativos do usuário (um por slot)
