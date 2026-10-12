@@ -453,11 +453,8 @@ export class DatabaseStorage implements IStorage {
       // Deactivate existing active tokens first to maintain single-active invariant
       tx
         .update(derivTokens)
-        .set({
-          isActive: false,
-          updatedAt: new Date().toISOString(),
-        })
-        .where(eq(derivTokens.userId, tokenData.userId))
+        .set({ isActive: false, updatedAt: new Date().toISOString() })
+        .where(and(eq(derivTokens.userId, tokenData.userId), isNull(derivTokens.slotIndex)))
         .run();
       
       // Encrypt the token before storing
