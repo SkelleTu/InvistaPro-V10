@@ -138,6 +138,10 @@ export async function restoreEssentialDataToSqlite(): Promise<{ users: number; t
     pgDb.select().from(pgSchema.modalityModuleConfigs),
   ]);
 
+  if (tokens.length > 0 && !/^[0-9a-fA-F]{64}$/.test(process.env.ENCRYPTION_KEY?.trim() ?? "")) {
+    throw new Error("ENCRYPTION_KEY inválida ou ausente: não é seguro restaurar tokens Deriv criptografados.");
+  }
+
   const userUpsert = sqlite.prepare(`
     INSERT INTO users (
       id,email,password_hash,nome_completo,cpf,telefone,endereco,cidade,estado,cep,chave_pix,tipo_chave_pix,
