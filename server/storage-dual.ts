@@ -9,6 +9,7 @@
 import { randomBytes } from "crypto";
 import { DatabaseStorage } from "./storage";
 import { PostgresStorage } from "./storage-postgres";
+import { TursoStorage } from "./storage-turso";
 import { isPostgresAvailable } from "./db-postgres";
 import type { IStorage } from "./storage";
 import type {
@@ -36,16 +37,23 @@ function isQuotaOrBlockError(msg: string): boolean {
 
 export class DualStorage implements IStorage {
   private sqlite: DatabaseStorage;
+  private turso: TursoStorage | null;
   private neon: PostgresStorage | null;
 
   private neonDisabled = false;
   private neonFailCount = 0;
   private readonly MAX_NEON_FAILS = 3;
 
+  // Retained only to make legacy code paths inert; constructor always sets this to null.
+  private tursoReadDisabled = true;
+  private tursoReadFailCount = 0;
+  private readonly MAX_TURSO_READ_FAILS = 5;
+
 
   constructor() {
     this.sqlite = new DatabaseStorage();
     // Turso is intentionally disabled: this deployment uses only Neon + SQLite.
+    this.turso = null;
     this.neon = isPostgresAvailable ? new PostgresStorage() : null;
 
     console.log('🗄️ [STORAGE] SQLite local ativo para cache, dados transitórios e diagnósticos.');
@@ -82,6 +90,18 @@ export class DualStorage implements IStorage {
   // ─── Circuit breaker do Turso (leituras) ─────────────────────────────────
 
 
+
+  private get tursoReadOk(): boolean { return !this.tursoReadDisabled && this.turso !== null; }
+
+  private onTursoReadError(err: any, op: string): void {
+    const msg = err?.message || String(err);
+    if (isQuotaOrBlockError(msg)) {
+      this.tursoReadDisabled = true;
+      return;
+    }
+    this.tursoReadFailCount++;
+    if (this.tursoReadFailCount >= this.MAX_TURSO_READ_FAILS) this.tursoReadDisabled = true;
+  }
 
   // ─── Primitivas ───────────────────────────────────────────────────────────
 
