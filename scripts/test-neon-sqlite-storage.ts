@@ -41,6 +41,7 @@ assert.match(storagePostgres, /async updateTradeConfig[\s\S]*?db\.transaction/);
 assert.match(boot, /restoreEssentialDataToSqlite/);
 assert.match(boot, /maxPersistenceAttempts = 3/);
 assert.match(boot, /persistenceReady = true/);
+assert.doesNotMatch(boot, /anonymousSecurityProbe|req\.path\.startsWith\(['"]\/__audit_/);
 assert.match(boot, /process\.exit\(1\)/);
 assert.match(deploymentDocs, /Do not share the key between platforms/);
 
