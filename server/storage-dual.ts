@@ -73,7 +73,7 @@ export class DualStorage implements IStorage {
     if (isQuotaOrBlockError(msg)) {
       if (!this.neonDisabled) {
         this.neonDisabled = true;
-        console.warn(`🔌 [NEON] Circuit breaker ATIVADO — leituras redirecionadas para SQLite/Turso.`);
+        console.warn(`🔌 [NEON] Circuit breaker ATIVADO — leituras usam o cache SQLite; gravações essenciais ficam bloqueadas.`);
         console.warn(`   Motivo: cota/bloqueio detectado em "${op}"`);
       }
       return;
@@ -87,9 +87,7 @@ export class DualStorage implements IStorage {
 
   private neonOk_reset(): void { this.neonFailCount = 0; }
 
-  // ─── Circuit breaker do Turso (leituras) ─────────────────────────────────
-
-
+  // Legacy Turso callbacks are inert; no Turso connection is created.
 
   private get tursoReadOk(): boolean { return !this.tursoReadDisabled && this.turso !== null; }
 
@@ -145,7 +143,7 @@ export class DualStorage implements IStorage {
   }
 
   /**
-   * LEITURA REMOTA: Neon (circuit breaker) → Turso (circuit breaker) → SQLite
+   * LEITURA DE DADOS ESSENCIAIS: Neon → SQLite como cache de contingência.
    * Usar apenas para dados críticos de baixa frequência (ex: leitura de usuário na autenticação).
    */
   private async read<T>(
@@ -168,9 +166,7 @@ export class DualStorage implements IStorage {
   }
 
   /**
-   * LEITURA LOCAL: SQLite (primário) → Turso (fallback)
-   * Usar para dados de alta frequência já sincronizados no SQLite via dual-write.
-   * PRESERVA COTA DO TURSO: evita chamadas remotas desnecessárias.
+   * LEITURA LOCAL: SQLite para dados transitórios e de alta frequência.
    */
   private async localRead<T>(
     _legacyRemoteFn: () => Promise<T>,
