@@ -17,7 +17,7 @@ Neon stores the durable essentials: users/identity, Deriv tokens and account ass
 
 SQLite remains the local working store for trade operations/history, AI logs, market data, active sessions, WebSocket subscriptions, heartbeats, and other high-frequency operational state. These are not bulk-uploaded to Neon at startup. The balance shown for a Deriv account must be refreshed from Deriv and must not be treated as authoritative from a cached database value.
 
-At boot, after the PostgreSQL schema migration, essential snapshots are restored from Neon into SQLite in a local transaction. For users present in Neon, token/configuration snapshots are reconciled against Neon. Trade history and market data are not touched by that reconciliation.
+At boot, after the PostgreSQL schema migration, a one-time additive backfill imports only local users absent from Neon and their essential tokens/configurations/module settings. Existing Neon users always win; their local data never overwrites Neon. The completion marker is written only after the backfill succeeds. Then essential snapshots are restored from Neon into SQLite in a local transaction. For users present in Neon, token/configuration snapshots are reconciled against Neon. Trade history and market data are not touched by that reconciliation.
 
 ## Persistence limits
 
