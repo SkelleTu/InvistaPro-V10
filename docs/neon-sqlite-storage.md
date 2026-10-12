@@ -19,6 +19,8 @@ SQLite remains the local working store for trade operations/history, AI logs, ma
 
 At boot, after the PostgreSQL schema migration, a one-time additive backfill imports only local users absent from Neon and their essential tokens/configurations/module settings. Existing Neon users always win; their local data never overwrites Neon. The completion marker is written only after the backfill succeeds. Then essential snapshots are restored from Neon into SQLite in a local transaction. For users present in Neon, token/configuration snapshots are reconciled against Neon. Trade history and market data are not touched by that reconciliation.
 
+Legacy active Deriv tokens from older schemas may have no `slot_index`. Migration preserves these rows and never deactivates them merely because the new column is initially NULL. The primary-token path selects one deterministic current row, and slot uniqueness is enforced only for rows with an explicit slot index. Do not infer slot assignments from token timestamps or token values.
+
 ## Persistence limits
 
 The SQLite file is stored at `database/investpro.db`. On Render instances without a persistent disk, local-only history, logs, and cache data may be lost on restart or redeploy. Neon restoration protects only the essential records listed above. If local trade history must survive deploys, attach a supported persistent disk or implement a separate archive; do not move every trade/tick into Neon as a workaround.
