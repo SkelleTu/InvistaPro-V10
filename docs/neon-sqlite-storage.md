@@ -9,7 +9,7 @@ Each Render web service must set `INVISTA_PLATFORM` to exactly one of:
 
 Each service's `DATABASE_URL` must point to its own Neon PostgreSQL database. Do not reuse the same Neon database for both services. At boot, the migration claims the database with a singleton identity row and fails closed if the stored platform does not match the service. This prevents silent cross-platform sharing.
 
-Both services must also configure the same valid `ENCRYPTION_KEY` across restarts of that platform so encrypted Deriv tokens remain decryptable. Never log or commit connection strings or keys.
+Each service must keep the same valid `ENCRYPTION_KEY` across restarts and redeploys of that platform so encrypted Deriv tokens remain decryptable. Do not share the key between platforms. Never log or commit connection strings or keys.
 
 ## Data placement
 
