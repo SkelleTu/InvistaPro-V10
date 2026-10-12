@@ -13,10 +13,13 @@ async function migratePostgres() {
     await pgDb.execute(sql`CREATE EXTENSION IF NOT EXISTS "pgcrypto";`);
     console.log('✅ Extensão pgcrypto ativada');
 
-    const platformId = String(process.env.INVISTA_PLATFORM ?? "").trim().toLowerCase();
-    if (platformId !== "v10" && platformId !== "aura") {
+    const visualPlatform = String(process.env.INVISTA_PLATFORM ?? "").trim().toLowerCase();
+    if (visualPlatform !== "v10" && visualPlatform !== "aura") {
       throw new Error("INVISTA_PLATFORM must be set to 'v10' or 'aura' before enabling Neon persistence.");
     }
+    // V10 and Aura are two visual deployments of the same platform. Their users,
+    // sessions, tokens and settings intentionally share one Neon source of truth.
+    const platformId = "invista-core";
     await pgDb.execute(sql`
       CREATE TABLE IF NOT EXISTS invista_database_identity (
         id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -30,9 +33,9 @@ async function migratePostgres() {
     const [databaseIdentity] = await pgDb.select().from(pgSchema.invistaDatabaseIdentity)
       .where(eq(pgSchema.invistaDatabaseIdentity.id, 1));
     if (!databaseIdentity || databaseIdentity.platformId !== platformId) {
-      throw new Error(`Neon database platform mismatch: configured=${platformId}, database=${databaseIdentity?.platformId ?? "unclaimed"}. Use a separate Neon database per platform.`);
+      throw new Error(`Neon database platform mismatch: configured=${platformId}, database=${databaseIdentity?.platformId ?? "unclaimed"}. Both visual deployments must use the same Invista Core database identity.`);
     }
-    console.log(`🔒 [NEON] Banco isolado confirmado para plataforma ${platformId}.`);
+    console.log(`🔒 [NEON] Fonte de dados compartilhada confirmada para Invista Core; visual=${visualPlatform}.`);
     
     // Criar tabela de sessões
     await pgDb.execute(sql`
