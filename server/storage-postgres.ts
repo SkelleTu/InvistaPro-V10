@@ -320,7 +320,7 @@ export class PostgresStorage implements IStorage {
     const newToken = await db.transaction(async (tx: any) => {
       const [currentPrimary] = await tx.select({ id: pgSchema.derivTokens.id })
         .from(pgSchema.derivTokens)
-        .where(and(eq(pgSchema.derivTokens.userId, userId), eq(pgSchema.derivTokens.isActive, true), isNull(pgSchema.derivTokens.slotIndex)))
+        .where(and(eq(pgSchema.derivTokens.userId, userId), eq(pgSchema.derivTokens.isActive, true), eq(pgSchema.derivTokens.isPrimary, true)))
         .orderBy(desc(pgSchema.derivTokens.updatedAt), desc(pgSchema.derivTokens.createdAt), desc(pgSchema.derivTokens.id))
         .limit(1);
       if (currentPrimary) {
@@ -329,7 +329,7 @@ export class PostgresStorage implements IStorage {
           .where(eq(pgSchema.derivTokens.id, currentPrimary.id));
       }
       const [row] = await tx.insert(pgSchema.derivTokens)
-        .values({ id, userId, token: encrypted, accountType, isActive: true, slotIndex: null } as any)
+        .values({ id, userId, token: encrypted, accountType, isActive: true, isPrimary: true, slotIndex: null } as any)
         .returning();
       return row;
     });
