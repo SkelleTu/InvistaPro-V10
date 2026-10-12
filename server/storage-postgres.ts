@@ -935,20 +935,6 @@ export class PostgresStorage implements IStorage {
     return row;
   }
 
-  async updateRiskSettings(userId: string, settings: any): Promise<void> {
-    const patch: Record<string, any> = {};
-    if (settings.enableMartingale !== undefined) patch.enableMartingale = settings.enableMartingale;
-    if (settings.enableLeverage !== undefined) patch.enableLeverage = settings.enableLeverage;
-    if (settings.enableCircuitBreaker !== undefined) patch.enableCircuitBreaker = settings.enableCircuitBreaker;
-    if (settings.enableRecoveryMode !== undefined) patch.enableRecoveryMode = settings.enableRecoveryMode;
-    if (settings.martingaleMultipliers !== undefined) patch.martingaleMultipliers = JSON.stringify(settings.martingaleMultipliers);
-    if (settings.circuitBreakerLosses !== undefined) patch.circuitBreakerLosses = settings.circuitBreakerLosses;
-    if (settings.circuitBreakerPauseMinutes !== undefined) patch.circuitBreakerPauseMinutes = settings.circuitBreakerPauseMinutes;
-    if (settings.stakeMode !== undefined) patch.stakeMode = settings.stakeMode;
-    if (settings.fixedStake !== undefined) patch.fixedStake = settings.fixedStake;
-    await this.updateActiveConfig(userId, patch);
-  }
-
   async isUserBlockedAsset(_userId: string, _symbol: string, _tradeMode: string): Promise<boolean> { return false; }
 
   async expireOldPendingTrades(_olderThanMinutes?: number): Promise<number> { return 0; }
