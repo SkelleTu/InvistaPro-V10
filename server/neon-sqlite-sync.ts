@@ -101,7 +101,7 @@ export async function restoreEssentialDataToSqlite(): Promise<{ users: number; t
     }
     for (const t of tokens as any[]) {
       tokenUpsert.run({id:t.id,user_id:t.userId,token:t.token,account_type:t.accountType,is_active:localValue(t.isActive),
-        slot_index:t.slotIndex ?? 0,created_at:localValue(t.createdAt),updated_at:localValue(t.updatedAt)});
+        slot_index:t.slotIndex ?? null,created_at:localValue(t.createdAt),updated_at:localValue(t.updatedAt)});
     }
     for (const c of configs as any[]) {
       configUpsert.run({
