@@ -9,6 +9,7 @@ const migration = read("server/migrate-postgres.ts");
 const restore = read("server/neon-sqlite-sync.ts");
 const boot = read("server/index.ts");
 const sqliteDb = read("server/db.ts");
+const secretHealth = read("server/services/secret-health.ts");
 const deploymentDocs = read("docs/neon-sqlite-storage.md");
 
 assert.match(storage, /private async writeEssential/);
@@ -20,6 +21,9 @@ assert.doesNotMatch(storage, /storage-turso/);
 assert.match(storage, /async createAiLog\(log: InsertAiLog\)\s+\{ return this\.sqlite\.createAiLog\(log\); \}/);
 assert.match(storage, /async upsertMarketData\(data: InsertMarketData\) \{ return this\.sqlite\.upsertMarketData\(data\); \}/);
 
+assert.match(secretHealth, /optionalState\("DERIV_API_KEY_DEMO"\)/);
+assert.match(secretHealth, /optionalState\("DERIV_API_KEY_REAL"\)/);
+assert.match(secretHealth, /state\("DERIV_APP_ID", v => \/^\\d\+\$\/.test\(v\)\)/);
 assert.match(migration, /invista_database_identity/);
 assert.match(migration, /INVISTA_PLATFORM/);
 assert.match(migration, /const platformId = "invista-core"/);
