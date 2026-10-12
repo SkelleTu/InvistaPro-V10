@@ -40,8 +40,11 @@ export class DualStorage implements IStorage {
   private neon: PostgresStorage | null;
 
   private neonDisabled = false;
+  private neonQuotaBlocked = false;
+  private neonDisabledUntil = 0;
   private neonFailCount = 0;
   private readonly MAX_NEON_FAILS = 3;
+  private readonly NEON_RETRY_COOLDOWN_MS = 30_000;
 
   // Retained only to make legacy code paths inert; constructor always sets this to null.
   private tursoReadDisabled = true;
@@ -65,26 +68,40 @@ export class DualStorage implements IStorage {
 
   // ─── Circuit breaker do Neon ──────────────────────────────────────────────
 
-  private get neonOk(): boolean { return !this.neonDisabled && this.neon !== null; }
+  private get neonOk(): boolean {
+    if (!this.neon || this.neonQuotaBlocked) return false;
+    if (this.neonDisabled && Date.now() >= this.neonDisabledUntil) {
+      this.neonDisabled = false;
+      this.neonFailCount = 0;
+      this.neonDisabledUntil = 0;
+      console.info('🔄 [NEON] Circuit breaker liberado para nova tentativa após o período de resfriamento.');
+    }
+    return !this.neonDisabled;
+  }
 
   private onNeonError(err: any, op: string): void {
     const msg = err?.message || String(err);
     if (isQuotaOrBlockError(msg)) {
-      if (!this.neonDisabled) {
-        this.neonDisabled = true;
-        console.warn(`🔌 [NEON] Circuit breaker ATIVADO — leituras usam o cache SQLite; gravações essenciais ficam bloqueadas.`);
-        console.warn(`   Motivo: cota/bloqueio detectado em "${op}"`);
-      }
+      this.neonQuotaBlocked = true;
+      this.neonDisabled = true;
+      this.neonDisabledUntil = Number.POSITIVE_INFINITY;
+      console.warn('🔌 [NEON] Cota/bloqueio do provedor detectado; leituras usam cache SQLite e gravações essenciais ficam bloqueadas até correção da cota/configuração.');
+      console.warn(`   Motivo: cota/bloqueio detectado em "${op}"`);
       return;
     }
     this.neonFailCount++;
     if (this.neonFailCount >= this.MAX_NEON_FAILS && !this.neonDisabled) {
       this.neonDisabled = true;
-      console.warn(`🔌 [NEON] Circuit breaker ATIVADO após ${this.MAX_NEON_FAILS} falhas (última: ${op})`);
+      this.neonDisabledUntil = Date.now() + this.NEON_RETRY_COOLDOWN_MS;
+      console.warn(`🔌 [NEON] Circuit breaker ATIVADO após ${this.MAX_NEON_FAILS} falhas (última: ${op}); nova tentativa em 30 segundos.`);
     }
   }
 
-  private neonOk_reset(): void { this.neonFailCount = 0; }
+  private neonOk_reset(): void {
+    this.neonFailCount = 0;
+    this.neonDisabled = false;
+    this.neonDisabledUntil = 0;
+  }
 
   // Legacy Turso callbacks are inert; no Turso connection is created.
 
