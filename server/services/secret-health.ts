@@ -11,8 +11,9 @@ export function getSecretHealth() {
   const checks = [
     state("ENCRYPTION_KEY", v => /^[0-9a-fA-F]{64}$/.test(v)),
     state("DERIV_APP_ID", v => /^\d+$/.test(v)),
-    state("DERIV_API_KEY_DEMO"),
-    state("DERIV_API_KEY_REAL"),
+    // The application authenticates with each user's saved Deriv OAuth/PAT token.
+    // Static API keys are not used by the current account-routing implementation
+    // and are intentionally optional; their absence must not degrade readiness.
     state("DATABASE_URL", v => /^(postgres|postgresql|file|libsql|https?):/i.test(v)),
     state("SESSION_SECRET", v => v.length >= 32 && !/^your-very-secure/i.test(v)),
     state("ADMIN_EMAIL", v => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)),
