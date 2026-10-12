@@ -374,12 +374,9 @@ async function migratePostgres() {
 
 // Exportar função para ser chamada ao inicializar o servidor
 export async function runPostgresMigration() {
-  try {
-    await migratePostgres();
-    console.log('🎉 Migração PostgreSQL concluída com sucesso!');
-    return true;
-  } catch (error) {
-    console.error('❌ Falha na migração PostgreSQL:', error);
-    return false;
-  }
+  // Let the boot coordinator classify failures and retry transient database outages.
+  // Returning false here hid the original cause and prevented reliable recovery.
+  await migratePostgres();
+  console.log('🎉 Migração PostgreSQL concluída com sucesso!');
+  return true;
 }
