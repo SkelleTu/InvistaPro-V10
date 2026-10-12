@@ -50,7 +50,7 @@ try {
   }
 } catch (error) {
   console.error('❌ Erro ao conectar ao Turso:', error);
-  if (process.env.NODE_ENV === "production" && ["v10", "aura"].includes((process.env.INVISTA_PLATFORM || "").trim().toLowerCase())) {
+  if (process.env.NODE_ENV === "production") {
     throw error; // Fail closed: production must not silently switch to a different local database.
   }
   console.warn('⚠️ Continuando com SQLite local');
