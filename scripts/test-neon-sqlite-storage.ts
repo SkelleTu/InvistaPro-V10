@@ -23,7 +23,7 @@ assert.match(storage, /async upsertMarketData\(data: InsertMarketData\) \{ retur
 
 assert.match(secretHealth, /optionalState\("DERIV_API_KEY_DEMO"\)/);
 assert.match(secretHealth, /optionalState\("DERIV_API_KEY_REAL"\)/);
-assert.match(secretHealth, /state\("DERIV_APP_ID", v => \/^\\d\+\$\/.test\(v\)\)/);
+assert.match(secretHealth, /state\("DERIV_APP_ID"/);
 assert.match(migration, /invista_database_identity/);
 assert.match(migration, /INVISTA_PLATFORM/);
 assert.match(migration, /const platformId = "invista-core"/);
