@@ -19,7 +19,7 @@ SQLite remains the local working store for trade operations/history, AI logs, ma
 
 At boot, after the PostgreSQL schema migration, a one-time additive backfill imports only local users absent from Neon and their essential tokens/configurations/module settings. Existing Neon users always win; their local data never overwrites Neon. The completion marker is written only after the backfill succeeds. Then essential snapshots are restored from Neon into SQLite in a local transaction. For users present in Neon, token/configuration snapshots are reconciled against Neon. Trade history and market data are not touched by that reconciliation.
 
-Legacy active Deriv tokens from older schemas may have no `slot_index`. Migration preserves these rows and never deactivates them merely because the new column is initially NULL. The primary-token path selects one deterministic current row, and slot uniqueness is enforced only for rows with an explicit slot index. Do not infer slot assignments from token timestamps or token values.
+Legacy active Deriv tokens from older schemas may have no `slot_index`. Migration preserves these rows and never deactivates them merely because the new column is initially NULL. The primary-token path selects one deterministic current row, and slot uniqueness is enforced only for rows with an explicit slot index. Slot indexes are recovered only by exact encrypted-token identity match against the corresponding local SQLite record; if no local match exists, legacy rows remain active and unassigned rather than guessing from timestamps or order.
 
 ## Persistence limits
 
