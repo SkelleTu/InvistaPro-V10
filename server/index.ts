@@ -30,6 +30,7 @@ import { getSecretHealth } from "./services/secret-health";
 
 const app = express();
 let routesReady = false;
+let persistenceReady = false;
 let routeRegistrationError: string | null = null;
 let bootFailureEventId: string | null = null;
 app.use(express.json());
@@ -117,11 +118,11 @@ app.use((req, res, next) => {
   app.get('/health', (_req, res) => {
     const obsHealth = observability.getHealth();
     const secretHealth = getSecretHealth();
-    if (!routesReady) {
+    if (!routesReady || !persistenceReady) {
       return res.status(503).json({
         status: 'degraded',
         routesReady: false,
-        error: routeRegistrationError || 'Routes ainda não registradas',
+        error: routeRegistrationError || (!persistenceReady ? 'Persistência Neon ainda não está pronta' : 'Routes ainda não registradas'),
         bootFailureEventId,
         observability: {
           status: obsHealth.status,
@@ -132,7 +133,7 @@ app.use((req, res, next) => {
         secrets: secretHealth,
       });
     }
-    const healthy = obsHealth.critical === 0 && secretHealth.status === 'healthy';
+    const healthy = routesReady && persistenceReady && obsHealth.critical === 0 && secretHealth.status === 'healthy';
     res.status(healthy ? 200 : 503).json({
       status: healthy ? 'ok' : 'degraded',
       routesReady: true,
@@ -151,7 +152,7 @@ app.use((req, res, next) => {
   app.get('/api/observability/health', (_req, res) => {
     const health = observability.getHealth();
     const secretHealth = getSecretHealth();
-    const healthy = routesReady && health.critical === 0 && secretHealth.status === 'healthy';
+    const healthy = routesReady && persistenceReady && health.critical === 0 && secretHealth.status === 'healthy';
     res.status(healthy ? 200 : 503).json({
       success: healthy,
       routesReady,
@@ -233,6 +234,13 @@ app.use((req, res, next) => {
         detail: routeRegistrationError || 'Falha de inicialização não especificada',
       });
     }
+    if (!persistenceReady) {
+      return res.status(503).json({
+        success: false,
+        error: 'Persistência indisponível: Neon não foi migrada/restaurada com sucesso.',
+        persistenceReady: false,
+      });
+    }
     next();
   });
 
@@ -271,8 +279,8 @@ app.use((req, res, next) => {
     console.error("❌ [BOOT] Banco local não pôde ser inicializado; servidor HTTP continuará ativo:", dbError?.message || dbError);
   }
   
-  app.locals.serviceReady = routesReady;
-  console.log(`✅ [BOOT] Serviço HTTP finalizado. routesReady=${routesReady}`);
+  app.locals.serviceReady = false;
+  console.log(`⏳ [BOOT] Rotas registradas; aguardando migração e restauração da persistência. routesReady=${routesReady}`);
 
   // 🗄️ EXECUTAR MIGRAÇÃO POSTGRESQL - SUPORTE A QUALQUER BANCO (REPLIT, SUPABASE, ETC)
   console.log('🗄️ Verificando sincronização com PostgreSQL...');
@@ -288,6 +296,9 @@ app.use((req, res, next) => {
       try {
         const restored = await restoreEssentialDataToSqlite();
         console.log('✅ [NEON→SQLITE] Dados essenciais restaurados', restored);
+        persistenceReady = true;
+        app.locals.persistenceReady = true;
+        app.locals.serviceReady = routesReady;
       } catch (restoreError: any) {
         console.error('❌ [NEON→SQLITE] Restauração essencial falhou:', restoreError?.message || restoreError);
         app.locals.serviceReady = false;
@@ -302,6 +313,10 @@ app.use((req, res, next) => {
       console.warn('⚠️ Não foi possível criar tabelas no PostgreSQL - continuando com SQLite');
     }
   } else {
+    persistenceReady = false;
+    app.locals.persistenceReady = false;
+    app.locals.serviceReady = false;
+    console.error('❌ DATABASE_URL PostgreSQL não configurada. API bloqueada para proteger dados essenciais.');
     console.log('ℹ️ DATABASE_URL PostgreSQL não está configurado');
     console.log('   ⚠️ Sistema funcionando apenas em MODO LOCAL (SQLite)');
     console.log('');
