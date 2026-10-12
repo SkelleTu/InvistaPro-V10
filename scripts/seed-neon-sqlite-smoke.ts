@@ -76,9 +76,11 @@ async function main() {
   }).onConflictDoNothing();
 
   console.log("CI-only Neon fixture seeded for restore verification; token plaintext was not logged.");
+  await (pgDb as any).$client.end({ timeout: 5 });
 }
 
-main().catch((error) => {
+main().catch(async (error) => {
   console.error("CI Neon fixture setup failed:", error?.message || String(error));
+  try { await (pgDb as any)?.$client?.end({ timeout: 1 }); } catch {}
   process.exitCode = 1;
 });
