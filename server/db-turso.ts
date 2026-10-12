@@ -7,30 +7,8 @@ let tursoClient: Client | null = null;
 let isTursoAvailable = false;
 
 try {
-  const platform = (process.env.INVISTA_PLATFORM || "").trim().toLowerCase();
-  const isProduction = process.env.NODE_ENV === "production";
-  const platformSpecific = platform === "aura" || platform === "v10";
-
-  // Production services must use distinct platform-scoped database credentials.
-  // Never silently fall back to the legacy shared Turso database in production.
-  if (isProduction && !platformSpecific) {
-    throw new Error("INVISTA_PLATFORM must be explicitly set to 'v10' or 'aura' in production");
-  }
-
-  const tursoUrl = platform === "aura"
-    ? process.env.TURSO_DATABASE_URL_AURA
-    : platform === "v10"
-      ? process.env.TURSO_DATABASE_URL_V10
-      : process.env.TURSO_DATABASE_URL;
-  const tursoToken = platform === "aura"
-    ? process.env.TURSO_AUTH_TOKEN_AURA
-    : platform === "v10"
-      ? process.env.TURSO_AUTH_TOKEN_V10
-      : process.env.TURSO_AUTH_TOKEN;
-
-  if (isProduction && platformSpecific && (!tursoUrl || !tursoToken)) {
-    throw new Error(`Dedicated Turso credentials are required for INVISTA_PLATFORM=${platform}; refusing shared-database fallback`);
-  }
+  const tursoUrl = process.env.TURSO_DATABASE_URL;
+  const tursoToken = process.env.TURSO_AUTH_TOKEN;
 
   if (tursoUrl && tursoToken) {
     tursoClient = createClient({
@@ -50,9 +28,6 @@ try {
   }
 } catch (error) {
   console.error('❌ Erro ao conectar ao Turso:', error);
-  if (process.env.NODE_ENV === "production") {
-    throw error; // Fail closed: production must not silently switch to a different local database.
-  }
   console.warn('⚠️ Continuando com SQLite local');
 }
 
