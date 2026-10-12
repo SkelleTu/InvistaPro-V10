@@ -1,22 +1,15 @@
 /**
- * STORAGE COOPERATIVO
+ * STORAGE NEON + SQLITE
  *
- * ESCRITAS : Turso (primário) + SQLite (sync background) — Neon NÃO recebe escritas
- * LEITURAS críticas/raras    : Neon (circuit breaker) → Turso → SQLite
- * LEITURAS alta frequência   : SQLite (primário, já sincronizado) → Turso (fallback)
- *
- * ESTRATÉGIA DE PRESERVAÇÃO DE COTA:
- *  - Dados efêmeros (market data, heartbeat, ws subs, ai logs) → SQLite only
- *  - Leituras de alta frequência (controle, sessões ativas) → SQLite first
- *  - Escritas importantes (users, trades, movimentos) → Turso + SQLite sync
+ * Neon: fonte durável para identidade, tokens e configurações essenciais.
+ * SQLite: cache local, logs técnicos, dados transitórios e histórico operacional local.
+ * Turso is intentionally not used by this storage layer.
  */
 
 import { randomBytes } from "crypto";
 import { DatabaseStorage } from "./storage";
 import { PostgresStorage } from "./storage-postgres";
-import { TursoStorage } from "./storage-turso";
 import { isPostgresAvailable } from "./db-postgres";
-import { isTursoAvailable } from "./db-turso";
 import type { IStorage } from "./storage";
 import type {
   User, InsertUser, UpdateUser,
@@ -43,22 +36,16 @@ function isQuotaOrBlockError(msg: string): boolean {
 
 export class DualStorage implements IStorage {
   private sqlite: DatabaseStorage;
-  private turso: TursoStorage | null;
   private neon: PostgresStorage | null;
 
   private neonDisabled = false;
   private neonFailCount = 0;
   private readonly MAX_NEON_FAILS = 3;
 
-  // Circuit breaker para o Turso (preservar cota)
-  private tursoReadDisabled = false;
-  private tursoReadFailCount = 0;
-  private readonly MAX_TURSO_READ_FAILS = 5;
 
   constructor() {
     this.sqlite = new DatabaseStorage();
     // Turso is intentionally disabled: this deployment uses only Neon + SQLite.
-    this.turso = null;
     this.neon = isPostgresAvailable ? new PostgresStorage() : null;
 
     console.log('🗄️ [STORAGE] SQLite local ativo para cache, dados transitórios e diagnósticos.');
@@ -94,24 +81,7 @@ export class DualStorage implements IStorage {
 
   // ─── Circuit breaker do Turso (leituras) ─────────────────────────────────
 
-  private get tursoReadOk(): boolean { return !this.tursoReadDisabled && this.turso !== null; }
 
-  private onTursoReadError(err: any, op: string): void {
-    const msg = err?.message || String(err);
-    if (isQuotaOrBlockError(msg)) {
-      if (!this.tursoReadDisabled) {
-        this.tursoReadDisabled = true;
-        console.warn(`🔌 [TURSO] Circuit breaker de LEITURAS ATIVADO — redirecionando para SQLite.`);
-        console.warn(`   Motivo: cota/bloqueio detectado em "${op}"`);
-      }
-      return;
-    }
-    this.tursoReadFailCount++;
-    if (this.tursoReadFailCount >= this.MAX_TURSO_READ_FAILS && !this.tursoReadDisabled) {
-      this.tursoReadDisabled = true;
-      console.warn(`🔌 [TURSO] Circuit breaker de LEITURAS ATIVADO após ${this.MAX_TURSO_READ_FAILS} falhas (última: ${op})`);
-    }
-  }
 
   // ─── Primitivas ───────────────────────────────────────────────────────────
 
@@ -213,17 +183,13 @@ export class DualStorage implements IStorage {
   // ─── Movimentos ───────────────────────────────────────────────────────────
 
   async createMovimento(m: InsertMovimento) { return this.write(() => this.turso!.createMovimento(m), () => this.sqlite.createMovimento(m), 'createMovimento'); }
-  async getUserMovimentos(uid: string, limit?: number) {
-    return this.read(() => this.neon!.getUserMovimentos(uid, limit), () => this.turso!.getUserMovimentos(uid, limit), () => this.sqlite.getUserMovimentos(uid, limit), 'getUserMovimentos');
-  }
+  async getUserMovimentos(uid: string, limit?: number) { return this.sqlite.getUserMovimentos(uid, limit); }
   async calcularRendimento(saldo: number) { return this.sqlite.calcularRendimento(saldo); }
 
   // ─── Documentos ───────────────────────────────────────────────────────────
 
   async createDocumento(d: InsertDocumento) { return this.write(() => this.turso!.createDocumento(d), () => this.sqlite.createDocumento(d), 'createDocumento'); }
-  async getUserDocumentos(uid: string) {
-    return this.read(() => this.neon!.getUserDocumentos(uid), () => this.turso!.getUserDocumentos(uid), () => this.sqlite.getUserDocumentos(uid), 'getUserDocumentos');
-  }
+  async getUserDocumentos(uid: string) { return this.sqlite.getUserDocumentos(uid); }
   async updateDocumentoStatus(id: string, status: string, motivo?: string) { return this.write(() => this.turso!.updateDocumentoStatus(id, status, motivo), () => this.sqlite.updateDocumentoStatus(id, status, motivo), 'updateDocumentoStatus'); }
 
   // ─── Tokens Deriv ─────────────────────────────────────────────────────────
