@@ -120,7 +120,7 @@ async function migratePostgres() {
         token TEXT NOT NULL,
         account_type VARCHAR(20) NOT NULL,
         is_active BOOLEAN DEFAULT TRUE,
-        slot_index INTEGER DEFAULT 0,
+        slot_index INTEGER,
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
       );
@@ -273,7 +273,7 @@ async function migratePostgres() {
     `);
     
     // Idempotent upgrades for existing Neon databases.
-    await pgDb.execute(sql`ALTER TABLE deriv_tokens ADD COLUMN IF NOT EXISTS slot_index INTEGER DEFAULT 0`);
+    await pgDb.execute(sql`ALTER TABLE deriv_tokens ADD COLUMN IF NOT EXISTS slot_index INTEGER`);
     await pgDb.execute(sql`ALTER TABLE trade_configurations ADD COLUMN IF NOT EXISTS accu_growth_rates TEXT DEFAULT '["1","2","3","4","5"]'`);
     await pgDb.execute(sql`ALTER TABLE trade_configurations ADD COLUMN IF NOT EXISTS modality_frequency TEXT DEFAULT '{}'`);
     await pgDb.execute(sql`ALTER TABLE trade_configurations ADD COLUMN IF NOT EXISTS accu_ticks_per_rate TEXT DEFAULT '{"1":10,"2":7,"3":5,"4":4,"5":3}'`);
