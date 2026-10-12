@@ -1,5 +1,5 @@
 import { pgDb as db, pgSchema, isPostgresAvailable } from "./db-postgres";
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc, and, isNull } from "drizzle-orm";
 import { createHash, randomBytes, createCipheriv, createDecipheriv } from "crypto";
 import type {
   User,
@@ -279,7 +279,7 @@ export class PostgresStorage implements IStorage {
     await db
       .update(pgSchema.derivTokens)
       .set({ isActive: false, updatedAt: new Date() })
-      .where(and(eq(pgSchema.derivTokens.userId, tokenData.userId), eq(pgSchema.derivTokens.slotIndex, null as any)));
+      .where(and(eq(pgSchema.derivTokens.userId, tokenData.userId), isNull(pgSchema.derivTokens.slotIndex)));
     
     const encryptedTokenData = {
       ...convertSQLiteDataToPostgres(tokenData),
