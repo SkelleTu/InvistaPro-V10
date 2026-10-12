@@ -306,8 +306,8 @@ app.use((req, res, next) => {
       console.log('✅ ✅ ✅ SINCRONIZAÇÃO COMPLETA!');
       console.log(`   • ${dbType} conectado`);
       console.log('   • Tabelas SQL criadas');
-      console.log('   • Dados sincronizados (users, trades, sessions, etc)');
-      console.log('   • 2 bancos harmônicos: SQLite (local) + Neon PostgreSQL');
+      console.log('   • Identidade, tokens e configurações essenciais restaurados da Neon');
+      console.log('   • Neon durável + SQLite local; histórico de trading e dados de mercado ficam locais');
       console.log('   🎉 Sistema Dual-Database 100% OPERACIONAL');
     } else {
       console.warn('⚠️ Não foi possível criar tabelas no PostgreSQL - continuando com SQLite');
