@@ -311,11 +311,12 @@ app.use((req, res, next) => {
   
   if (hasPostgres) {
     const dbType = process.env.DATABASE_URL!.includes('neon.tech') ? 'Neon PostgreSQL' : 'PostgreSQL';
-    
-    console.log(`✨ ${dbType} configurado! Criando schema SQL...`);
-    const migrationSuccess = await runPostgresMigration();
-    if (migrationSuccess) {
+    const maxPersistenceAttempts = 3;
+    console.log(`✨ ${dbType} configurado! Iniciando migração e restauração verificáveis...`);
+
+    for (let attempt = 1; attempt <= maxPersistenceAttempts; attempt++) {
       try {
+        await runPostgresMigration();
         const backfill = await backfillMissingEssentialDataToNeon();
         console.log('✅ [SQLITE→NEON] Backfill aditivo de essenciais concluído', backfill);
         const restored = await restoreEssentialDataToSqlite();
@@ -328,17 +329,26 @@ app.use((req, res, next) => {
         console.log('   • Identidade, tokens e configurações essenciais restaurados da Neon');
         console.log('   • Histórico operacional, logs de IA e dados de mercado permanecem locais');
         console.log('   🎉 Persistência pronta para uso.');
-      } catch (restoreError: any) {
-        console.error('❌ [NEON→SQLITE] Restauração essencial falhou:', restoreError?.message || restoreError);
+        break;
+      } catch (persistenceError: any) {
+        const message = persistenceError?.message || String(persistenceError);
+        const nonRetryable = /platform mismatch|INVISTA_PLATFORM must be set|NEON_PLATFORM_IDENTITY_MISSING|LOCAL_USER_ID_CONFLICT|LOCAL_USER_IMPORT_CONFLICT|ENCRYPTION_KEY|TOKEN_CIPHERTEXT_FORMAT_INVALID/i.test(message);
         persistenceReady = false;
         app.locals.persistenceReady = false;
         app.locals.serviceReady = false;
+        console.error(`❌ [PERSISTÊNCIA] Tentativa ${attempt}/${maxPersistenceAttempts} falhou:`, message);
+
+        if (nonRetryable || attempt === maxPersistenceAttempts) {
+          console.error(nonRetryable
+            ? '❌ Erro de identidade/configuração/integridade: não será repetido.'
+            : '❌ Persistência não recuperada após tentativas limitadas; encerrando para permitir reinício controlado pelo Render.');
+          if (process.env.NODE_ENV === 'production') process.exit(1);
+          break;
+        }
+        const delayMs = 1000 * (2 ** (attempt - 1));
+        console.warn(`⏳ [PERSISTÊNCIA] Nova tentativa em ${delayMs} ms.`);
+        await new Promise(resolve => setTimeout(resolve, delayMs));
       }
-    } else {
-      persistenceReady = false;
-      app.locals.persistenceReady = false;
-      app.locals.serviceReady = false;
-      console.error('❌ Migração Neon falhou; API permanece bloqueada para proteger dados essenciais.');
     }
   } else {
     persistenceReady = false;
@@ -349,6 +359,7 @@ app.use((req, res, next) => {
     console.log('   📋 Configure DATABASE_URL com a Neon exclusiva desta plataforma.');
     console.log('   📋 Configure INVISTA_PLATFORM=v10 ou INVISTA_PLATFORM=aura.');
     console.log('   📋 Configure uma base Neon diferente para cada plataforma e reinicie.');
+    if (process.env.NODE_ENV === 'production') process.exit(1);
   }
   
   // 🛡️ SISTEMA DE BACKUP AUTOMÁTICO DO BANCO DE DADOS
