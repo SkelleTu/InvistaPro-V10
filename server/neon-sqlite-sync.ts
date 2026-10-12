@@ -11,8 +11,16 @@ function toPgDate(value: any): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+function isEncryptedTokenFormat(token: string): boolean {
+  const parts = token.split(":");
+  return parts.length === 3
+    && /^[0-9a-fA-F]{32}$/.test(parts[0])
+    && /^[0-9a-fA-F]{32}$/.test(parts[1])
+    && /^(?:[0-9a-fA-F]{2})+$/.test(parts[2]);
+}
+
 function encryptLegacyPlainToken(token: string): string {
-  if (token.includes(":")) return token;
+  if (isEncryptedTokenFormat(token)) return token;
   const rawKey = process.env.ENCRYPTION_KEY?.trim();
   if (!rawKey || !/^[0-9a-fA-F]{64}$/.test(rawKey)) {
     throw new Error("ENCRYPTION_KEY válida é obrigatória para migrar tokens legados.");
@@ -198,7 +206,7 @@ export async function restoreEssentialDataToSqlite(): Promise<{ users: number; t
     throw new Error("ENCRYPTION_KEY inválida ou ausente: não é seguro restaurar tokens Deriv criptografados.");
   }
   for (const token of tokens as any[]) {
-    if (!String(token.token).includes(":")) {
+    if (!isEncryptedTokenFormat(String(token.token))) {
       const encrypted = encryptLegacyPlainToken(String(token.token));
       await pgDb.update(pgSchema.derivTokens).set({ token: encrypted, updatedAt: new Date() })
         .where(eq(pgSchema.derivTokens.id, token.id));
