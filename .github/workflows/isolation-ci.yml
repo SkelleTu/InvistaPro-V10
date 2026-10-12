@@ -162,7 +162,7 @@ jobs:
           for i in $(seq 1 45); do
             if curl -fsS http://127.0.0.1:5123/health > /tmp/health.json; then
               cat /tmp/health.json
-              node -e 'const fs=require("fs"); const d=JSON.parse(fs.readFileSync("/tmp/health.json","utf8")); if(d.status!=="ok" || d.routesReady!==true || d.observability?.critical!==0){console.error("Health check is degraded:",JSON.stringify(d,null,2));process.exit(1)}'
+              node -e 'const fs=require("fs"); const d=JSON.parse(fs.readFileSync("/tmp/health.json","utf8")); if(d.status!=="ok" || d.readiness!=="ready" || d.routesReady!==true || d.persistenceReady!==true || d.observability?.critical!==0){console.error("Production readiness check failed:",JSON.stringify(d,null,2));process.exit(1)}'
 
               curl -fsS http://127.0.0.1:5123/api/ping > /tmp/ping.txt
               test "$(cat /tmp/ping.txt)" = "OK" || { cat /tmp/ping.txt; echo "Ping endpoint invalid: expected OK"; exit 1; }
