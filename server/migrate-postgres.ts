@@ -1,7 +1,5 @@
 import { pgDb, pgSchema } from './db-postgres';
 import { sql } from 'drizzle-orm';
-import { db as sqliteDb } from './db';
-import * as sqliteSchema from '@shared/schema';
 
 /**
  * Script de migração para criar tabelas PostgreSQL
@@ -122,6 +120,7 @@ async function migratePostgres() {
         token TEXT NOT NULL,
         account_type VARCHAR(20) NOT NULL,
         is_active BOOLEAN DEFAULT TRUE,
+        slot_index INTEGER DEFAULT 0,
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
       );
@@ -136,6 +135,21 @@ async function migratePostgres() {
         operations_count INTEGER NOT NULL,
         interval_type VARCHAR(20) NOT NULL,
         interval_value INTEGER NOT NULL,
+        selected_modalities TEXT DEFAULT 'digit_differs',
+        accu_growth_rates TEXT DEFAULT '["1","2","3","4","5"]',
+        modality_frequency TEXT DEFAULT '{}',
+        accu_ticks_per_rate TEXT DEFAULT '{"1":10,"2":7,"3":5,"4":4,"5":3}',
+        accu_frequency_per_rate TEXT DEFAULT '{}',
+        modality_ticks TEXT DEFAULT '{}',
+        enable_martingale BOOLEAN DEFAULT TRUE,
+        enable_leverage BOOLEAN DEFAULT TRUE,
+        enable_circuit_breaker BOOLEAN DEFAULT TRUE,
+        enable_recovery_mode BOOLEAN DEFAULT TRUE,
+        martingale_multipliers TEXT DEFAULT '[1.3,1.6,2.0]',
+        circuit_breaker_losses INTEGER DEFAULT 1,
+        circuit_breaker_pause_minutes INTEGER DEFAULT 2,
+        stake_mode TEXT DEFAULT 'ai',
+        fixed_stake REAL DEFAULT 0.35,
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
       );
@@ -258,114 +272,39 @@ async function migratePostgres() {
       );
     `);
     
+    // Idempotent upgrades for existing Neon databases.
+    await pgDb.execute(sql`ALTER TABLE deriv_tokens ADD COLUMN IF NOT EXISTS slot_index INTEGER DEFAULT 0`);
+    await pgDb.execute(sql`ALTER TABLE trade_configurations ADD COLUMN IF NOT EXISTS accu_growth_rates TEXT DEFAULT '["1","2","3","4","5"]'`);
+    await pgDb.execute(sql`ALTER TABLE trade_configurations ADD COLUMN IF NOT EXISTS modality_frequency TEXT DEFAULT '{}'`);
+    await pgDb.execute(sql`ALTER TABLE trade_configurations ADD COLUMN IF NOT EXISTS accu_ticks_per_rate TEXT DEFAULT '{"1":10,"2":7,"3":5,"4":4,"5":3}'`);
+    await pgDb.execute(sql`ALTER TABLE trade_configurations ADD COLUMN IF NOT EXISTS accu_frequency_per_rate TEXT DEFAULT '{}'`);
+    await pgDb.execute(sql`ALTER TABLE trade_configurations ADD COLUMN IF NOT EXISTS modality_ticks TEXT DEFAULT '{}'`);
+    await pgDb.execute(sql`ALTER TABLE trade_configurations ADD COLUMN IF NOT EXISTS enable_martingale BOOLEAN DEFAULT TRUE`);
+    await pgDb.execute(sql`ALTER TABLE trade_configurations ADD COLUMN IF NOT EXISTS enable_leverage BOOLEAN DEFAULT TRUE`);
+    await pgDb.execute(sql`ALTER TABLE trade_configurations ADD COLUMN IF NOT EXISTS enable_circuit_breaker BOOLEAN DEFAULT TRUE`);
+    await pgDb.execute(sql`ALTER TABLE trade_configurations ADD COLUMN IF NOT EXISTS enable_recovery_mode BOOLEAN DEFAULT TRUE`);
+    await pgDb.execute(sql`ALTER TABLE trade_configurations ADD COLUMN IF NOT EXISTS martingale_multipliers TEXT DEFAULT '[1.3,1.6,2.0]'`);
+    await pgDb.execute(sql`ALTER TABLE trade_configurations ADD COLUMN IF NOT EXISTS circuit_breaker_losses INTEGER DEFAULT 1`);
+    await pgDb.execute(sql`ALTER TABLE trade_configurations ADD COLUMN IF NOT EXISTS circuit_breaker_pause_minutes INTEGER DEFAULT 2`);
+    await pgDb.execute(sql`ALTER TABLE trade_configurations ADD COLUMN IF NOT EXISTS stake_mode TEXT DEFAULT 'ai'`);
+    await pgDb.execute(sql`ALTER TABLE trade_configurations ADD COLUMN IF NOT EXISTS fixed_stake REAL DEFAULT 0.35`);
+
+    await pgDb.execute(sql`
+      CREATE TABLE IF NOT EXISTS modality_module_configs (
+        id VARCHAR(32) PRIMARY KEY DEFAULT replace(gen_random_uuid()::text, '-', ''),
+        user_id VARCHAR(32) NOT NULL REFERENCES users(id),
+        modality VARCHAR(100) NOT NULL,
+        slot_configs TEXT NOT NULL DEFAULT '[]',
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE (user_id, modality)
+      )
+    `);
+
     console.log('✅ Tabelas PostgreSQL criadas com sucesso!');
 
-    // Helper: converte texto SQLite de data para string ISO compatível com Postgres
-    const toIso = (v: string | null | undefined): string | null => {
-      if (!v) return null;
-      try {
-        const d = new Date(v);
-        return isNaN(d.getTime()) ? null : d.toISOString();
-      } catch { return null; }
-    };
-    const nowIso = () => new Date().toISOString();
-
-    // 🔄 SINCRONIZAR USUÁRIOS DO SQLITE → NEON (garante que admin e outros usuários existam)
-    try {
-      console.log('🔄 [SYNC] Sincronizando usuários SQLite → Neon PostgreSQL...');
-      const sqliteUsers = await sqliteDb.select().from(sqliteSchema.users);
-      let synced = 0;
-      let skipped = 0;
-      for (const user of sqliteUsers) {
-        try {
-          await pgDb.execute(sql`
-            INSERT INTO users (
-              id, email, password_hash, nome_completo, cpf, telefone,
-              endereco, cidade, estado, cep,
-              chave_pix, tipo_chave_pix,
-              telefone_verificado, codigo_verificacao, codigo_expires_at,
-              password_reset_token, password_reset_token_expires_at,
-              conta_aprovada, aprovada_por, aprovada_em,
-              documentos_verificados, documentos_aprovados_em,
-              is_admin, senha_fallback, usar_senha_fallback, biometria_configurada,
-              saldo, deposito_data, rendimento_saque_automatico,
-              created_at, updated_at
-            ) VALUES (
-              ${user.id}, ${user.email}, ${user.passwordHash}, ${user.nomeCompleto}, ${user.cpf}, ${user.telefone},
-              ${user.endereco}, ${user.cidade}, ${user.estado}, ${user.cep},
-              ${user.chavePix}, ${user.tipoChavePix},
-              ${Boolean(user.telefoneVerificado)}, ${user.codigoVerificacao ?? null}, ${toIso(user.codigoExpiresAt)},
-              ${user.passwordResetToken ?? null}, ${toIso(user.passwordResetTokenExpiresAt)},
-              ${Boolean(user.contaAprovada)}, ${user.aprovadaPor ?? null}, ${toIso(user.aprovadaEm)},
-              ${Boolean(user.documentosVerificados)}, ${toIso(user.documentosAprovadosEm)},
-              ${Boolean(user.isAdmin)}, ${user.senhaFallback ?? null}, ${Boolean(user.usarSenhaFallback)}, ${Boolean(user.biometriaConfigurada)},
-              ${user.saldo ?? 0}, ${toIso(user.depositoData)}, ${Boolean(user.rendimentoSaqueAutomatico)},
-              ${toIso(user.createdAt) ?? nowIso()}, ${toIso(user.updatedAt) ?? nowIso()}
-            )
-            ON CONFLICT (id) DO UPDATE SET
-              saldo = EXCLUDED.saldo,
-              updated_at = EXCLUDED.updated_at
-          `);
-          synced++;
-        } catch (userErr: any) {
-          if (userErr.message?.includes('unique') || userErr.message?.includes('duplicate')) {
-            skipped++;
-          } else {
-            console.warn(`⚠️ [SYNC] Erro ao sincronizar usuário ${user.id}:`, userErr.message);
-          }
-        }
-      }
-      console.log(`✅ [SYNC] Usuários sincronizados: ${synced} inseridos/atualizados, ${skipped} ignorados (conflito)`);
-    } catch (syncErr: any) {
-      console.warn('⚠️ [SYNC] Falha ao sincronizar usuários (não crítico):', syncErr.message);
-    }
-
-    // 🔄 SINCRONIZAR TOKENS DERIV DO SQLITE → NEON
-    try {
-      const sqliteTokens = await sqliteDb.select().from(sqliteSchema.derivTokens);
-      let tokensSynced = 0;
-      for (const token of sqliteTokens) {
-        try {
-          await pgDb.execute(sql`
-            INSERT INTO deriv_tokens (id, user_id, token, account_type, is_active, created_at, updated_at)
-            VALUES (${token.id}, ${token.userId}, ${token.token}, ${token.accountType}, ${Boolean(token.isActive)},
-                    ${toIso(token.createdAt) ?? nowIso()}, ${toIso(token.updatedAt) ?? nowIso()})
-            ON CONFLICT (id) DO UPDATE SET
-              token = EXCLUDED.token,
-              is_active = EXCLUDED.is_active,
-              updated_at = EXCLUDED.updated_at
-          `);
-          tokensSynced++;
-        } catch (_) {}
-      }
-      if (tokensSynced > 0) console.log(`✅ [SYNC] Tokens Deriv sincronizados: ${tokensSynced}`);
-    } catch (tokenErr: any) {
-      console.warn('⚠️ [SYNC] Falha ao sincronizar tokens Deriv (não crítico):', tokenErr.message);
-    }
-
-    // 🔄 SINCRONIZAR TRADE CONFIGURATIONS DO SQLITE → NEON
-    try {
-      const sqliteConfigs = await sqliteDb.select().from(sqliteSchema.tradeConfigurations);
-      let configsSynced = 0;
-      for (const config of sqliteConfigs) {
-        try {
-          await pgDb.execute(sql`
-            INSERT INTO trade_configurations (id, user_id, mode, is_active, operations_count, interval_type, interval_value, selected_modalities, created_at, updated_at)
-            VALUES (${config.id}, ${config.userId}, ${config.mode}, ${Boolean(config.isActive)}, ${config.operationsCount},
-                    ${config.intervalType}, ${config.intervalValue}, ${config.selectedModalities ?? 'digit_differs'},
-                    ${toIso(config.createdAt) ?? nowIso()}, ${toIso(config.updatedAt) ?? nowIso()})
-            ON CONFLICT (id) DO UPDATE SET
-              is_active = EXCLUDED.is_active,
-              selected_modalities = EXCLUDED.selected_modalities,
-              updated_at = EXCLUDED.updated_at
-          `);
-          configsSynced++;
-        } catch (_) {}
-      }
-      if (configsSynced > 0) console.log(`✅ [SYNC] Trade Configurations sincronizadas: ${configsSynced}`);
-    } catch (configErr: any) {
-      console.warn('⚠️ [SYNC] Falha ao sincronizar trade configurations (não crítico):', configErr.message);
-    }
+    // Neon is the durable source of truth. Never bulk-copy SQLite into Neon at boot.
+    // Local restoration is handled by neon-sqlite-sync after schema migration.
+    console.log('ℹ️ Backfill SQLite → Neon desativado; a Neon não será sobrescrita por dados locais antigos.');
 
     console.log('🔄 Sistema Dual Database pronto para uso');
     
