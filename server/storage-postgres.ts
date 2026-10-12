@@ -276,26 +276,19 @@ export class PostgresStorage implements IStorage {
 
   // Deriv token operations
   async createDerivToken(tokenData: InsertDerivToken): Promise<DerivToken> {
-    await db
-      .update(pgSchema.derivTokens)
-      .set({ isActive: false, updatedAt: new Date() })
-      .where(and(eq(pgSchema.derivTokens.userId, tokenData.userId), isNull(pgSchema.derivTokens.slotIndex)));
-    
     const encryptedTokenData = {
       ...convertSQLiteDataToPostgres(tokenData),
       token: EncryptionService.encrypt(tokenData.token),
       isActive: true,
     };
-    
-    const [newToken] = await db
-      .insert(pgSchema.derivTokens)
-      .values(encryptedTokenData)
-      .returning();
-    
-    return {
-      ...newToken,
-      token: EncryptionService.decrypt(newToken.token)
-    } as DerivToken;
+    const newToken = await db.transaction(async (tx: any) => {
+      await tx.update(pgSchema.derivTokens)
+        .set({ isActive: false, updatedAt: new Date() })
+        .where(and(eq(pgSchema.derivTokens.userId, tokenData.userId), isNull(pgSchema.derivTokens.slotIndex)));
+      const [row] = await tx.insert(pgSchema.derivTokens).values(encryptedTokenData).returning();
+      return row;
+    });
+    return { ...newToken, token: EncryptionService.decrypt(newToken.token) } as DerivToken;
   }
 
   async getUserDerivToken(userId: string): Promise<DerivToken | undefined> {
@@ -313,33 +306,18 @@ export class PostgresStorage implements IStorage {
   }
 
   async updateDerivToken(userId: string, token: string, accountType: string, id?: string): Promise<DerivToken> {
-    // Deactivate all existing tokens first
-    await db
-      .update(pgSchema.derivTokens)
-      .set({
-        isActive: false,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(pgSchema.derivTokens.userId, userId), isNull(pgSchema.derivTokens.slotIndex)));
-    
-    // Create new active token with encryption
-    const [newToken] = await db
-      .insert(pgSchema.derivTokens)
-      .values({
-        id,
-        userId,
-        token: EncryptionService.encrypt(token),
-        accountType,
-        isActive: true,
-        slotIndex: null,
-      } as any)
-      .returning();
-    
-    // Decrypt token for return value
-    return {
-      ...newToken,
-      token: EncryptionService.decrypt(newToken.token)
-    } as DerivToken;
+    // Encrypt before opening the transaction so a key/configuration error cannot deactivate the current token.
+    const encrypted = EncryptionService.encrypt(token);
+    const newToken = await db.transaction(async (tx: any) => {
+      await tx.update(pgSchema.derivTokens)
+        .set({ isActive: false, updatedAt: new Date() })
+        .where(and(eq(pgSchema.derivTokens.userId, userId), isNull(pgSchema.derivTokens.slotIndex)));
+      const [row] = await tx.insert(pgSchema.derivTokens)
+        .values({ id, userId, token: encrypted, accountType, isActive: true, slotIndex: null } as any)
+        .returning();
+      return row;
+    });
+    return { ...newToken, token: EncryptionService.decrypt(newToken.token) } as DerivToken;
   }
 
   async deactivateDerivToken(userId: string): Promise<void> {
@@ -352,23 +330,15 @@ export class PostgresStorage implements IStorage {
   // Trade configuration operations
   async createTradeConfig(configData: InsertTradeConfiguration): Promise<TradeConfiguration> {
     const pgData = convertSQLiteDataToPostgres(configData);
-    
-    await db
-      .update(pgSchema.tradeConfigurations)
-      .set({
-        isActive: false,
-        updatedAt: new Date(),
-      })
-      .where(eq(pgSchema.tradeConfigurations.userId, configData.userId));
-    
-    const [config] = await db
-      .insert(pgSchema.tradeConfigurations)
-      .values({
-        ...pgData,
-        isActive: true,
-      })
-      .returning();
-    
+    const config = await db.transaction(async (tx: any) => {
+      await tx.update(pgSchema.tradeConfigurations)
+        .set({ isActive: false, updatedAt: new Date() })
+        .where(eq(pgSchema.tradeConfigurations.userId, configData.userId));
+      const [row] = await tx.insert(pgSchema.tradeConfigurations)
+        .values({ ...pgData, isActive: true })
+        .returning();
+      return row;
+    });
     return config as TradeConfiguration;
   }
 
@@ -400,27 +370,23 @@ export class PostgresStorage implements IStorage {
     if (config.interval === "minutes" && config.value < 5) throw new Error("SEGURANÇA: Mínimo de 5 minutos entre operações");
     if (config.interval === "hours" && config.value < 1) throw new Error("SEGURANÇA: Mínimo de 1 hora entre operações se usando horas");
     
-    await db
-      .update(pgSchema.tradeConfigurations)
-      .set({
-        isActive: false,
-        updatedAt: new Date(),
-      })
-      .where(eq(pgSchema.tradeConfigurations.userId, userId));
-    
-    const [newConfig] = await db
-      .insert(pgSchema.tradeConfigurations)
-      .values({
-        id,
-        userId,
-        mode,
-        isActive: true,
-        operationsCount: config.operations,
-        intervalType: config.interval,
-        intervalValue: config.value,
-      })
-      .returning();
-    
+    const newConfig = await db.transaction(async (tx: any) => {
+      await tx.update(pgSchema.tradeConfigurations)
+        .set({ isActive: false, updatedAt: new Date() })
+        .where(eq(pgSchema.tradeConfigurations.userId, userId));
+      const [row] = await tx.insert(pgSchema.tradeConfigurations)
+        .values({
+          id,
+          userId,
+          mode,
+          isActive: true,
+          operationsCount: config.operations,
+          intervalType: config.interval,
+          intervalValue: config.value,
+        })
+        .returning();
+      return row;
+    });
     return newConfig as TradeConfiguration;
   }
 
@@ -900,11 +866,15 @@ export class PostgresStorage implements IStorage {
 
   async upsertDerivTokenBySlot(userId: string, slotIndex: number, token: string, accountType: string, id?: string): Promise<DerivToken> {
     if (!Number.isInteger(slotIndex) || slotIndex < 0 || slotIndex > 9) throw new Error("slotIndex must be an integer from 0 to 9");
-    await db.update(pgSchema.derivTokens).set({ isActive: false, updatedAt: new Date() })
-      .where(and(eq(pgSchema.derivTokens.userId, userId), eq(pgSchema.derivTokens.slotIndex, slotIndex)));
-    const [saved] = await db.insert(pgSchema.derivTokens)
-      .values({ id: id ?? randomBytes(16).toString("hex"), userId, token: EncryptionService.encrypt(token), accountType, isActive: true, slotIndex })
-      .returning();
+    const encrypted = EncryptionService.encrypt(token);
+    const saved = await db.transaction(async (tx: any) => {
+      await tx.update(pgSchema.derivTokens).set({ isActive: false, updatedAt: new Date() })
+        .where(and(eq(pgSchema.derivTokens.userId, userId), eq(pgSchema.derivTokens.slotIndex, slotIndex)));
+      const [row] = await tx.insert(pgSchema.derivTokens)
+        .values({ id: id ?? randomBytes(16).toString("hex"), userId, token: encrypted, accountType, isActive: true, slotIndex })
+        .returning();
+      return row;
+    });
     return { ...saved, token: EncryptionService.decrypt(saved.token) } as DerivToken;
   }
 
