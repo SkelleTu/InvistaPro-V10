@@ -22,6 +22,7 @@ import { dualStorage as storage } from "./storage-dual";
 import { derivTradeSync } from "./services/deriv-trade-sync";
 import { realStatsTracker } from "./services/real-stats-tracker";
 import { runPostgresMigration } from "./migrate-postgres";
+import { restoreEssentialDataToSqlite } from "./neon-sqlite-sync";
 import { initUrlRegistry } from "./services/url-registry";
 import { startDerivObservabilityBridge } from "./services/deriv-observability-bridge";
 import { startUniversalHeartbeatLoop } from "./services/universal-server-session";
@@ -284,6 +285,13 @@ app.use((req, res, next) => {
     console.log(`✨ ${dbType} configurado! Criando schema SQL...`);
     const migrationSuccess = await runPostgresMigration();
     if (migrationSuccess) {
+      try {
+        const restored = await restoreEssentialDataToSqlite();
+        console.log('✅ [NEON→SQLITE] Dados essenciais restaurados', restored);
+      } catch (restoreError: any) {
+        console.error('❌ [NEON→SQLITE] Restauração essencial falhou:', restoreError?.message || restoreError);
+        app.locals.serviceReady = false;
+      }
       console.log('✅ ✅ ✅ SINCRONIZAÇÃO COMPLETA!');
       console.log(`   • ${dbType} conectado`);
       console.log('   • Tabelas SQL criadas');
