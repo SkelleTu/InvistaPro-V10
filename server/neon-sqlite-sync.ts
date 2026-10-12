@@ -1,6 +1,5 @@
 import { pgDb, pgSchema, isPostgresAvailable } from "./db-postgres";
-import { db as sqliteDb, sqlite } from "./db";
-import * as localSchema from "@shared/schema";
+import { sqlite } from "./db";
 
 /**
  * Restore only durable configuration/identity data from Neon to the local SQLite cache.
@@ -124,9 +123,6 @@ export async function restoreEssentialDataToSqlite(): Promise<{ users: number; t
   });
   transaction();
 
-  // Touch the imported Drizzle schema so TypeScript verifies it remains aligned with this module.
-  void sqliteDb;
-  void localSchema;
   console.info("[NEON→SQLITE] Restauração essencial concluída", {
     users: users.length, tokens: tokens.length, configs: configs.length, moduleConfigs: moduleConfigs.length
   });
