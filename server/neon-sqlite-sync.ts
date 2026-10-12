@@ -108,7 +108,14 @@ export async function backfillMissingEssentialDataToNeon(): Promise<{ importedUs
       // is authoritative and must not be resurrected from a stale local copy.
       const neonTokens = await tx.select().from(pgSchema.derivTokens)
         .where(eq(pgSchema.derivTokens.userId, targetUserId));
-      for (const token of localTokens as any[]) {
+      // Import the active/newest local token first for each slot. Inactive rows
+      // are historical snapshots and must never shadow the token currently in use.
+      const rankedTokens = [...(localTokens as any[])].sort((a, b) =>
+        Number(Boolean(b.isActive)) - Number(Boolean(a.isActive)) ||
+        (toPgDate(b.updatedAt ?? b.createdAt)?.getTime() ?? 0) -
+          (toPgDate(a.updatedAt ?? a.createdAt)?.getTime() ?? 0)
+      );
+      for (const token of rankedTokens) {
         const slotIndex = token.slotIndex ?? null;
         if (neonTokens.some((row: any) => (row.slotIndex ?? null) === slotIndex)) continue;
         await tx.insert(pgSchema.derivTokens).values({
