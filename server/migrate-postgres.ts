@@ -325,7 +325,7 @@ async function migratePostgres() {
           ORDER BY COALESCE(updated_at, created_at) DESC NULLS LAST, id DESC
         ) AS row_num
         FROM deriv_tokens
-        WHERE is_active = TRUE
+        WHERE is_active = TRUE AND slot_index IS NOT NULL
       )
       UPDATE deriv_tokens AS token
       SET is_active = FALSE, updated_at = NOW()
@@ -336,11 +336,10 @@ async function migratePostgres() {
       ON deriv_tokens (user_id, slot_index)
       WHERE is_active = TRUE AND slot_index IS NOT NULL
     `);
-    await pgDb.execute(sql`
-      CREATE UNIQUE INDEX IF NOT EXISTS uq_deriv_tokens_one_active_primary
-      ON deriv_tokens (user_id)
-      WHERE is_active = TRUE AND slot_index IS NULL
-    `);
+    // Legacy active tokens without slot_index are deliberately preserved.
+    // They may be Frenético slots from a schema predating slot_index, so treating
+    // them as duplicate primary tokens would deactivate valid accounts.
+    // The primary-token path chooses one deterministic row and only deactivates that row.
 
     await pgDb.execute(sql`
       WITH ranked AS (
