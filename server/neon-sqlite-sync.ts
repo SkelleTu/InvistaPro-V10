@@ -290,10 +290,10 @@ export async function restoreEssentialDataToSqlite(): Promise<{ users: number; t
   `);
 
   const tokenUpsert = sqlite.prepare(`
-    INSERT INTO deriv_tokens(id,user_id,token,account_type,is_active,slot_index,created_at,updated_at)
-    VALUES(@id,@user_id,@token,@account_type,@is_active,@slot_index,@created_at,@updated_at)
+    INSERT INTO deriv_tokens(id,user_id,token,account_type,is_active,is_primary,slot_index,created_at,updated_at)
+    VALUES(@id,@user_id,@token,@account_type,@is_active,@is_primary,@slot_index,@created_at,@updated_at)
     ON CONFLICT(id) DO UPDATE SET token=excluded.token,account_type=excluded.account_type,is_active=excluded.is_active,
-      slot_index=excluded.slot_index,updated_at=excluded.updated_at
+      is_primary=excluded.is_primary,slot_index=excluded.slot_index,updated_at=excluded.updated_at
   `);
 
   const configUpsert = sqlite.prepare(`
@@ -354,7 +354,8 @@ export async function restoreEssentialDataToSqlite(): Promise<{ users: number; t
     }
     for (const t of tokens as any[]) {
       tokenUpsert.run({id:t.id,user_id:t.userId,token:t.token,account_type:t.accountType,is_active:localValue(t.isActive),
-        slot_index:t.slotIndex ?? null,created_at:localValue(t.createdAt),updated_at:localValue(t.updatedAt)});
+        is_primary:localValue(t.isPrimary ?? false),slot_index:t.slotIndex ?? null,
+        created_at:localValue(t.createdAt),updated_at:localValue(t.updatedAt)});
     }
     for (const c of configs as any[]) {
       configUpsert.run({
