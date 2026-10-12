@@ -8,6 +8,7 @@ const storagePostgres = read("server/storage-postgres.ts");
 const migration = read("server/migrate-postgres.ts");
 const restore = read("server/neon-sqlite-sync.ts");
 const boot = read("server/index.ts");
+const sqliteDb = read("server/db.ts");
 const deploymentDocs = read("docs/neon-sqlite-storage.md");
 
 assert.match(storage, /private async writeEssential/);
@@ -51,6 +52,9 @@ assert.match(storagePostgres, /currentPrimary/);
 assert.match(storagePostgres, /eq\(pgSchema\.derivTokens\.isPrimary, true\)/);
 assert.match(storageSqlite, /eq\(derivTokens\.isPrimary, true\)/);
 assert.match(storageSqlite, /isPrimary: true/);
+for (const column of ["shortcode", "buy_price", "sell_price", "entry_epoch", "exit_epoch", "contract_type", "barrier", "deriv_status", "deriv_profit", "payout", "status_changed_at", "last_sync_at", "sync_count"]) {
+  assert.match(sqliteDb, new RegExp(`\\['${column}',`), `SQLite migration must add missing trade_operations column: ${column}`);
+}
 assert.match(storagePostgres, /async upsertDerivTokenBySlot[\s\S]*?db\.transaction/);
 assert.match(storagePostgres, /async createTradeConfig[\s\S]*?db\.transaction/);
 assert.match(storagePostgres, /async updateTradeConfig[\s\S]*?db\.transaction/);
