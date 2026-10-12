@@ -353,6 +353,37 @@ export function initializeDatabase() {
       console.error('⚠️ Erro ao adicionar coluna operation_mode:', error);
     }
 
+    // Keep legacy SQLite files compatible with the current Drizzle trade_operations schema.
+    // Add each missing column idempotently before contract recovery queries run.
+    try {
+      const tradeOperationColumns: Array<[string, string]> = [
+        ['shortcode', 'TEXT'],
+        ['buy_price', 'REAL'],
+        ['sell_price', 'REAL'],
+        ['entry_epoch', 'INTEGER'],
+        ['exit_epoch', 'INTEGER'],
+        ['contract_type', 'TEXT'],
+        ['barrier', 'TEXT'],
+        ['deriv_status', 'TEXT'],
+        ['deriv_profit', 'REAL'],
+        ['payout', 'REAL'],
+        ['status_changed_at', 'TEXT'],
+        ['last_sync_at', 'TEXT'],
+        ['sync_count', 'INTEGER DEFAULT 0'],
+        ['is_conservative_forced', 'INTEGER DEFAULT 0'],
+      ];
+      for (const [columnName, columnDefinition] of tradeOperationColumns) {
+        const existingColumns = sqlite.prepare("PRAGMA table_info(trade_operations)").all();
+        if (!existingColumns.some((column: any) => column.name === columnName)) {
+          sqlite.exec(`ALTER TABLE trade_operations ADD COLUMN ${columnName} ${columnDefinition}`);
+          console.log(`✅ Coluna ${columnName} adicionada a trade_operations`);
+        }
+      }
+    } catch (error) {
+      console.error('❌ Falha ao atualizar o esquema SQLite de trade_operations:', error);
+      throw error;
+    }
+
     // SISTEMA DE RESILIÊNCIA E AUTO-RESTART
 
     sqlite.exec(`
