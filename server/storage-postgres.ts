@@ -124,7 +124,7 @@ function convertSQLiteDataToPostgres(data: any): any {
         'telefoneVerificado', 'contaAprovada', 'documentosVerificados', 'isAdmin',
         'usarSenhaFallback', 'biometriaConfigurada', 'rendimentoSaqueAutomatico',
         'biometriaVerificada', 'isActive', 'isRecoveryMode', 'isConservativeForced',
-        'isRecoveryActive', 'isSimulated'
+        'isRecoveryActive', 'isSimulated', 'enableMartingale', 'enableLeverage', 'enableCircuitBreaker', 'enableRecoveryMode'
       ];
       
       if (booleanFields.includes(key)) {
@@ -434,12 +434,44 @@ export class PostgresStorage implements IStorage {
       .where(eq(pgSchema.tradeConfigurations.userId, userId));
   }
 
-  async updateSelectedModalities(_userId: string, _modalities: string[]): Promise<void> {}
-  async updateAccuGrowthRates(_userId: string, _rates: string[]): Promise<void> {}
-  async updateModalityFrequency(_userId: string, _freq: Record<string, string>): Promise<void> {}
-  async updateAccuTicksPerRate(_userId: string, _ticks: Record<string, number>): Promise<void> {}
-  async updateAccuFrequencyPerRate(_userId: string, _freq: Record<string, string>): Promise<void> {}
-  async updateModalityTicks(_userId: string, _ticks: Record<string, number>): Promise<void> {}
+  private async updateActiveConfig(userId: string, patch: Record<string, any>): Promise<void> {
+    await db.update(pgSchema.tradeConfigurations)
+      .set({ ...patch, updatedAt: new Date() })
+      .where(and(eq(pgSchema.tradeConfigurations.userId, userId), eq(pgSchema.tradeConfigurations.isActive, true)));
+  }
+
+  async updateSelectedModalities(userId: string, modalities: string[]): Promise<void> {
+    return this.updateActiveConfig(userId, { selectedModalities: JSON.stringify(modalities) });
+  }
+  async updateAccuGrowthRates(userId: string, rates: string[]): Promise<void> {
+    return this.updateActiveConfig(userId, { accuGrowthRates: JSON.stringify(rates) });
+  }
+  async updateModalityFrequency(userId: string, freq: Record<string, string>): Promise<void> {
+    return this.updateActiveConfig(userId, { modalityFrequency: JSON.stringify(freq) });
+  }
+  async updateAccuTicksPerRate(userId: string, ticks: Record<string, number>): Promise<void> {
+    return this.updateActiveConfig(userId, { accuTicksPerRate: JSON.stringify(ticks) });
+  }
+  async updateAccuFrequencyPerRate(userId: string, freq: Record<string, string>): Promise<void> {
+    return this.updateActiveConfig(userId, { accuFrequencyPerRate: JSON.stringify(freq) });
+  }
+  async updateModalityTicks(userId: string, ticks: Record<string, number>): Promise<void> {
+    return this.updateActiveConfig(userId, { modalityTicks: JSON.stringify(ticks) });
+  }
+
+  async updateRiskSettings(userId: string, settings: any): Promise<void> {
+    const patch: Record<string, any> = {};
+    if (settings.enableMartingale !== undefined) patch.enableMartingale = settings.enableMartingale;
+    if (settings.enableLeverage !== undefined) patch.enableLeverage = settings.enableLeverage;
+    if (settings.enableCircuitBreaker !== undefined) patch.enableCircuitBreaker = settings.enableCircuitBreaker;
+    if (settings.enableRecoveryMode !== undefined) patch.enableRecoveryMode = settings.enableRecoveryMode;
+    if (settings.martingaleMultipliers !== undefined) patch.martingaleMultipliers = JSON.stringify(settings.martingaleMultipliers);
+    if (settings.circuitBreakerLosses !== undefined) patch.circuitBreakerLosses = settings.circuitBreakerLosses;
+    if (settings.circuitBreakerPauseMinutes !== undefined) patch.circuitBreakerPauseMinutes = settings.circuitBreakerPauseMinutes;
+    if (settings.stakeMode !== undefined) patch.stakeMode = settings.stakeMode;
+    if (settings.fixedStake !== undefined) patch.fixedStake = settings.fixedStake;
+    await this.updateActiveConfig(userId, patch);
+  }
 
   async getActiveTradeConfigurations(): Promise<TradeConfiguration[]> {
     const configs = await db
@@ -860,9 +892,56 @@ export class PostgresStorage implements IStorage {
 
   async updatePausedNowStatus(userId: string, isPausedNow: boolean): Promise<void> {}
 
-  async getAllDerivTokens(_userId: string): Promise<DerivToken[]> { return []; }
-  async upsertDerivTokenBySlot(_userId: string, _slotIndex: number, _token: string, _accountType: string): Promise<DerivToken> { throw new Error('Not implemented in PostgresStorage'); }
-  async deleteDerivTokenBySlot(_userId: string, _slotIndex: number): Promise<void> {}
+  async getAllDerivTokens(userId: string): Promise<DerivToken[]> {
+    const rows = await db.select().from(pgSchema.derivTokens)
+      .where(and(eq(pgSchema.derivTokens.userId, userId), eq(pgSchema.derivTokens.isActive, true)));
+    return rows.map((row: any) => ({ ...row, token: EncryptionService.decrypt(row.token) })) as DerivToken[];
+  }
+
+  async upsertDerivTokenBySlot(userId: string, slotIndex: number, token: string, accountType: string, id?: string): Promise<DerivToken> {
+    if (!Number.isInteger(slotIndex) || slotIndex < 0 || slotIndex > 9) throw new Error("slotIndex must be an integer from 0 to 9");
+    const encrypted = EncryptionService.encrypt(token);
+    const [existing] = await db.select().from(pgSchema.derivTokens)
+      .where(and(eq(pgSchema.derivTokens.userId, userId), eq(pgSchema.derivTokens.slotIndex, slotIndex)));
+    let saved: any;
+    if (existing) {
+      [saved] = await db.update(pgSchema.derivTokens)
+        .set({ token: encrypted, accountType, isActive: true, updatedAt: new Date() })
+        .where(eq(pgSchema.derivTokens.id, existing.id)).returning();
+    } else {
+      [saved] = await db.insert(pgSchema.derivTokens)
+        .values({ id: id ?? randomBytes(16).toString("hex"), userId, token: encrypted, accountType, isActive: true, slotIndex })
+        .returning();
+    }
+    return { ...saved, token: EncryptionService.decrypt(saved.token) } as DerivToken;
+  }
+
+  async deleteDerivTokenBySlot(userId: string, slotIndex: number): Promise<void> {
+    await db.update(pgSchema.derivTokens).set({ isActive: false, updatedAt: new Date() })
+      .where(and(eq(pgSchema.derivTokens.userId, userId), eq(pgSchema.derivTokens.slotIndex, slotIndex)));
+  }
+
+  async getModalityModuleConfigs(userId: string): Promise<any[]> {
+    return await db.select().from(pgSchema.modalityModuleConfigs).where(eq(pgSchema.modalityModuleConfigs.userId, userId));
+  }
+  async getModalityModuleConfig(userId: string, modality: string): Promise<any> {
+    const [row] = await db.select().from(pgSchema.modalityModuleConfigs)
+      .where(and(eq(pgSchema.modalityModuleConfigs.userId, userId), eq(pgSchema.modalityModuleConfigs.modality, modality)));
+    return row;
+  }
+  async upsertModalityModuleConfig(userId: string, modality: string, slotConfigs: any[]): Promise<any> {
+    const [existing] = await db.select().from(pgSchema.modalityModuleConfigs)
+      .where(and(eq(pgSchema.modalityModuleConfigs.userId, userId), eq(pgSchema.modalityModuleConfigs.modality, modality)));
+    if (existing) {
+      const [row] = await db.update(pgSchema.modalityModuleConfigs)
+        .set({ slotConfigs: JSON.stringify(slotConfigs), updatedAt: new Date() })
+        .where(eq(pgSchema.modalityModuleConfigs.id, existing.id)).returning();
+      return row;
+    }
+    const [row] = await db.insert(pgSchema.modalityModuleConfigs)
+      .values({ userId, modality, slotConfigs: JSON.stringify(slotConfigs) }).returning();
+    return row;
+  }
 
   async getModalityModuleConfigs(_userId: string): Promise<any[]> { return []; }
   async getModalityModuleConfig(_userId: string, _modality: string): Promise<any> { return undefined; }
