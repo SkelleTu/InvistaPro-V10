@@ -131,7 +131,8 @@ app.use((req, res, next) => {
     }
     const healthy = persistenceReady && obsHealth.critical === 0 && secretHealth.status === 'healthy';
     return res.status(200).json({
-      status: healthy ? 'ok' : 'degraded',
+      status: 'ok',
+      readiness: healthy ? 'ready' : 'degraded',
       routesReady,
       persistenceReady,
       error: persistenceReady ? undefined : 'Persistência Neon ainda não está pronta',
@@ -177,7 +178,8 @@ app.use((req, res, next) => {
   // This guard must be registered before the application routes so no API
   // handler can accept writes before Neon migration and local restoration finish.
   app.use('/api', (req, res, next) => {
-    if (!persistenceReady && !req.path.startsWith('/observability/')) {
+    const livenessPath = req.path === '/health' || req.path === '/status';
+    if (!persistenceReady && !livenessPath && !req.path.startsWith('/observability/')) {
       return res.status(503).json({
         success: false,
         error: 'Persistência indisponível: Neon não foi migrada/restaurada com sucesso.',
