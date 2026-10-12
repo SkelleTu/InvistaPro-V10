@@ -52,6 +52,7 @@ async function main() {
     token: encryptedToken,
     accountType: "demo",
     isActive: false,
+    isPrimary: true,
     slotIndex: null,
   }).onConflictDoNothing();
 
