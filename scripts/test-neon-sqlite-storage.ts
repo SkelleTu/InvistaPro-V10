@@ -10,6 +10,7 @@ const boot = read("server/index.ts");
 assert.match(storage, /private async writeEssential/);
 assert.match(storage, /NEON_REQUIRED/);
 assert.match(storage, /this\.turso = null/);
+assert.doesNotMatch(storage, /storage-turso/);
 assert.match(storage, /async createAiLog\(log: InsertAiLog\)\s+\{ return this\.sqlite\.createAiLog\(log\); \}/);
 assert.match(storage, /async upsertMarketData\(data: InsertMarketData\) \{ return this\.sqlite\.upsertMarketData\(data\); \}/);
 
