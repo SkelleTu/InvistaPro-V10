@@ -278,11 +278,8 @@ export class PostgresStorage implements IStorage {
   async createDerivToken(tokenData: InsertDerivToken): Promise<DerivToken> {
     await db
       .update(pgSchema.derivTokens)
-      .set({
-        isActive: false,
-        updatedAt: new Date(),
-      })
-      .where(eq(pgSchema.derivTokens.userId, tokenData.userId));
+      .set({ isActive: false, updatedAt: new Date() })
+      .where(and(eq(pgSchema.derivTokens.userId, tokenData.userId), eq(pgSchema.derivTokens.slotIndex, null as any)));
     
     const encryptedTokenData = {
       ...convertSQLiteDataToPostgres(tokenData),
@@ -315,7 +312,7 @@ export class PostgresStorage implements IStorage {
     } as DerivToken;
   }
 
-  async updateDerivToken(userId: string, token: string, accountType: string): Promise<DerivToken> {
+  async updateDerivToken(userId: string, token: string, accountType: string, id?: string): Promise<DerivToken> {
     // Deactivate all existing tokens first
     await db
       .update(pgSchema.derivTokens)
@@ -323,17 +320,19 @@ export class PostgresStorage implements IStorage {
         isActive: false,
         updatedAt: new Date(),
       })
-      .where(eq(pgSchema.derivTokens.userId, userId));
+      .where(and(eq(pgSchema.derivTokens.userId, userId), eq(pgSchema.derivTokens.slotIndex, null as any)));
     
     // Create new active token with encryption
     const [newToken] = await db
       .insert(pgSchema.derivTokens)
       .values({
+        id,
         userId,
         token: EncryptionService.encrypt(token),
         accountType,
         isActive: true,
-      })
+        slotIndex: null,
+      } as any)
       .returning();
     
     // Decrypt token for return value
@@ -384,7 +383,7 @@ export class PostgresStorage implements IStorage {
     return config as TradeConfiguration;
   }
 
-  async updateTradeConfig(userId: string, mode: string): Promise<TradeConfiguration> {
+  async updateTradeConfig(userId: string, mode: string, id?: string): Promise<TradeConfiguration> {
     const modeConfigs: Record<string, any> = {
       'production_3-4_24h': { operations: 4, interval: 'hours', value: 6 },
       'production_2_24h': { operations: 2, interval: 'hours', value: 12 },
@@ -412,6 +411,7 @@ export class PostgresStorage implements IStorage {
     const [newConfig] = await db
       .insert(pgSchema.tradeConfigurations)
       .values({
+        id,
         userId,
         mode,
         isActive: true,
@@ -947,7 +947,19 @@ export class PostgresStorage implements IStorage {
   async getModalityModuleConfig(_userId: string, _modality: string): Promise<any> { return undefined; }
   async upsertModalityModuleConfig(_userId: string, _modality: string, _slotConfigs: any[]): Promise<any> { return {}; }
 
-  async updateRiskSettings(_userId: string, _settings: any): Promise<void> {}
+  async updateRiskSettings(userId: string, settings: any): Promise<void> {
+    const patch: Record<string, any> = {};
+    if (settings.enableMartingale !== undefined) patch.enableMartingale = settings.enableMartingale;
+    if (settings.enableLeverage !== undefined) patch.enableLeverage = settings.enableLeverage;
+    if (settings.enableCircuitBreaker !== undefined) patch.enableCircuitBreaker = settings.enableCircuitBreaker;
+    if (settings.enableRecoveryMode !== undefined) patch.enableRecoveryMode = settings.enableRecoveryMode;
+    if (settings.martingaleMultipliers !== undefined) patch.martingaleMultipliers = JSON.stringify(settings.martingaleMultipliers);
+    if (settings.circuitBreakerLosses !== undefined) patch.circuitBreakerLosses = settings.circuitBreakerLosses;
+    if (settings.circuitBreakerPauseMinutes !== undefined) patch.circuitBreakerPauseMinutes = settings.circuitBreakerPauseMinutes;
+    if (settings.stakeMode !== undefined) patch.stakeMode = settings.stakeMode;
+    if (settings.fixedStake !== undefined) patch.fixedStake = settings.fixedStake;
+    await this.updateActiveConfig(userId, patch);
+  }
 
   async isUserBlockedAsset(_userId: string, _symbol: string, _tradeMode: string): Promise<boolean> { return false; }
 
