@@ -237,6 +237,11 @@ export async function restoreEssentialDataToSqlite(): Promise<{ users: number; t
     ON CONFLICT(id) DO UPDATE SET slot_configs=excluded.slot_configs,updated_at=excluded.updated_at
   `);
 
+  const moduleConfigUpdateByKey = sqlite.prepare(`
+    UPDATE modality_module_configs SET slot_configs = ?, updated_at = ?
+    WHERE user_id = ? AND modality = ?
+  `);
+
   const transaction = sqlite.transaction(() => {
     for (const u of users as any[]) {
       userUpsert.run({
@@ -255,9 +260,9 @@ export async function restoreEssentialDataToSqlite(): Promise<{ users: number; t
     // Reconcile canonical per-user token/config snapshots before rehydrating them.
     // Only users present in Neon are reconciled; trade history and transient tables are untouched.
     for (const u of users as any[]) {
-      sqlite.prepare("DELETE FROM deriv_tokens WHERE user_id = ?").run(u.id);
-      sqlite.prepare("DELETE FROM trade_configurations WHERE user_id = ?").run(u.id);
-      sqlite.prepare("DELETE FROM modality_module_configs WHERE user_id = ?").run(u.id);
+      // Keep local history rows, but make Neon the only active token/config snapshot.
+      sqlite.prepare("UPDATE deriv_tokens SET is_active = 0 WHERE user_id = ?").run(u.id);
+      sqlite.prepare("UPDATE trade_configurations SET is_active = 0 WHERE user_id = ?").run(u.id);
     }
     for (const t of tokens as any[]) {
       tokenUpsert.run({id:t.id,user_id:t.userId,token:t.token,account_type:t.accountType,is_active:localValue(t.isActive),
@@ -278,7 +283,12 @@ export async function restoreEssentialDataToSqlite(): Promise<{ users: number; t
       });
     }
     for (const m of moduleConfigs as any[]) {
-      moduleConfigUpsert.run({id:m.id,user_id:m.userId,modality:m.modality,slot_configs:m.slotConfigs ?? "[]",updated_at:localValue(m.updatedAt)});
+      const slotConfigs = m.slotConfigs ?? "[]";
+      const updatedAt = localValue(m.updatedAt);
+      const result = moduleConfigUpdateByKey.run(slotConfigs, updatedAt, m.userId, m.modality);
+      if (result.changes === 0) {
+        moduleConfigUpsert.run({id:m.id,user_id:m.userId,modality:m.modality,slot_configs:slotConfigs,updated_at:updatedAt});
+      }
     }
   });
   transaction();
