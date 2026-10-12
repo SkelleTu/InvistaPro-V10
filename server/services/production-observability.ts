@@ -207,7 +207,19 @@ class ProductionObservability {
     const requestId = String((req as any).observabilityRequestId || req.headers["x-request-id"] || req.headers["rndr-id"] || "");
     if (requestId) this.finishRequest(requestId);
     const status = res.statusCode;
-    const level: ObservabilityLevel = status >= 500 ? "ERROR" : status >= 400 ? "WARNING" : "INFO";
+    // Readiness endpoints may intentionally return 503 while configuration is degraded.
+    // Do not let the health probe itself inflate the error counter it is measuring.
+    const isReadinessProbe = [
+      "/health",
+      "/api/health",
+      "/api/observability/health",
+      "/api/observability/errors",
+    ].includes(req.path);
+    const level: ObservabilityLevel = status >= 500 && !isReadinessProbe
+      ? "ERROR"
+      : status >= 400
+        ? "WARNING"
+        : "INFO";
     const category: ObservabilityCategory = status === 401 || status === 403 ? "AUTH" : "HTTP";
     return this.emit({
       level,
