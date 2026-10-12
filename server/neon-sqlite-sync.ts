@@ -3,7 +3,7 @@ import { db as sqliteDb, sqlite } from "./db";
 import { DatabaseStorage } from "./storage";
 import * as localSchema from "@shared/schema";
 import { eq } from "drizzle-orm";
-import { createCipheriv, randomBytes } from "crypto";
+import { createCipheriv, createDecipheriv, randomBytes } from "crypto";
 
 function toPgDate(value: any): Date | null {
   if (value === null || value === undefined || value === "") return null;
@@ -21,6 +21,20 @@ function encryptLegacyPlainToken(token: string): string {
   const cipher = createCipheriv("aes-256-gcm", Buffer.from(rawKey, "hex"), iv);
   const encrypted = cipher.update(token, "utf8", "hex") + cipher.final("hex");
   return `${iv.toString("hex")}:${cipher.getAuthTag().toString("hex")}:${encrypted}`;
+}
+
+function assertTokenDecryptable(encryptedToken: string): void {
+  const rawKey = process.env.ENCRYPTION_KEY?.trim();
+  if (!rawKey || !/^[0-9a-fA-F]{64}$/.test(rawKey)) {
+    throw new Error("ENCRYPTION_KEY inválida ou ausente para validar tokens Deriv.");
+  }
+  const parts = encryptedToken.split(":");
+  if (parts.length !== 3) throw new Error("TOKEN_CIPHERTEXT_FORMAT_INVALID: token criptografado em formato inválido.");
+  const decipher = createDecipheriv("aes-256-gcm", Buffer.from(rawKey, "hex"), Buffer.from(parts[0], "hex"));
+  decipher.setAuthTag(Buffer.from(parts[1], "hex"));
+  // Decrypt only to validate the key/tag; never log or return the plaintext.
+  decipher.update(parts[2], "hex", "utf8");
+  decipher.final("utf8");
 }
 
 /**
@@ -175,6 +189,15 @@ export async function restoreEssentialDataToSqlite(): Promise<{ users: number; t
 
   if (tokens.length > 0 && !/^[0-9a-fA-F]{64}$/.test(process.env.ENCRYPTION_KEY?.trim() ?? "")) {
     throw new Error("ENCRYPTION_KEY inválida ou ausente: não é seguro restaurar tokens Deriv criptografados.");
+  }
+  for (const token of tokens as any[]) {
+    if (!String(token.token).includes(":")) {
+      const encrypted = encryptLegacyPlainToken(String(token.token));
+      await pgDb.update(pgSchema.derivTokens).set({ token: encrypted, updatedAt: new Date() })
+        .where(eq(pgSchema.derivTokens.id, token.id));
+      token.token = encrypted;
+    }
+    assertTokenDecryptable(String(token.token));
   }
 
   const userUpsert = sqlite.prepare(`
