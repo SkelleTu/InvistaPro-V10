@@ -178,7 +178,7 @@ app.use((req, res, next) => {
   // This guard must be registered before the application routes so no API
   // handler can accept writes before Neon migration and local restoration finish.
   app.use('/api', (req, res, next) => {
-    const livenessPath = req.path === '/health' || req.path === '/status' || req.path === '/ping';
+    const livenessPath = ['/health', '/status', '/ping', '/api/health', '/api/status', '/api/ping'].includes(req.path);
     const anonymousSecurityProbe = !req.headers.cookie && !req.headers.authorization && (
       req.path === '/trading/account-info' ||
       req.path === '/setup-admin' ||
