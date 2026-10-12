@@ -3,7 +3,7 @@ import { db as sqliteDb, sqlite } from "./db";
 import { DatabaseStorage } from "./storage";
 import * as localSchema from "@shared/schema";
 import { eq } from "drizzle-orm";
-import { createCipheriv, createDecipheriv, randomBytes } from "crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from "crypto";
 
 function toPgDate(value: any): Date | null {
   if (value === null || value === undefined || value === "") return null;
@@ -31,18 +31,27 @@ function encryptLegacyPlainToken(token: string): string {
   return `${iv.toString("hex")}:${cipher.getAuthTag().toString("hex")}:${encrypted}`;
 }
 
-function assertTokenDecryptable(encryptedToken: string): void {
+function decryptTokenForMatching(token: string): string {
+  if (!isEncryptedTokenFormat(token)) return token;
   const rawKey = process.env.ENCRYPTION_KEY?.trim();
   if (!rawKey || !/^[0-9a-fA-F]{64}$/.test(rawKey)) {
     throw new Error("ENCRYPTION_KEY inválida ou ausente para validar tokens Deriv.");
   }
-  const parts = encryptedToken.split(":");
-  if (parts.length !== 3) throw new Error("TOKEN_CIPHERTEXT_FORMAT_INVALID: token criptografado em formato inválido.");
+  const parts = token.split(":");
   const decipher = createDecipheriv("aes-256-gcm", Buffer.from(rawKey, "hex"), Buffer.from(parts[0], "hex"));
   decipher.setAuthTag(Buffer.from(parts[1], "hex"));
-  // Decrypt only to validate the key/tag; never log or return the plaintext.
-  decipher.update(parts[2], "hex", "utf8");
-  decipher.final("utf8");
+  return decipher.update(parts[2], "hex", "utf8") + decipher.final("utf8");
+}
+
+function tokenFingerprint(token: string): string {
+  return createHash("sha256").update(token, "utf8").digest("hex");
+}
+
+function assertTokenDecryptable(encryptedToken: string): void {
+  if (!isEncryptedTokenFormat(encryptedToken)) {
+    throw new Error("TOKEN_CIPHERTEXT_FORMAT_INVALID: token criptografado em formato inválido.");
+  }
+  decryptTokenForMatching(encryptedToken);
 }
 
 /**
@@ -116,6 +125,26 @@ export async function backfillMissingEssentialDataToNeon(): Promise<{ importedUs
       // is authoritative and must not be resurrected from a stale local copy.
       const neonTokens = await tx.select().from(pgSchema.derivTokens)
         .where(eq(pgSchema.derivTokens.userId, targetUserId));
+
+      // If this legacy Neon schema stored active Frenético tokens before slot_index
+      // existed, recover slot identity only by exact token match against local SQLite.
+      // Never guess a slot from row order or timestamps.
+      const localActiveTokens = await localStorage.getAllDerivTokens(user.id);
+      for (const localToken of localActiveTokens as any[]) {
+        if (localToken.slotIndex === null || localToken.slotIndex === undefined) continue;
+        const localFingerprint = tokenFingerprint(String(localToken.token));
+        const matchingLegacy = (neonTokens as any[]).find((row: any) =>
+          row.isActive && (row.slotIndex === null || row.slotIndex === undefined) &&
+          tokenFingerprint(decryptTokenForMatching(String(row.token))) === localFingerprint
+        );
+        if (matchingLegacy) {
+          await tx.update(pgSchema.derivTokens)
+            .set({ slotIndex: localToken.slotIndex })
+            .where(eq(pgSchema.derivTokens.id, matchingLegacy.id));
+          matchingLegacy.slotIndex = localToken.slotIndex;
+        }
+      }
+
       // Import the active/newest local token first for each slot. Inactive rows
       // are historical snapshots and must never shadow the token currently in use.
       const rankedTokens = [...(localTokens as any[])].sort((a, b) =>
