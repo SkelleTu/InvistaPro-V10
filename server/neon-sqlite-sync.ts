@@ -50,7 +50,11 @@ export async function backfillMissingEssentialDataToNeon(): Promise<{ importedUs
     const imported = await pgDb.transaction(async (tx: any) => {
       const [byId] = await tx.select().from(pgSchema.users).where(eq(pgSchema.users.id, user.id));
       const [byEmail] = await tx.select().from(pgSchema.users).where(eq(pgSchema.users.email, user.email));
-      if (byId || byEmail) return false;
+      const [byCpf] = await tx.select().from(pgSchema.users).where(eq(pgSchema.users.cpf, user.cpf));
+      if (byId) return false;
+      if (byEmail || byCpf) {
+        throw new Error("LOCAL_USER_ID_CONFLICT: existe uma conta local com identificador diferente da conta durável na Neon; backfill interrompido para evitar misturar identidades.");
+      }
 
       const userValues: any = {
         ...user,
