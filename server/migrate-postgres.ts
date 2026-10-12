@@ -13,7 +13,7 @@ async function migratePostgres() {
     await pgDb.execute(sql`CREATE EXTENSION IF NOT EXISTS "pgcrypto";`);
     console.log('✅ Extensão pgcrypto ativada');
 
-    const visualPlatform = String(process.env.INVISTA_PLATFORM ?? "").trim().toLowerCase();
+    const visualPlatform = String(process.env.INVISTA_PLATFORM ?? "v10").trim().toLowerCase();
     if (visualPlatform !== "v10" && visualPlatform !== "aura") {
       throw new Error("INVISTA_PLATFORM must be set to 'v10' or 'aura' before enabling Neon persistence.");
     }
