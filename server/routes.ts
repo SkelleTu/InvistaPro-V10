@@ -208,6 +208,63 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
   });
 
+  // Internal service-to-service DEMO authorization check. Never returns tokens or balances.
+  app.post("/api/internal/master/demo-auth-check", async (req, res) => {
+    const expected = String(process.env.INVISTA_UNIVERSAL_SERVER_KEY ?? "").trim();
+    const supplied = String(req.header("x-invista-server-key") ?? "").trim();
+    if (!expected || !supplied) {
+      return res.status(401).json({ ok: false, error: "unauthorized" });
+    }
+    const expectedBuffer = Buffer.from(expected, "utf8");
+    const suppliedBuffer = Buffer.from(supplied, "utf8");
+    if (expectedBuffer.length !== suppliedBuffer.length || !crypto.timingSafeEqual(expectedBuffer, suppliedBuffer)) {
+      return res.status(401).json({ ok: false, error: "unauthorized" });
+    }
+
+    const operationId = crypto.randomUUID();
+    let derivSession: DerivAPIService | null = null;
+    try {
+      const master = await dbStorage.getUserByEmail("vfdiogoseg@gmail.com");
+      if (!master) {
+        console.warn(`[INTERNAL_DEMO_AUTH] ${operationId} master_user_missing`);
+        return res.status(404).json({ ok: false, platform: "main", masterFound: false, demoTokenPresent: false, authenticated: false });
+      }
+
+      const activeTokens = await dbStorage.getAllDerivTokens(master.id);
+      const demoToken = activeTokens.find((item) => item.isActive && String(item.accountType).toLowerCase() === "demo" && String(item.token ?? "").trim());
+      if (!demoToken) {
+        console.info(`[INTERNAL_DEMO_AUTH] ${operationId} demo_token_missing`);
+        return res.status(200).json({ ok: true, platform: "main", masterFound: true, demoTokenPresent: false, authenticated: false });
+      }
+
+      derivSession = new DerivAPIService("demo");
+      const connected = await derivSession.connect(demoToken.token, "demo", operationId);
+      if (!connected) {
+        console.warn(`[INTERNAL_DEMO_AUTH] ${operationId} demo_auth_failed`);
+        return res.status(200).json({ ok: true, platform: "main", masterFound: true, demoTokenPresent: true, authenticated: false });
+      }
+
+      const balance = await derivSession.getBalance();
+      const demoLoginId = Boolean(balance?.loginid && /^VRTC/i.test(String(balance.loginid)));
+      console.info(`[INTERNAL_DEMO_AUTH] ${operationId} checked authenticated=${Boolean(balance)} demoLoginId=${demoLoginId}`);
+      return res.status(200).json({
+        ok: true,
+        platform: "main",
+        masterFound: true,
+        demoTokenPresent: true,
+        authenticated: Boolean(balance) && demoLoginId,
+        accountType: "demo",
+      });
+    } catch (error) {
+      console.error(`[INTERNAL_DEMO_AUTH] ${operationId} check_failed: ${error instanceof Error ? error.name : "unknown"}`);
+      return res.status(502).json({ ok: false, platform: "main", authenticated: false, error: "demo_auth_check_failed" });
+    } finally {
+      if (derivSession) {
+        try { await derivSession.disconnect(); } catch { /* cleanup only */ }
+      }
+    }
+  });
+
   // Setup authentication
   setupAuth(app);
 
