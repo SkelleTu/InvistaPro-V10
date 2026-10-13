@@ -155,7 +155,9 @@ export function setupAuth(app: Express) {
 
 // Middleware to check if user is authenticated
 export function isAuthenticated(req: any, res: any, next: any) {
-  if (req.isAuthenticated()) {
+  // Defense in depth: Passport normally installs this method through passport.session().
+  // If middleware ordering/configuration regresses, return a controlled 401 instead of a 500.
+  if (typeof req.isAuthenticated === "function" && req.isAuthenticated()) {
     return next();
   }
   res.status(401).json({ message: "Unauthorized" });
