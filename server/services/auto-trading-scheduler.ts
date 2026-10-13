@@ -5018,7 +5018,8 @@ export class AutoTradingScheduler {
   } {
     const nowSt = Date.now();
     const marketStats = marketDataCollector.getCollectionStats();
-    const marketDataReady = marketStats.isCollecting && marketStats.totalTicks > 0;
+    const marketDataReady = marketStats.isCollecting && marketStats.activeSymbols > 0 &&
+      marketStats.symbols.some((symbol) => Date.now() - symbol.lastUpdate < 30000);
     const isPaused = this.badMarketPausedUntil > nowSt;
     const secsLeft = isPaused ? Math.round((this.badMarketPausedUntil - nowSt) / 1000) : 0;
     return {
