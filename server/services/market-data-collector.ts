@@ -24,6 +24,8 @@ export class MarketDataCollector extends EventEmitter {
   private isCollecting = false;
   private isDiscoveryComplete = false;
   private totalTicksReceived = 0;
+  private lastPersistenceSuccessAt = 0;
+  private persistenceFailures = 0;
   
   // 🎯 FALLBACK SEGURO: Símbolos que SEMPRE suportam DIGITDIFF (garantido pela Deriv)
   private static readonly FALLBACK_SYMBOLS = [
@@ -258,6 +260,7 @@ export class MarketDataCollector extends EventEmitter {
         priceHistory: JSON.stringify(priceHistory),
         isSimulated: false // Dados reais da Deriv
       });
+      this.lastPersistenceSuccessAt = Date.now();
 
       // Dados salvos silenciosamente para evitar log flood
 
@@ -265,6 +268,7 @@ export class MarketDataCollector extends EventEmitter {
       buffer.ticks = [];
 
     } catch (error) {
+      this.persistenceFailures += 1;
       console.error(`❌ [FNACIA] Erro ao salvar ${symbol}:`, error);
     }
   }
@@ -340,6 +344,8 @@ export class MarketDataCollector extends EventEmitter {
       this.DIGITDIFF_SUPPORTED_SYMBOLS = supportedSymbols;
       this.tickBuffers.clear();
       this.totalTicksReceived = 0;
+      this.lastPersistenceSuccessAt = 0;
+      this.persistenceFailures = 0;
 
       console.log(`🚀 [FNACIA] Iniciando coleta validada para ${supportedSymbols.length} ativos: ${supportedSymbols.join(', ')}`);
 
@@ -366,6 +372,18 @@ export class MarketDataCollector extends EventEmitter {
       }
 
       await firstTick;
+      // Prove that the first real tick can be persisted through the same storage
+      // path the analysis engine reads before acknowledging Play as ready.
+      const firstSymbol = this.getCollectionStats().symbols
+        .filter((entry) => Date.now() - entry.lastUpdate < 5000)
+        .map((entry) => entry.symbol)[0];
+      if (!firstSymbol) throw new Error('First Deriv tick was received but no active symbol buffer was created.');
+      await this.saveBufferedData();
+      const persisted = await storage.getMarketData(firstSymbol);
+      const persistedAt = persisted?.lastUpdate ? new Date(persisted.lastUpdate).getTime() : 0;
+      if (!persisted || !persistedAt || Date.now() - persistedAt > 30000 || this.lastPersistenceSuccessAt === 0) {
+        throw new Error(`First real tick for ${firstSymbol} was not confirmed in persistent market storage.`);
+      }
       if (firstTickHandler) this.removeListener('tick_processed', firstTickHandler);
       if (firstTickTimer) clearTimeout(firstTickTimer);
       firstTickHandler = null;
@@ -462,8 +480,11 @@ export class MarketDataCollector extends EventEmitter {
       isCollecting: this.isCollecting,
       activeSymbols: this.tickBuffers.size,
       totalTicks: this.totalTicksReceived,
-      symbols
-    };
+      symbols,
+      persistenceReady: this.lastPersistenceSuccessAt > 0 && Date.now() - this.lastPersistenceSuccessAt < 60000,
+      lastPersistenceSuccessAt: this.lastPersistenceSuccessAt,
+      persistenceFailures: this.persistenceFailures
+    } as any;
   }
 
   /**
