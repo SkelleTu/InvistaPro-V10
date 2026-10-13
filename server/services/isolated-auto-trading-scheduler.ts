@@ -34,6 +34,10 @@ interface UserRuntime {
   marketDataSymbols: number;
   currentPhase: string;
   totalExecutedOperations: number;
+  contractCapabilityReady: boolean;
+  contractCapabilitySymbols: number;
+  contractCapabilityCheckedAt: number;
+  contractCapabilityModes: string[];
 }
 
 class IsolatedAutoTradingScheduler {
@@ -70,6 +74,10 @@ class IsolatedAutoTradingScheduler {
         marketDataSymbols: 0,
         currentPhase: "AGUARDANDO_PLAY",
         totalExecutedOperations: 0,
+        contractCapabilityReady: false,
+        contractCapabilitySymbols: 0,
+        contractCapabilityCheckedAt: 0,
+        contractCapabilityModes: [],
       };
       this.runtimes.set(id, runtime);
       console.log(`🧩 [USER-RUNTIME] sessão leve criada | user=${id} | session=${runtime.sessionId}`);
@@ -140,6 +148,10 @@ class IsolatedAutoTradingScheduler {
         runtime.marketDataSymbols = Number(message.marketDataSymbols || 0);
         runtime.currentPhase = String(message.currentPhase || runtime.currentPhase);
         runtime.totalExecutedOperations = Number(message.totalExecutedOperations || 0);
+        runtime.contractCapabilityReady = Boolean(message.contractCapabilityReady);
+        runtime.contractCapabilitySymbols = Number(message.contractCapabilitySymbols || 0);
+        runtime.contractCapabilityCheckedAt = Number(message.contractCapabilityCheckedAt || 0);
+        runtime.contractCapabilityModes = Array.isArray(message.contractCapabilityModes) ? message.contractCapabilityModes : [];
       } else if (message?.type === "error") {
         console.error(`❌ [USER-RUNTIME] user=${runtime.userId} session=${runtime.sessionId}: ${message.error}`);
         if (!settled) settle(new Error(String(message.error || "Worker failed before readiness.")));
@@ -319,6 +331,10 @@ class IsolatedAutoTradingScheduler {
       marketDataSymbols: r.marketDataSymbols,
       currentPhase: r.currentPhase,
       totalExecutedOperations: r.totalExecutedOperations,
+      contractCapabilityReady: r.contractCapabilityReady,
+      contractCapabilitySymbols: r.contractCapabilitySymbols,
+      contractCapabilityCheckedAt: r.contractCapabilityCheckedAt,
+      contractCapabilityModes: r.contractCapabilityModes,
     }));
   }
 
