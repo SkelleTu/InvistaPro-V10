@@ -636,7 +636,7 @@ export class DerivAPIService extends EventEmitter {
       // Current Deriv WebSocket schema accepts active_symbols and req_id;
       // legacy product_type filtering can cause the request to be rejected.
       this.sendMessage({
-        active_symbols: 'brief',
+        active_symbols: 'full',
         req_id: reqId
       });
     });
