@@ -28,6 +28,16 @@ interface UserRuntime {
   activeSessions: number;
   workerReady: boolean;
   workerReadyPromise: Promise<void> | null;
+  currentPhase: string;
+  currentPhaseDetail: string;
+  lastCycleStartedAt: number;
+  nextCycleAt: number;
+  cycleIntervalMs: number;
+  activityLog: Array<{ time: number; message: string; type: string }>;
+  marketQuality: number;
+  badMarketPaused: boolean;
+  badMarketPausedSecondsLeft: number;
+  isInitialized: boolean;
 }
 
 class IsolatedAutoTradingScheduler {
@@ -58,6 +68,16 @@ class IsolatedAutoTradingScheduler {
         activeSessions: 0,
         workerReady: false,
         workerReadyPromise: null,
+        currentPhase: "INICIALIZANDO",
+        currentPhaseDetail: "Aguardando inicialização do worker",
+        lastCycleStartedAt: 0,
+        nextCycleAt: 0,
+        cycleIntervalMs: 0,
+        activityLog: [],
+        marketQuality: 0,
+        badMarketPaused: false,
+        badMarketPausedSecondsLeft: 0,
+        isInitialized: false,
       };
       this.runtimes.set(id, runtime);
       console.log(`🧩 [USER-RUNTIME] sessão leve criada | user=${id} | session=${runtime.sessionId}`);
@@ -122,6 +142,16 @@ class IsolatedAutoTradingScheduler {
         runtime.status = message.status || runtime.status;
         runtime.armed = Boolean(message.armed);
         runtime.activeSessions = Number(message.activeSessions || 0);
+        runtime.isInitialized = Boolean(message.isInitialized);
+        runtime.currentPhase = String(message.currentPhase || runtime.currentPhase);
+        runtime.currentPhaseDetail = String(message.currentPhaseDetail || runtime.currentPhaseDetail);
+        runtime.lastCycleStartedAt = Number(message.lastCycleStartedAt || 0);
+        runtime.nextCycleAt = Number(message.nextCycleAt || 0);
+        runtime.cycleIntervalMs = Number(message.cycleIntervalMs || 0);
+        runtime.activityLog = Array.isArray(message.activityLog) ? message.activityLog.slice(0, 8) : [];
+        runtime.marketQuality = Number(message.marketQuality || 0);
+        runtime.badMarketPaused = Boolean(message.badMarketPaused);
+        runtime.badMarketPausedSecondsLeft = Number(message.badMarketPausedSecondsLeft || 0);
       } else if (message?.type === "error") {
         console.error(`❌ [USER-RUNTIME] user=${runtime.userId} session=${runtime.sessionId}: ${message.error}`);
         if (!settled) settle(new Error(String(message.error || "Worker failed before readiness.")));
@@ -295,6 +325,16 @@ class IsolatedAutoTradingScheduler {
       isolated: true,
       workerReady: r.workerReady,
       lastHeartbeatAt: r.lastHeartbeatAt,
+      currentPhase: r.currentPhase,
+      currentPhaseDetail: r.currentPhaseDetail,
+      lastCycleStartedAt: r.lastCycleStartedAt,
+      nextCycleAt: r.nextCycleAt,
+      cycleIntervalMs: r.cycleIntervalMs,
+      activityLog: r.activityLog,
+      marketQuality: r.marketQuality,
+      badMarketPaused: r.badMarketPaused,
+      badMarketPausedSecondsLeft: r.badMarketPausedSecondsLeft,
+      isInitialized: r.isInitialized,
     }));
   }
 
