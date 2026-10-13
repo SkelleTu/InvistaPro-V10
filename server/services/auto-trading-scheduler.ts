@@ -2307,7 +2307,12 @@ export class AutoTradingScheduler {
         const symbolCompatible = new Set<string>();
         if (liveContractTypes.has('DIGITDIFF')) symbolCompatible.add('digit_differs');
         if (liveContractTypes.has('ACCU')) symbolCompatible.add('accumulator');
-        const modalityFilter = activeModalities && activeModalities.length > 0 ? new Set(activeModalities) : null;
+        const canonicalModalities = activeModalities.map((modality: string) => {
+          const normalized = String(modality).trim().toLowerCase();
+          if (['digit_diff', 'digitdiff', 'digit_differs'].includes(normalized)) return 'digit_differs';
+          if (['accumulator', 'accu'].includes(normalized)) return 'accumulator';
+          return normalized;
+        });
 
         // 🤖 MODO AUTOMÁTICO: usar todas as modalidades compatíveis com o símbolo
         // A IA (selectModalityByMarketFit) escolhe a melhor para cada ciclo.
@@ -2318,20 +2323,20 @@ export class AutoTradingScheduler {
           compatibleModalities = Array.from(symbolCompatible).filter(m => ALL_SUPPORTED.has(m));
           console.log(`🤖 [${operationId}] MODO AUTOMÁTICO — pool de modalidades para ${selectedSymbol}: [${compatibleModalities.join(', ')}]`);
         } else {
-          compatibleModalities = activeModalities.filter(m => ALL_SUPPORTED.has(m) && symbolCompatible.has(m));
+          compatibleModalities = canonicalModalities.filter(m => ALL_SUPPORTED.has(m) && symbolCompatible.has(m));
         }
 
         if (compatibleModalities.length === 0) {
           if (!isAutoModalityMode) {
-            const knownUnsupported = activeModalities.filter(m => ALL_SUPPORTED.has(m) && !symbolCompatible.has(m));
-            const unknown = activeModalities.filter(m => !ALL_SUPPORTED.has(m));
+            const knownUnsupported = canonicalModalities.filter(m => ALL_SUPPORTED.has(m) && !symbolCompatible.has(m));
+            const unknown = canonicalModalities.filter(m => !ALL_SUPPORTED.has(m));
             console.log(`⛔ [${operationId}] Modalidades selecionadas (${activeModalities.join(', ')}) incompatíveis com ${selectedSymbol}${knownUnsupported.length ? ` [incompatíveis: ${knownUnsupported.join(', ')}]` : ''}${unknown.length ? ` [desconhecidas: ${unknown.join(', ')}]` : ''} — operação cancelada.`);
           }
           return { success: false, reason: 'no_compatible_modalities' } as any;
         }
 
         if (!isAutoModalityMode) {
-          const dropped = activeModalities.filter(m => ALL_SUPPORTED.has(m) && !symbolCompatible.has(m));
+          const dropped = canonicalModalities.filter(m => ALL_SUPPORTED.has(m) && !symbolCompatible.has(m));
           if (dropped.length > 0) {
             console.log(`🔄 [${operationId}] Compatibilidade: ${dropped.join(', ')} não disponível em ${selectedSymbol} → usando: ${compatibleModalities.join(', ')}`);
           }
