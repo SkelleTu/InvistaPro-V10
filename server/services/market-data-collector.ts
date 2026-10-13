@@ -115,7 +115,7 @@ export class MarketDataCollector extends EventEmitter {
   }
 
   getSupportedSymbolsByTradeMode(mode: string): string[] {
-    const normalized = String(mode ?? '').trim().toLowerCase().replace(/[-\\s]/g, '_');
+    const normalized = String(mode ?? '').trim().toLowerCase().replace(/[-\s]/g, '_');
     const key = ['digit_diff', 'digitdiff', 'digit_differs'].includes(normalized)
       ? 'digit_differs'
       : ['accu', 'accumulator'].includes(normalized)
