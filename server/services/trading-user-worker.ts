@@ -24,6 +24,12 @@ function sendStatus() {
       status: status?.isRunning ? "armed" : "ready",
       armed: Boolean(status?.isRunning),
       activeSessions: status?.hasActiveSessions ? 1 : 0,
+      isInitialized: Boolean(status?.isInitialized),
+      marketDataReady: Boolean(status?.marketDataReady),
+      marketDataTicks: Number(status?.marketDataTicks || 0),
+      marketDataSymbols: Number(status?.marketDataSymbols || 0),
+      currentPhase: String(status?.currentPhase || "AGUARDANDO_PLAY"),
+      totalExecutedOperations: Number(scheduler?.getSessionStats().totalExecutedOperations || 0),
     });
   } catch {}
 }
