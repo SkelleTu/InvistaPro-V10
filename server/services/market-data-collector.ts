@@ -312,68 +312,71 @@ export class MarketDataCollector extends EventEmitter {
    * Iniciar coleta contínua de dados (modo "Fluxo Natural de Análises Cooperativas de Inteligência Artificial")
    */
   async startCollection(symbols?: string[]): Promise<void> {
-    if (this.isCollecting) {
-      console.log('🔄 [FNACIA] Coleta já está ativa');
+    if (this.isCollecting && this.derivAPI.getIsConnected()) {
+      console.log('🔄 [FNACIA] Coleta já está ativa e conectada');
       return;
     }
 
+    let firstTickHandler: ((event: any) => void) | null = null;
+    let firstTickTimer: NodeJS.Timeout | null = null;
     try {
-      let supportedSymbols = symbols;
-      
-      // PRODUÇÃO: não descobrir/subscrever todos os ativos da Deriv.
-      // A descoberta anterior podia gerar milhares de consultas/subscrições e saturar memória.
-      if (!supportedSymbols || supportedSymbols.length === 0) {
-        supportedSymbols = [...MarketDataCollector.FALLBACK_SYMBOLS];
-        console.log(`🛡️ [FNACIA] Coleta limitada a ${supportedSymbols.length} ativos-alvo para proteger o Render Free`);
-      } else {
-        // Atualizar lista interna com os símbolos passados (se não estiver vazia)
-        if (supportedSymbols.length > 0) {
-          this.DIGITDIFF_SUPPORTED_SYMBOLS = supportedSymbols;
-        }
-      }
-      
-      // Garantir que temos pelo menos os fallback symbols
-      if (supportedSymbols.length === 0) {
-        console.warn('⚠️ [FNACIA] Nenhum símbolo descoberto - usando fallback');
-        supportedSymbols = [...MarketDataCollector.FALLBACK_SYMBOLS];
-        this.DIGITDIFF_SUPPORTED_SYMBOLS = supportedSymbols;
-      }
-      
-      // Deduplicar, bloquear 1s e aplicar teto rígido antes de abrir qualquer stream.
-      supportedSymbols = Array.from(new Set(supportedSymbols))
+      let supportedSymbols = (symbols && symbols.length > 0)
+        ? symbols
+        : [...MarketDataCollector.FALLBACK_SYMBOLS];
+
+      // Normalize/deduplicate and fail closed to the production allowlist.
+      supportedSymbols = Array.from(new Set(supportedSymbols.map(s => String(s).trim().toUpperCase())))
         .filter(symbol => !MarketDataCollector.BLOCKED_SYMBOLS_PATTERN.test(symbol))
-        .filter(symbol => MarketDataCollector.ALLOWED_PRODUCTION_SYMBOLS.has(String(symbol).toUpperCase().replace(/[^A-Z0-9]/g, '')) && isAllowedProductionSymbol(symbol))
+        .filter(symbol => MarketDataCollector.ALLOWED_PRODUCTION_SYMBOLS.has(String(symbol).replace(/[^A-Z0-9]/g, '')))
+        .filter(symbol => isAllowedProductionSymbol(symbol))
         .slice(0, MarketDataCollector.MAX_STREAM_SYMBOLS);
 
+      if (supportedSymbols.length === 0) {
+        supportedSymbols = [...MarketDataCollector.FALLBACK_SYMBOLS];
+      }
       this.DIGITDIFF_SUPPORTED_SYMBOLS = supportedSymbols;
-      console.log(`🚀 [FNACIA] Iniciando coleta controlada para ${supportedSymbols.length} ativos...`);
-      
-      // Mostrar primeiros 10 e contar o resto
-      const firstTen = supportedSymbols.slice(0, 10).join(', ');
-      const remaining = supportedSymbols.length > 10 ? ` ... +${supportedSymbols.length - 10} mais` : '';
-      console.log(`🚀 [FNACIA] Símbolos: ${firstTen}${remaining}`);
-      
-      // Conectar à Deriv (público, sem autenticação)
-      await this.derivAPI.connectPublic();
-      
-      // Inscrever-se em batches para não sobrecarregar
-      const batchSize = 50;
-      for (let i = 0; i < supportedSymbols.length; i += batchSize) {
-        const batch = supportedSymbols.slice(i, i + batchSize);
-        
-        for (const symbol of batch) {
-          await this.derivAPI.subscribeToTicks(symbol);
-        }
-        
-        console.log(`📈 [FNACIA] Inscrito em ${Math.min(i + batchSize, supportedSymbols.length)}/${supportedSymbols.length} ativos`);
+      this.tickBuffers.clear();
+
+      console.log(`🚀 [FNACIA] Iniciando coleta validada para ${supportedSymbols.length} ativos: ${supportedSymbols.join(', ')}`);
+
+      // A "collecting" state is not considered ready until at least one real tick
+      // has been received. This prevents the UI from reporting active with a dead socket.
+      const firstTick = new Promise<void>((resolve, reject) => {
+        firstTickHandler = (event: any) => {
+          if (!supportedSymbols.includes(String(event?.symbol || '').toUpperCase())) return;
+          if (firstTickTimer) clearTimeout(firstTickTimer);
+          firstTickTimer = null;
+          resolve();
+        };
+        this.on('tick_processed', firstTickHandler);
+        firstTickTimer = setTimeout(() => {
+          if (firstTickHandler) this.removeListener('tick_processed', firstTickHandler);
+          firstTickHandler = null;
+          reject(new Error(`No real Deriv tick received within 20s for allowlisted symbols: ${supportedSymbols.join(', ')}`));
+        }, 20000);
+      });
+
+      await this.derivAPI.connectPublic('MARKET_DATA_COLLECTOR');
+      for (const symbol of supportedSymbols) {
+        await this.derivAPI.subscribeToTicks(symbol);
       }
 
+      await firstTick;
+      if (firstTickHandler) this.removeListener('tick_processed', firstTickHandler);
+      if (firstTickTimer) clearTimeout(firstTickTimer);
+      firstTickHandler = null;
+      firstTickTimer = null;
+
       this.isCollecting = true;
-      console.log(`✅ [FNACIA] Coleta ativa para ${supportedSymbols.length} ativos descobertos dinamicamente`);
-      console.log(`🛡️ [FNACIA] Modo protegido: máximo ${MarketDataCollector.MAX_STREAM_SYMBOLS} streams simultâneos`);
-      
+      console.log(`✅ [FNACIA] Coleta validada: recebeu tick real; ativos=${supportedSymbols.length}; totalTicks=${this.getCollectionStats().totalTicks}`);
+      console.log(`🛡️ [FNACIA] Limite de segurança: máximo ${MarketDataCollector.MAX_STREAM_SYMBOLS} streams`);
     } catch (error) {
-      console.error('❌ [FNACIA] Erro ao iniciar coleta:', error);
+      if (firstTickHandler) this.removeListener('tick_processed', firstTickHandler);
+      if (firstTickTimer) clearTimeout(firstTickTimer);
+      this.isCollecting = false;
+      try { await this.derivAPI.disconnect(); } catch {}
+      this.tickBuffers.clear();
+      console.error('❌ [FNACIA] Coleta não ficou pronta; ativação deve falhar em vez de reportar falso positivo:', error);
       throw error;
     }
   }
