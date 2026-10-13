@@ -1858,8 +1858,8 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       // remains disarmed. Start only this user's worker, never every logged-in user.
       // The isolated scheduler confirms readiness and the armed state through
       // the user's own worker before this endpoint reports success.
-      await autoTradingScheduler.startSchedulerForUser(userId);
       await setUniversalTradingArmed(userId, true);
+      await autoTradingScheduler.startSchedulerForUser(userId);
       const schedulerStatus = autoTradingScheduler.getSchedulerStatus();
       const active = autoTradingScheduler.getArmedUserIds().includes(userId)
         && schedulerStatus.isRunning;
