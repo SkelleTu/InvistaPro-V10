@@ -37,6 +37,10 @@ export class MarketDataCollector extends EventEmitter {
   // of symbols that actually support DIGITDIFF and/or ACCU.
   private static readonly BLOCKED_SYMBOLS_PATTERN = /\(1s\)|^1HZ|_1S/i;
   private DIGITDIFF_SUPPORTED_SYMBOLS: string[] = [];
+  private supportedSymbolsByMode: Record<'digit_differs' | 'accumulator', string[]> = {
+    digit_differs: [],
+    accumulator: [],
+  };
   private allDerivSymbols: Map<string, any> = new Map();
   private symbolsRefreshInterval: NodeJS.Timeout | null = null;
   private lastSymbolsUpdate: number = 0;
@@ -108,6 +112,16 @@ export class MarketDataCollector extends EventEmitter {
     return this.DIGITDIFF_SUPPORTED_SYMBOLS.filter((symbol) =>
       isAllowedProductionSymbol(symbol) && !MarketDataCollector.BLOCKED_SYMBOLS_PATTERN.test(symbol)
     );
+  }
+
+  getSupportedSymbolsByTradeMode(mode: string): string[] {
+    const normalized = String(mode ?? '').trim().toLowerCase().replace(/[-\\s]/g, '_');
+    const key = ['digit_diff', 'digitdiff', 'digit_differs'].includes(normalized)
+      ? 'digit_differs'
+      : ['accu', 'accumulator'].includes(normalized)
+        ? 'accumulator'
+        : null;
+    return key ? [...this.supportedSymbolsByMode[key]] : [];
   }
 
   /**
@@ -272,6 +286,10 @@ export class MarketDataCollector extends EventEmitter {
       const accumulators = await this.derivAPI.getAvailableSymbolsByTradeMode('accumulator');
       const digitSymbols = digit.map((entry: any) => String(entry.symbol));
       const accuSymbols = accumulators.map((entry: any) => String(entry.symbol));
+      this.supportedSymbolsByMode = {
+        digit_differs: [...new Set(digitSymbols)],
+        accumulator: [...new Set(accuSymbols)],
+      };
 
       // Keep the stream budget small, while guaranteeing representation from each
       // modality when Deriv has eligible symbols for both.
@@ -290,6 +308,7 @@ export class MarketDataCollector extends EventEmitter {
       if (candidates.length === 0) {
         this.isDiscoveryComplete = true;
         this.DIGITDIFF_SUPPORTED_SYMBOLS = [];
+        this.supportedSymbolsByMode = { digit_differs: [], accumulator: [] };
         throw new Error('Deriv não retornou símbolos sintéticos compatíveis com DIGITDIFF ou ACCU; coleta não iniciada.');
       }
       this.DIGITDIFF_SUPPORTED_SYMBOLS = candidates;
