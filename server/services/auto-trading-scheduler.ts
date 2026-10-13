@@ -3763,9 +3763,11 @@ export class AutoTradingScheduler {
       const modalityFilter = activeModalities && activeModalities.length > 0 ? new Set(activeModalities) : null;
       const isSymbolCompatibleWithModalities = (sym: string): boolean => {
         if (!modalityFilter) return true;
-        // Crash/Boom: somente Rise/Fall — nunca dígitos
+        // Market analysis must cover the explicitly allowlisted Boom/Crash symbols.
+        // Contract eligibility is checked separately before proposal/buy; never discard
+        // market data merely because a modality is not available for every symbol.
         const supported = _isCrashBoomSym(sym)
-          ? [..._RF_K]
+          ? [..._DIGIT_K, ..._ACCU_K]
           : (_COMPAT[sym] ?? [..._DIGIT_K, ..._RF_K]);
         return Array.from(modalityFilter).some(m => supported.includes(m));
       };
