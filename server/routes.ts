@@ -1856,9 +1856,15 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     try {
       // Synchronize the remote session first; if it fails, this user's worker
       // remains disarmed. Start only this user's worker, never every logged-in user.
+      // The scheduler exposes one shared loop, guarded by per-user arming.
+      // Arm this authenticated user first, then start/ensure the loop itself.
+      autoTradingScheduler.armUserTrading(userId);
       await setUniversalTradingArmed(userId, true);
-      await autoTradingScheduler.startSchedulerForUser(userId);
-      const active = autoTradingScheduler.getArmedUserIds().includes(userId);
+      await autoTradingScheduler.startScheduler();
+      const schedulerStatus = autoTradingScheduler.getSchedulerStatus();
+      const active = autoTradingScheduler.getArmedUserIds().includes(userId)
+        && schedulerStatus.isRunning
+        && schedulerStatus.isInitialized;
       res.json({
         success: active,
         active,
