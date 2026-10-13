@@ -23,6 +23,7 @@ export class MarketDataCollector extends EventEmitter {
   private heartbeatInterval: NodeJS.Timeout | null = null;
   private isCollecting = false;
   private isDiscoveryComplete = false;
+  private totalTicksReceived = 0;
   
   // 🎯 FALLBACK SEGURO: Símbolos que SEMPRE suportam DIGITDIFF (garantido pela Deriv)
   private static readonly FALLBACK_SYMBOLS = [
@@ -157,6 +158,8 @@ export class MarketDataCollector extends EventEmitter {
       this.tickBuffers.set(symbol, buffer);
     }
 
+    // Count every real tick since the current Play; persistence flushes may empty buffers.
+    this.totalTicksReceived += 1;
     // Adicionar tick ao buffer
     buffer.ticks.push(tickData);
     buffer.lastUpdate = Date.now();
@@ -336,6 +339,7 @@ export class MarketDataCollector extends EventEmitter {
       }
       this.DIGITDIFF_SUPPORTED_SYMBOLS = supportedSymbols;
       this.tickBuffers.clear();
+      this.totalTicksReceived = 0;
 
       console.log(`🚀 [FNACIA] Iniciando coleta validada para ${supportedSymbols.length} ativos: ${supportedSymbols.join(', ')}`);
 
@@ -430,6 +434,7 @@ export class MarketDataCollector extends EventEmitter {
     
     // Limpar buffers
     this.tickBuffers.clear();
+    this.totalTicksReceived = 0;
     
     this.isCollecting = false;
     console.log('✅ [FNACIA] Coleta parada');
@@ -456,7 +461,7 @@ export class MarketDataCollector extends EventEmitter {
     return {
       isCollecting: this.isCollecting,
       activeSymbols: this.tickBuffers.size,
-      totalTicks: symbols.reduce((total, s) => total + s.ticks, 0),
+      totalTicks: this.totalTicksReceived,
       symbols
     };
   }
