@@ -699,7 +699,7 @@ export class DerivAPIService extends EventEmitter {
 
   async getAvailableSymbolsByTradeMode(mode: string) {
     const requiredTypes = contractTypesForProductionMode(mode);
-    const normalizedMode = String(mode || '').trim().toLowerCase().replace(/[-\\s]/g, '_');
+    const normalizedMode = String(mode || '').trim().toLowerCase().replace(/[-\s]/g, '_');
     if (requiredTypes.length === 0) {
       console.warn(`[DERIV_POLICY] Unknown trade mode rejected: ${normalizedMode}`);
       return [];
