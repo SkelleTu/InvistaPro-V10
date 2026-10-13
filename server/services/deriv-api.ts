@@ -764,23 +764,24 @@ export class DerivAPIService extends EventEmitter {
       .map((s: any) => String(s?.symbol || ''))
       .filter((symbol: string) => isAllowedProductionSymbol(symbol));
 
-    const supported: Array<{ symbol: string; display_name: string; market: string }> = [];
-    for (const symbol of allowed) {
+    const supportResults = await Promise.all(allowed.map(async (symbol) => {
       try {
         const contracts = await marketApi.getContractsFor(symbol);
-        if (contracts.some((contract: any) => requiredTypes.includes(String(contract?.contract_type || '').toUpperCase()))) {
-          const info = symbols.find((entry: any) => String(entry.symbol) === symbol);
-          supported.push({
-            symbol,
-            display_name: info?.display_name || symbol,
-            market: info?.market || 'synthetic_index',
-          });
+        if (!contracts.some((contract: any) => requiredTypes.includes(String(contract?.contract_type || '').toUpperCase()))) {
+          return null;
         }
+        const info = symbols.find((entry: any) => String(entry.symbol) === symbol);
+        return {
+          symbol,
+          display_name: info?.display_name || symbol,
+          market: info?.market || 'synthetic_index',
+        };
       } catch (error) {
         console.warn(`[DERIV_DISCOVERY] Contract support check failed for ${symbol} / ${normalizedMode}:`, error);
+        return null;
       }
-    }
-
+    }));
+    const supported = supportResults.filter((entry): entry is { symbol: string; display_name: string; market: string } => entry !== null);
     console.log(`📡 [DerivAPI] ${supported.length}/${allowed.length} allowlisted symbols support ${normalizedMode}`);
     return supported;
   }
