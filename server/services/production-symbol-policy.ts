@@ -24,8 +24,15 @@ export function isBlockedOneSecondSymbol(symbol: unknown): boolean {
 
 /** Generic symbol safety gate; live modality support is checked separately. */
 export function isAllowedProductionSymbol(symbol: unknown): boolean {
-  const normalized = normalizeDerivSymbol(symbol);
-  return normalized.length > 0 && /^[A-Z0-9_]+$/.test(normalized) && !isBlockedOneSecondSymbol(symbol);
+  const raw = String(symbol ?? "").trim();
+  const normalized = normalizeDerivSymbol(raw);
+  // Accept Deriv codes and display-name aliases, but reject arbitrary punctuation
+  // before normalization so values such as "WIN$" cannot become valid symbols.
+  return raw.length > 0 &&
+    /^[A-Z0-9_ ()-]+$/i.test(raw) &&
+    normalized.length > 0 &&
+    /^[A-Z0-9_]+$/.test(normalized) &&
+    !isBlockedOneSecondSymbol(raw);
 }
 
 export function assertAllowedProductionSymbol(symbol: unknown, operation: string): void {
