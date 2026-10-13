@@ -736,55 +736,53 @@ export class DerivAPIService extends EventEmitter {
   }
 
   async getAvailableSymbolsByTradeMode(mode: string) {
-    console.log(`📡 [DerivAPI] Buscando símbolos para o modo: ${mode}`);
-    
-    // Public market-data traffic uses its own socket exclusively.
-    // Never let symbol discovery share or overwrite an authenticated Demo/Real session.
-    const marketApi = derivPublicAPI;
-    if (!marketApi.isConnected) {
-      await marketApi.connectPublic('GET_SYMBOLS_' + (mode || 'DEFAULT'));
+    const normalizedMode = String(mode || 'digit_diff').trim().toLowerCase().replace(/[-\s]/g, '_');
+    console.log(`📡 [DerivAPI] Validating allowed symbols against live contracts for mode: ${normalizedMode}`);
+
+    // The UI may use several aliases for the same Deriv contract. Never claim a
+    // symbol supports a mode unless contracts_for confirms it at runtime.
+    const contractTypesByMode: Record<string, string[]> = {
+      digit_diff: ['DIGITDIFF'],
+      digit_differs: ['DIGITDIFF'],
+      digitdiff: ['DIGITDIFF'],
+      accumulator: ['ACCU'],
+      accu: ['ACCU'],
+    };
+    const requiredTypes = contractTypesByMode[normalizedMode];
+    if (!requiredTypes) {
+      console.warn(`[DERIV_POLICY] Unknown trade mode rejected: ${normalizedMode}`);
+      return [];
     }
 
-    // Se o modo for digit_diff, usar o sistema de descoberta especializado
-    if (mode === 'digit_diff' || mode === 'undefined' || !mode) {
+    const marketApi = derivPublicAPI;
+    if (!marketApi.isConnected) {
+      await marketApi.connectPublic('GET_SYMBOLS_' + normalizedMode);
+    }
+
+    const symbols = await marketApi.getActiveSymbolsCached();
+    const allowed = symbols
+      .map((s: any) => String(s?.symbol || ''))
+      .filter((symbol: string) => isAllowedProductionSymbol(symbol));
+
+    const supported: Array<{ symbol: string; display_name: string; market: string }> = [];
+    for (const symbol of allowed) {
       try {
-        console.log('🔍 [DerivAPI] Usando descoberta dinâmica para DIGITDIFF...');
-        
-        // 2. Obter símbolos ativos (com cache)
-        const allSymbols = await marketApi.getActiveSymbolsCached();
-        console.log(`📊 [DerivAPI] Total de símbolos ativos: ${allSymbols.length}`);
-        
-        // 3. Filtrar os que suportam DIGITDIFF (com cache)
-        const digitDiffSymbols = await marketApi.getDigitDiffSupportedSymbols(allSymbols);
-        
-        // 4. Mapear para o formato esperado pelo frontend
-        return digitDiffSymbols.map(symbol => {
-          const info = allSymbols.find(s => s.symbol === symbol);
-          return {
-            symbol: symbol,
+        const contracts = await marketApi.getContractsFor(symbol);
+        if (contracts.some((contract: any) => requiredTypes.includes(String(contract?.contract_type || '').toUpperCase()))) {
+          const info = symbols.find((entry: any) => String(entry.symbol) === symbol);
+          supported.push({
+            symbol,
             display_name: info?.display_name || symbol,
-            market: info?.market || 'unknown'
-          };
-        });
+            market: info?.market || 'synthetic_index',
+          });
+        }
       } catch (error) {
-        console.error('❌ Erro na descoberta dinâmica DIGITDIFF:', error);
-        // Fallback básico se a descoberta falhar
-        return [
-          { symbol: 'BOOM500', display_name: 'Boom 500 Index', market: 'synthetic_index' },
-          { symbol: 'BOOM1000', display_name: 'Boom 1000 Index', market: 'synthetic_index' },
-          { symbol: 'CRASH500', display_name: 'Crash 500 Index', market: 'synthetic_index' },
-          { symbol: 'CRASH1000', display_name: 'Crash 1000 Index', market: 'synthetic_index' }
-        ];
+        console.warn(`[DERIV_DISCOVERY] Contract support check failed for ${symbol} / ${normalizedMode}:`, error);
       }
     }
 
-    // Fallback para outros modos
-    const symbols = await marketApi.getActiveSymbolsCached();
-    return symbols.filter(s => isAllowedProductionSymbol(s.symbol)).map(s => ({
-      symbol: s.symbol,
-      display_name: s.display_name,
-      market: s.market
-    }));
+    console.log(`📡 [DerivAPI] ${supported.length}/${allowed.length} allowlisted symbols support ${normalizedMode}`);
+    return supported;
   }
 
   // Helper method for generic requests
