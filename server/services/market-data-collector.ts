@@ -466,6 +466,9 @@ export class MarketDataCollector extends EventEmitter {
     activeSymbols: number;
     totalTicks: number;
     symbols: { symbol: string; ticks: number; lastUpdate: number }[];
+    persistenceReady: boolean;
+    lastPersistenceSuccessAt: number;
+    persistenceFailures: number;
   } {
     const symbols = Array.from(this.tickBuffers.entries()).map((entry) => {
       const [symbol, buffer] = entry;
@@ -484,7 +487,7 @@ export class MarketDataCollector extends EventEmitter {
       persistenceReady: this.lastPersistenceSuccessAt > 0 && Date.now() - this.lastPersistenceSuccessAt < 60000,
       lastPersistenceSuccessAt: this.lastPersistenceSuccessAt,
       persistenceFailures: this.persistenceFailures
-    } as any;
+    };
   }
 
   /**
