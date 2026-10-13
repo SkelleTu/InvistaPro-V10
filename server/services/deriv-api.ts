@@ -633,9 +633,10 @@ export class DerivAPIService extends EventEmitter {
       }, 12000);
 
       this.on('message', symbolsHandler);
+      // Current Deriv WebSocket schema accepts active_symbols and req_id;
+      // legacy product_type filtering can cause the request to be rejected.
       this.sendMessage({
         active_symbols: 'brief',
-        product_type: 'basic',
         req_id: reqId
       });
     });
@@ -791,9 +792,10 @@ export class DerivAPIService extends EventEmitter {
       }, 10000);
 
       this.on('message', contractsHandler);
+      // Current contracts_for schema only accepts the underlying symbol and
+      // optional passthrough/req_id; currency is account-derived and was removed.
       this.sendMessage({
         contracts_for: symbol,
-        currency: 'USD',
         req_id: reqId
       });
     });
