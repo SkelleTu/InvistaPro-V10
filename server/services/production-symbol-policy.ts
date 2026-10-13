@@ -13,7 +13,8 @@ export function normalizeDerivSymbol(symbol: unknown): string {
     .trim()
     .toUpperCase()
     .replace(/\s+INDEX$/i, "")
-    .replace(/[^A-Z0-9_]/g, "");
+    .replace(/[^A-Z0-9_]/g, "")
+    .replace(/^(BOOM|CRASH)_+(\d+)/, "$1$2");
 }
 
 export function isBlockedOneSecondSymbol(symbol: unknown): boolean {
