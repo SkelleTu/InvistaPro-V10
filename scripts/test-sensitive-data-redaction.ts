@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { sanitizeSensitiveData } from "../server/services/sensitive-data-redaction";
+import { getSecretHealth } from "../server/services/secret-health";
 
 const original = {
   email: "audit@example.invalid",
@@ -27,4 +28,8 @@ assert.equal(sanitized.items[0].cookie, "[REDACTED]");
 assert.equal(sanitized.items[0].count, 3);
 assert.equal(original.password, "not-a-real-password", "sanitizer must not mutate input");
 
-console.log("Sensitive-data redaction passed: nested credentials are redacted without mutating source data.");
+process.env.DERIV_APP_ID = "app12345";
+const derivIdHealth = getSecretHealth().checks.find((item) => item.name === "DERIV_APP_ID");
+assert.equal(derivIdHealth?.state, "configured", "Current Deriv developer App IDs may use the app12345 format, not only digits.");
+
+console.log("Sensitive-data redaction and current Deriv App ID format checks passed.");

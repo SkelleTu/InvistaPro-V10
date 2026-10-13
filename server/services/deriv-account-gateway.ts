@@ -7,24 +7,40 @@ export interface DerivAccountContext {
   accountType: DerivAccountType;
   authorizationToken: string;
   websocketUrl: string;
-  appId: string;
+  appId: string | null;
 }
 
 const API_BASE = 'https://api.derivws.com';
 
-function appId(): string {
+function isOAuthAccessToken(token: string): boolean {
+  return String(process.env.DERIV_AUTH_MODE ?? '').trim().toLowerCase() === 'oauth'
+    || /^ory_at_[A-Za-z0-9._~-]+$/.test(String(token ?? '').trim());
+}
+
+function appId(): string | null {
   const value = String(process.env.DERIV_APP_ID ?? '').trim();
-  if (!value) throw new Error('DERIV_APP_ID is required for Deriv API v1 authentication');
+  if (!value) return null;
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value)) {
+    throw new Error('DERIV_APP_ID has an invalid format for the current Deriv developer application');
+  }
   return value;
 }
 
 function headers(token: string): Record<string, string> {
-  return {
+  const result: Record<string, string> = {
     Authorization: `Bearer ${token}`,
-    'Deriv-App-ID': appId(),
     Accept: 'application/json',
     'Content-Type': 'application/json',
   };
+
+  // Current Deriv documentation requires Deriv-App-ID for PAT, not OAuth access tokens.
+  if (!isOAuthAccessToken(token)) {
+    const id = appId();
+    if (!id) throw new Error('DERIV_APP_ID is required when using a Deriv PAT');
+    result['Deriv-App-ID'] = id;
+  }
+
+  return result;
 }
 
 async function derivFetch<T>(token: string, path: string, init: RequestInit = {}): Promise<T> {
@@ -116,7 +132,7 @@ export async function createDerivAccountContext(
     accountType,
     authorizationToken,
     websocketUrl,
-    appId: appId(),
+    appId: isOAuthAccessToken(authorizationToken) ? null : appId(),
   };
 }
 
