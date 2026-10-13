@@ -2225,46 +2225,18 @@ export class AutoTradingScheduler {
           'lookback_high_low': 'LBHIGHLOW',
         };
 
-        // Production allowlist is intentionally narrower than legacy UI mappings.
+        // Only modalities returned by Deriv's live contracts_for API may be selected.
         const ALL_SUPPORTED = new Set(['digit_differs', 'accumulator']);
-
-        // ─── MATRIZ DE COMPATIBILIDADE SÍMBOLO × MODALIDADE ──────────────
-        // Define quais modalidades são suportadas por cada grupo de símbolo.
-        // Baseado na documentação oficial da Deriv para índices sintéticos.
-        const DIGIT_KEYS        = Object.keys(DIGIT_TYPES);
-        const RISFALL_KEYS      = ['rise', 'fall'];           // CALL/PUT — ticks simples
-        const HIGHER_LOWER_KEYS = ['higher', 'lower'];        // CALLE/PUTE — com barreira
-        const INOUT_KEYS        = Object.keys(IN_OUT_TYPES);
-        const TOUCH_KEYS        = Object.keys(TOUCH_TYPES);
-        const MULT_KEYS         = Object.keys(MULTIPLIER_TYPES);
-        const ACCU_KEYS         = ['accumulator'];
-        const TURBO_KEYS        = Object.keys(TURBO_TYPES);
-        const VANILLA_KEYS      = Object.keys(VANILLA_TYPES);
-        const LB_KEYS           = Object.keys(LOOKBACK_TYPES);
-
-        // Volatility Indices (R_10..R_100): suportam tudo, incluindo CALLE/PUTE (higher/lower)
-        const VOL_BASE   = [...DIGIT_KEYS, ...RISFALL_KEYS, ...HIGHER_LOWER_KEYS, ...INOUT_KEYS, ...TOUCH_KEYS, ...MULT_KEYS, ...ACCU_KEYS, ...LB_KEYS];
-        // Jump Indices (JD10..JD100): apenas dígitos e CALL/PUT (rise/fall) — NÃO suportam CALLE/PUTE
-        const JUMP_OK    = [...DIGIT_KEYS, ...RISFALL_KEYS];
-        // Range Break (RDBULL, RDBEAR): apenas dígitos e CALL/PUT (rise/fall) — NÃO suportam CALLE/PUTE
-        const RDB_OK     = [...DIGIT_KEYS, ...RISFALL_KEYS];
-        // R_100 também suporta Turbos e Vanillas (maior liquidez)
-        const VOL_100    = [...VOL_BASE, ...TURBO_KEYS, ...VANILLA_KEYS];
-
-        const SYMBOL_COMPAT: Record<string, string[]> = {
-          'R_10': VOL_BASE,   'R_25': VOL_BASE,   'R_50': VOL_BASE,
-          'R_75': VOL_BASE,   'R_100': VOL_100,
-          'JD10': JUMP_OK,    'JD25': JUMP_OK,    'JD50': JUMP_OK,
-          'JD75': JUMP_OK,    'JD100': JUMP_OK,
-          'RDBULL': RDB_OK,   'RDBEAR': RDB_OK,
-        };
-
-        // Determinar modalidades compatíveis com o símbolo selecionado
-        // ⚠️ CRASH/BOOM: a Deriv não oferece dígitos para esses ativos — apenas Rise/Fall
-        const isCrashBoomSymbol = /^(CRASH|BOOM)\d+N?$/i.test(selectedSymbol);
-        const symbolCompatible = new Set<string>(
-          SYMBOL_COMPAT[selectedSymbol] ?? (isCrashBoomSymbol ? [...RISFALL_KEYS] : [...DIGIT_KEYS, ...RISFALL_KEYS])
+        const liveContractTypes = await this.getLiveProductionContractTypes(
+          tradeDerivAPI,
+          String(config.userId),
+          (tokenData.accountType as 'demo' | 'real') || 'demo',
+          selectedSymbol
         );
+        const symbolCompatible = new Set<string>();
+        if (liveContractTypes.has('DIGITDIFF')) symbolCompatible.add('digit_differs');
+        if (liveContractTypes.has('ACCU')) symbolCompatible.add('accumulator');
+        const modalityFilter = activeModalities && activeModalities.length > 0 ? new Set(activeModalities) : null;
 
         // 🤖 MODO AUTOMÁTICO: usar todas as modalidades compatíveis com o símbolo
         // A IA (selectModalityByMarketFit) escolhe a melhor para cada ciclo.
@@ -3761,52 +3733,50 @@ export class AutoTradingScheduler {
         };
       }
 
-      // ── Mapa de compatibilidade símbolo × modalidade (espelhado da lógica de execução) ──
-      // Permite que a seleção de símbolo SOMENTE considere ativos onde as modalidades do usuário funcionam.
-      const _DIGIT_K   = ['digit_diff','digitdiff','digit_differs','digit_matches','digit_over','digit_under','digit_odd','digit_even'];
-      const _RF_K      = ['rise','fall'];                   // CALL/PUT (ticks simples)
-      const _HL_K      = ['higher','lower'];                 // CALLE/PUTE (com barreira) — JD/RDB não suportam
-      const _INOUT_K   = ['ends_between','ends_outside','stays_between','goes_outside'];
-      const _TOUCH_K   = ['touch','no_touch'];
-      const _MULT_K    = ['multiplier_up','multiplier_down'];
-      const _ACCU_K    = ['accumulator'];
-      const _TURBO_K   = ['turbo_up','turbo_down'];
-      const _VANILLA_K = ['vanilla_call','vanilla_put'];
-      const _LB_K      = ['lookback_high_close','lookback_close_low','lookback_high_low'];
-      const _VOL_BASE  = [..._DIGIT_K, ..._RF_K, ..._HL_K, ..._INOUT_K, ..._TOUCH_K, ..._MULT_K, ..._ACCU_K, ..._LB_K];
-      const _JUMP_OK   = [..._DIGIT_K, ..._RF_K];           // JD: apenas ticks — sem CALLE/PUTE
-      const _RDB_OK    = [..._DIGIT_K, ..._RF_K];           // RDB: apenas ticks — sem CALLE/PUTE
-      const _VOL_100   = [..._VOL_BASE, ..._TURBO_K, ..._VANILLA_K];
-      const _COMPAT: Record<string, string[]> = {
-        'R_10': _VOL_BASE,  'R_25': _VOL_BASE,   'R_50': _VOL_BASE,
-        'R_75': _VOL_BASE,  'R_100': _VOL_100,
-        'JD10': _JUMP_OK,   'JD25': _JUMP_OK,    'JD50': _JUMP_OK,
-        'JD75': _JUMP_OK,   'JD100': _JUMP_OK,
-        'RDBULL': _RDB_OK,  'RDBEAR': _RDB_OK,
+      // Use the user's authenticated account context and Deriv's live contracts_for
+      // response. This avoids both false compatibility and empty analysis pools caused by
+      // hard-coded assumptions about Boom/Crash products.
+      const tokenData = await storage.getUserDerivToken(userId);
+      if (!tokenData?.token) {
+        return { success: false, error: 'Token Deriv não configurado para validar contratos', totalAnalyzed: 0, top5Symbols: [] };
+      }
+      const accountType: 'demo' | 'real' = tokenData.accountType === 'real' ? 'real' : 'demo';
+      const capabilityApi = this.getUserDerivAPI(userId, accountType);
+      try {
+        if (!capabilityApi.isSessionFor(tokenData.token, accountType)) {
+          await capabilityApi.connect(tokenData.token, accountType, operationId + '_CAPABILITIES');
+        }
+      } catch (error) {
+        return { success: false, error: `Falha ao validar contratos permitidos na Deriv: ${error instanceof Error ? error.message : String(error)}`, totalAnalyzed: 0, top5Symbols: [] };
+      }
+
+      const capabilitiesBySymbol = new Map<string, Set<string>>();
+      await Promise.all(allSymbolsData
+        .filter((data: any) => isAllowedProductionSymbol(data.symbol))
+        .map(async (data: any) => {
+          const symbol = String(data.symbol);
+          try {
+            const types = await this.getLiveProductionContractTypes(capabilityApi, userId, accountType, symbol);
+            capabilitiesBySymbol.set(symbol, types);
+          } catch (error) {
+            console.warn(`[DERIV_CAPABILITY] Não foi possível validar ${symbol}:`, error);
+            capabilitiesBySymbol.set(symbol, new Set<string>());
+          }
+        }));
+
+      const modalityFilter = activeModalities && activeModalities.length > 0 ? new Set(activeModalities) : null;
+      const isSymbolCompatibleWithModalities = (symbol: string): boolean => {
+        const types = capabilitiesBySymbol.get(symbol) || new Set<string>();
+        if (types.size === 0) return false;
+        if (!modalityFilter) return true;
+        return Array.from(modalityFilter).some((modality) => {
+          const normalized = String(modality).trim().toLowerCase();
+          if (['digit_diff', 'digitdiff', 'digit_differs'].includes(normalized)) return types.has('DIGITDIFF');
+          if (normalized === 'accumulator' || normalized === 'accu') return types.has('ACCU');
+          return false;
+        });
       };
 
-      // Se o usuário tem modalidades ativas, pré-filtrar símbolos compatíveis com PELO MENOS UMA.
-      // Símbolos não mapeados aceitam dígitos e rise/fall — são descartados se o usuário só tem ACCU/MULT/etc.
-      // ⚠️  CRASH/BOOM: a Deriv NÃO oferece contratos de dígito (DIGITMATCH/DIGITDIFF) para esses ativos.
-      //     Eles suportam apenas Rise/Fall (CALL/PUT). Sem mapeamento explícito aqui, o fallback
-      //     incorretamente incluiria dígitos e causaria "Trading is not offered for this asset".
-      const _isCrashBoomSym = (sym: string) => /^(CRASH|BOOM)\d+N?$/i.test(sym);
-      const modalityFilter = activeModalities && activeModalities.length > 0 ? new Set(activeModalities) : null;
-      const isSymbolCompatibleWithModalities = (sym: string): boolean => {
-        if (!modalityFilter) return true;
-        // Market analysis must cover the explicitly allowlisted Boom/Crash symbols.
-        // Contract eligibility is checked separately before proposal/buy; never discard
-        // market data merely because a modality is not available for every symbol.
-        const supported = _isCrashBoomSym(sym)
-          ? [..._DIGIT_K, ..._ACCU_K]
-          : (_COMPAT[sym] ?? [..._DIGIT_K, ..._RF_K]);
-        return Array.from(modalityFilter).some(m => supported.includes(m));
-      };
-      
-      // 🔥 EXPANSÃO MASSIVA: Usar TODOS os 120+ ativos disponíveis na Deriv
-      // 🚫 BLOQUEIO TOTAL: Filtrar 100% os ativos com "(1s)" - CAUSADORES DE LOSS
-      // 🎯 FILTRO DE MODALIDADE: Ignorar ativos incompatíveis com as modalidades do usuário
-      
       const filteredSymbolsData = allSymbolsData.filter((symbolData: any) => {
         const symbol = symbolData.symbol;
         
@@ -3826,7 +3796,7 @@ export class AutoTradingScheduler {
       if (filteredSymbolsData.length === 0) {
         return { 
           success: false, 
-          error: 'Nenhum símbolo com dados disponíveis', 
+          error: 'Nenhum símbolo possui contrato Deriv compatível com as modalidades ativas e a allowlist de produção', 
           totalAnalyzed: allSymbolsData.length, 
           top5Symbols: [] 
         };
