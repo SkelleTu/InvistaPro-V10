@@ -115,6 +115,10 @@ function calculateCRC16(data: string): string {
 }
 
 export async function registerRoutes(app: Express, existingServer?: Server): Promise<Server> {
+  // Authentication/session middleware must be installed before registering ANY route.
+  // Otherwise early routes can call req.isAuthenticated before Passport attaches it.
+  setupAuth(app);
+
   const isTradingAuthorized = (req: any, res: any, next: any) => {
     const userEmail = req.user?.email;
     const envAdminEmail = process.env.ADMIN_EMAIL;
@@ -207,9 +211,6 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       res.status(500).json({ error: "Erro ao salvar bloqueio de ativos" });
     }
   });
-
-  // Setup authentication
-  setupAuth(app);
 
   // Production observability: health, sanitized client error intake, admin diagnostics and live SSE stream.
   app.use("/api/observability", observabilityRoutes);
