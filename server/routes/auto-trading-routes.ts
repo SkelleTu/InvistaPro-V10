@@ -86,8 +86,20 @@ router.get('/status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(as
   // Current production policy allows only BOOM/CRASH symbols and ACCU/DIGITDIFF
   // contracts, while the scheduler's own compatibility map marks BOOM/CRASH
   // as Rise/Fall-only. Do not report that trades can run when the intersection is empty.
+  const modalityContractTypes: Record<string, string[]> = {
+    digit_differs: ['DIGITDIFF'],
+    digitdiff: ['DIGITDIFF'],
+    accumulator: ['ACCU'],
+    rise: ['CALL'],
+    fall: ['PUT'],
+  };
+  const allowedProductionContractTypes = new Set(['ACCU', 'DIGITDIFF']);
+  // The scheduler's production compatibility map marks BOOM/CRASH as Rise/Fall-only.
+  const boomCrashSupportedContractTypes = new Set(['CALL', 'PUT']);
   const compatibleProductionModalities = selectedModalities.filter((modality: string) =>
-    ['rise', 'fall'].includes(modality) && false
+    (modalityContractTypes[modality] || []).some((contractType: string) =>
+      allowedProductionContractTypes.has(contractType) && boomCrashSupportedContractTypes.has(contractType)
+    )
   );
   const modalityCompatibilityBlocked = activeConfigsCount > 0 && (
     selectedModalities.length === 0 || compatibleProductionModalities.length === 0
