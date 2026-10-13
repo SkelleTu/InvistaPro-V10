@@ -86,6 +86,8 @@ export class AutoTradingScheduler {
     checkedAt: 0,
     compatibleSymbols: 0,
     requestedModalities: [] as string[],
+    availableModalities: [] as string[],
+    unavailableModalities: [] as string[],
   };
 
   private parseConfiguredModalities(config: any): string[] {
@@ -132,21 +134,29 @@ export class AutoTradingScheduler {
       const symbols = marketDataCollector.getSupportedSymbols().filter(isAllowedProductionSymbol);
       const checks = await Promise.all(symbols.map(async (symbol) => {
         const types = await this.getLiveProductionContractTypes(api, userId, accountType, symbol);
-        const compatible = (requested.has('digit_differs') && types.has('DIGITDIFF')) ||
-          (requested.has('accumulator') && types.has('ACCU'));
-        return { symbol, types, compatible };
+        const modes: string[] = [];
+        if (requested.has('digit_differs') && types.has('DIGITDIFF')) modes.push('digit_differs');
+        if (requested.has('accumulator') && types.has('ACCU')) modes.push('accumulator');
+        return { symbol, types, modes };
       }));
-      const compatibleSymbols = checks.filter((check) => check.compatible).map((check) => check.symbol);
+      const compatibleSymbols = checks.filter((check) => check.modes.length > 0).map((check) => check.symbol);
+      const availableModalities = [...requested].filter((mode) => checks.some((check) => check.modes.includes(mode)));
+      const unavailableModalities = [...requested].filter((mode) => !availableModalities.includes(mode));
       this.lastContractCapabilityStatus = {
         userId,
         checkedAt: Date.now(),
         compatibleSymbols: compatibleSymbols.length,
         requestedModalities: [...requested],
+        availableModalities,
+        unavailableModalities,
       };
-      console.log(`[DERIV_CAPABILITY] preflight user=${userId} account=${accountType} requested=[${[...requested].join(',')}] compatibleSymbols=[${compatibleSymbols.join(',') || 'none'}]`);
+      console.log(`[DERIV_CAPABILITY] preflight user=${userId} account=${accountType} requested=[${[...requested].join(',')}] available=[${availableModalities.join(',') || 'none'}] unavailable=[${unavailableModalities.join(',') || 'none'}] compatibleSymbols=[${compatibleSymbols.join(',') || 'none'}]`);
 
       if (compatibleSymbols.length === 0) {
         throw new Error(`Play bloqueado: nenhum ativo sintético disponível na Deriv oferece os contratos solicitados [${[...requested].join(', ')}]. A coleta/análise não será apresentada como pronta para operar.`);
+      }
+      if (unavailableModalities.length > 0) {
+        console.warn(`[DERIV_CAPABILITY] Modalidades sem ativos compatíveis nesta sessão serão bloqueadas individualmente: ${unavailableModalities.join(', ')}`);
       }
     }
   }
@@ -5078,6 +5088,8 @@ export class AutoTradingScheduler {
     contractCapabilitySymbols: number;
     contractCapabilityCheckedAt: number;
     contractCapabilityModes: string[];
+    contractCapabilityAvailableModes: string[];
+    contractCapabilityUnavailableModes: string[];
     badMarketPaused: boolean;
     badMarketPausedSecondsLeft: number;
     badMarketReducedGrowth: boolean;
@@ -5107,6 +5119,8 @@ export class AutoTradingScheduler {
       contractCapabilitySymbols: this.lastContractCapabilityStatus.compatibleSymbols,
       contractCapabilityCheckedAt: this.lastContractCapabilityStatus.checkedAt,
       contractCapabilityModes: [...this.lastContractCapabilityStatus.requestedModalities],
+      contractCapabilityAvailableModes: [...this.lastContractCapabilityStatus.availableModalities],
+      contractCapabilityUnavailableModes: [...this.lastContractCapabilityStatus.unavailableModalities],
       badMarketPaused: isPaused && !this.badMarketReducedGrowthActive,
       badMarketPausedSecondsLeft: secsLeft,
       badMarketReducedGrowth: this.badMarketReducedGrowthActive,
