@@ -41,8 +41,12 @@ router.get('/status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(as
   const legacySafetyStatus = autoTradingScheduler.getSchedulerStatus();
   const isolatedSafetyStatus = isolatedAutoTradingScheduler.getSchedulerStatus();
   const emergencyStop = Boolean(legacySafetyStatus.emergencyStop || isolatedSafetyStatus.emergencyStop);
+  const marketDataReady = activeSessions.some((session: any) =>
+    Boolean(session.workerReady && session.marketDataReady && Number(session.marketDataTicks || 0) > 0)
+  );
   const schedulerActiveForUser = isolatedAutoTradingScheduler.getArmedUserIds().includes(userId) &&
-    activeSessions.some((session: any) => session.isActive) &&
+    activeSessions.some((session: any) => session.isActive && session.workerReady) &&
+    marketDataReady &&
     !emergencyStop;
   // Expose only this user's runtime; never disclose other users' IDs or counts.
   const schedulerStatus = {
@@ -64,11 +68,12 @@ router.get('/status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(as
   const activeConfigsCount = userActiveConfigs.length;
 
   // O sistema só está realmente operando se: scheduler rodando + token configurado + configurações ativas
-  const canExecuteTrades = schedulerActiveForUser && derivTokenConfigured && activeConfigsCount > 0;
+  const canExecuteTrades = schedulerActiveForUser && marketDataReady && derivTokenConfigured && activeConfigsCount > 0;
 
   // Bloqueios que impedem trading
   const tradingBlockers: string[] = [];
-  if (!schedulerActiveForUser) tradingBlockers.push('Trading não ativado para esta sessão');
+  if (!schedulerActiveForUser) tradingBlockers.push('Runtime ou coleta de mercado não está pronto para esta sessão');
+  if (!marketDataReady) tradingBlockers.push('Coleta ainda não confirmou ticks reais da Deriv');
   if (!derivTokenConfigured) tradingBlockers.push('Token Deriv não configurado');
   if (activeConfigsCount === 0) tradingBlockers.push('Nenhuma configuração de trading ativa');
 
@@ -81,7 +86,10 @@ router.get('/status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(as
     schedulerStatus,
     stats: {
       totalSessions: activeSessions.length,
-      totalExecutedOperations: 0,
+      totalExecutedOperations: activeSessions.reduce((sum: number, session: any) => sum + Number(session.totalExecutedOperations || 0), 0),
+      marketDataReady,
+      marketDataTicks: activeSessions.reduce((sum: number, session: any) => sum + Number(session.marketDataTicks || 0), 0),
+      marketDataSymbols: activeSessions.reduce((sum: number, session: any) => sum + Number(session.marketDataSymbols || 0), 0),
       activeSessions: activeSessions.filter((session: any) => session.isActive).length,
       isolatedUsers: activeSessions.length > 0 ? 1 : 0,
       armedUsers: schedulerActiveForUser ? 1 : 0,
@@ -91,9 +99,14 @@ router.get('/status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(as
       sessionId: session.sessionId,
       isActive: Boolean(session.isActive),
       workerReady: Boolean(session.workerReady),
+      isInitialized: Boolean(session.isInitialized),
+      marketDataReady: Boolean(session.marketDataReady),
+      marketDataTicks: Number(session.marketDataTicks || 0),
+      marketDataSymbols: Number(session.marketDataSymbols || 0),
+      currentPhase: String(session.currentPhase || 'AGUARDANDO_PLAY'),
+      totalExecutedOperations: Number(session.totalExecutedOperations || 0),
       lastHeartbeatAt: session.lastHeartbeatAt,
-      // This isolated runtime does not expose per-trade counters in the parent process.
-      progress: { executed: 0, total: 0, percentage: 0 },
+      progress: { executed: Number(session.totalExecutedOperations || 0), total: 0, percentage: 0 },
       lastExecution: null,
       nextEstimated: null,
     }))
