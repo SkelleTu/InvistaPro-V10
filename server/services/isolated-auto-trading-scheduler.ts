@@ -28,6 +28,12 @@ interface UserRuntime {
   activeSessions: number;
   workerReady: boolean;
   workerReadyPromise: Promise<void> | null;
+  isInitialized: boolean;
+  marketDataReady: boolean;
+  marketDataTicks: number;
+  marketDataSymbols: number;
+  currentPhase: string;
+  totalExecutedOperations: number;
 }
 
 class IsolatedAutoTradingScheduler {
@@ -58,6 +64,12 @@ class IsolatedAutoTradingScheduler {
         activeSessions: 0,
         workerReady: false,
         workerReadyPromise: null,
+        isInitialized: false,
+        marketDataReady: false,
+        marketDataTicks: 0,
+        marketDataSymbols: 0,
+        currentPhase: "AGUARDANDO_PLAY",
+        totalExecutedOperations: 0,
       };
       this.runtimes.set(id, runtime);
       console.log(`🧩 [USER-RUNTIME] sessão leve criada | user=${id} | session=${runtime.sessionId}`);
@@ -122,6 +134,12 @@ class IsolatedAutoTradingScheduler {
         runtime.status = message.status || runtime.status;
         runtime.armed = Boolean(message.armed);
         runtime.activeSessions = Number(message.activeSessions || 0);
+        runtime.isInitialized = Boolean(message.isInitialized);
+        runtime.marketDataReady = Boolean(message.marketDataReady);
+        runtime.marketDataTicks = Number(message.marketDataTicks || 0);
+        runtime.marketDataSymbols = Number(message.marketDataSymbols || 0);
+        runtime.currentPhase = String(message.currentPhase || runtime.currentPhase);
+        runtime.totalExecutedOperations = Number(message.totalExecutedOperations || 0);
       } else if (message?.type === "error") {
         console.error(`❌ [USER-RUNTIME] user=${runtime.userId} session=${runtime.sessionId}: ${message.error}`);
         if (!settled) settle(new Error(String(message.error || "Worker failed before readiness.")));
@@ -295,6 +313,12 @@ class IsolatedAutoTradingScheduler {
       isolated: true,
       workerReady: r.workerReady,
       lastHeartbeatAt: r.lastHeartbeatAt,
+      isInitialized: r.isInitialized,
+      marketDataReady: r.marketDataReady,
+      marketDataTicks: r.marketDataTicks,
+      marketDataSymbols: r.marketDataSymbols,
+      currentPhase: r.currentPhase,
+      totalExecutedOperations: r.totalExecutedOperations,
     }));
   }
 
