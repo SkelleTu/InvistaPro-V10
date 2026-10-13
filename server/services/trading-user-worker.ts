@@ -28,6 +28,10 @@ function sendStatus() {
       marketDataReady: Boolean(status?.marketDataReady),
       marketDataTicks: Number(status?.marketDataTicks || 0),
       marketDataSymbols: Number(status?.marketDataSymbols || 0),
+      contractCapabilityReady: Boolean(status?.contractCapabilityReady),
+      contractCapabilitySymbols: Number(status?.contractCapabilitySymbols || 0),
+      contractCapabilityCheckedAt: Number(status?.contractCapabilityCheckedAt || 0),
+      contractCapabilityModes: Array.isArray(status?.contractCapabilityModes) ? status.contractCapabilityModes : [],
       currentPhase: String(status?.currentPhase || "AGUARDANDO_PLAY"),
       totalExecutedOperations: Number(scheduler?.getSessionStats().totalExecutedOperations || 0),
     });
