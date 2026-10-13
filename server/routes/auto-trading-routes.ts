@@ -45,13 +45,24 @@ router.get('/status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(as
     activeSessions.some((session: any) => session.isActive) &&
     !emergencyStop;
   // Expose only this user's runtime; never disclose other users' IDs or counts.
+  const userRuntime = activeSessions.find((session: any) => String(session.userId) === userId);
   const schedulerStatus = {
     isRunning: schedulerActiveForUser,
-    hasActiveSessions: schedulerActiveForUser,
+    hasActiveSessions: Boolean(userRuntime?.activeSessions),
     emergencyStop,
-    isInitialized: activeSessions.some((session: any) => session.workerReady),
-    currentPhase: schedulerActiveForUser ? 'ATIVO' : 'AGUARDANDO_PLAY',
-    currentPhaseDetail: schedulerActiveForUser ? 'Runtime isolado ativo para este usuário' : 'Nenhuma atividade ativa para este usuário',
+    isInitialized: Boolean(userRuntime?.isInitialized),
+    currentPhase: schedulerActiveForUser ? (userRuntime?.currentPhase || 'INICIALIZANDO') : 'AGUARDANDO_PLAY',
+    currentPhaseDetail: schedulerActiveForUser
+      ? (userRuntime?.currentPhaseDetail || 'Worker ativo; aguardando primeira análise')
+      : 'Nenhuma atividade ativa para este usuário',
+    lastCycleStartedAt: Number(userRuntime?.lastCycleStartedAt || 0),
+    nextCycleAt: Number(userRuntime?.nextCycleAt || 0),
+    cycleIntervalMs: Number(userRuntime?.cycleIntervalMs || 0),
+    activityLog: Array.isArray(userRuntime?.activityLog) ? userRuntime.activityLog.slice(0, 8) : [],
+    marketQuality: Number(userRuntime?.marketQuality || 0),
+    badMarketPaused: Boolean(userRuntime?.badMarketPaused),
+    badMarketPausedSecondsLeft: Number(userRuntime?.badMarketPausedSecondsLeft || 0),
+    lastHeartbeatAt: Number(userRuntime?.lastHeartbeatAt || 0),
   };
 
   // Verificar se o token Deriv está configurado para este usuário
@@ -62,15 +73,49 @@ router.get('/status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(as
   const activeConfigs = await storage.getActiveTradeConfigurations();
   const userActiveConfigs = activeConfigs.filter((c: any) => String(c.userId) === String(userId));
   const activeConfigsCount = userActiveConfigs.length;
+  const normalizeModalities = (value: unknown): string[] => {
+    if (Array.isArray(value)) return value.map(v => String(v).trim().toLowerCase()).filter(Boolean);
+    if (typeof value !== 'string' || !value.trim()) return [];
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed.map(v => String(v).trim().toLowerCase()).filter(Boolean);
+    } catch {}
+    return value.split(',').map(v => v.trim().toLowerCase()).filter(Boolean);
+  };
+  const selectedModalities = [...new Set(userActiveConfigs.flatMap((config: any) => normalizeModalities(config.selectedModalities)))];
+  const modalityContractTypes: Record<string, string[]> = {
+    digit_differs: ['DIGITDIFF'],
+    digitdiff: ['DIGITDIFF'],
+    accumulator: ['ACCU'],
+    rise: ['CALL'],
+    fall: ['PUT'],
+  };
+  const allowedProductionContractTypes = new Set(['ACCU', 'DIGITDIFF']);
+  // The scheduler's production compatibility map marks BOOM/CRASH as Rise/Fall-only.
+  const boomCrashSupportedContractTypes = new Set(['CALL', 'PUT']);
+  const compatibleProductionModalities = selectedModalities.filter((modality: string) =>
+    (modalityContractTypes[modality] || []).some((contractType: string) =>
+      allowedProductionContractTypes.has(contractType) && boomCrashSupportedContractTypes.has(contractType)
+    )
+  );
+  const modalityCompatibilityBlocked = activeConfigsCount > 0 && (
+    selectedModalities.length === 0 || compatibleProductionModalities.length === 0
+  );
 
-  // O sistema só está realmente operando se: scheduler rodando + token configurado + configurações ativas
-  const canExecuteTrades = schedulerActiveForUser && derivTokenConfigured && activeConfigsCount > 0;
+  // "Armed" is not the same as "able to trade": require a live worker, token,
+  // active strategy, and at least one modality/asset/contract combination allowed by policy.
+  const canExecuteTrades = schedulerActiveForUser && derivTokenConfigured
+    && activeConfigsCount > 0 && !modalityCompatibilityBlocked;
 
-  // Bloqueios que impedem trading
   const tradingBlockers: string[] = [];
   if (!schedulerActiveForUser) tradingBlockers.push('Trading não ativado para esta sessão');
   if (!derivTokenConfigured) tradingBlockers.push('Token Deriv não configurado');
   if (activeConfigsCount === 0) tradingBlockers.push('Nenhuma configuração de trading ativa');
+  if (modalityCompatibilityBlocked) tradingBlockers.push(
+    selectedModalities.length === 0
+      ? 'Nenhuma modalidade salva na configuração ativa'
+      : 'Nenhuma combinação válida: os ativos permitidos (BOOM/CRASH) não são compatíveis com as modalidades/contratos liberados (ACCU/DIGITDIFF).'
+  );
 
   res.json({
     schedulerActive: schedulerActiveForUser,

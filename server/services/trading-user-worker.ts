@@ -24,6 +24,16 @@ function sendStatus() {
       status: status?.isRunning ? "armed" : "ready",
       armed: Boolean(status?.isRunning),
       activeSessions: status?.hasActiveSessions ? 1 : 0,
+      isInitialized: Boolean(status?.isInitialized),
+      currentPhase: status?.currentPhase || "INICIALIZANDO",
+      currentPhaseDetail: status?.currentPhaseDetail || "Aguardando início da análise",
+      lastCycleStartedAt: Number(status?.lastCycleStartedAt || 0),
+      nextCycleAt: Number(status?.nextCycleAt || 0),
+      cycleIntervalMs: Number(status?.cycleIntervalMs || 0),
+      activityLog: Array.isArray(status?.activityLog) ? status.activityLog.slice(0, 8) : [],
+      marketQuality: Number(status?.marketQuality ?? 0),
+      badMarketPaused: Boolean(status?.badMarketPaused),
+      badMarketPausedSecondsLeft: Number(status?.badMarketPausedSecondsLeft || 0),
     });
   } catch {}
 }
