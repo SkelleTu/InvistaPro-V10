@@ -2528,7 +2528,7 @@ export default function TradingSystemPage() {
                           method: "PUT",
                           body: JSON.stringify({ modalities: ["__auto__"] }),
                         }).catch(() => {});
-                        toast({ title: "⚡ Modo Automático ativado!", description: "5 IAs agora controlam as modalidades em tempo real — nenhuma seleção manual necessária." });
+                        toast({ title: "Modo automático de modalidades ativado", description: "A seleção automática foi salva. A execução financeira e a compatibilidade de ativos são verificadas separadamente no Controle do Sistema." });
                       }
                     }}
                     className={`w-full justify-start font-bold text-base py-6 transition-all ${
@@ -2542,12 +2542,12 @@ export default function TradingSystemPage() {
                     <div className="text-left">
                       <div>AUTOMÁTICO — 5 IAs em Tempo Real</div>
                       <div className={`text-xs font-normal mt-0.5 ${autoMode ? "text-violet-200" : "text-violet-500"}`}>
-                        O sistema decide e alterna modalidades autonomamente a cada segundo
+                        Seleção automática de modalidade. A execução real é confirmada separadamente no Controle do Sistema.
                       </div>
                     </div>
                     {autoMode && (
                       <Badge className="ml-auto bg-white/20 text-white border-0 animate-pulse">
-                        ATIVO
+                        MODO AUTO
                       </Badge>
                     )}
                   </Button>
