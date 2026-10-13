@@ -655,7 +655,7 @@ export class DerivAPIService extends EventEmitter {
     const candidates = (allSymbols ?? await this.getActiveSymbolsCached()).filter((entry: any) =>
       isAllowedProductionSymbol(entry?.symbol) &&
       !isBlockedOneSecondSymbol(entry?.symbol) &&
-      /synthetic|derived/i.test(String(entry?.market ?? entry?.market_display_name ?? ''))
+      /synthetic|derived/i.test(String(entry?.market || entry?.market_display_name || ''))
     );
     const supported: string[] = [];
     // A bounded concurrency avoids flooding Deriv's WebSocket with hundreds of requests.
@@ -710,7 +710,7 @@ export class DerivAPIService extends EventEmitter {
     const candidates = symbols.filter((entry: any) =>
       isAllowedProductionSymbol(entry?.symbol) &&
       !isBlockedOneSecondSymbol(entry?.symbol) &&
-      /synthetic|derived/i.test(String(entry?.market ?? entry?.market_display_name ?? ''))
+      /synthetic|derived/i.test(String(entry?.market || entry?.market_display_name || ''))
     );
     const supported: Array<{symbol: string; display_name: string; market: string}> = [];
     for (let i = 0; i < candidates.length; i += 5) {
