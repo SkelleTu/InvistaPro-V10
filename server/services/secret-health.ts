@@ -10,7 +10,7 @@ function state(name: string, validator?: (value: string) => boolean): { name: st
 export function getSecretHealth() {
   const checks = [
     state("ENCRYPTION_KEY", v => /^[0-9a-fA-F]{64}$/.test(v)),
-    state("DERIV_APP_ID", v => /^\d+$/.test(v)),
+    state("DERIV_APP_ID", v => /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(v)),
     state("DERIV_API_KEY_DEMO"),
     state("DERIV_API_KEY_REAL"),
     state("DATABASE_URL", v => /^(postgres|postgresql|file|libsql|https?):/i.test(v)),
