@@ -3848,11 +3848,20 @@ export class AutoTradingScheduler {
       const compatibleSymbolCount = currentSymbolData.filter((data: any) =>
         isSymbolCompatibleWithModalities(String(data.symbol))
       ).length;
+      const requestedCapabilityModes = modalityFilter ? [...modalityFilter] : ['digit_differs', 'accumulator'];
+      const availableCapabilityModes = ['digit_differs', 'accumulator'].filter((mode) =>
+        currentSymbolData.some((data: any) => {
+          const types = capabilitiesBySymbol.get(String(data.symbol)) || new Set<string>();
+          return mode === 'digit_differs' ? types.has('DIGITDIFF') : types.has('ACCU');
+        })
+      );
       this.lastContractCapabilityStatus = {
         userId,
         checkedAt: capabilityCacheTimes.length > 0 ? Math.min(...capabilityCacheTimes) : 0,
         compatibleSymbols: compatibleSymbolCount,
-        requestedModalities: modalityFilter ? [...modalityFilter] : ['digit_differs', 'accumulator'],
+        requestedModalities: requestedCapabilityModes,
+        availableModalities: availableCapabilityModes,
+        unavailableModalities: requestedCapabilityModes.filter((mode) => !availableCapabilityModes.includes(mode)),
       };
 
       const filteredSymbolsData = currentSymbolData.filter((symbolData: any) => {
