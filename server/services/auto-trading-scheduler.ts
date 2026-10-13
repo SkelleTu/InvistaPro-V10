@@ -582,7 +582,9 @@ export class AutoTradingScheduler {
       );
       console.log(`📊 [INIT] Deriv devolveu ${discoveredSymbols.length} símbolos; ${activeSymbols.length} correspondem à allowlist`);
 
-      const digitdiffSymbols = await tempDerivAPI.getDigitDiffSupportedSymbols(activeSymbols);
+      // Do not block startup on an expensive DigitDiff contract scan: market-data readiness
+      // is established by a real tick below, and contract eligibility is checked per mode.
+      const digitdiffSymbols: string[] = [];
       const crashBoomFromApi = activeSymbols
         .map((s: any) => (typeof s === 'string' ? s : s.symbol))
         .filter((sym: string) => /^(CRASH|BOOM)_?\d+N?$/i.test(sym));
@@ -5007,11 +5009,16 @@ export class AutoTradingScheduler {
     cycleIntervalMs: number;
     activityLog: Array<{ time: number; message: string; type: string }>;
     marketQuality: number;
+    marketDataReady: boolean;
+    marketDataTicks: number;
+    marketDataSymbols: number;
     badMarketPaused: boolean;
     badMarketPausedSecondsLeft: number;
     badMarketReducedGrowth: boolean;
   } {
     const nowSt = Date.now();
+    const marketStats = marketDataCollector.getCollectionStats();
+    const marketDataReady = marketStats.isCollecting && marketStats.totalTicks > 0;
     const isPaused = this.badMarketPausedUntil > nowSt;
     const secsLeft = isPaused ? Math.round((this.badMarketPausedUntil - nowSt) / 1000) : 0;
     return {
@@ -5026,6 +5033,9 @@ export class AutoTradingScheduler {
       cycleIntervalMs: 2000, // Intervalo de segurança entre ciclos
       activityLog: this.activityLog.slice(0, 10),
       marketQuality: this.lastScanMarketQuality,
+      marketDataReady,
+      marketDataTicks: marketStats.totalTicks,
+      marketDataSymbols: marketStats.activeSymbols,
       badMarketPaused: isPaused && !this.badMarketReducedGrowthActive,
       badMarketPausedSecondsLeft: secsLeft,
       badMarketReducedGrowth: this.badMarketReducedGrowthActive,
