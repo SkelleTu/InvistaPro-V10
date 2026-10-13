@@ -324,6 +324,7 @@ class IsolatedAutoTradingScheduler {
       isActive: r.armed,
       isolated: true,
       workerReady: r.workerReady,
+      activeSessions: r.activeSessions,
       lastHeartbeatAt: r.lastHeartbeatAt,
       currentPhase: r.currentPhase,
       currentPhaseDetail: r.currentPhaseDetail,
