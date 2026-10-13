@@ -3800,9 +3800,14 @@ export class AutoTradingScheduler {
         return { success: false, error: `Falha ao validar contratos permitidos na Deriv: ${error instanceof Error ? error.message : String(error)}`, totalAnalyzed: 0, top5Symbols: [] };
       }
 
+      const liveCollectedSymbols = new Set(marketDataCollector.getSupportedSymbols());
+      const currentSymbolData = allSymbolsData.filter((data: any) =>
+        liveCollectedSymbols.has(String(data?.symbol ?? '')) &&
+        isAllowedProductionSymbol(data.symbol) &&
+        !AutoTradingScheduler.BLOCKED_SYMBOLS_PATTERN.test(String(data.symbol ?? ''))
+      );
       const capabilitiesBySymbol = new Map<string, Set<string>>();
-      await Promise.all(allSymbolsData
-        .filter((data: any) => isAllowedProductionSymbol(data.symbol))
+      await Promise.all(currentSymbolData
         .map(async (data: any) => {
           const symbol = String(data.symbol);
           try {
@@ -3830,8 +3835,8 @@ export class AutoTradingScheduler {
       const capabilityCacheTimes = [...capabilitiesBySymbol.keys()]
         .map((symbol) => this.productionContractCapabilityCache.get(`${userId}:${accountType}:${symbol.toUpperCase()}`)?.checkedAt || 0)
         .filter((timestamp) => timestamp > 0);
-      const compatibleSymbolCount = allSymbolsData.filter((data: any) =>
-        isAllowedProductionSymbol(data.symbol) && isSymbolCompatibleWithModalities(String(data.symbol))
+      const compatibleSymbolCount = currentSymbolData.filter((data: any) =>
+        isSymbolCompatibleWithModalities(String(data.symbol))
       ).length;
       this.lastContractCapabilityStatus = {
         userId,
@@ -3840,10 +3845,10 @@ export class AutoTradingScheduler {
         requestedModalities: modalityFilter ? [...modalityFilter] : ['digit_differs', 'accumulator'],
       };
 
-      const filteredSymbolsData = allSymbolsData.filter((symbolData: any) => {
+      const filteredSymbolsData = currentSymbolData.filter((symbolData: any) => {
         const symbol = String(symbolData.symbol || '');
         if (!isAllowedProductionSymbol(symbol) || this.isSymbolBlocked(symbol)) return false;
-        return true;
+        return isSymbolCompatibleWithModalities(symbol);
       });
       
       if (filteredSymbolsData.length === 0) {
