@@ -97,7 +97,8 @@ app.use((req, res, next) => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
+      // Remote SSO launch URLs contain one-time bearer tickets; never log their response bodies.
+      if (capturedJsonResponse && path !== "/api/auth/remote-access-ticket") {
         logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
       }
       if (logLine.length > 80) {
