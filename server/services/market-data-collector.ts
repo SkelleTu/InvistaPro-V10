@@ -27,28 +27,16 @@ export class MarketDataCollector extends EventEmitter {
   private lastPersistenceSuccessAt = 0;
   private persistenceFailures = 0;
   
-  // 🎯 FALLBACK SEGURO: Símbolos que SEMPRE suportam DIGITDIFF (garantido pela Deriv)
-  private static readonly FALLBACK_SYMBOLS = [
-    'BOOM500', 'BOOM1000', 'CRASH500', 'CRASH1000',
-  ];
+  // No hard-coded symbol fallback: every collected symbol must be discovered live
+  // and be eligible for at least one approved modality.
 
   // Limite rígido para produção no Render Free. Nunca abrir centenas/milhares de streams.
   private static readonly MAX_STREAM_SYMBOLS = 9;
 
-  // Universo explícito de produção. Nunca assinar todos os símbolos devolvidos pela Deriv.
-  // Mantém apenas os índices usados pelo Invista Pro: DigitDiff/Accumulator + Boom/Crash.
-  private static readonly ALLOWED_PRODUCTION_SYMBOLS = new Set([
-    "CRASH500", "CRASH1000", "BOOM500", "BOOM1000",
-  ]);
-  
-  // 🚫 BLOQUEADO 100%: Ativos causadores de loss - NUNCA serão operados
-  // Cobre tanto o formato "(1s)" quanto o formato de API "1HZ*" (são os mesmos ativos)
+  // Never subscribe to every Deriv symbol. Runtime discovery selects a small union
+  // of symbols that actually support DIGITDIFF and/or ACCU.
   private static readonly BLOCKED_SYMBOLS_PATTERN = /\(1s\)|^1HZ|_1S/i;
-  
-  // 🎯 DINÂMICO: CARREGADO DA DERIV EM TEMPO REAL
-  // Sistema agora descobri automaticamente TODOS os ativos que suportam DIGITDIFF
-  // Inicializado com fallback para garantir funcionamento mesmo se descoberta falhar
-  private DIGITDIFF_SUPPORTED_SYMBOLS: string[] = [...MarketDataCollector.FALLBACK_SYMBOLS];
+  private DIGITDIFF_SUPPORTED_SYMBOLS: string[] = [];
   private allDerivSymbols: Map<string, any> = new Map();
   private symbolsRefreshInterval: NodeJS.Timeout | null = null;
   private lastSymbolsUpdate: number = 0;
@@ -117,11 +105,9 @@ export class MarketDataCollector extends EventEmitter {
    * Retorna fallback seguro se a lista estiver vazia
    */
   getSupportedSymbols(): string[] {
-    if (this.DIGITDIFF_SUPPORTED_SYMBOLS.length === 0) {
-      console.warn('⚠️ [getSupportedSymbols] Lista vazia - usando fallback');
-      return [...MarketDataCollector.FALLBACK_SYMBOLS];
-    }
-    return [...this.DIGITDIFF_SUPPORTED_SYMBOLS];
+    return this.DIGITDIFF_SUPPORTED_SYMBOLS.filter((symbol) =>
+      isAllowedProductionSymbol(symbol) && !MarketDataCollector.BLOCKED_SYMBOLS_PATTERN.test(symbol)
+    );
   }
 
   /**
@@ -279,39 +265,42 @@ export class MarketDataCollector extends EventEmitter {
    */
   async discoverAndLoadAllAssets(): Promise<string[]> {
     try {
-      console.log('🔍 [DISCOVERY] Iniciando descoberta de todos os ativos DIGITDIFF disponíveis...');
-      
-      // Conectar à Deriv se não estiver conectado
-      if (!this.derivAPI.getIsConnected()) {
-        await this.derivAPI.connectPublic();
-      }
-      
-      // Obter TODOS os símbolos ativos
+      console.log('[DISCOVERY] Consultando ativos sintéticos disponíveis por modalidade...');
+      if (!this.derivAPI.getIsConnected()) await this.derivAPI.connectPublic('MARKET_MODE_DISCOVERY');
       const allSymbols = await this.derivAPI.getActiveSymbolsCached();
-      console.log(`📊 [DISCOVERY] Encontrados ${allSymbols.length} símbolos ativos na Deriv`);
-      
-      // Descobrir quais suportam DIGITDIFF
-      const digitDiffSymbols = await this.derivAPI.getDigitDiffSupportedSymbols(allSymbols);
-      console.log(`💎 [DISCOVERY] ${digitDiffSymbols.length} ativos com DIGITDIFF suportado`);
-      
-      // Só atualizar lista se encontrou símbolos (não sobrescrever com lista vazia)
-      if (digitDiffSymbols.length > 0) {
-        this.DIGITDIFF_SUPPORTED_SYMBOLS = digitDiffSymbols;
-        this.allDerivSymbols = new Map(allSymbols.map(s => [s.symbol, s]));
-        this.lastSymbolsUpdate = Date.now();
+      const digit = await this.derivAPI.getAvailableSymbolsByTradeMode('digit_differs');
+      const accumulators = await this.derivAPI.getAvailableSymbolsByTradeMode('accumulator');
+      const digitSymbols = digit.map((entry: any) => String(entry.symbol));
+      const accuSymbols = accumulators.map((entry: any) => String(entry.symbol));
+
+      // Keep the stream budget small, while guaranteeing representation from each
+      // modality when Deriv has eligible symbols for both.
+      const preferred = [
+        ...digitSymbols.slice(0, 4),
+        ...accuSymbols.slice(0, 4),
+      ];
+      const candidates = [...new Set([
+        ...preferred,
+        ...digitSymbols,
+        ...accuSymbols,
+      ])].filter((symbol) =>
+        isAllowedProductionSymbol(symbol) && !MarketDataCollector.BLOCKED_SYMBOLS_PATTERN.test(symbol)
+      ).slice(0, MarketDataCollector.MAX_STREAM_SYMBOLS);
+
+      if (candidates.length === 0) {
         this.isDiscoveryComplete = true;
-        console.log(`✅ [DISCOVERY] Lista atualizada com ${digitDiffSymbols.length} ativos DIGITDIFF`);
-      } else {
-        console.warn('⚠️ [DISCOVERY] Nenhum símbolo descoberto - mantendo fallback');
-        // Manter a lista atual (fallback)
+        this.DIGITDIFF_SUPPORTED_SYMBOLS = [];
+        throw new Error('Deriv não retornou símbolos sintéticos compatíveis com DIGITDIFF ou ACCU; coleta não iniciada.');
       }
-      
-      return this.DIGITDIFF_SUPPORTED_SYMBOLS;
+      this.DIGITDIFF_SUPPORTED_SYMBOLS = candidates;
+      this.allDerivSymbols = new Map(allSymbols.map((entry: any) => [entry.symbol, entry]));
+      this.lastSymbolsUpdate = Date.now();
+      this.isDiscoveryComplete = true;
+      console.log(`[DISCOVERY] ${candidates.length} símbolos elegíveis selecionados; DIGITDIFF=${digitSymbols.length}, ACCU=${accuSymbols.length}`);
+      return [...candidates];
     } catch (error) {
-      console.error('❌ [DISCOVERY] Erro ao descobrir ativos:', error);
-      console.warn('⚠️ [DISCOVERY] Usando fallback seguro');
-      // Não fazer throw - retornar a lista atual (fallback)
-      return this.DIGITDIFF_SUPPORTED_SYMBOLS;
+      console.error('[DISCOVERY] Não foi possível confirmar símbolos por modalidade:', error);
+      throw error;
     }
   }
 
@@ -329,17 +318,15 @@ export class MarketDataCollector extends EventEmitter {
     try {
       let supportedSymbols = (symbols && symbols.length > 0)
         ? symbols
-        : [...MarketDataCollector.FALLBACK_SYMBOLS];
+        : await this.discoverAndLoadAllAssets();
 
-      // Normalize/deduplicate and fail closed to the production allowlist.
       supportedSymbols = Array.from(new Set(supportedSymbols.map(s => String(s).trim().toUpperCase())))
         .filter(symbol => !MarketDataCollector.BLOCKED_SYMBOLS_PATTERN.test(symbol))
-        .filter(symbol => MarketDataCollector.ALLOWED_PRODUCTION_SYMBOLS.has(String(symbol).replace(/[^A-Z0-9]/g, '')))
         .filter(symbol => isAllowedProductionSymbol(symbol))
         .slice(0, MarketDataCollector.MAX_STREAM_SYMBOLS);
 
       if (supportedSymbols.length === 0) {
-        supportedSymbols = [...MarketDataCollector.FALLBACK_SYMBOLS];
+        throw new Error('Nenhum símbolo elegível foi confirmado pela Deriv para DIGITDIFF/ACCU; coleta bloqueada.');
       }
       this.DIGITDIFF_SUPPORTED_SYMBOLS = supportedSymbols;
       this.tickBuffers.clear();
