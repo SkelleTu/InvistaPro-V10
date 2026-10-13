@@ -3734,7 +3734,7 @@ export class AutoTradingScheduler {
 
       // ── Mapa de compatibilidade símbolo × modalidade (espelhado da lógica de execução) ──
       // Permite que a seleção de símbolo SOMENTE considere ativos onde as modalidades do usuário funcionam.
-      const _DIGIT_K   = ['digit_differs','digit_matches','digit_over','digit_under','digit_odd','digit_even'];
+      const _DIGIT_K   = ['digit_diff','digitdiff','digit_differs','digit_matches','digit_over','digit_under','digit_odd','digit_even'];
       const _RF_K      = ['rise','fall'];                   // CALL/PUT (ticks simples)
       const _HL_K      = ['higher','lower'];                 // CALLE/PUTE (com barreira) — JD/RDB não suportam
       const _INOUT_K   = ['ends_between','ends_outside','stays_between','goes_outside'];
