@@ -146,9 +146,7 @@ export class AutoTradingScheduler {
       console.log(`[DERIV_CAPABILITY] preflight user=${userId} account=${accountType} requested=[${[...requested].join(',')}] compatibleSymbols=[${compatibleSymbols.join(',') || 'none'}]`);
 
       if (compatibleSymbols.length === 0) {
-        console.warn(
-          `[DERIV_CAPABILITY] Nenhum contrato compatível com [${[...requested].join(', ')}] nos símbolos permitidos. A análise de mercado continuará; a execução financeira permanecerá bloqueada.`
-        );
+        throw new Error(`Play bloqueado: nenhum ativo sintético disponível na Deriv oferece os contratos solicitados [${[...requested].join(', ')}]. A coleta/análise não será apresentada como pronta para operar.`);
       }
     }
   }
