@@ -81,6 +81,77 @@ export class AutoTradingScheduler {
   // a contract from a UI toggle: Deriv's contracts_for response is authoritative.
   private readonly PRODUCTION_CONTRACT_CACHE_TTL_MS = 5 * 60 * 1000;
   private readonly productionContractCapabilityCache = new Map<string, { checkedAt: number; types: Set<string> }>();
+  private lastContractCapabilityStatus = {
+    userId: '',
+    checkedAt: 0,
+    compatibleSymbols: 0,
+    requestedModalities: [] as string[],
+  };
+
+  private parseConfiguredModalities(config: any): string[] {
+    const raw = config?.selectedModalities ?? config?.activeModalities ?? '';
+    if (Array.isArray(raw)) return raw.map((value: any) => String(value).trim()).filter(Boolean);
+    if (typeof raw !== 'string' || !raw.trim()) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed.map((value: any) => String(value).trim()).filter(Boolean);
+    } catch {}
+    return raw.split(',').map((value: string) => value.trim()).filter(Boolean);
+  }
+
+  private async validateProductionContractCapabilities(): Promise<void> {
+    const activeConfigs = await storage.getActiveTradeConfigurations();
+    for (const userId of this.armedUserIds) {
+      const userConfigs = activeConfigs.filter((config: any) => String(config.userId) === String(userId));
+      if (userConfigs.length === 0) {
+        throw new Error('Play bloqueado: nenhuma configuração de operação ativa para este usuário.');
+      }
+      const tokenData = await storage.getUserDerivToken(userId);
+      if (!tokenData?.token) throw new Error('Play bloqueado: token Deriv não configurado.');
+      const accountType: 'demo' | 'real' = tokenData.accountType === 'real' ? 'real' : 'demo';
+      const api = this.getUserDerivAPI(userId, accountType);
+      if (!api.isSessionFor(tokenData.token, accountType)) {
+        await api.connect(tokenData.token, accountType, 'PLAY_CAPABILITY_PREFLIGHT');
+      }
+
+      const requested = new Set<string>();
+      for (const config of userConfigs) {
+        const modalities = this.parseConfiguredModalities(config);
+        if (modalities.includes('__auto__') || modalities.length === 0) {
+          requested.add('digit_differs');
+          requested.add('accumulator');
+        } else {
+          for (const modality of modalities) {
+            const normalized = modality.toLowerCase();
+            if (['digit_diff', 'digitdiff', 'digit_differs'].includes(normalized)) requested.add('digit_differs');
+            if (['accumulator', 'accu'].includes(normalized)) requested.add('accumulator');
+          }
+        }
+      }
+
+      const symbols = marketDataCollector.getSupportedSymbols().filter(isAllowedProductionSymbol);
+      const checks = await Promise.all(symbols.map(async (symbol) => {
+        const types = await this.getLiveProductionContractTypes(api, userId, accountType, symbol);
+        const compatible = (requested.has('digit_differs') && types.has('DIGITDIFF')) ||
+          (requested.has('accumulator') && types.has('ACCU'));
+        return { symbol, types, compatible };
+      }));
+      const compatibleSymbols = checks.filter((check) => check.compatible).map((check) => check.symbol);
+      this.lastContractCapabilityStatus = {
+        userId,
+        checkedAt: Date.now(),
+        compatibleSymbols: compatibleSymbols.length,
+        requestedModalities: [...requested],
+      };
+      console.log(`[DERIV_CAPABILITY] preflight user=${userId} account=${accountType} requested=[${[...requested].join(',')}] compatibleSymbols=[${compatibleSymbols.join(',') || 'none'}]`);
+
+      if (compatibleSymbols.length === 0) {
+        throw new Error(
+          `Play bloqueado: a Deriv não confirmou nenhum contrato compatível com [${[...requested].join(', ')}] nos símbolos permitidos BOOM500, BOOM1000, CRASH500 e CRASH1000. Nenhuma ordem foi enviada.`
+        );
+      }
+    }
+  }
 
   private async getLiveProductionContractTypes(
     api: DerivAPIService,
@@ -5011,6 +5082,10 @@ export class AutoTradingScheduler {
     marketDataReady: boolean;
     marketDataTicks: number;
     marketDataSymbols: number;
+    contractCapabilityReady: boolean;
+    contractCapabilitySymbols: number;
+    contractCapabilityCheckedAt: number;
+    contractCapabilityModes: string[];
     badMarketPaused: boolean;
     badMarketPausedSecondsLeft: number;
     badMarketReducedGrowth: boolean;
@@ -5036,6 +5111,10 @@ export class AutoTradingScheduler {
       marketDataReady,
       marketDataTicks: marketStats.totalTicks,
       marketDataSymbols: marketStats.activeSymbols,
+      contractCapabilityReady: this.lastContractCapabilityStatus.compatibleSymbols > 0 && Date.now() - this.lastContractCapabilityStatus.checkedAt < this.PRODUCTION_CONTRACT_CACHE_TTL_MS,
+      contractCapabilitySymbols: this.lastContractCapabilityStatus.compatibleSymbols,
+      contractCapabilityCheckedAt: this.lastContractCapabilityStatus.checkedAt,
+      contractCapabilityModes: [...this.lastContractCapabilityStatus.requestedModalities],
       badMarketPaused: isPaused && !this.badMarketReducedGrowthActive,
       badMarketPausedSecondsLeft: secsLeft,
       badMarketReducedGrowth: this.badMarketReducedGrowthActive,
@@ -5077,26 +5156,31 @@ export class AutoTradingScheduler {
       return;
     }
     
-    // Inicialização pesada acontece SOMENTE quando o usuário autenticado
-    // solicita manualmente o início do trading.
+    // Initialization is gated by a live tick, successful persistence, and a live
+    // contracts_for capability preflight. Never acknowledge Play on configuration alone.
     if (!this.isInitialized) {
-      console.log('⏳ [TRADING] Ativação manual recebida. Inicializando coleta e motores...');
-      await this.setupAnaliseNaturalSystem();
-      this.isInitialized = true;
-      console.log('✅ [TRADING] Componentes inicializados após ativação manual.');
+      console.log('⏳ [TRADING] Ativação manual recebida. Validando coleta, persistência e contratos Deriv...');
       try {
-        supremeAnalyzer.start();
-        console.log('🧠 [SUPREME] Motor de análise ativado manualmente.');
-      } catch (e) {
-        console.warn('⚠️ [SUPREME] Falha ao iniciar motor:', e);
+        await this.setupAnaliseNaturalSystem();
+        await this.validateProductionContractCapabilities();
+        this.isInitialized = true;
+        console.log('✅ [TRADING] Coleta persistida e ao menos um contrato compatível confirmados.');
+        try {
+          supremeAnalyzer.start();
+          console.log('🧠 [SUPREME] Motor de análise ativado manualmente.');
+        } catch (e) {
+          console.warn('⚠️ [SUPREME] Falha ao iniciar motor:', e);
+        }
+        try {
+          await persistentLearningEngine.initialize();
+        } catch (e) {
+          console.warn('⚠️ [LEARNING] Falha ao inicializar motor:', e);
+        }
+      } catch (error) {
+        await this.stopScheduler().catch(() => {});
+        throw error;
       }
-      try {
-        await persistentLearningEngine.initialize();
-      } catch (e) {
-        console.warn('⚠️ [LEARNING] Falha ao inicializar motor:', e);
-      }
-    }
-    
+    }    
     // Re-checar após await (prevenir race condition com múltiplas chamadas concorrentes)
     if (this.continuousLoopActive) {
       console.log('⚠️ Loop já foi iniciado por outra chamada concorrente');
