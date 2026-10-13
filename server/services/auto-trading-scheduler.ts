@@ -3853,6 +3853,19 @@ export class AutoTradingScheduler {
         });
       };
 
+      const capabilityCacheTimes = [...capabilitiesBySymbol.keys()]
+        .map((symbol) => this.productionContractCapabilityCache.get(`${userId}:${accountType}:${symbol.toUpperCase()}`)?.checkedAt || 0)
+        .filter((timestamp) => timestamp > 0);
+      const compatibleSymbolCount = allSymbolsData.filter((data: any) =>
+        isAllowedProductionSymbol(data.symbol) && isSymbolCompatibleWithModalities(String(data.symbol))
+      ).length;
+      this.lastContractCapabilityStatus = {
+        userId,
+        checkedAt: capabilityCacheTimes.length > 0 ? Math.min(...capabilityCacheTimes) : 0,
+        compatibleSymbols: compatibleSymbolCount,
+        requestedModalities: modalityFilter ? [...modalityFilter] : ['digit_differs', 'accumulator'],
+      };
+
       const filteredSymbolsData = allSymbolsData.filter((symbolData: any) => {
         const symbol = String(symbolData.symbol || '');
         if (!isAllowedProductionSymbol(symbol) || this.isSymbolBlocked(symbol)) return false;
