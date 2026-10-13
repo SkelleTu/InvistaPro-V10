@@ -44,9 +44,13 @@ router.get('/status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(as
   const marketDataReady = activeSessions.some((session: any) =>
     Boolean(session.workerReady && session.marketDataReady && Number(session.marketDataTicks || 0) > 0)
   );
+  const contractCapabilityReady = activeSessions.some((session: any) =>
+    Boolean(session.workerReady && session.contractCapabilityReady && Number(session.contractCapabilitySymbols || 0) > 0)
+  );
   const schedulerActiveForUser = isolatedAutoTradingScheduler.getArmedUserIds().includes(userId) &&
     activeSessions.some((session: any) => session.isActive && session.workerReady) &&
     marketDataReady &&
+    contractCapabilityReady &&
     !emergencyStop;
   // Expose only this user's runtime; never disclose other users' IDs or counts.
   const schedulerStatus = {
@@ -73,7 +77,8 @@ router.get('/status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(as
   // Bloqueios que impedem trading
   const tradingBlockers: string[] = [];
   if (!schedulerActiveForUser) tradingBlockers.push('Runtime ou coleta de mercado não está pronto para esta sessão');
-  if (!marketDataReady) tradingBlockers.push('Coleta ainda não confirmou ticks reais da Deriv');
+  if (!marketDataReady) tradingBlockers.push('Coleta ainda não confirmou ticks reais persistidos da Deriv');
+  if (!contractCapabilityReady) tradingBlockers.push('Nenhum contrato compatível foi confirmado para as modalidades e ativos permitidos');
   if (!derivTokenConfigured) tradingBlockers.push('Token Deriv não configurado');
   if (activeConfigsCount === 0) tradingBlockers.push('Nenhuma configuração de trading ativa');
 
@@ -90,6 +95,9 @@ router.get('/status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(as
       marketDataReady,
       marketDataTicks: activeSessions.reduce((sum: number, session: any) => sum + Number(session.marketDataTicks || 0), 0),
       marketDataSymbols: activeSessions.reduce((sum: number, session: any) => sum + Number(session.marketDataSymbols || 0), 0),
+      contractCapabilityReady,
+      contractCapabilitySymbols: activeSessions.reduce((sum: number, session: any) => sum + Number(session.contractCapabilitySymbols || 0), 0),
+      contractCapabilityModes: [...new Set(activeSessions.flatMap((session: any) => Array.isArray(session.contractCapabilityModes) ? session.contractCapabilityModes : []))],
       activeSessions: activeSessions.filter((session: any) => session.isActive).length,
       isolatedUsers: activeSessions.length > 0 ? 1 : 0,
       armedUsers: schedulerActiveForUser ? 1 : 0,
@@ -103,6 +111,9 @@ router.get('/status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(as
       marketDataReady: Boolean(session.marketDataReady),
       marketDataTicks: Number(session.marketDataTicks || 0),
       marketDataSymbols: Number(session.marketDataSymbols || 0),
+      contractCapabilityReady: Boolean(session.contractCapabilityReady),
+      contractCapabilitySymbols: Number(session.contractCapabilitySymbols || 0),
+      contractCapabilityModes: Array.isArray(session.contractCapabilityModes) ? session.contractCapabilityModes : [],
       currentPhase: String(session.currentPhase || 'AGUARDANDO_PLAY'),
       totalExecutedOperations: Number(session.totalExecutedOperations || 0),
       lastHeartbeatAt: session.lastHeartbeatAt,
