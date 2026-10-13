@@ -880,8 +880,9 @@ export class AutoTradingScheduler {
     }
 
     // 3. Escanear todos os ativos com análise recente (< 90s) buscando condição excepcional
-    const ACCU_SYMBOLS = ['BOOM500', 'BOOM1000', 'CRASH500', 'CRASH1000']
-      .filter((symbol) => isAllowedProductionSymbol(symbol));
+    // Leverage is an ACCU-only path: inspect only symbols confirmed live for ACCU.
+    const ACCU_SYMBOLS = marketDataCollector.getSupportedSymbolsByTradeMode('accumulator')
+      .filter((symbol) => isAllowedProductionSymbol(symbol) && !AutoTradingScheduler.BLOCKED_SYMBOLS_PATTERN.test(symbol));
     const STALE_THRESHOLD_MS = 90 * 1000;
 
     type Candidate = { symbol: string; consensus: number; hurst: number; regime: string };
@@ -4301,20 +4302,11 @@ export class AutoTradingScheduler {
   }
 
   private getSymbolsForMode(mode: string): string[] {
-    // 🔥 TODOS OS ATIVOS SUPORTADOS - DESCOBERTA DINÂMICA
-    // Sistema agora carrega automaticamente TODOS os ativos da Deriv em tempo real
-    const supportedSymbols = marketDataCollector.getSupportedSymbols()
-      .filter((symbol) => isAllowedProductionSymbol(symbol));
-    
-    if (supportedSymbols.length > 0) {
-      console.log(`🎯 [getSymbolsForMode] Usando ${supportedSymbols.length} ativos permitidos descobertos dinamicamente`);
-      return supportedSymbols;
-    }
-    
-    // Fallback se descoberta dinâmica não tiver funcionado ainda
-    console.warn('⚠️ [getSymbolsForMode] Nenhum símbolo descoberto - usando fallback');
-    const fallbackSymbols = ['BOOM500', 'BOOM1000', 'CRASH500', 'CRASH1000'];
-    return fallbackSymbols.filter((symbol) => isAllowedProductionSymbol(symbol));
+    const normalized = String(mode ?? '').trim().toLowerCase();
+    const symbols = marketDataCollector.getSupportedSymbolsByTradeMode(normalized)
+      .filter((symbol) => isAllowedProductionSymbol(symbol) && !AutoTradingScheduler.BLOCKED_SYMBOLS_PATTERN.test(symbol));
+    console.log(`[getSymbolsForMode] mode=${normalized} eligibleSymbols=${symbols.length}`);
+    return symbols;
   }
 
   // ===== FLEXIBILIDADE DINÂMICA: STAKE + TICKS =====
