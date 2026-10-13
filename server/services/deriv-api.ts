@@ -4,7 +4,7 @@ import { errorTracker } from './error-tracker';
 import { dualStorage as storage } from '../storage-dual';
 import { resilienceSupervisor } from './resilience-supervisor';
 import { connectDerivAccount, type DerivAccountContext } from './deriv-account-gateway';
-import { isAllowedProductionSymbol, isAllowedProductionContractType, minimumStakeForContract, isValidProductionStake } from './production-symbol-policy';
+import { isAllowedProductionSymbol, isAllowedProductionContractType, minimumStakeForContract, isValidProductionStake, isBlockedOneSecondSymbol, contractTypesForProductionMode } from './production-symbol-policy';
 
 // ☠️ PROTOCOLO DE EXECUÇÃO IMEDIATA — tolerância zero para ativos criminosos
 // Qualquer símbolo que viole as regras é executado aqui: blacklistado, logado e morto.
@@ -648,73 +648,34 @@ export class DerivAPIService extends EventEmitter {
 
   // 🔥 NOVO: Descobrir DINAMICAMENTE quais ativos suportam DIGITDIFF (conforme docs oficiais Deriv)
   async getDigitDiffSupportedSymbols(allSymbols?: DerivActiveSymbol[]): Promise<string[]> {
-    // Se cache está válido, retornar do cache
-    if (this.isCacheValid() && this.digitDiffCache.length > 0) {
-      console.log(`⚡ [DIGITDIFF CACHE] Retornando ${this.digitDiffCache.length} ativos do cache`);
-      return this.digitDiffCache;
-    }
-
-    // Se não passar símbolos e cache expirou, usar cache anterior se houver
-    if (!allSymbols) {
-      if (this.digitDiffCache.length > 0) {
-        console.log(`⚡ [DIGITDIFF CACHE] Retornando ${this.digitDiffCache.length} ativos do cache antigo`);
-        return this.digitDiffCache;
-      }
-      return [];
-    }
-
-    console.log(`🔍 [DIGITDIFF DISCOVERY] Iniciando descoberta com ${allSymbols.length} símbolos`);
-    
-    if (!this.isConnected) {
-      console.warn('⚠️ [DIGITDIFF DISCOVERY] NÃO CONECTADO! Retornando array vazio');
-      return [];
-    }
-    
-    const supportedSymbols: string[] = [];
-    let checked = 0;
-    
-    for (const symbolInfo of allSymbols) {
-      const symbol = symbolInfo.symbol;
-      if (!isAllowedProductionSymbol(symbol)) continue;
-      checked++;
-      
-      // Log a cada 10 símbolos para rastreamento
-      if (checked % 10 === 0) {
-        console.log(`🔍 [DIGITDIFF DISCOVERY] Progresso: ${checked}/${allSymbols.length} símbolos verificados...`);
-      }
-      
-      try {
-        const contracts = await this.getContractsFor(symbol);
-        
-        // Verificar se DIGITDIFF está disponível
-        const hasDigitDiff = contracts.some((c: any) => c.contract_type === 'DIGITDIFF');
-        
-        if (hasDigitDiff) {
-          // 🚫 Nunca adicionar ativos 1s ao cache de DIGITDIFF
-          if (/\(1s\)|^1HZ/i.test(symbol)) {
-            console.log(`🚫 ${symbol} SUPORTA DIGITDIFF mas é ativo 1s — IGNORADO`);
-          } else {
-            supportedSymbols.push(symbol);
-            console.log(`✅ ${symbol} SUPORTA DIGITDIFF`);
-          }
+    const cached = this.digitDiffCache.filter((symbol) => isAllowedProductionSymbol(symbol) && !isBlockedOneSecondSymbol(symbol));
+    if (this.isCacheValid() && cached.length > 0) return cached;
+    if (!this.isConnected) return [];
+    const candidates = (allSymbols ?? await this.getActiveSymbolsCached()).filter((entry: any) =>
+      isAllowedProductionSymbol(entry?.symbol) &&
+      !isBlockedOneSecondSymbol(entry?.symbol) &&
+      /synthetic|derived/i.test(String(entry?.market ?? entry?.market_display_name ?? ''))
+    );
+    const supported: string[] = [];
+    // A bounded concurrency avoids flooding Deriv's WebSocket with hundreds of requests.
+    for (let i = 0; i < candidates.length; i += 5) {
+      const batch = candidates.slice(i, i + 5);
+      const results = await Promise.all(batch.map(async (entry: any) => {
+        const symbol = String(entry.symbol);
+        try {
+          const contracts = await this.getContractsFor(symbol);
+          return contracts.some((contract: any) => String(contract?.contract_type ?? '').toUpperCase() === 'DIGITDIFF') ? symbol : null;
+        } catch (error) {
+          console.warn(`[DIGITDIFF DISCOVERY] ${symbol}: ${error instanceof Error ? error.message : String(error)}`);
+          return null;
         }
-      } catch (error) {
-        console.warn(`⚠️ [DIGITDIFF DISCOVERY] Erro ao verificar ${symbol}:`, error);
-      }
+      }));
+      supported.push(...results.filter((value): value is string => Boolean(value)));
     }
-    
-    // Atualizar cache
-    this.digitDiffCache = supportedSymbols;
+    this.digitDiffCache = [...new Set(supported)];
     this.lastCacheUpdate = Date.now();
-    
-    console.log(`🔥 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-    console.log(`🔥 [DIGITDIFF DESCOBERTA COMPLETA]`);
-    console.log(`🔥 Símbolos verificados: ${checked}/${allSymbols.length}`);
-    console.log(`🔥 Ativos com DIGITDIFF encontrados: ${supportedSymbols.length}`);
-    console.log(`🔥 Símbolos: ${supportedSymbols.join(', ') || 'NENHUM'}`);
-    console.log(`🔥 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-    
-    return supportedSymbols;
+    console.log(`[DIGITDIFF DISCOVERY] ${this.digitDiffCache.length} synthetic symbols support DIGITDIFF; 1s symbols excluded.`);
+    return [...this.digitDiffCache];
   }
 
   // Obter símbolos ativos com cache
@@ -736,53 +697,40 @@ export class DerivAPIService extends EventEmitter {
   }
 
   async getAvailableSymbolsByTradeMode(mode: string) {
-    const normalizedMode = String(mode || 'digit_diff').trim().toLowerCase().replace(/[-\s]/g, '_');
-    console.log(`📡 [DerivAPI] Validating allowed symbols against live contracts for mode: ${normalizedMode}`);
-
-    // The UI may use several aliases for the same Deriv contract. Never claim a
-    // symbol supports a mode unless contracts_for confirms it at runtime.
-    const contractTypesByMode: Record<string, string[]> = {
-      digit_diff: ['DIGITDIFF'],
-      digit_differs: ['DIGITDIFF'],
-      digitdiff: ['DIGITDIFF'],
-      accumulator: ['ACCU'],
-      accu: ['ACCU'],
-    };
-    const requiredTypes = contractTypesByMode[normalizedMode];
-    if (!requiredTypes) {
+    const requiredTypes = contractTypesForProductionMode(mode);
+    const normalizedMode = String(mode || '').trim().toLowerCase().replace(/[-\\s]/g, '_');
+    if (requiredTypes.length === 0) {
       console.warn(`[DERIV_POLICY] Unknown trade mode rejected: ${normalizedMode}`);
       return [];
     }
-
     const marketApi = derivPublicAPI;
-    if (!marketApi.isConnected) {
-      await marketApi.connectPublic('GET_SYMBOLS_' + normalizedMode);
-    }
-
+    if (!marketApi.isConnected) await marketApi.connectPublic('GET_SYMBOLS_' + normalizedMode);
     const symbols = await marketApi.getActiveSymbolsCached();
-    const allowed = symbols
-      .map((s: any) => String(s?.symbol || ''))
-      .filter((symbol: string) => isAllowedProductionSymbol(symbol));
-
-    const supportResults = await Promise.all(allowed.map(async (symbol) => {
-      try {
-        const contracts = await marketApi.getContractsFor(symbol);
-        if (!contracts.some((contract: any) => requiredTypes.includes(String(contract?.contract_type || '').toUpperCase()))) {
+    const candidates = symbols.filter((entry: any) =>
+      isAllowedProductionSymbol(entry?.symbol) &&
+      !isBlockedOneSecondSymbol(entry?.symbol) &&
+      /synthetic|derived/i.test(String(entry?.market ?? entry?.market_display_name ?? ''))
+    );
+    const supported: Array<{symbol: string; display_name: string; market: string}> = [];
+    for (let i = 0; i < candidates.length; i += 5) {
+      const batch = candidates.slice(i, i + 5);
+      const results = await Promise.all(batch.map(async (entry: any) => {
+        try {
+          const contracts = await marketApi.getContractsFor(String(entry.symbol));
+          if (!contracts.some((contract: any) => requiredTypes.includes(String(contract?.contract_type ?? '').toUpperCase()))) return null;
+          return {
+            symbol: String(entry.symbol),
+            display_name: String(entry.display_name || entry.symbol),
+            market: String(entry.market || 'synthetic_index'),
+          };
+        } catch (error) {
+          console.warn(`[DERIV_DISCOVERY] ${entry.symbol}/${normalizedMode}: ${error instanceof Error ? error.message : String(error)}`);
           return null;
         }
-        const info = symbols.find((entry: any) => String(entry.symbol) === symbol);
-        return {
-          symbol,
-          display_name: info?.display_name || symbol,
-          market: info?.market || 'synthetic_index',
-        };
-      } catch (error) {
-        console.warn(`[DERIV_DISCOVERY] Contract support check failed for ${symbol} / ${normalizedMode}:`, error);
-        return null;
-      }
-    }));
-    const supported = supportResults.filter((entry): entry is { symbol: string; display_name: string; market: string } => entry !== null);
-    console.log(`📡 [DerivAPI] ${supported.length}/${allowed.length} allowlisted symbols support ${normalizedMode}`);
+      }));
+      supported.push(...results.filter((entry): entry is {symbol: string; display_name: string; market: string} => entry !== null));
+    }
+    console.log(`[DERIV_DISCOVERY] mode=${normalizedMode} compatible=${supported.length}; 1s symbols excluded.`);
     return supported;
   }
 
@@ -813,8 +761,8 @@ export class DerivAPIService extends EventEmitter {
 
   // 🔥 NOVO: Buscar contratos disponíveis para um símbolo (conforme docs Deriv)
   async getContractsFor(symbol: string): Promise<any[]> {
-    if (!isAllowedProductionSymbol(symbol)) {
-      console.warn('[DERIV_POLICY] Contract discovery blocked for disallowed symbol: ' + symbol);
+    if (!isAllowedProductionSymbol(symbol) || isBlockedOneSecondSymbol(symbol)) {
+      console.warn('[DERIV_POLICY] Contract discovery blocked for prohibited 1s/invalid symbol: ' + symbol);
       return [];
     }
     if (!this.isConnected) return [];
@@ -1015,8 +963,13 @@ export class DerivAPIService extends EventEmitter {
   }
 
   private async createDigitDifferProposal(params: DigitDifferContract): Promise<{id: string, ask_price: number} | null> {
-    if (!isAllowedProductionSymbol(params.symbol) || !isValidProductionStake('DIGITDIFF', params.amount)) {
+    if (!isAllowedProductionSymbol(params.symbol) || isBlockedOneSecondSymbol(params.symbol) || !isValidProductionStake('DIGITDIFF', params.amount)) {
       console.warn('[DERIV_POLICY] DIGITDIFF proposal blocked by production symbol/stake policy.');
+      return null;
+    }
+    const available = await this.getContractsFor(params.symbol);
+    if (!available.some((contract: any) => String(contract?.contract_type ?? '').toUpperCase() === 'DIGITDIFF')) {
+      console.warn(`[DERIV_POLICY] DIGITDIFF unavailable for ${params.symbol}; proposal not sent.`);
       return null;
     }
     return new Promise((resolve) => {
