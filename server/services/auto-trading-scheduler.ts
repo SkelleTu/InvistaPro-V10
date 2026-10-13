@@ -572,78 +572,47 @@ export class AutoTradingScheduler {
   }
 
   private async initializeMarketDataCollection(): Promise<void> {
+    const tempDerivAPI = new DerivAPIService('demo');
     try {
-      console.log('📊 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      console.log('📊 [INIT] Iniciando coleta contínua de dados de mercado...');
-      
-      // Conectar à Deriv para buscar símbolos disponíveis
-      console.log('📊 [INIT] Conectando à Deriv API...');
-      const tempDerivAPI = new DerivAPIService('demo');
-      await tempDerivAPI.connectPublic('GET_ALL_SYMBOLS');
-      console.log('✅ [INIT] Conectado à Deriv API');
-      
-      // BUSCAR TODOS OS ATIVOS DISPONÍVEIS DA API DA DERIV
-      console.log('📊 [INIT] Buscando ativos disponíveis...');
+      console.log('📊 [INIT] Descobrindo os símbolos permitidos e preparando a coleta de mercado...');
+      await tempDerivAPI.connectPublic('MARKET_SYMBOL_DISCOVERY');
       const discoveredSymbols = await tempDerivAPI.getActiveSymbols();
       const activeSymbols = discoveredSymbols.filter((entry: any) =>
         isAllowedProductionSymbol(typeof entry === 'string' ? entry : entry?.symbol)
       );
-      console.log(`✅ [INIT] Recuperados ${activeSymbols.length} símbolos permitidos da Deriv API (de ${discoveredSymbols.length} descobertos)`);
-      
-      if (activeSymbols.length === 0) {
-        console.warn('⚠️ [INIT] AVISO: getActiveSymbols() retornou 0 ativos!');
-      }
-      
-      // 🔥 DESCOBRIR DINAMICAMENTE quais suportam DIGITDIFF (conforme docs oficiais Deriv)
-      console.log('🔥 [INIT] Iniciando descoberta dinâmica de DIGITDIFF...');
-      const digitdiffSymbols = await tempDerivAPI.getDigitDiffSupportedSymbols(activeSymbols);
-      console.log(`🔥 [INIT] Ativos com suporte DIGITDIFF descobertos: ${digitdiffSymbols.length}`);
+      console.log(`📊 [INIT] Deriv devolveu ${discoveredSymbols.length} símbolos; ${activeSymbols.length} correspondem à allowlist`);
 
-      // ══════════════════════════════════════════════════════════════════
-      // CRASH/BOOM — sempre adicionar à coleta, independente de DigitDiff
-      //
-      // Crash e Boom NÃO suportam DigitDiff, portanto nunca são descobertos
-      // pelo loop acima. Porém são ativos fundamentais do InvestaPro:
-      //  - Crash: tendência de ALTA com spikes de queda periódicos
-      //  - Boom:  tendência de BAIXA com spikes de alta periódicos
-      //
-      // Extraímos os símbolos reais da lista da Deriv API para garantir
-      // compatibilidade com qualquer formato de nome (CRASH1000 / CRASH_1000).
-      // ══════════════════════════════════════════════════════════════════
-      const CRASH_BOOM_KEYWORDS = ['CRASH', 'BOOM'];
+      const digitdiffSymbols = await tempDerivAPI.getDigitDiffSupportedSymbols(activeSymbols);
       const crashBoomFromApi = activeSymbols
         .map((s: any) => (typeof s === 'string' ? s : s.symbol))
-        .filter((sym: string) => CRASH_BOOM_KEYWORDS.some(kw => sym.toUpperCase().includes(kw)));
+        .filter((sym: string) => /^(CRASH|BOOM)_?\d+N?$/i.test(sym));
+      const fallbackSymbols = ['CRASH500', 'CRASH1000', 'BOOM500', 'BOOM1000'];
+      const crashBoomSymbols = (crashBoomFromApi.length > 0 ? crashBoomFromApi : fallbackSymbols)
+        .filter((symbol: string) => isAllowedProductionSymbol(symbol));
+      const symbolsToUse = Array.from(new Set([
+        ...digitdiffSymbols.filter((symbol: string) => isAllowedProductionSymbol(symbol)),
+        ...crashBoomSymbols,
+      ])).filter((symbol: string) => isAllowedProductionSymbol(symbol));
 
-      // Fallback caso a API não retorne nenhum Crash/Boom (ex: conta demo limitada)
-      // Inclui variantes com e sem underscore (Deriv usa ambos dependendo do ambiente)
-      const CRASH_BOOM_FALLBACK = ['CRASH500', 'CRASH1000', 'BOOM500', 'BOOM1000'];
-      const crashBoomSymbols = (crashBoomFromApi.length > 0 ? crashBoomFromApi : CRASH_BOOM_FALLBACK)
-        .filter((symbol: string) => isAllowedProductionSymbol(symbol));
-      console.log(`⚡ [INIT] Crash/Boom adicionados à coleta: ${crashBoomSymbols.join(', ')}`);
-      
-      // Desconectar a conexão temporária
-      console.log('📊 [INIT] Desconectando da Deriv API...');
-      await tempDerivAPI.disconnect();
-      console.log('✅ [INIT] Desconectado');
-      
-      // Unir DigitDiff + Crash/Boom (sem duplicatas)
-      const baseSymbols = digitdiffSymbols.filter((symbol: string) => isAllowedProductionSymbol(symbol));
-      const symbolsToUse = Array.from(new Set([...baseSymbols, ...crashBoomSymbols]))
-        .filter((symbol: string) => isAllowedProductionSymbol(symbol));
-      
-      console.log(`🎯 [INIT] Usando ${symbolsToUse.length} símbolos para coleta (DigitDiff + Crash/Boom)`);
-      console.log(`🎯 [INIT] Símbolos: ${symbolsToUse.join(', ')}`);
-      
-      await marketDataCollector.startCollection(symbolsToUse);
-      
-      console.log('✅ [INIT] Coleta de dados iniciada para DIGITDIFF + CRASH/BOOM');
-      console.log('📊 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      
-      // Ticks processados silenciosamente - análise contínua sem log flood
-      
+      if (symbolsToUse.length === 0) {
+        throw new Error('Deriv discovery returned no symbols within the production allowlist.');
+      }
+      console.log(`📊 [INIT] Símbolos candidatos para coleta: ${symbolsToUse.join(', ')}`);
+    } finally {
+      await tempDerivAPI.disconnect().catch(() => {});
+    }
+
+    try {
+      await marketDataCollector.startCollection(['CRASH500', 'CRASH1000', 'BOOM500', 'BOOM1000']);
+      const stats = marketDataCollector.getCollectionStats();
+      if (!stats.isCollecting || stats.totalTicks < 1) {
+        throw new Error('Market collector did not confirm a real tick; refusing to report trading as ready.');
+      }
+      console.log(`✅ [INIT] Coleta validada com tick real; símbolos com dados=${stats.activeSymbols}, ticks no buffer=${stats.totalTicks}`);
     } catch (error) {
-      console.error('❌ Erro ao inicializar coleta de dados:', error);
+      console.error('❌ [INIT] Coleta de mercado não ficou pronta:', error);
+      await marketDataCollector.stopCollection().catch(() => {});
+      throw error;
     }
   }
 
@@ -5068,6 +5037,7 @@ export class AutoTradingScheduler {
     this.loopSleepUntil = 0;
     this.lastOperationId = null;
     this.lastOperationStartTime = 0;
+    this.isInitialized = false;
     
     // Parar coleta de mercado e sincronização quando o usuário desativa.
     try { await marketDataCollector.stopCollection(); } catch (e) { console.warn('⚠️ [TRADING] Falha ao parar MarketDataCollector:', e); }
