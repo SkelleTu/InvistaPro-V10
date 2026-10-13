@@ -153,6 +153,21 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
   });
 
+  // Compatibility aliases for clients that request /api/trading/assets/<mode>.
+  // Exact mode paths avoid shadowing /assets/discover and other nested API routes.
+  for (const modeAlias of ["digit_diff","digit_differs","digit_matches","digit_over","digit_under","digit_even","digit_odd","accumulator"]) {
+    app.get(`/api/trading/assets/${modeAlias}`, isAuthenticated, async (req, res) => {
+      try {
+        const assets = await derivAPI.getAvailableSymbolsByTradeMode(modeAlias);
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.json(assets || []);
+      } catch (error) {
+        console.error(`❌ Erro ao buscar ativos para ${modeAlias}:`, error);
+        res.status(500).json({ error: 'Erro ao buscar ativos da Deriv', mode: modeAlias });
+      }
+    });
+  }
+
   app.get("/api/trading/blocked-assets", isAuthenticated, async (req, res) => {
     const userId = (req.user as any).id;
     const { mode } = req.query;
