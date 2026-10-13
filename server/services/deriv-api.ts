@@ -704,7 +704,7 @@ export class DerivAPIService extends EventEmitter {
       console.warn(`[DERIV_POLICY] Unknown trade mode rejected: ${normalizedMode}`);
       return [];
     }
-    const marketApi = derivPublicAPI;
+    const marketApi = this;
     if (!marketApi.isConnected) await marketApi.connectPublic('GET_SYMBOLS_' + normalizedMode);
     const symbols = await marketApi.getActiveSymbolsCached();
     const candidates = symbols.filter((entry: any) =>
