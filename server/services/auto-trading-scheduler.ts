@@ -146,8 +146,8 @@ export class AutoTradingScheduler {
       console.log(`[DERIV_CAPABILITY] preflight user=${userId} account=${accountType} requested=[${[...requested].join(',')}] compatibleSymbols=[${compatibleSymbols.join(',') || 'none'}]`);
 
       if (compatibleSymbols.length === 0) {
-        throw new Error(
-          `Play bloqueado: a Deriv não confirmou nenhum contrato compatível com [${[...requested].join(', ')}] nos símbolos permitidos BOOM500, BOOM1000, CRASH500 e CRASH1000. Nenhuma ordem foi enviada.`
+        console.warn(
+          `[DERIV_CAPABILITY] Nenhum contrato compatível com [${[...requested].join(', ')}] nos símbolos permitidos. A análise de mercado continuará; a execução financeira permanecerá bloqueada.`
         );
       }
     }
@@ -3849,27 +3849,17 @@ export class AutoTradingScheduler {
       };
 
       const filteredSymbolsData = allSymbolsData.filter((symbolData: any) => {
-        const symbol = symbolData.symbol;
-        
-        // ☠️ EXECUÇÃO: crime tentado na seleção de pool — eliminado silenciosamente
-        if (this.isSymbolBlocked(symbol)) {
-          return false;
-        }
-
-        // 🎯 FILTRO DE MODALIDADE: Ignorar ativos incompatíveis com as modalidades do usuário
-        if (!isSymbolCompatibleWithModalities(symbol)) {
-          return false;
-        }
-        
+        const symbol = String(symbolData.symbol || '');
+        if (!isAllowedProductionSymbol(symbol) || this.isSymbolBlocked(symbol)) return false;
         return true;
       });
       
       if (filteredSymbolsData.length === 0) {
-        return { 
-          success: false, 
-          error: 'Nenhum símbolo possui contrato Deriv compatível com as modalidades ativas e a allowlist de produção', 
-          totalAnalyzed: allSymbolsData.length, 
-          top5Symbols: [] 
+        return {
+          success: false,
+          error: 'Nenhum símbolo permitido com dados de mercado disponíveis para análise',
+          totalAnalyzed: allSymbolsData.length,
+          top5Symbols: []
         };
       }
       
@@ -4272,8 +4262,22 @@ export class AutoTradingScheduler {
         if (mt5) setSignal(mt5, { ...entry, symbol: mt5 });
       }
 
-      // Melhor símbolo
-      const best = validResults[0];
+      // As análises/sinais são publicados para todos os símbolos permitidos acima.
+      // Para execução financeira, usar apenas os que têm contrato confirmado pela Deriv.
+      const eligibleTradeResults = validResults.filter((result: any) =>
+        isSymbolCompatibleWithModalities(String(result?.symbol || ''))
+      );
+      if (eligibleTradeResults.length === 0) {
+        return {
+          success: false,
+          error: 'Análise de mercado concluída, mas a Deriv não confirmou contrato compatível para os símbolos e modalidades permitidos. Nenhuma ordem foi enviada.',
+          totalAnalyzed: validResults.length,
+          top5Symbols,
+        } as any;
+      }
+
+      // Melhor símbolo elegível para operação
+      const best = eligibleTradeResults[0];
       
       console.log(`🏆 [${operationId}] TOP 5 Símbolos (Score Multidimensional — 6 dimensões):`);
       top5.forEach((r, i) => {
