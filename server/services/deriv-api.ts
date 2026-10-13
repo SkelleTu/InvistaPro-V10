@@ -585,38 +585,58 @@ export class DerivAPIService extends EventEmitter {
 
     return new Promise((resolve) => {
       const reqId = this.generateRequestId();
-      
+      let settled = false;
+      const finish = (symbols: DerivActiveSymbol[]) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        this.removeListener('message', symbolsHandler);
+        resolve(symbols);
+      };
+
       const symbolsHandler = (message: any) => {
-        if (message.req_id === reqId) {
-          this.removeListener('message', symbolsHandler);
-          if (message.active_symbols) {
-            const symbols = message.active_symbols
-              .filter((s: any) => isAllowedProductionSymbol(s.symbol) && s.exchange_is_open === 1 && s.is_trading_suspended === 0)
-              .map((s: any) => ({
-                symbol: s.symbol,
-                display_name: s.display_name,
-                market: s.market,
-                market_display_name: s.market_display_name,
-                submarket: s.submarket,
-                submarket_display_name: s.submarket_display_name,
-                exchange_is_open: s.exchange_is_open,
-                is_trading_suspended: s.is_trading_suspended
-              }));
-            
-            console.log(`✅ Recuperados ${symbols.length} símbolos ativos da Deriv API`);
-            resolve(symbols);
-          } else {
-            console.error('❌ Erro ao buscar símbolos ativos:', message.error);
-            resolve([]);
+        if (message.req_id !== reqId) return;
+        if (Array.isArray(message.active_symbols)) {
+          // The API may omit flags or serialize them differently across endpoints.
+          // Do not discard every allowed synthetic just because a flag is absent.
+          // Explicitly suspended symbols remain excluded; order execution performs
+          // its own live contract/availability validation before any purchase.
+          const symbols = message.active_symbols
+            .filter((s: any) =>
+              isAllowedProductionSymbol(s?.symbol) &&
+              Number(s?.is_trading_suspended ?? 0) !== 1
+            )
+            .map((s: any) => ({
+              symbol: String(s.symbol),
+              display_name: String(s.display_name ?? s.symbol),
+              market: String(s.market ?? ''),
+              market_display_name: String(s.market_display_name ?? s.market ?? ''),
+              submarket: String(s.submarket ?? ''),
+              submarket_display_name: String(s.submarket_display_name ?? s.submarket ?? ''),
+              exchange_is_open: Number(s.exchange_is_open ?? 0),
+              is_trading_suspended: Number(s.is_trading_suspended ?? 0)
+            }));
+          console.log(`✅ Recuperados ${symbols.length} símbolos permitidos da Deriv API (${message.active_symbols.length} recebidos)`);
+          if (symbols.length === 0) {
+            console.warn('[DERIV_DISCOVERY] A API respondeu, mas nenhum símbolo corresponde à allowlist de produção.');
           }
+          finish(symbols);
+        } else if (message.error) {
+          console.error('❌ Erro ao buscar símbolos ativos:', message.error.message || message.error.code || 'erro desconhecido');
+          finish([]);
         }
       };
 
+      const timer = setTimeout(() => {
+        console.warn('⚠️ [TIMEOUT] getActiveSymbols: sem resposta em 12s; mantendo fallback seguro');
+        finish([]);
+      }, 12000);
+
       this.on('message', symbolsHandler);
-      this.sendMessage({ 
+      this.sendMessage({
         active_symbols: 'brief',
         product_type: 'basic',
-        req_id: reqId 
+        req_id: reqId
       });
     });
   }
