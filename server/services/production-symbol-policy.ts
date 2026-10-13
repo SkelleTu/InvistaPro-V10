@@ -29,6 +29,7 @@ export function isAllowedProductionSymbol(symbol: unknown): boolean {
   // Accept Deriv codes and display-name aliases, but reject arbitrary punctuation
   // before normalization so values such as "WIN$" cannot become valid symbols.
   return raw.length > 0 &&
+    !["undefined", "null", "none", "n/a"].includes(raw.toLowerCase()) &&
     /^[A-Z0-9_ ()-]+$/i.test(raw) &&
     normalized.length > 0 &&
     /^[A-Z0-9_]+$/.test(normalized) &&
