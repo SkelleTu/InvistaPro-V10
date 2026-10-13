@@ -53,6 +53,7 @@ import { asyncErrorHandler } from './middleware/error-handler';
 import { tpmSystem } from './services/tpm-system';
 import { getRegistryInfo } from './services/url-registry';
 import { registerUniversalSession, setUniversalTradingArmed, disconnectUniversalSession } from './services/universal-server-session';
+import { createUniversalRemoteTicket, consumeUniversalRemoteTicket } from "./services/universal-remote-access";
 import { isAllowedProductionSymbol, isAllowedProductionContractType } from './services/production-symbol-policy';
 
 // PIX payload generator compatível com Santander
@@ -976,6 +977,48 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
 
   app.post('/api/logout', handleLogout);
   app.get('/api/logout', handleLogout);
+
+  // Remote browser SSO: explicit one-time handoff, never shares the user's cookie.
+  app.post("/api/auth/remote-access-ticket", isAuthenticated, asyncErrorHandler(async (req: any, res: any) => {
+    if (!req.user?.id) return res.status(401).json({ message: "Usuário não autenticado" });
+    const publicUrl = (process.env.INVISTA_PUBLIC_URL || "").trim().replace(/\/$/, "");
+    if (!publicUrl) return res.status(503).json({ message: "Acesso remoto não configurado neste ambiente." });
+    const grant = await createUniversalRemoteTicket(String(req.user.id));
+    const launch = new URL("/api/auth/remote-session", publicUrl);
+    launch.searchParams.set("ticket", grant.ticket);
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Pragma", "no-cache");
+    return res.json({ launchUrl: launch.toString(), expiresAt: grant.expiresAt, singleUse: true });
+  }));
+
+  // The one-time grant creates a fresh, isolated session in this browser only.
+  app.get("/api/auth/remote-session", async (req: any, res: any) => {
+    const ticket = typeof req.query?.ticket === "string" ? req.query.ticket : "";
+    if (!ticket) return res.status(400).send("Link de acesso remoto inválido.");
+    try {
+      const grant = await consumeUniversalRemoteTicket(ticket);
+      const user = await dbStorage.getUser(grant.userId);
+      if (!user || String(user.id) !== grant.userId || !user.email) {
+        return res.status(401).send("A sessão não está mais disponível. Gere um novo acesso.");
+      }
+      // Regenerate first to prevent session fixation, then establish Passport auth.
+      req.session.regenerate((regenerateError: any) => {
+        if (regenerateError) return res.status(500).send("Não foi possível iniciar a sessão remota.");
+        req.login(user, (loginError: any) => {
+          if (loginError) return res.status(500).send("Não foi possível autenticar a sessão remota.");
+          req.session.save((saveError: any) => {
+            if (saveError) return res.status(500).send("Não foi possível salvar a sessão remota.");
+            res.setHeader("Cache-Control", "no-store");
+            res.setHeader("Referrer-Policy", "no-referrer");
+            return res.redirect(303, "/");
+          });
+        });
+      });
+    } catch (error) {
+      console.warn("[REMOTE SSO] Ticket rejeitado ou expirado.");
+      return res.status(401).send("Link expirado ou já utilizado. Gere um novo acesso remoto.");
+    }
+  });
 
   // Get current user
   // Get current user route (both /api/user and /api/auth/user for compatibility)
