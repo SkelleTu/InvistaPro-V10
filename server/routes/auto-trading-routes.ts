@@ -50,7 +50,6 @@ router.get('/status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(as
   const schedulerActiveForUser = isolatedAutoTradingScheduler.getArmedUserIds().includes(userId) &&
     activeSessions.some((session: any) => session.isActive && session.workerReady) &&
     marketDataReady &&
-    contractCapabilityReady &&
     !emergencyStop;
   // Expose only this user's runtime; never disclose other users' IDs or counts.
   const schedulerStatus = {
@@ -72,7 +71,7 @@ router.get('/status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(as
   const activeConfigsCount = userActiveConfigs.length;
 
   // O sistema só está realmente operando se: scheduler rodando + token configurado + configurações ativas
-  const canExecuteTrades = schedulerActiveForUser && marketDataReady && derivTokenConfigured && activeConfigsCount > 0;
+  const canExecuteTrades = schedulerActiveForUser && marketDataReady && contractCapabilityReady && derivTokenConfigured && activeConfigsCount > 0;
 
   // Bloqueios que impedem trading
   const tradingBlockers: string[] = [];
