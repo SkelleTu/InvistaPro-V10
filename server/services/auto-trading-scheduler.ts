@@ -672,47 +672,22 @@ export class AutoTradingScheduler {
   }
 
   private async initializeMarketDataCollection(): Promise<void> {
-    const tempDerivAPI = new DerivAPIService('demo');
-    try {
-      console.log('📊 [INIT] Descobrindo os símbolos permitidos e preparando a coleta de mercado...');
-      await tempDerivAPI.connectPublic('MARKET_SYMBOL_DISCOVERY');
-      const discoveredSymbols = await tempDerivAPI.getActiveSymbols();
-      const activeSymbols = discoveredSymbols.filter((entry: any) =>
-        isAllowedProductionSymbol(typeof entry === 'string' ? entry : entry?.symbol)
-      );
-      console.log(`📊 [INIT] Deriv devolveu ${discoveredSymbols.length} símbolos; ${activeSymbols.length} correspondem à allowlist`);
-
-      // Do not block startup on an expensive DigitDiff contract scan: market-data readiness
-      // is established by a real tick below, and contract eligibility is checked per mode.
-      const digitdiffSymbols: string[] = [];
-      const crashBoomFromApi = activeSymbols
-        .map((s: any) => (typeof s === 'string' ? s : s.symbol))
-        .filter((sym: string) => /^(CRASH|BOOM)_?\d+N?$/i.test(sym));
-      const fallbackSymbols = ['CRASH500', 'CRASH1000', 'BOOM500', 'BOOM1000'];
-      const crashBoomSymbols = (crashBoomFromApi.length > 0 ? crashBoomFromApi : fallbackSymbols)
-        .filter((symbol: string) => isAllowedProductionSymbol(symbol));
-      const symbolsToUse = Array.from(new Set([
-        ...digitdiffSymbols.filter((symbol: string) => isAllowedProductionSymbol(symbol)),
-        ...crashBoomSymbols,
-      ])).filter((symbol: string) => isAllowedProductionSymbol(symbol));
-
-      if (symbolsToUse.length === 0) {
-        throw new Error('Deriv discovery returned no symbols within the production allowlist.');
-      }
-      console.log(`📊 [INIT] Símbolos candidatos para coleta: ${symbolsToUse.join(', ')}`);
-    } finally {
-      await tempDerivAPI.disconnect().catch(() => {});
+    console.log('[INIT] Descobrindo ativos sintéticos por modalidade (DIGITDIFF/ACCU), sem símbolos 1s...');
+    const symbolsToUse = await marketDataCollector.discoverAndLoadAllAssets();
+    if (symbolsToUse.length === 0) {
+      throw new Error('Deriv não confirmou nenhum ativo compatível com DIGITDIFF ou ACCU; Play não será marcado como pronto.');
     }
+    console.log(`[INIT] Símbolos confirmados por contratos_for: ${symbolsToUse.join(', ')}`);
 
     try {
-      await marketDataCollector.startCollection(['CRASH500', 'CRASH1000', 'BOOM500', 'BOOM1000']);
+      await marketDataCollector.startCollection(symbolsToUse);
       const stats = marketDataCollector.getCollectionStats();
-      if (!stats.isCollecting || stats.totalTicks < 1) {
-        throw new Error('Market collector did not confirm a real tick; refusing to report trading as ready.');
+      if (!stats.isCollecting || stats.totalTicks < 1 || !stats.persistenceReady) {
+        throw new Error('A coleta não confirmou tick real e persistência de mercado; trading permanece bloqueado.');
       }
-      console.log(`✅ [INIT] Coleta validada com tick real; símbolos com dados=${stats.activeSymbols}, ticks no buffer=${stats.totalTicks}`);
+      console.log(`[INIT] Coleta validada: símbolos com dados=${stats.activeSymbols}, ticks=${stats.totalTicks}, persistência=${stats.persistenceReady}`);
     } catch (error) {
-      console.error('❌ [INIT] Coleta de mercado não ficou pronta:', error);
+      console.error('[INIT] Coleta de mercado não ficou pronta:', error);
       await marketDataCollector.stopCollection().catch(() => {});
       throw error;
     }
