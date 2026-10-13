@@ -1042,6 +1042,13 @@ export class DerivAPIService extends EventEmitter {
     this.requireAuthenticatedAccountSession('buy');
     if (!this.isConnected) return null;
 
+    // Live contract capability is the final gate, even if a stale UI/config selected this symbol.
+    const availableContracts = await this.getContractsFor(params.symbol);
+    if (!availableContracts.some((contract: any) => String(contract?.contract_type ?? '').toUpperCase() === params.contract_type)) {
+      console.warn(`[DERIV_POLICY] ${params.contract_type} is not available for ${params.symbol}; buy blocked.`);
+      return null;
+    }
+
     // ☠️ EXECUÇÃO IMEDIATA: CRIME = ativo 1s
     if (CRIME_PATTERN.test(params.symbol)) {
       return executarCrime(params.symbol, 'buyGenericDigitContract');
@@ -1222,6 +1229,13 @@ export class DerivAPIService extends EventEmitter {
     if (!isValidProductionStake(params.contract_type, params.amount)) { console.error(`[DERIV_POLICY] Stake must be finite and at least ${minimumStake} for ${params.contract_type}`); return null; }
     this.requireAuthenticatedAccountSession('buy');
     if (!this.isConnected) return null;
+
+    // ACCU/DIGITDIFF must be supported by this exact underlying symbol at execution time.
+    const availableContracts = await this.getContractsFor(params.symbol);
+    if (!availableContracts.some((contract: any) => String(contract?.contract_type ?? '').toUpperCase() === String(params.contract_type).toUpperCase())) {
+      console.warn(`[DERIV_POLICY] ${params.contract_type} is not available for ${params.symbol}; buy blocked.`);
+      return null;
+    }
 
     // ☠️ EXECUÇÃO IMEDIATA: CRIME = ativo 1s
     if (CRIME_PATTERN.test(params.symbol)) {
