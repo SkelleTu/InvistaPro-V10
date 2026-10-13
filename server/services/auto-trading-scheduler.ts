@@ -18,7 +18,7 @@ import { analyzeCrashBoomSpike } from './crash-boom-spike-engine';
 import { setSignal } from './signal-store';
 import { classifyAsset, getGateThreshold } from '../utils/asset-classifier';
 import { consensusCache } from './consensus-cache';
-import { isAllowedProductionSymbol } from './production-symbol-policy';
+import { isAllowedProductionSymbol, isAllowedProductionContractType } from './production-symbol-policy';
 
 function derivToMT5Name(derivSymbol: string): string | null {
   const map: Record<string, string> = {
@@ -75,6 +75,35 @@ export class AutoTradingScheduler {
       this.userDerivSessions.set(key, sessions);
     }
     return sessions[accountType];
+  }
+
+  // Live capability cache is scoped to the user/account environment. Never infer
+  // a contract from a UI toggle: Deriv's contracts_for response is authoritative.
+  private readonly PRODUCTION_CONTRACT_CACHE_TTL_MS = 5 * 60 * 1000;
+  private readonly productionContractCapabilityCache = new Map<string, { checkedAt: number; types: Set<string> }>();
+
+  private async getLiveProductionContractTypes(
+    api: DerivAPIService,
+    userId: string,
+    accountType: 'demo' | 'real',
+    symbol: string,
+  ): Promise<Set<string>> {
+    if (!isAllowedProductionSymbol(symbol)) return new Set<string>();
+    const cacheKey = `${userId}:${accountType}:${symbol.toUpperCase()}`;
+    const cached = this.productionContractCapabilityCache.get(cacheKey);
+    if (cached && Date.now() - cached.checkedAt < this.PRODUCTION_CONTRACT_CACHE_TTL_MS) {
+      return new Set(cached.types);
+    }
+
+    const contracts = await api.getContractsFor(symbol);
+    const types = new Set<string>(
+      contracts
+        .map((contract: any) => String(contract?.contract_type || '').trim().toUpperCase())
+        .filter((type: string) => isAllowedProductionContractType(type))
+    );
+    this.productionContractCapabilityCache.set(cacheKey, { checkedAt: Date.now(), types });
+    console.log(`[DERIV_CAPABILITY] user=${userId} account=${accountType} symbol=${symbol} allowedContracts=[${[...types].join(',') || 'none'}]`);
+    return new Set(types);
   }
 
   private async disconnectAllUserDerivSessions(): Promise<void> {
