@@ -606,7 +606,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
           // Cada login recebe seu próprio runtime isolado. Login prepara a sessão, mas NÃO arma o trading.
           autoTradingScheduler.registerUser(String(user.id));
           void (async () => {
-            await registerUniversalSession(String(user.id));
+            await registerUniversalSession(String(user.id), user.email);
             const savedDerivToken = await dbStorage.getUserDerivToken(String(user.id));
             if (savedDerivToken?.token && ['demo', 'real'].includes(savedDerivToken.accountType)) {
               await syncDerivTokenToUniversalServer(String(user.id), savedDerivToken.token, savedDerivToken.accountType as 'demo' | 'real');
@@ -651,7 +651,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
     try {
       // Login-time registration is asynchronous; reconcile synchronously here to avoid a grant race.
-      await registerUniversalSession(userId);
+      await registerUniversalSession(userId, req.user?.email);
       const response = await fetch(`${universalUrl}/api/invista/browser-access/grants`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-invista-server-key': serviceKey },
@@ -1111,7 +1111,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       // Existing persistent web sessions may predate the Universal Server token vault.
       // Reconcile the user's saved Deriv token in the background without exposing it
       // to the browser or forcing the user to log out and back in.
-      void registerUniversalSession(String(req.user.id)).then(async () => {
+      void registerUniversalSession(String(req.user.id), req.user.email).then(async () => {
         const savedDerivToken = await dbStorage.getUserDerivToken(String(req.user.id));
         if (savedDerivToken?.token && ['demo', 'real'].includes(savedDerivToken.accountType)) {
           await ensureUniversalDerivSession(String(req.user.id), savedDerivToken.token, savedDerivToken.accountType as 'demo' | 'real');
