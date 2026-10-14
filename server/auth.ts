@@ -52,15 +52,19 @@ export function generateVerificationCode(): string {
 }
 
 export function setupAuth(app: Express) {
-  // Evita queda total do processo se o Render iniciar antes das secrets.
-  const sessionSecret = process.env.SESSION_SECRET?.trim() || crypto.randomBytes(32).toString("hex");
-  if (!process.env.SESSION_SECRET) {
-    console.warn("⚠️ SESSION_SECRET não configurada; usando segredo efêmero desta instância.");
+  const configuredSessionSecret = process.env.SESSION_SECRET?.trim();
+  const isProduction = process.env.NODE_ENV === "production";
+  // Persistent login requires a stable secret across restarts and instances.
+  // Fail at boot rather than silently invalidating every session after restart.
+  if (isProduction && !configuredSessionSecret) {
+    throw new Error("SESSION_SECRET is required in production for persistent and secure authentication.");
   }
+  if (isProduction && !process.env.DATABASE_URL) {
+    throw new Error("DATABASE_URL is required in production for persistent authenticated sessions.");
+  }
+  const sessionSecret = configuredSessionSecret || crypto.randomBytes(32).toString("hex");
 
-  // Session store robusto para Render: PostgreSQL quando DATABASE_URL existe,
-  // MemoryStore somente como fallback. Evita depender do módulo nativo SQLite
-  // no caminho crítico de autenticação/boot.
+  // PostgreSQL store is mandatory in production; MemoryStore is development-only.
   let sessionStore: session.Store;
   if (process.env.DATABASE_URL) {
     const PgStore = connectPgSimpleFactory(session);
@@ -75,8 +79,6 @@ export function setupAuth(app: Express) {
     sessionStore = new MemoryStore({ checkPeriod: 24 * 60 * 60 * 1000 });
     console.warn("⚠️ [SessionStore] DATABASE_URL ausente; usando MemoryStore em modo fallback.");
   }
-
-  const isProduction = process.env.NODE_ENV === 'production';
 
   // 1 ano em ms — usuário só é deslogado se limpar cookies/cache ou clicar em "Sair"
   const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
