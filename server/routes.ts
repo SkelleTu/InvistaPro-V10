@@ -683,19 +683,39 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         signal: AbortSignal.timeout(10000),
       });
       const result: any = await response.json().catch(() => ({}));
-      if (!response.ok || result?.ok !== true || result.platform !== platform || !result.userId) {
-        return res.status(401).send('Link expirado, já utilizado ou destinado a outra plataforma.');
+      if (!response.ok || result?.ok !== true || result.platform !== platform || !result.userId || !result.sessionId) {
+        res.setHeader('Cache-Control', 'no-store, max-age=0');
+        res.setHeader('Referrer-Policy', 'no-referrer');
+        return res.status(401).send('Link expirado, já utilizado, sem sessão de origem ativa ou destinado a outra plataforma.');
       }
       const user = await dbStorage.getUser(String(result.userId));
-      if (!user || !user.contaAprovada) return res.status(403).send('Conta indisponível ou não aprovada.');
+      if (!user || !user.contaAprovada) {
+        res.setHeader('Cache-Control', 'no-store, max-age=0');
+        res.setHeader('Referrer-Policy', 'no-referrer');
+        return res.status(403).send('Conta indisponível ou não aprovada.');
+      }
       req.logIn(user, (err: any) => {
         if (err) {
           console.error('[UNIVERSAL_BROWSER_ACCESS] Platform session creation failed:', err);
           return res.status(500).send('Não foi possível criar a sessão autenticada.');
         }
-        autoTradingScheduler.registerUser(String(user.id));
-        void registerUniversalSession(String(user.id)).catch((e) => console.warn('[UNIVERSAL_BROWSER_ACCESS] Universal session registration failed:', e instanceof Error ? e.message : e));
-        return res.redirect(303, '/');
+        // Bind this remote browser session to the exact source login session.
+        // The auth middleware checks this binding against Universal Server and fails closed.
+        req.session.universalBrowserAccess = {
+          userId: String(user.id),
+          platform,
+          sessionId: String(result.sessionId),
+        };
+        req.session.save((saveErr: any) => {
+          if (saveErr) {
+            console.error('[UNIVERSAL_BROWSER_ACCESS] Delegated session persistence failed:', saveErr);
+            return res.status(500).send('Não foi possível persistir a sessão remota.');
+          }
+          res.setHeader('Cache-Control', 'no-store, max-age=0');
+          res.setHeader('Referrer-Policy', 'no-referrer');
+          autoTradingScheduler.registerUser(String(user.id));
+          return res.redirect(303, '/');
+        });
       });
     } catch (error) {
       console.error('[UNIVERSAL_BROWSER_ACCESS] Grant redemption failed:', error instanceof Error ? error.message : String(error));
