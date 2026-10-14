@@ -31,6 +31,26 @@ async function call(path: string, body: any) {
   return await response.json() as any;
 }
 
+const derivEnsureAttemptAt = new Map<string, number>();
+
+export async function ensureUniversalDerivSession(userId: string, token: string, accountType: "demo" | "real") {
+  if (!enabled()) throw new Error("Universal Server integration is not configured.");
+  const id = String(userId);
+  const now = Date.now();
+  if (now - (derivEnsureAttemptAt.get(id) ?? 0) < 30_000) return { connected: false, throttled: true };
+  derivEnsureAttemptAt.set(id, now);
+  const response = await fetch(`${universalUrl}/api/invista/deriv/session/${platform}/${encodeURIComponent(id)}`, {
+    method: "GET",
+    headers: { "x-invista-server-key": serviceKey },
+    signal: AbortSignal.timeout(10000),
+  });
+  if (response.ok) {
+    const state: any = await response.json();
+    if (state?.ok === true && state?.connected === true && state?.active === true) return { connected: true, alreadyActive: true };
+  }
+  return await syncDerivTokenToUniversalServer(id, token, accountType);
+}
+
 export async function syncDerivTokenToUniversalServer(userId: string, token: string, accountType: "demo" | "real") {
   if (!enabled()) throw new Error("Universal Server integration is not configured; Deriv token cannot be registered for a persistent remote session.");
   const response = await call("/api/invista/deriv/session", {
