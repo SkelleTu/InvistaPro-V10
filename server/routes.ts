@@ -629,7 +629,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   });
 
   // Small authenticated consent screen; no grant is minted until the user clicks.
-  app.get('/api/auth/browser-access/consent', isAuthenticated, (_req: any, res: any) => {
+  app.get('/api/auth/browser-access/consent', isAuthenticated, isApproved, (_req: any, res: any) => {
     res.setHeader('Cache-Control', 'no-store, max-age=0');
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.type('html').send(`<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Acesso remoto autorizado</title><body style="font:16px system-ui;max-width:620px;margin:48px auto;padding:0 20px;background:#111827;color:#f9fafb"><h1>Autorizar acesso remoto</h1><p>Ativa a delegação persistente do Browser Use para esta conta. Cada acesso gera um link novo, de uso único e válido por 2 minutos. O acesso só é liberado ao perfil MCP autenticado com o mesmo e-mail; isso não compartilha sua token Deriv nem ativa operações de trading.</p><p>Isso não compartilha sua token Deriv e não ativa operações de trading.</p><button id="authorize" style="padding:12px 18px;border:0;border-radius:8px;cursor:pointer">Autorizar Browser Use</button> <button id="revoke" style="padding:12px 18px;border:1px solid #f87171;border-radius:8px;cursor:pointer;background:transparent;color:#fca5a5">Revogar acesso persistente</button><p id="status" role="status"></p><textarea id="link" readonly style="width:100%;min-height:90px;display:none"></textarea><script>const b=document.getElementById('authorize'),v=document.getElementById('revoke'),s=document.getElementById('status'),l=document.getElementById('link');b.addEventListener('click',async()=>{b.disabled=true;s.textContent='Gerando autorização…';try{const r=await fetch('/api/auth/browser-access/grant',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({userConsented:true})});const d=await r.json();if(!r.ok||!d.launchUrl)throw new Error(d.error||'Falha ao gerar link');l.value=d.launchUrl;l.style.display='block';s.textContent='Acesso persistente ativado. Primeiro link válido até '+d.expiresAt+' e utilizável uma única vez.';if(navigator.clipboard)navigator.clipboard.writeText(d.launchUrl).catch(()=>{});}catch(e){s.textContent='Não foi possível gerar o link: '+(e.message||'erro');b.disabled=false;}});v.addEventListener('click',async()=>{v.disabled=true;s.textContent='Revogando acesso…';try{const r=await fetch('/api/auth/browser-access/revoke',{method:'POST',credentials:'same-origin'});const d=await r.json();if(!r.ok||!d.revoked)throw new Error(d.error||'Falha ao revogar');l.value='';l.style.display='none';s.textContent='Acesso persistente revogado.';}catch(e){s.textContent='Não foi possível revogar: '+(e.message||'erro');}finally{v.disabled=false;}});</script></body></html>`);
@@ -638,7 +638,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   // Short-lived, one-use handoff for an explicitly consented remote browser.
   // This creates a platform login only after the user authorizes a grant; it never
   // exposes Deriv tokens or copies browser cookies between devices.
-  app.post('/api/auth/browser-access/grant', isAuthenticated, async (req: any, res: any) => {
+  app.post('/api/auth/browser-access/grant', isAuthenticated, isApproved, async (req: any, res: any) => {
     const userId = String(req.user?.id ?? '');
     const platform = process.env.INVISTA_PLATFORM === 'aura' ? 'aura' : 'main';
     const universalUrl = String(process.env.UNIVERSAL_SERVER_URL ?? '').replace(/\/$/, '');
@@ -681,7 +681,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
   });
 
-  app.post('/api/auth/browser-access/revoke', isAuthenticated, async (req: any, res: any) => {
+  app.post('/api/auth/browser-access/revoke', isAuthenticated, isApproved, async (req: any, res: any) => {
     const userId = String(req.user?.id ?? '');
     const userEmail = String(req.user?.email ?? '').trim().toLowerCase();
     const platform = process.env.INVISTA_PLATFORM === 'aura' ? 'aura' : 'main';
