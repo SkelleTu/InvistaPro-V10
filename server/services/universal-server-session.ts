@@ -66,6 +66,22 @@ export async function syncDerivTokenToUniversalServer(userId: string, token: str
   return { connected: true, accountType: response.accountType, accountId: response.accountId };
 }
 
+export async function heartbeatUniversalDerivSession(userId: string) {
+  if (!enabled()) return null;
+  try {
+    const response = await fetch(`${universalUrl}/api/invista/deriv/session/heartbeat/${platform}/${encodeURIComponent(String(userId))}`, {
+      method: "POST",
+      headers: { "x-invista-server-key": serviceKey },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!response.ok) throw new Error(`Universal Server Deriv heartbeat returned HTTP ${response.status}`);
+    return await response.json() as any;
+  } catch (error) {
+    console.warn(`⚠️ [UNIVERSAL] Falha no heartbeat Deriv user=${userId}:`, error instanceof Error ? error.message : error);
+    return null;
+  }
+}
+
 export async function disconnectUniversalDerivSession(userId: string) {
   if (!enabled()) return null;
   try {
@@ -124,12 +140,14 @@ export async function heartbeatUniversalSession(userId: string, tradingArmed = f
       return sessions.get(id) || null;
     }
     state.tradingArmed = tradingArmed;
-    return (await call("/api/invista/session/heartbeat", {
+    const result = (await call("/api/invista/session/heartbeat", {
       sessionId: state.sessionId,
       userId: state.userId,
       platform: state.platform,
       tradingArmed,
     }))?.session || null;
+    await heartbeatUniversalDerivSession(id);
+    return result;
   } catch (error) {
     console.warn(`⚠️ [UNIVERSAL] Heartbeat/registration retry failed for user=${id}:`, error instanceof Error ? error.message : error);
     return null;

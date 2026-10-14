@@ -1070,12 +1070,12 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       // Existing persistent web sessions may predate the Universal Server token vault.
       // Reconcile the user's saved Deriv token in the background without exposing it
       // to the browser or forcing the user to log out and back in.
-      void dbStorage.getUserDerivToken(String(req.user.id)).then((savedDerivToken) => {
+      void registerUniversalSession(String(req.user.id)).then(async () => {
+        const savedDerivToken = await dbStorage.getUserDerivToken(String(req.user.id));
         if (savedDerivToken?.token && ['demo', 'real'].includes(savedDerivToken.accountType)) {
-          return ensureUniversalDerivSession(String(req.user.id), savedDerivToken.token, savedDerivToken.accountType as 'demo' | 'real');
+          await ensureUniversalDerivSession(String(req.user.id), savedDerivToken.token, savedDerivToken.accountType as 'demo' | 'real');
         }
-        return null;
-      }).catch((e) => console.warn('⚠️ [UNIVERSAL] Falha ao reconciliar sessão Deriv da sessão web ativa:', e instanceof Error ? e.message : String(e)));
+      }).catch((e) => console.warn('⚠️ [UNIVERSAL] Falha ao reconciliar sessão web/Deriv ativa:', e instanceof Error ? e.message : String(e)));
       res.json(userWithoutSensitiveData);
     } catch (error) {
       console.error("Error fetching user:", error);
