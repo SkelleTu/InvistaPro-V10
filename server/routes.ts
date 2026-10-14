@@ -52,7 +52,7 @@ import { contractMonitor } from './services/contract-monitor';
 import { asyncErrorHandler } from './middleware/error-handler';
 import { tpmSystem } from './services/tpm-system';
 import { getRegistryInfo } from './services/url-registry';
-import { registerUniversalSession, setUniversalTradingArmed, disconnectUniversalSession, syncDerivTokenToUniversalServer, ensureUniversalDerivSession, heartbeatUniversalDerivSession, deleteUniversalDerivSession, disconnectUniversalDerivSession } from './services/universal-server-session';
+import { registerUniversalSession, setUniversalTradingArmed, disconnectUniversalSession, syncDerivTokenToUniversalServer, ensureUniversalDerivSession, deleteUniversalDerivSession, disconnectUniversalDerivSession } from './services/universal-server-session';
 import { isAllowedProductionSymbol, isAllowedProductionContractType } from './services/production-symbol-policy';
 
 // PIX payload generator compatível com Santander
