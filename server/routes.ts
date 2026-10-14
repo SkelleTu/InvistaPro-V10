@@ -2301,7 +2301,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
 
       // PASSO 3: Teste de conexão com Deriv
       console.log(`🌐 PASSO 3: Testando conexão com Deriv API...`);
-      console.log(`   Token: ${token.substring(0, 5)}... (parcial)`);
+      console.log("   Token: [REDACTED]");
       console.log(`   Account Type: ${accountType}`);
       
       let connected = false;
@@ -2326,7 +2326,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
           {
             ...errorTracker.createContextFromRequest(req),
             requestBody: { 
-              token: token.substring(0, 10) + '...',
+              tokenProvided: Boolean(token),
               accountType,
               operationId, 
               step: 'DERIV_CONNECTION_FAILED'
