@@ -140,12 +140,14 @@ export async function heartbeatUniversalSession(userId: string, tradingArmed = f
       return sessions.get(id) || null;
     }
     state.tradingArmed = tradingArmed;
-    return (await call("/api/invista/session/heartbeat", {
+    const result = (await call("/api/invista/session/heartbeat", {
       sessionId: state.sessionId,
       userId: state.userId,
       platform: state.platform,
       tradingArmed,
     }))?.session || null;
+    await heartbeatUniversalDerivSession(id);
+    return result;
   } catch (error) {
     console.warn(`⚠️ [UNIVERSAL] Heartbeat/registration retry failed for user=${id}:`, error instanceof Error ? error.message : error);
     return null;
