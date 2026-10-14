@@ -52,7 +52,7 @@ import { contractMonitor } from './services/contract-monitor';
 import { asyncErrorHandler } from './middleware/error-handler';
 import { tpmSystem } from './services/tpm-system';
 import { getRegistryInfo } from './services/url-registry';
-import { registerUniversalSession, setUniversalTradingArmed, disconnectUniversalSession, syncDerivTokenToUniversalServer, deleteUniversalDerivSession, disconnectUniversalDerivSession } from './services/universal-server-session';
+import { registerUniversalSession, setUniversalTradingArmed, disconnectUniversalSession, syncDerivTokenToUniversalServer, ensureUniversalDerivSession, deleteUniversalDerivSession, disconnectUniversalDerivSession } from './services/universal-server-session';
 import { isAllowedProductionSymbol, isAllowedProductionContractType } from './services/production-symbol-policy';
 
 // PIX payload generator compatível com Santander
@@ -1067,6 +1067,15 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         return res.status(401).json({ message: "Não autenticado" });
       }
       const { passwordHash, codigoVerificacao, ...userWithoutSensitiveData } = req.user;
+      // Existing persistent web sessions may predate the Universal Server token vault.
+      // Reconcile the user's saved Deriv token in the background without exposing it
+      // to the browser or forcing the user to log out and back in.
+      void dbStorage.getUserDerivToken(String(req.user.id)).then((savedDerivToken) => {
+        if (savedDerivToken?.token && ['demo', 'real'].includes(savedDerivToken.accountType)) {
+          return ensureUniversalDerivSession(String(req.user.id), savedDerivToken.token, savedDerivToken.accountType as 'demo' | 'real');
+        }
+        return null;
+      }).catch((e) => console.warn('⚠️ [UNIVERSAL] Falha ao reconciliar sessão Deriv da sessão web ativa:', e instanceof Error ? e.message : String(e)));
       res.json(userWithoutSensitiveData);
     } catch (error) {
       console.error("Error fetching user:", error);
