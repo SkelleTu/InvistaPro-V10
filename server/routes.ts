@@ -670,6 +670,8 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   // Browser navigation redeems a one-use Universal Server grant, establishes a
   // normal platform session cookie, and then redirects into the authenticated app.
   app.get('/api/auth/universal-exchange', async (req: any, res: any) => {
+    res.setHeader('Cache-Control', 'no-store, max-age=0');
+    res.setHeader('Referrer-Policy', 'no-referrer');
     const grant = String(req.query?.grant ?? '').trim();
     const platform = process.env.INVISTA_PLATFORM === 'aura' ? 'aura' : 'main';
     const universalUrl = String(process.env.UNIVERSAL_SERVER_URL ?? '').replace(/\/$/, '');
