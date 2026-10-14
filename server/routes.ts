@@ -622,6 +622,74 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
   });
 
+  // Short-lived, one-use handoff for an explicitly consented remote browser.
+  // This creates a platform login only after the user authorizes a grant; it never
+  // exposes Deriv tokens or copies browser cookies between devices.
+  app.post('/api/auth/browser-access/grant', isAuthenticated, async (req: any, res: any) => {
+    const userId = String(req.user?.id ?? '');
+    const platform = process.env.INVISTA_PLATFORM === 'aura' ? 'aura' : 'main';
+    const universalUrl = String(process.env.UNIVERSAL_SERVER_URL ?? '').replace(/\/$/, '');
+    const serviceKey = String(process.env.INVISTA_UNIVERSAL_SERVER_KEY ?? '').trim();
+    if (!userId || !universalUrl || !serviceKey) {
+      return res.status(503).json({ ok: false, error: 'browser_access_not_configured' });
+    }
+    if (req.body?.userConsented !== true) {
+      return res.status(403).json({ ok: false, error: 'explicit_user_consent_required' });
+    }
+    try {
+      const response = await fetch(`${universalUrl}/api/invista/browser-access/grants`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-invista-server-key': serviceKey },
+        body: JSON.stringify({ userId, platform, userConsented: true }),
+        signal: AbortSignal.timeout(10000),
+      });
+      const result: any = await response.json().catch(() => ({}));
+      if (!response.ok || !result?.launchUrl) {
+        return res.status(502).json({ ok: false, error: 'universal_grant_failed', status: response.status });
+      }
+      return res.status(201).json({ ok: true, launchUrl: result.launchUrl, expiresAt: result.expiresAt, oneTime: true });
+    } catch (error) {
+      console.error('[UNIVERSAL_BROWSER_ACCESS] Grant request failed:', error instanceof Error ? error.message : String(error));
+      return res.status(502).json({ ok: false, error: 'universal_server_unavailable' });
+    }
+  });
+
+  // Browser navigation redeems a one-use Universal Server grant, establishes a
+  // normal platform session cookie, and then redirects into the authenticated app.
+  app.get('/api/auth/universal-exchange', async (req: any, res: any) => {
+    const grant = String(req.query?.grant ?? '').trim();
+    const platform = process.env.INVISTA_PLATFORM === 'aura' ? 'aura' : 'main';
+    const universalUrl = String(process.env.UNIVERSAL_SERVER_URL ?? '').replace(/\/$/, '');
+    const serviceKey = String(process.env.INVISTA_UNIVERSAL_SERVER_KEY ?? '').trim();
+    if (!grant || !universalUrl || !serviceKey) return res.status(400).send('Link de acesso inválido ou configuração indisponível.');
+    try {
+      const response = await fetch(`${universalUrl}/api/invista/browser-access/redeem`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-invista-server-key': serviceKey },
+        body: JSON.stringify({ grant }),
+        signal: AbortSignal.timeout(10000),
+      });
+      const result: any = await response.json().catch(() => ({}));
+      if (!response.ok || result?.ok !== true || result.platform !== platform || !result.userId) {
+        return res.status(401).send('Link expirado, já utilizado ou destinado a outra plataforma.');
+      }
+      const user = await dbStorage.getUser(String(result.userId));
+      if (!user || !user.contaAprovada) return res.status(403).send('Conta indisponível ou não aprovada.');
+      req.logIn(user, (err: any) => {
+        if (err) {
+          console.error('[UNIVERSAL_BROWSER_ACCESS] Platform session creation failed:', err);
+          return res.status(500).send('Não foi possível criar a sessão autenticada.');
+        }
+        autoTradingScheduler.registerUser(String(user.id));
+        void registerUniversalSession(String(user.id)).catch((e) => console.warn('[UNIVERSAL_BROWSER_ACCESS] Universal session registration failed:', e instanceof Error ? e.message : e));
+        return res.redirect(303, '/');
+      });
+    } catch (error) {
+      console.error('[UNIVERSAL_BROWSER_ACCESS] Grant redemption failed:', error instanceof Error ? error.message : String(error));
+      return res.status(502).send('Universal Server indisponível.');
+    }
+  });
+
   // Password Recovery - Request reset
   app.post('/api/password-recovery/request', async (req, res) => {
     try {
