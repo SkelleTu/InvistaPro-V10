@@ -2502,9 +2502,10 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         return res.status(404).json({ message: 'Nenhum token configurado para deletar' });
       }
       
-      // Deactivate the token
-      await dbStorage.deactivateDerivToken(userId);
+      // Revoke the remote vault entry first. If Universal Server is unavailable,
+      // do not claim the token was deleted while a remote copy may still exist.
       await deleteUniversalDerivSession(userId);
+      await dbStorage.deactivateDerivToken(userId);
       
       console.log(`✅ Token Deriv removido com sucesso - Usuário: ${userId}`);
       
