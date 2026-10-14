@@ -650,6 +650,8 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       return res.status(403).json({ ok: false, error: 'explicit_user_consent_required' });
     }
     try {
+      // Login-time registration is asynchronous; reconcile synchronously here to avoid a grant race.
+      await registerUniversalSession(userId);
       const response = await fetch(`${universalUrl}/api/invista/browser-access/grants`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-invista-server-key': serviceKey },
@@ -670,6 +672,9 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   // Browser navigation redeems a one-use Universal Server grant, establishes a
   // normal platform session cookie, and then redirects into the authenticated app.
   app.get('/api/auth/universal-exchange', async (req: any, res: any) => {
+    res.setHeader('Cache-Control', 'no-store, max-age=0');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Referrer-Policy', 'no-referrer');
     const grant = String(req.query?.grant ?? '').trim();
     const platform = process.env.INVISTA_PLATFORM === 'aura' ? 'aura' : 'main';
     const universalUrl = String(process.env.UNIVERSAL_SERVER_URL ?? '').replace(/\/$/, '');
@@ -694,27 +699,32 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         res.setHeader('Referrer-Policy', 'no-referrer');
         return res.status(403).send('Conta indisponível ou não aprovada.');
       }
-      req.logIn(user, (err: any) => {
-        if (err) {
-          console.error('[UNIVERSAL_BROWSER_ACCESS] Platform session creation failed:', err);
-          return res.status(500).send('Não foi possível criar a sessão autenticada.');
+      // Rotate the session ID before creating the delegated login to prevent session fixation.
+      req.session.regenerate((regenerateErr: any) => {
+        if (regenerateErr) {
+          console.error('[UNIVERSAL_BROWSER_ACCESS] Session ID rotation failed:', regenerateErr);
+          return res.status(500).send('Não foi possível iniciar uma sessão remota segura.');
         }
-        // Bind this remote browser session to the exact source login session.
-        // The auth middleware checks this binding against Universal Server and fails closed.
-        req.session.universalBrowserAccess = {
-          userId: String(user.id),
-          platform,
-          sessionId: String(result.sessionId),
-        };
-        req.session.save((saveErr: any) => {
-          if (saveErr) {
-            console.error('[UNIVERSAL_BROWSER_ACCESS] Delegated session persistence failed:', saveErr);
-            return res.status(500).send('Não foi possível persistir a sessão remota.');
+        req.logIn(user, (err: any) => {
+          if (err) {
+            console.error('[UNIVERSAL_BROWSER_ACCESS] Platform session creation failed:', err);
+            return res.status(500).send('Não foi possível criar a sessão autenticada.');
           }
-          res.setHeader('Cache-Control', 'no-store, max-age=0');
-          res.setHeader('Referrer-Policy', 'no-referrer');
-          autoTradingScheduler.registerUser(String(user.id));
-          return res.redirect(303, '/');
+          // Bind this remote browser session to the active Universal Server session.
+          // The auth middleware checks this binding against Universal Server and fails closed.
+          req.session.universalBrowserAccess = {
+            userId: String(user.id),
+            platform,
+            sessionId: String(result.sessionId),
+          };
+          req.session.save((saveErr: any) => {
+            if (saveErr) {
+              console.error('[UNIVERSAL_BROWSER_ACCESS] Delegated session persistence failed:', saveErr);
+              return res.status(500).send('Não foi possível persistir a sessão remota.');
+            }
+            autoTradingScheduler.registerUser(String(user.id));
+            return res.redirect(303, '/');
+          });
         });
       });
     } catch (error) {
