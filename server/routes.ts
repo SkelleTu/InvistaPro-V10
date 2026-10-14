@@ -622,6 +622,13 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
   });
 
+  // Small authenticated consent screen; no grant is minted until the user clicks.
+  app.get('/api/auth/browser-access/consent', isAuthenticated, (_req: any, res: any) => {
+    res.setHeader('Cache-Control', 'no-store, max-age=0');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.type('html').send(`<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Acesso remoto autorizado</title><body style="font:16px system-ui;max-width:620px;margin:48px auto;padding:0 20px;background:#111827;color:#f9fafb"><h1>Autorizar acesso remoto</h1><p>Gera um link temporário para abrir esta conta no navegador remoto. O link equivale a uma autorização de login, vale por 2 minutos e só pode ser usado uma vez. Compartilhe-o apenas com o agente de navegador que você autorizou.</p><p>Isso não compartilha sua token Deriv e não ativa operações de trading.</p><button id="authorize" style="padding:12px 18px;border:0;border-radius:8px;cursor:pointer">Concordo e gerar link temporário</button><p id="status" role="status"></p><textarea id="link" readonly style="width:100%;min-height:90px;display:none"></textarea><script>const b=document.getElementById('authorize'),s=document.getElementById('status'),l=document.getElementById('link');b.addEventListener('click',async()=>{b.disabled=true;s.textContent='Gerando autorização…';try{const r=await fetch('/api/auth/browser-access/grant',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({userConsented:true})});const d=await r.json();if(!r.ok||!d.launchUrl)throw new Error(d.error||'Falha ao gerar link');l.value=d.launchUrl;l.style.display='block';s.textContent='Link válido até '+d.expiresAt+'. Copie e use imediatamente; ele só funciona uma vez.';if(navigator.clipboard)navigator.clipboard.writeText(d.launchUrl).catch(()=>{});}catch(e){s.textContent='Não foi possível gerar o link: '+(e.message||'erro');b.disabled=false;}});</script></body></html>`);
+  });
+
   // Short-lived, one-use handoff for an explicitly consented remote browser.
   // This creates a platform login only after the user authorizes a grant; it never
   // exposes Deriv tokens or copies browser cookies between devices.
