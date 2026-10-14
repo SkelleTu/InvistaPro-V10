@@ -650,19 +650,31 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       return res.status(403).json({ ok: false, error: 'explicit_user_consent_required' });
     }
     try {
-      // Login-time registration is asynchronous; reconcile synchronously here to avoid a grant race.
-      await registerUniversalSession(userId, req.user?.email);
-      const response = await fetch(`${universalUrl}/api/invista/browser-access/grants`, {
+      // Reconcile synchronously, then persist the user's explicit one-time opt-in
+      // for future MCP-mediated launches. Each launch still gets a new one-use grant.
+      const userEmail = String(req.user?.email ?? '').trim().toLowerCase();
+      if (!userEmail.includes('@')) return res.status(400).json({ ok: false, error: 'verified_account_email_required' });
+      await registerUniversalSession(userId, userEmail);
+      const delegationResponse = await fetch(`${universalUrl}/api/invista/browser-access/delegations`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-invista-server-key': serviceKey },
-        body: JSON.stringify({ userId, platform, userConsented: true }),
+        body: JSON.stringify({ userId, userEmail, platform, userConsented: true }),
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!delegationResponse.ok) {
+        return res.status(502).json({ ok: false, error: 'universal_delegation_failed', status: delegationResponse.status });
+      }
+      const response = await fetch(`${universalUrl}/api/invista/browser-access/agent-launch`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-invista-server-key': serviceKey },
+        body: JSON.stringify({ userEmail, platform }),
         signal: AbortSignal.timeout(10000),
       });
       const result: any = await response.json().catch(() => ({}));
       if (!response.ok || !result?.launchUrl) {
         return res.status(502).json({ ok: false, error: 'universal_grant_failed', status: response.status });
       }
-      return res.status(201).json({ ok: true, launchUrl: result.launchUrl, expiresAt: result.expiresAt, oneTime: true });
+      return res.status(201).json({ ok: true, launchUrl: result.launchUrl, expiresAt: result.expiresAt, oneTime: true, persistentDelegation: true });
     } catch (error) {
       console.error('[UNIVERSAL_BROWSER_ACCESS] Grant request failed:', error instanceof Error ? error.message : String(error));
       return res.status(502).json({ ok: false, error: 'universal_server_unavailable' });
