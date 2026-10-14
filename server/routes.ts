@@ -1071,15 +1071,26 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   const handleLogout = (req: any, res: any) => {
     console.log('🚪 Logout solicitado');
     const loggedUserId = req.user?.id ? String(req.user.id) : null;
+    // A delegated Browser Use logout must end only that remote cookie session.
+    // It must not tear down the source device's Universal/Deriv session.
+    const isDelegatedBrowserSession = Boolean(req.session?.universalBrowserAccess);
     req.logout(async (err: any) => {
       if (err) {
         console.error('❌ Erro no logout:', err);
         return res.status(500).json({ message: "Erro ao fazer logout" });
       }
-      if (loggedUserId) {
+      if (loggedUserId && !isDelegatedBrowserSession) {
         await autoTradingScheduler.disconnectUser(loggedUserId);
         await disconnectUniversalDerivSession(loggedUserId);
         await disconnectUniversalSession(loggedUserId);
+      }
+      if (req.session?.destroy) {
+        req.session.destroy(() => {
+          res.clearCookie("investpro.sid", { path: "/" });
+          console.log('✅ Logout realizado com sucesso');
+          res.json({ message: "Logout realizado com sucesso", success: true });
+        });
+        return;
       }
       console.log('✅ Logout realizado com sucesso');
       res.json({ message: "Logout realizado com sucesso", success: true });
