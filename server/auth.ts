@@ -166,6 +166,13 @@ async function checkDelegatedBrowserSession(req: any): Promise<DelegatedBrowserC
   const sessionId = String(delegated.sessionId ?? "");
   const userId = String(delegated.userId ?? "");
   const platform = String(delegated.platform ?? "");
+  const authenticatedUserId = String(req.user?.id ?? "");
+  const expectedPlatform = process.env.INVISTA_PLATFORM === "aura" ? "aura" : "main";
+  // Bind the delegated cookie to both the Passport identity and this deployment.
+  // A valid Universal session for a different user/platform must never authorize this request.
+  if (!authenticatedUserId || authenticatedUserId !== userId || platform !== expectedPlatform) {
+    return "inactive";
+  }
   if (!universalUrl || !serviceKey || !sessionId || !userId || !["main", "aura"].includes(platform)) {
     return "unavailable";
   }
