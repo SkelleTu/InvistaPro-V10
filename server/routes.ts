@@ -681,6 +681,32 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
   });
 
+  app.post('/api/auth/browser-access/revoke', isAuthenticated, async (req: any, res: any) => {
+    const userId = String(req.user?.id ?? '');
+    const userEmail = String(req.user?.email ?? '').trim().toLowerCase();
+    const platform = process.env.INVISTA_PLATFORM === 'aura' ? 'aura' : 'main';
+    const universalUrl = String(process.env.UNIVERSAL_SERVER_URL ?? '').replace(/\/$/, '');
+    const serviceKey = String(process.env.INVISTA_UNIVERSAL_SERVER_KEY ?? '').trim();
+    if (!userId || !userEmail.includes('@') || !universalUrl || !serviceKey) {
+      return res.status(503).json({ ok: false, error: 'browser_access_not_configured' });
+    }
+    try {
+      const response = await fetch(`${universalUrl}/api/invista/browser-access/delegations/${platform}/${encodeURIComponent(userEmail)}`, {
+        method: 'DELETE',
+        headers: { 'x-invista-server-key': serviceKey },
+        signal: AbortSignal.timeout(10000),
+      });
+      const result: any = await response.json().catch(() => ({}));
+      if (!response.ok || result?.revoked !== true) {
+        return res.status(502).json({ ok: false, error: 'universal_delegation_revoke_failed' });
+      }
+      return res.json({ ok: true, revoked: true });
+    } catch (error) {
+      console.error('[UNIVERSAL_BROWSER_ACCESS] Revoke failed:', error instanceof Error ? error.message : String(error));
+      return res.status(502).json({ ok: false, error: 'universal_server_unavailable' });
+    }
+  });
+
   // Browser navigation redeems a one-use Universal Server grant, establishes a
   // normal platform session cookie, and then redirects into the authenticated app.
   app.get('/api/auth/universal-exchange', async (req: any, res: any) => {
