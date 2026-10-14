@@ -52,7 +52,7 @@ import { contractMonitor } from './services/contract-monitor';
 import { asyncErrorHandler } from './middleware/error-handler';
 import { tpmSystem } from './services/tpm-system';
 import { getRegistryInfo } from './services/url-registry';
-import { registerUniversalSession, setUniversalTradingArmed, disconnectUniversalSession, syncDerivTokenToUniversalServer, deleteUniversalDerivSession } from './services/universal-server-session';
+import { registerUniversalSession, setUniversalTradingArmed, disconnectUniversalSession, syncDerivTokenToUniversalServer, deleteUniversalDerivSession, disconnectUniversalDerivSession } from './services/universal-server-session';
 import { isAllowedProductionSymbol, isAllowedProductionContractType } from './services/production-symbol-policy';
 
 // PIX payload generator compatível com Santander
@@ -605,7 +605,13 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
           console.log('🎉 Login bem-sucedido para:', user.email);
           // Cada login recebe seu próprio runtime isolado. Login prepara a sessão, mas NÃO arma o trading.
           autoTradingScheduler.registerUser(String(user.id));
-          void registerUniversalSession(String(user.id)).catch((e) => console.warn('⚠️ [UNIVERSAL] Falha ao registrar sessão pós-login:', e));
+          void (async () => {
+            await registerUniversalSession(String(user.id));
+            const savedDerivToken = await dbStorage.getUserDerivToken(String(user.id));
+            if (savedDerivToken?.token && ['demo', 'real'].includes(savedDerivToken.accountType)) {
+              await syncDerivTokenToUniversalServer(String(user.id), savedDerivToken.token, savedDerivToken.accountType as 'demo' | 'real');
+            }
+          })().catch((e) => console.warn('⚠️ [UNIVERSAL] Falha ao restaurar sessão pós-login:', e instanceof Error ? e.message : String(e)));
           const { passwordHash, codigoVerificacao, ...userWithoutSensitiveData } = user;
           res.json({ 
             message: "Login realizado com sucesso",
@@ -1042,6 +1048,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       }
       if (loggedUserId) {
         await autoTradingScheduler.disconnectUser(loggedUserId);
+        await disconnectUniversalDerivSession(loggedUserId);
         await disconnectUniversalSession(loggedUserId);
       }
       console.log('✅ Logout realizado com sucesso');
