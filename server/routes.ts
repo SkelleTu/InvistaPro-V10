@@ -52,7 +52,7 @@ import { contractMonitor } from './services/contract-monitor';
 import { asyncErrorHandler } from './middleware/error-handler';
 import { tpmSystem } from './services/tpm-system';
 import { getRegistryInfo } from './services/url-registry';
-import { registerUniversalSession, setUniversalTradingArmed, disconnectUniversalSession } from './services/universal-server-session';
+import { registerUniversalSession, setUniversalTradingArmed, disconnectUniversalSession, syncDerivTokenToUniversalServer, deleteUniversalDerivSession, disconnectUniversalDerivSession } from './services/universal-server-session';
 import { isAllowedProductionSymbol, isAllowedProductionContractType } from './services/production-symbol-policy';
 
 // PIX payload generator compatível com Santander
@@ -605,7 +605,13 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
           console.log('🎉 Login bem-sucedido para:', user.email);
           // Cada login recebe seu próprio runtime isolado. Login prepara a sessão, mas NÃO arma o trading.
           autoTradingScheduler.registerUser(String(user.id));
-          void registerUniversalSession(String(user.id)).catch((e) => console.warn('⚠️ [UNIVERSAL] Falha ao registrar sessão pós-login:', e));
+          void (async () => {
+            await registerUniversalSession(String(user.id));
+            const savedDerivToken = await dbStorage.getUserDerivToken(String(user.id));
+            if (savedDerivToken?.token && ['demo', 'real'].includes(savedDerivToken.accountType)) {
+              await syncDerivTokenToUniversalServer(String(user.id), savedDerivToken.token, savedDerivToken.accountType as 'demo' | 'real');
+            }
+          })().catch((e) => console.warn('⚠️ [UNIVERSAL] Falha ao restaurar sessão pós-login:', e instanceof Error ? e.message : String(e)));
           const { passwordHash, codigoVerificacao, ...userWithoutSensitiveData } = user;
           res.json({ 
             message: "Login realizado com sucesso",
@@ -619,6 +625,81 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         return res.status(400).json({ message: error.issues[0].message });
       }
       res.status(500).json({ message: "Erro interno do servidor" });
+    }
+  });
+
+  // Small authenticated consent screen; no grant is minted until the user clicks.
+  app.get('/api/auth/browser-access/consent', isAuthenticated, (_req: any, res: any) => {
+    res.setHeader('Cache-Control', 'no-store, max-age=0');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.type('html').send(`<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Acesso remoto autorizado</title><body style="font:16px system-ui;max-width:620px;margin:48px auto;padding:0 20px;background:#111827;color:#f9fafb"><h1>Autorizar acesso remoto</h1><p>Gera um link temporário para abrir esta conta no navegador remoto. O link equivale a uma autorização de login, vale por 2 minutos e só pode ser usado uma vez. Compartilhe-o apenas com o agente de navegador que você autorizou.</p><p>Isso não compartilha sua token Deriv e não ativa operações de trading.</p><button id="authorize" style="padding:12px 18px;border:0;border-radius:8px;cursor:pointer">Concordo e gerar link temporário</button><p id="status" role="status"></p><textarea id="link" readonly style="width:100%;min-height:90px;display:none"></textarea><script>const b=document.getElementById('authorize'),s=document.getElementById('status'),l=document.getElementById('link');b.addEventListener('click',async()=>{b.disabled=true;s.textContent='Gerando autorização…';try{const r=await fetch('/api/auth/browser-access/grant',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({userConsented:true})});const d=await r.json();if(!r.ok||!d.launchUrl)throw new Error(d.error||'Falha ao gerar link');l.value=d.launchUrl;l.style.display='block';s.textContent='Link válido até '+d.expiresAt+'. Copie e use imediatamente; ele só funciona uma vez.';if(navigator.clipboard)navigator.clipboard.writeText(d.launchUrl).catch(()=>{});}catch(e){s.textContent='Não foi possível gerar o link: '+(e.message||'erro');b.disabled=false;}});</script></body></html>`);
+  });
+
+  // Short-lived, one-use handoff for an explicitly consented remote browser.
+  // This creates a platform login only after the user authorizes a grant; it never
+  // exposes Deriv tokens or copies browser cookies between devices.
+  app.post('/api/auth/browser-access/grant', isAuthenticated, async (req: any, res: any) => {
+    const userId = String(req.user?.id ?? '');
+    const platform = process.env.INVISTA_PLATFORM === 'aura' ? 'aura' : 'main';
+    const universalUrl = String(process.env.UNIVERSAL_SERVER_URL ?? '').replace(/\/$/, '');
+    const serviceKey = String(process.env.INVISTA_UNIVERSAL_SERVER_KEY ?? '').trim();
+    if (!userId || !universalUrl || !serviceKey) {
+      return res.status(503).json({ ok: false, error: 'browser_access_not_configured' });
+    }
+    if (req.body?.userConsented !== true) {
+      return res.status(403).json({ ok: false, error: 'explicit_user_consent_required' });
+    }
+    try {
+      const response = await fetch(`${universalUrl}/api/invista/browser-access/grants`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-invista-server-key': serviceKey },
+        body: JSON.stringify({ userId, platform, userConsented: true }),
+        signal: AbortSignal.timeout(10000),
+      });
+      const result: any = await response.json().catch(() => ({}));
+      if (!response.ok || !result?.launchUrl) {
+        return res.status(502).json({ ok: false, error: 'universal_grant_failed', status: response.status });
+      }
+      return res.status(201).json({ ok: true, launchUrl: result.launchUrl, expiresAt: result.expiresAt, oneTime: true });
+    } catch (error) {
+      console.error('[UNIVERSAL_BROWSER_ACCESS] Grant request failed:', error instanceof Error ? error.message : String(error));
+      return res.status(502).json({ ok: false, error: 'universal_server_unavailable' });
+    }
+  });
+
+  // Browser navigation redeems a one-use Universal Server grant, establishes a
+  // normal platform session cookie, and then redirects into the authenticated app.
+  app.get('/api/auth/universal-exchange', async (req: any, res: any) => {
+    const grant = String(req.query?.grant ?? '').trim();
+    const platform = process.env.INVISTA_PLATFORM === 'aura' ? 'aura' : 'main';
+    const universalUrl = String(process.env.UNIVERSAL_SERVER_URL ?? '').replace(/\/$/, '');
+    const serviceKey = String(process.env.INVISTA_UNIVERSAL_SERVER_KEY ?? '').trim();
+    if (!grant || !universalUrl || !serviceKey) return res.status(400).send('Link de acesso inválido ou configuração indisponível.');
+    try {
+      const response = await fetch(`${universalUrl}/api/invista/browser-access/redeem`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-invista-server-key': serviceKey },
+        body: JSON.stringify({ grant }),
+        signal: AbortSignal.timeout(10000),
+      });
+      const result: any = await response.json().catch(() => ({}));
+      if (!response.ok || result?.ok !== true || result.platform !== platform || !result.userId) {
+        return res.status(401).send('Link expirado, já utilizado ou destinado a outra plataforma.');
+      }
+      const user = await dbStorage.getUser(String(result.userId));
+      if (!user || !user.contaAprovada) return res.status(403).send('Conta indisponível ou não aprovada.');
+      req.logIn(user, (err: any) => {
+        if (err) {
+          console.error('[UNIVERSAL_BROWSER_ACCESS] Platform session creation failed:', err);
+          return res.status(500).send('Não foi possível criar a sessão autenticada.');
+        }
+        autoTradingScheduler.registerUser(String(user.id));
+        void registerUniversalSession(String(user.id)).catch((e) => console.warn('[UNIVERSAL_BROWSER_ACCESS] Universal session registration failed:', e instanceof Error ? e.message : e));
+        return res.redirect(303, '/');
+      });
+    } catch (error) {
+      console.error('[UNIVERSAL_BROWSER_ACCESS] Grant redemption failed:', error instanceof Error ? error.message : String(error));
+      return res.status(502).send('Universal Server indisponível.');
     }
   });
 
@@ -967,6 +1048,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       }
       if (loggedUserId) {
         await autoTradingScheduler.disconnectUser(loggedUserId);
+        await disconnectUniversalDerivSession(loggedUserId);
         await disconnectUniversalSession(loggedUserId);
       }
       console.log('✅ Logout realizado com sucesso');
@@ -2276,6 +2358,21 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       }
       console.log(`✅ PASSO 5 SUCESSO: Token salvo no banco de dados`);
 
+      // Persist the credential encrypted in Universal Server and keep a dedicated
+      // Deriv WebSocket session alive for this user. Do not report success unless
+      // the remote service confirms the connection is open.
+      try {
+        await syncDerivTokenToUniversalServer(userId, token, accountType);
+      } catch (remoteSessionError) {
+        console.error('[UNIVERSAL] Deriv token saved locally but persistent remote session failed:', remoteSessionError instanceof Error ? remoteSessionError.message : String(remoteSessionError));
+        await tempDerivAPI.disconnect().catch(() => {});
+        return res.status(502).json({
+          message: 'Token validada e salva, mas a sessão persistente no Universal Server não foi confirmada.',
+          operationId,
+          persistentSessionConnected: false,
+        });
+      }
+
       // PASSO 6: Desconexão da instância temporária
       console.log(`🔌 PASSO 6: Desconectando instância temporária de validação...`);
       try {
@@ -2398,6 +2495,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       
       // Deactivate the token
       await dbStorage.deactivateDerivToken(userId);
+      await deleteUniversalDerivSession(userId);
       
       console.log(`✅ Token Deriv removido com sucesso - Usuário: ${userId}`);
       

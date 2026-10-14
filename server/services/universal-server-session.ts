@@ -31,6 +31,48 @@ async function call(path: string, body: any) {
   return await response.json() as any;
 }
 
+export async function syncDerivTokenToUniversalServer(userId: string, token: string, accountType: "demo" | "real") {
+  if (!enabled()) throw new Error("Universal Server integration is not configured; Deriv token cannot be registered for a persistent remote session.");
+  const response = await call("/api/invista/deriv/session", {
+    userId: String(userId),
+    platform,
+    token,
+    accountType,
+  });
+  if (response?.ok !== true || response?.connected !== true) {
+    throw new Error("Universal Server did not confirm a live Deriv session.");
+  }
+  console.log(`🔐 [UNIVERSAL] Token Deriv registrada de forma protegida e sessão conectada | user=${userId} | platform=${platform} | accountType=${accountType}`);
+  return { connected: true, accountType: response.accountType, accountId: response.accountId };
+}
+
+export async function disconnectUniversalDerivSession(userId: string) {
+  if (!enabled()) return null;
+  try {
+    const response = await fetch(`${universalUrl}/api/invista/deriv/session/disconnect/${platform}/${encodeURIComponent(String(userId))}`, {
+      method: "POST",
+      headers: { "x-invista-server-key": serviceKey },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!response.ok) throw new Error(`Universal Server Deriv disconnect returned HTTP ${response.status}`);
+    return await response.json() as any;
+  } catch (error) {
+    console.warn(`⚠️ [UNIVERSAL] Falha ao encerrar conexão Deriv user=${userId}:`, error instanceof Error ? error.message : error);
+    return null;
+  }
+}
+
+export async function deleteUniversalDerivSession(userId: string) {
+  if (!enabled()) throw new Error("Universal Server integration is not configured; remote Deriv session cannot be revoked.");
+  const response = await fetch(`${universalUrl}/api/invista/deriv/session/${platform}/${encodeURIComponent(String(userId))}`, {
+    method: "DELETE",
+    headers: { "x-invista-server-key": serviceKey },
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!response.ok) throw new Error(`Universal Server Deriv session deletion returned HTTP ${response.status}`);
+  return await response.json() as any;
+}
+
 export async function registerUniversalSession(userId: string) {
   if (!userId) throw new Error("Universal session requires an authenticated user ID.");
   if (!enabled()) throw new Error("Universal Server integration is not configured; refusing to create an untracked trading session.");
