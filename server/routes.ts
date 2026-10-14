@@ -606,7 +606,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
           // Cada login recebe seu próprio runtime isolado. Login prepara a sessão, mas NÃO arma o trading.
           autoTradingScheduler.registerUser(String(user.id));
           void (async () => {
-            await registerUniversalSession(String(user.id));
+            await registerUniversalSession(String(user.id), user.email);
             const savedDerivToken = await dbStorage.getUserDerivToken(String(user.id));
             if (savedDerivToken?.token && ['demo', 'real'].includes(savedDerivToken.accountType)) {
               await syncDerivTokenToUniversalServer(String(user.id), savedDerivToken.token, savedDerivToken.accountType as 'demo' | 'real');
@@ -629,16 +629,16 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   });
 
   // Small authenticated consent screen; no grant is minted until the user clicks.
-  app.get('/api/auth/browser-access/consent', isAuthenticated, (_req: any, res: any) => {
+  app.get('/api/auth/browser-access/consent', isAuthenticated, isApproved, (_req: any, res: any) => {
     res.setHeader('Cache-Control', 'no-store, max-age=0');
     res.setHeader('Referrer-Policy', 'no-referrer');
-    res.type('html').send(`<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Acesso remoto autorizado</title><body style="font:16px system-ui;max-width:620px;margin:48px auto;padding:0 20px;background:#111827;color:#f9fafb"><h1>Autorizar acesso remoto</h1><p>Gera um link temporário para abrir esta conta no navegador remoto. O link equivale a uma autorização de login, vale por 2 minutos e só pode ser usado uma vez. Compartilhe-o apenas com o agente de navegador que você autorizou.</p><p>Isso não compartilha sua token Deriv e não ativa operações de trading.</p><button id="authorize" style="padding:12px 18px;border:0;border-radius:8px;cursor:pointer">Concordo e gerar link temporário</button><p id="status" role="status"></p><textarea id="link" readonly style="width:100%;min-height:90px;display:none"></textarea><script>const b=document.getElementById('authorize'),s=document.getElementById('status'),l=document.getElementById('link');b.addEventListener('click',async()=>{b.disabled=true;s.textContent='Gerando autorização…';try{const r=await fetch('/api/auth/browser-access/grant',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({userConsented:true})});const d=await r.json();if(!r.ok||!d.launchUrl)throw new Error(d.error||'Falha ao gerar link');l.value=d.launchUrl;l.style.display='block';s.textContent='Link válido até '+d.expiresAt+'. Copie e use imediatamente; ele só funciona uma vez.';if(navigator.clipboard)navigator.clipboard.writeText(d.launchUrl).catch(()=>{});}catch(e){s.textContent='Não foi possível gerar o link: '+(e.message||'erro');b.disabled=false;}});</script></body></html>`);
+    res.type('html').send(`<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Acesso remoto autorizado</title><body style="font:16px system-ui;max-width:620px;margin:48px auto;padding:0 20px;background:#111827;color:#f9fafb"><h1>Autorizar acesso remoto</h1><p>Ativa a delegação persistente do Browser Use para esta conta. Cada acesso gera um link novo, de uso único e válido por 2 minutos. O acesso só é liberado ao perfil MCP autenticado com o mesmo e-mail; isso não compartilha sua token Deriv nem ativa operações de trading.</p><p>Isso não compartilha sua token Deriv e não ativa operações de trading.</p><button id="authorize" style="padding:12px 18px;border:0;border-radius:8px;cursor:pointer">Autorizar Browser Use</button> <button id="revoke" style="padding:12px 18px;border:1px solid #f87171;border-radius:8px;cursor:pointer;background:transparent;color:#fca5a5">Revogar acesso persistente</button><p id="status" role="status"></p><textarea id="link" readonly style="width:100%;min-height:90px;display:none"></textarea><script>const b=document.getElementById('authorize'),v=document.getElementById('revoke'),s=document.getElementById('status'),l=document.getElementById('link');b.addEventListener('click',async()=>{b.disabled=true;s.textContent='Gerando autorização…';try{const r=await fetch('/api/auth/browser-access/grant',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({userConsented:true})});const d=await r.json();if(!r.ok||!d.launchUrl)throw new Error(d.error||'Falha ao gerar link');l.value=d.launchUrl;l.style.display='block';s.textContent='Acesso persistente ativado. Primeiro link válido até '+d.expiresAt+' e utilizável uma única vez.';if(navigator.clipboard)navigator.clipboard.writeText(d.launchUrl).catch(()=>{});}catch(e){s.textContent='Não foi possível gerar o link: '+(e.message||'erro');b.disabled=false;}});v.addEventListener('click',async()=>{v.disabled=true;s.textContent='Revogando acesso…';try{const r=await fetch('/api/auth/browser-access/revoke',{method:'POST',credentials:'same-origin'});const d=await r.json();if(!r.ok||!d.revoked)throw new Error(d.error||'Falha ao revogar');l.value='';l.style.display='none';s.textContent='Acesso persistente revogado.';}catch(e){s.textContent='Não foi possível revogar: '+(e.message||'erro');}finally{v.disabled=false;}});</script></body></html>`);
   });
 
   // Short-lived, one-use handoff for an explicitly consented remote browser.
   // This creates a platform login only after the user authorizes a grant; it never
   // exposes Deriv tokens or copies browser cookies between devices.
-  app.post('/api/auth/browser-access/grant', isAuthenticated, async (req: any, res: any) => {
+  app.post('/api/auth/browser-access/grant', isAuthenticated, isApproved, async (req: any, res: any) => {
     const userId = String(req.user?.id ?? '');
     const platform = process.env.INVISTA_PLATFORM === 'aura' ? 'aura' : 'main';
     const universalUrl = String(process.env.UNIVERSAL_SERVER_URL ?? '').replace(/\/$/, '');
@@ -650,21 +650,59 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       return res.status(403).json({ ok: false, error: 'explicit_user_consent_required' });
     }
     try {
-      // Login-time registration is asynchronous; reconcile synchronously here to avoid a grant race.
-      await registerUniversalSession(userId);
-      const response = await fetch(`${universalUrl}/api/invista/browser-access/grants`, {
+      // Reconcile synchronously, then persist the user's explicit one-time opt-in
+      // for future MCP-mediated launches. Each launch still gets a new one-use grant.
+      const userEmail = String(req.user?.email ?? '').trim().toLowerCase();
+      if (!userEmail.includes('@')) return res.status(400).json({ ok: false, error: 'verified_account_email_required' });
+      await registerUniversalSession(userId, userEmail);
+      const delegationResponse = await fetch(`${universalUrl}/api/invista/browser-access/delegations`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-invista-server-key': serviceKey },
-        body: JSON.stringify({ userId, platform, userConsented: true }),
+        body: JSON.stringify({ userId, userEmail, platform, userConsented: true }),
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!delegationResponse.ok) {
+        return res.status(502).json({ ok: false, error: 'universal_delegation_failed', status: delegationResponse.status });
+      }
+      const response = await fetch(`${universalUrl}/api/invista/browser-access/agent-launch`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-invista-server-key': serviceKey },
+        body: JSON.stringify({ userEmail, platform }),
         signal: AbortSignal.timeout(10000),
       });
       const result: any = await response.json().catch(() => ({}));
       if (!response.ok || !result?.launchUrl) {
         return res.status(502).json({ ok: false, error: 'universal_grant_failed', status: response.status });
       }
-      return res.status(201).json({ ok: true, launchUrl: result.launchUrl, expiresAt: result.expiresAt, oneTime: true });
+      return res.status(201).json({ ok: true, launchUrl: result.launchUrl, expiresAt: result.expiresAt, oneTime: true, persistentDelegation: true });
     } catch (error) {
       console.error('[UNIVERSAL_BROWSER_ACCESS] Grant request failed:', error instanceof Error ? error.message : String(error));
+      return res.status(502).json({ ok: false, error: 'universal_server_unavailable' });
+    }
+  });
+
+  app.post('/api/auth/browser-access/revoke', isAuthenticated, isApproved, async (req: any, res: any) => {
+    const userId = String(req.user?.id ?? '');
+    const userEmail = String(req.user?.email ?? '').trim().toLowerCase();
+    const platform = process.env.INVISTA_PLATFORM === 'aura' ? 'aura' : 'main';
+    const universalUrl = String(process.env.UNIVERSAL_SERVER_URL ?? '').replace(/\/$/, '');
+    const serviceKey = String(process.env.INVISTA_UNIVERSAL_SERVER_KEY ?? '').trim();
+    if (!userId || !userEmail.includes('@') || !universalUrl || !serviceKey) {
+      return res.status(503).json({ ok: false, error: 'browser_access_not_configured' });
+    }
+    try {
+      const response = await fetch(`${universalUrl}/api/invista/browser-access/delegations/${platform}/${encodeURIComponent(userEmail)}`, {
+        method: 'DELETE',
+        headers: { 'x-invista-server-key': serviceKey },
+        signal: AbortSignal.timeout(10000),
+      });
+      const result: any = await response.json().catch(() => ({}));
+      if (!response.ok || result?.revoked !== true) {
+        return res.status(502).json({ ok: false, error: 'universal_delegation_revoke_failed' });
+      }
+      return res.json({ ok: true, revoked: true });
+    } catch (error) {
+      console.error('[UNIVERSAL_BROWSER_ACCESS] Revoke failed:', error instanceof Error ? error.message : String(error));
       return res.status(502).json({ ok: false, error: 'universal_server_unavailable' });
     }
   });
@@ -1111,7 +1149,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       // Existing persistent web sessions may predate the Universal Server token vault.
       // Reconcile the user's saved Deriv token in the background without exposing it
       // to the browser or forcing the user to log out and back in.
-      void registerUniversalSession(String(req.user.id)).then(async () => {
+      void registerUniversalSession(String(req.user.id), req.user.email).then(async () => {
         const savedDerivToken = await dbStorage.getUserDerivToken(String(req.user.id));
         if (savedDerivToken?.token && ['demo', 'real'].includes(savedDerivToken.accountType)) {
           await ensureUniversalDerivSession(String(req.user.id), savedDerivToken.token, savedDerivToken.accountType as 'demo' | 'real');
