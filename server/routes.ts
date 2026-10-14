@@ -52,7 +52,7 @@ import { contractMonitor } from './services/contract-monitor';
 import { asyncErrorHandler } from './middleware/error-handler';
 import { tpmSystem } from './services/tpm-system';
 import { getRegistryInfo } from './services/url-registry';
-import { registerUniversalSession, setUniversalTradingArmed, disconnectUniversalSession } from './services/universal-server-session';
+import { registerUniversalSession, setUniversalTradingArmed, disconnectUniversalSession, syncDerivTokenToUniversalServer, deleteUniversalDerivSession } from './services/universal-server-session';
 import { isAllowedProductionSymbol, isAllowedProductionContractType } from './services/production-symbol-policy';
 
 // PIX payload generator compatível com Santander
@@ -2351,6 +2351,21 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       }
       console.log(`✅ PASSO 5 SUCESSO: Token salvo no banco de dados`);
 
+      // Persist the credential encrypted in Universal Server and keep a dedicated
+      // Deriv WebSocket session alive for this user. Do not report success unless
+      // the remote service confirms the connection is open.
+      try {
+        await syncDerivTokenToUniversalServer(userId, token, accountType);
+      } catch (remoteSessionError) {
+        console.error('[UNIVERSAL] Deriv token saved locally but persistent remote session failed:', remoteSessionError instanceof Error ? remoteSessionError.message : String(remoteSessionError));
+        await tempDerivAPI.disconnect().catch(() => {});
+        return res.status(502).json({
+          message: 'Token validada e salva, mas a sessão persistente no Universal Server não foi confirmada.',
+          operationId,
+          persistentSessionConnected: false,
+        });
+      }
+
       // PASSO 6: Desconexão da instância temporária
       console.log(`🔌 PASSO 6: Desconectando instância temporária de validação...`);
       try {
@@ -2473,6 +2488,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       
       // Deactivate the token
       await dbStorage.deactivateDerivToken(userId);
+      await deleteUniversalDerivSession(userId);
       
       console.log(`✅ Token Deriv removido com sucesso - Usuário: ${userId}`);
       
