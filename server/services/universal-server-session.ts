@@ -6,7 +6,7 @@ const platform: Platform = process.env.INVISTA_PLATFORM === "aura" ? "aura" : "m
 const universalUrl = (process.env.UNIVERSAL_SERVER_URL || "").replace(/\/$/, "");
 const serviceKey = process.env.INVISTA_UNIVERSAL_SERVER_KEY || "";
 
-interface SessionState { sessionId: string; userId: string; platform: Platform; tradingArmed: boolean; }
+interface SessionState { sessionId: string; userId: string; userEmail?: string; platform: Platform; tradingArmed: boolean; }
 const sessions = new Map<string, SessionState>();
 // Keep authenticated users in the retry set even when a transient registration
 // failure leaves them without a session entry. The heartbeat loop can recover.
@@ -120,6 +120,7 @@ export async function registerUniversalSession(userId: string, userEmail?: strin
   sessions.set(String(userId), {
     sessionId: session.sessionId,
     userId: String(userId),
+    ...(userEmail ? { userEmail: userEmail.trim().toLowerCase() } : {}),
     platform,
     tradingArmed: Boolean(session.tradingArmed),
   });
@@ -149,7 +150,20 @@ export async function heartbeatUniversalSession(userId: string, tradingArmed = f
     await heartbeatUniversalDerivSession(id);
     return result;
   } catch (error) {
-    console.warn(`⚠️ [UNIVERSAL] Heartbeat/registration retry failed for user=${id}:`, error instanceof Error ? error.message : error);
+    const message = error instanceof Error ? error.message : String(error);
+    // Universal Server may have restarted and lost its in-memory login registry.
+    // Re-register with the email binding, then let the next heartbeat continue.
+    if (message.includes("HTTP 404") && sessions.has(id)) {
+      try {
+        const previous = sessions.get(id)!;
+        await registerUniversalSession(id, previous.userEmail);
+        return sessions.get(id) || null;
+      } catch (recoveryError) {
+        console.warn(`⚠️ [UNIVERSAL] Session recovery failed for user=${id}:`, recoveryError instanceof Error ? recoveryError.message : recoveryError);
+        return null;
+      }
+    }
+    console.warn(`⚠️ [UNIVERSAL] Heartbeat/registration retry failed for user=${id}:`, message);
     return null;
   }
 }
