@@ -154,13 +154,57 @@ export function setupAuth(app: Express) {
 }
 
 // Middleware to check if user is authenticated
-export function isAuthenticated(req: any, res: any, next: any) {
-  // Defense in depth: Passport normally installs this method through passport.session().
-  // If middleware ordering/configuration regresses, return a controlled 401 instead of a 500.
-  if (typeof req.isAuthenticated === "function" && req.isAuthenticated()) {
-    return next();
+type DelegatedBrowserCheck = "active" | "inactive" | "unavailable";
+
+async function checkDelegatedBrowserSession(req: any): Promise<DelegatedBrowserCheck> {
+  const delegated = req.session?.universalBrowserAccess;
+  if (!delegated) return "active";
+  const universalUrl = String(process.env.UNIVERSAL_SERVER_URL ?? "").replace(/\/$/, "");
+  const serviceKey = String(process.env.INVISTA_UNIVERSAL_SERVER_KEY ?? "").trim();
+  const sessionId = String(delegated.sessionId ?? "");
+  const userId = String(delegated.userId ?? "");
+  const platform = String(delegated.platform ?? "");
+  if (!universalUrl || !serviceKey || !sessionId || !userId || !["main", "aura"].includes(platform)) {
+    return "unavailable";
   }
-  res.status(401).json({ message: "Unauthorized" });
+  try {
+    const query = new URLSearchParams({ sessionId, userId, platform });
+    const response = await fetch(`${universalUrl}/api/invista/session/remote-status?${query.toString()}`, {
+      method: "GET",
+      headers: { "x-invista-server-key": serviceKey },
+      signal: AbortSignal.timeout(4000),
+    });
+    if (!response.ok) return "unavailable";
+    const result: any = await response.json();
+    return result?.ok === true && result?.active === true ? "active" : "inactive";
+  } catch {
+    return "unavailable";
+  }
+}
+
+export async function isAuthenticated(req: any, res: any, next: any) {
+  // Passport normally installs this method through passport.session().
+  if (typeof req.isAuthenticated !== "function" || !req.isAuthenticated()) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+
+  // Only delegated Browser Use sessions incur the Universal Server check.
+  // If the source login is logged out or its heartbeat expires, remote access is revoked.
+  const delegatedStatus = await checkDelegatedBrowserSession(req);
+  if (delegatedStatus === "active") return next();
+  if (delegatedStatus === "unavailable") {
+    return res.status(503).json({ message: "Não foi possível validar a sessão remota. Tente novamente." });
+  }
+
+  res.setHeader("Cache-Control", "no-store, max-age=0");
+  if (req.session?.destroy) {
+    req.session.destroy(() => {
+      res.clearCookie("investpro.sid", { path: "/" });
+      res.status(401).json({ message: "A sessão de origem foi encerrada. Faça login novamente." });
+    });
+    return;
+  }
+  return res.status(401).json({ message: "A sessão de origem foi encerrada. Faça login novamente." });
 }
 
 // Middleware to check if user account is approved
