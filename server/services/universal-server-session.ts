@@ -109,12 +109,12 @@ export async function deleteUniversalDerivSession(userId: string) {
   return await response.json() as any;
 }
 
-export async function registerUniversalSession(userId: string) {
+export async function registerUniversalSession(userId: string, userEmail?: string) {
   if (!userId) throw new Error("Universal session requires an authenticated user ID.");
   if (!enabled()) throw new Error("Universal Server integration is not configured; refusing to create an untracked trading session.");
   const id = String(userId);
   knownUserIds.add(id);
-  const result = await call("/api/invista/session/register", { userId: id, platform });
+  const result = await call("/api/invista/session/register", { userId: id, platform, ...(userEmail ? { userEmail: userEmail.trim().toLowerCase() } : {}) });
   const session = result?.session;
   if (!session?.sessionId) throw new Error("Universal Server did not confirm session registration.");
   sessions.set(String(userId), {
