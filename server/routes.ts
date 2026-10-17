@@ -632,7 +632,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
               await syncDerivTokenToUniversalServer(String(user.id), savedDerivToken.token, savedDerivToken.accountType as 'demo' | 'real');
             }
           })().catch((e) => console.warn('[PLATFORM_AUTOMATION] Post-login sync failed:', e instanceof Error ? e.message : String(e)));
-          return res.redirect(303, '/');
+          return res.redirect(303, '/dashboard');
         });
       });
     } catch (error) {
