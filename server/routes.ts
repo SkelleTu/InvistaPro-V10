@@ -597,8 +597,8 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
 
     const configuredEmail = String(
       platform === 'aura'
-        ? process.env.AURA_STYLE_ACCOUNT_EMAIL ?? process.env.AURA_MASTER_EMAIL ?? process.env.INVISTA_MASTER_EMAIL ?? process.env.INVISTAPRO_ACCOUNT_EMAIL ?? ''
-        : process.env.INVISTAPRO_ACCOUNT_EMAIL ?? process.env.INVISTA_MASTER_EMAIL ?? ''
+        ? process.env.AURA_STYLE_ACCOUNT_EMAIL ?? process.env.AURA_MASTER_EMAIL ?? process.env.INVISTA_MASTER_EMAIL ?? process.env.INVISTAPRO_ACCOUNT_EMAIL ?? process.env.ADMIN_EMAIL ?? ''
+        : process.env.INVISTAPRO_ACCOUNT_EMAIL ?? process.env.INVISTA_MASTER_EMAIL ?? process.env.ADMIN_EMAIL ?? ''
     ).trim().toLowerCase();
     const configuredPassword = String(platform === 'aura'
       ? process.env.AURA_STYLE_ACCOUNT_PASSWORD ?? ''
