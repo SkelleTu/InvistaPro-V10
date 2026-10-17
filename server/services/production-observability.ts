@@ -53,6 +53,12 @@ function safeString(value: unknown, max = MAX_DETAIL_LENGTH): string {
   }
 }
 
+function sanitizeRequestPath(input: unknown): string {
+  return String(input ?? "")
+    .replace(/(\\/__automation\\/entry\\/)[^/?#]+/gi, "$1[REDACTED]")
+    .replace(/([?&](?:grant|token|access_token|refresh_token|secret|password|api[-_]?key|credential)=)[^&#]*/gi, "$1[REDACTED]");
+}
+
 function sanitizeObject(input: unknown): unknown {
   if (!input || typeof input !== "object") return input;
   if (Array.isArray(input)) return input.slice(0, 100).map(sanitizeObject);
@@ -224,10 +230,10 @@ class ProductionObservability {
     return this.emit({
       level,
       category,
-      message: `${req.method} ${req.originalUrl || req.path} -> ${status}`,
+      message: `${req.method} ${sanitizeRequestPath(req.originalUrl || req.path)} -> ${status}`,
       requestId: String(req.headers["x-request-id"] || req.headers["rndr-id"] || ""),
       method: req.method,
-      path: req.originalUrl || req.path,
+      path: sanitizeRequestPath(req.originalUrl || req.path),
       statusCode: status,
       durationMs,
       userId: (req as any).user?.id,
@@ -278,7 +284,7 @@ class ProductionObservability {
   }
 
   trackRequest(requestId: string, method: string, path: string, startedAt: number, userId?: string, traceId?: string) {
-    this.activeRequests.set(requestId, { requestId, method, path, startedAt, userId, traceId });
+    this.activeRequests.set(requestId, { requestId, method, path: sanitizeRequestPath(path), startedAt, userId, traceId });
     if (this.activeRequests.size > MAX_ACTIVE_REQUESTS) {
       const oldest = Array.from(this.activeRequests.entries()).sort((a, b) => a[1].startedAt - b[1].startedAt).slice(0, 100);
       for (const [id] of oldest) this.activeRequests.delete(id);
@@ -342,7 +348,7 @@ export function observabilityRequestMiddleware(req: Request, res: Response, next
   res.setHeader("x-observability-trace-id", traceId);
   (req as any).observabilityRequestId = requestId;
   (req as any).observabilityTraceId = traceId;
-  observability.trackRequest(requestId, req.method, req.originalUrl || req.path, started, (req as any).user?.id, traceId);
+  observability.trackRequest(requestId, req.method, sanitizeRequestPath(req.originalUrl || req.path), started, (req as any).user?.id, traceId);
 
   res.on("finish", () => {
     const duration = Date.now() - started;
