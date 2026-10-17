@@ -628,6 +628,12 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
   });
 
+  app.get('/api/auth/browser-access/master-consent', isAuthenticated, isApproved, (_req: any, res: any) => {
+    res.setHeader('Cache-Control', 'no-store, max-age=0');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.type('html').send(`<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Acesso delegado do Browser Use</title><body style="font:16px system-ui;max-width:680px;margin:40px auto;padding:0 20px;background:#111827;color:#f9fafb"><h1>Autorizar acesso operacional</h1><p>Você está autorizando o Browser Use a abrir uma sessão própria em cada plataforma. Cada link é individual, de uso único e expira em 2 minutos. Sua senha e seus cookies não são compartilhados.</p><p>Escolha as plataformas. Cada autorização é registrada separadamente e pode ser revogada.</p><button data-platform="main">Autorizar Invista Pro V10</button> <button data-platform="aura">Autorizar Aura System Style</button><hr><button data-revoke="main">Revogar Invista Pro V10</button> <button data-revoke="aura">Revogar Aura System Style</button><p id="status" role="status"></p><textarea id="link" readonly style="width:100%;min-height:90px;display:none"></textarea><script>const s=document.getElementById('status'),l=document.getElementById('link');document.querySelectorAll('[data-platform]').forEach(b=>b.addEventListener('click',async()=>{b.disabled=true;s.textContent='Preparando autorização…';try{const r=await fetch('/api/auth/browser-access/grant',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({userConsented:true,targetPlatform:b.dataset.platform})});const d=await r.json();if(!r.ok||!d.launchUrl)throw new Error(d.error||'Falha ao gerar autorização');l.value=d.launchUrl;l.style.display='block';s.textContent='Link para '+b.textContent+' válido até '+d.expiresAt+'. Ele só pode ser usado uma vez.';if(navigator.clipboard)navigator.clipboard.writeText(d.launchUrl).catch(()=>{});}catch(e){s.textContent='Falha: '+(e.message||'erro');}finally{b.disabled=false;}}));document.querySelectorAll('[data-revoke]').forEach(b=>b.addEventListener('click',async()=>{b.disabled=true;s.textContent='Revogando autorização…';try{const r=await fetch('/api/auth/browser-access/revoke',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({targetPlatform:b.dataset.revoke})});const d=await r.json();if(!r.ok||d.revoked!==true)throw new Error(d.error||'Falha ao revogar');l.value='';l.style.display='none';s.textContent='Autorização revogada: '+b.dataset.revoke;}catch(e){s.textContent='Falha: '+(e.message||'erro');}finally{b.disabled=false;}}));</script></body></html>`);
+  });
+
   // Small authenticated consent screen; no grant is minted until the user clicks.
   app.get('/api/auth/browser-access/consent', isAuthenticated, isApproved, (_req: any, res: any) => {
     res.setHeader('Cache-Control', 'no-store, max-age=0');
@@ -640,7 +646,8 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   // exposes Deriv tokens or copies browser cookies between devices.
   app.post('/api/auth/browser-access/grant', isAuthenticated, isApproved, async (req: any, res: any) => {
     const userId = String(req.user?.id ?? '');
-    const platform = process.env.INVISTA_PLATFORM === 'aura' ? 'aura' : 'main';
+    const sourcePlatform = process.env.INVISTA_PLATFORM === 'aura' ? 'aura' : 'main';
+    const targetPlatform = ['main', 'aura'].includes(String(req.body?.targetPlatform)) ? String(req.body.targetPlatform) : sourcePlatform;
     const universalUrl = String(process.env.UNIVERSAL_SERVER_URL ?? '').replace(/\/$/, '');
     const serviceKey = String(process.env.INVISTA_UNIVERSAL_SERVER_KEY ?? '').trim();
     if (!userId || !universalUrl || !serviceKey) {
@@ -650,15 +657,13 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       return res.status(403).json({ ok: false, error: 'explicit_user_consent_required' });
     }
     try {
-      // Reconcile synchronously, then persist the user's explicit one-time opt-in
-      // for future MCP-mediated launches. Each launch still gets a new one-use grant.
       const userEmail = String(req.user?.email ?? '').trim().toLowerCase();
       if (!userEmail.includes('@')) return res.status(400).json({ ok: false, error: 'verified_account_email_required' });
       await registerUniversalSession(userId, userEmail);
       const delegationResponse = await fetch(`${universalUrl}/api/invista/browser-access/delegations`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-invista-server-key': serviceKey },
-        body: JSON.stringify({ userId, userEmail, platform, userConsented: true }),
+        body: JSON.stringify({ userId, userEmail, platform: targetPlatform, sourcePlatform, userConsented: true }),
         signal: AbortSignal.timeout(10000),
       });
       if (!delegationResponse.ok) {
@@ -667,14 +672,14 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       const response = await fetch(`${universalUrl}/api/invista/browser-access/agent-launch`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-invista-server-key': serviceKey },
-        body: JSON.stringify({ userEmail, platform }),
+        body: JSON.stringify({ userEmail, platform: targetPlatform, sourcePlatform }),
         signal: AbortSignal.timeout(10000),
       });
       const result: any = await response.json().catch(() => ({}));
       if (!response.ok || !result?.launchUrl) {
         return res.status(502).json({ ok: false, error: 'universal_grant_failed', status: response.status });
       }
-      return res.status(201).json({ ok: true, launchUrl: result.launchUrl, expiresAt: result.expiresAt, oneTime: true, persistentDelegation: true });
+      return res.status(201).json({ ok: true, launchUrl: result.launchUrl, expiresAt: result.expiresAt, oneTime: true, persistentDelegation: true, platform: targetPlatform });
     } catch (error) {
       console.error('[UNIVERSAL_BROWSER_ACCESS] Grant request failed:', error instanceof Error ? error.message : String(error));
       return res.status(502).json({ ok: false, error: 'universal_server_unavailable' });
@@ -684,7 +689,8 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   app.post('/api/auth/browser-access/revoke', isAuthenticated, isApproved, async (req: any, res: any) => {
     const userId = String(req.user?.id ?? '');
     const userEmail = String(req.user?.email ?? '').trim().toLowerCase();
-    const platform = process.env.INVISTA_PLATFORM === 'aura' ? 'aura' : 'main';
+    const sourcePlatform = process.env.INVISTA_PLATFORM === 'aura' ? 'aura' : 'main';
+    const platform = ['main', 'aura'].includes(String(req.body?.targetPlatform)) ? String(req.body.targetPlatform) : sourcePlatform;
     const universalUrl = String(process.env.UNIVERSAL_SERVER_URL ?? '').replace(/\/$/, '');
     const serviceKey = String(process.env.INVISTA_UNIVERSAL_SERVER_KEY ?? '').trim();
     if (!userId || !userEmail.includes('@') || !universalUrl || !serviceKey) {
@@ -737,6 +743,15 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         res.setHeader('Referrer-Policy', 'no-referrer');
         return res.status(403).send('Conta indisponível ou não aprovada.');
       }
+      // Establish a target-platform Universal session after the source grant is redeemed.
+      // This keeps the delegated browser session bound to the correct platform instance.
+      let targetUniversalSession: any;
+      try {
+        targetUniversalSession = await registerUniversalSession(String(user.id), String(user.email));
+      } catch (sessionError) {
+        console.error('[UNIVERSAL_BROWSER_ACCESS] Target Universal session registration failed:', sessionError instanceof Error ? sessionError.message : String(sessionError));
+        return res.status(502).send('Não foi possível registrar a sessão delegada no Universal Server.');
+      }
       // Rotate the session ID before creating the delegated login to prevent session fixation.
       req.session.regenerate((regenerateErr: any) => {
         if (regenerateErr) {
@@ -753,7 +768,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
           req.session.universalBrowserAccess = {
             userId: String(user.id),
             platform,
-            sessionId: String(result.sessionId),
+            sessionId: String(targetUniversalSession?.sessionId ?? ''),
           };
           req.session.save((saveErr: any) => {
             if (saveErr) {
