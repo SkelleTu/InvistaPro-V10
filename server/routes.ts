@@ -597,17 +597,32 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
 
     // Accept the documented legacy aliases while keeping Aura's password namespace
     // isolated from the main platform. Never log the values themselves.
-    const configuredEmail = String(
-      platform === 'aura'
-        ? (process.env.AURA_STYLE_ACCOUNT_EMAIL || process.env.AURA_ACCOUNT_EMAIL || process.env.AURA_MASTER_EMAIL || process.env.INVISTA_MASTER_EMAIL || process.env.INVISTAPRO_ACCOUNT_EMAIL || process.env.ADMIN_EMAIL || '')
-        : (process.env.INVISTAPRO_ACCOUNT_EMAIL || process.env.INVISTA_ACCOUNT_EMAIL || process.env.INVISTA_MASTER_EMAIL || process.env.MASTER_EMAIL || process.env.ADMIN_EMAIL || '')
-    ).trim().toLowerCase();
+    const emailCandidates = platform === 'aura'
+      ? [
+          ['AURA_STYLE_ACCOUNT_EMAIL', process.env.AURA_STYLE_ACCOUNT_EMAIL],
+          ['AURA_ACCOUNT_EMAIL', process.env.AURA_ACCOUNT_EMAIL],
+          ['AURA_MASTER_EMAIL', process.env.AURA_MASTER_EMAIL],
+          ['INVISTA_MASTER_EMAIL', process.env.INVISTA_MASTER_EMAIL],
+          ['INVISTAPRO_ACCOUNT_EMAIL', process.env.INVISTAPRO_ACCOUNT_EMAIL],
+          ['ADMIN_EMAIL', process.env.ADMIN_EMAIL],
+        ] as const
+      : [
+          ['INVISTAPRO_ACCOUNT_EMAIL', process.env.INVISTAPRO_ACCOUNT_EMAIL],
+          ['INVISTA_ACCOUNT_EMAIL', process.env.INVISTA_ACCOUNT_EMAIL],
+          ['INVISTA_MASTER_EMAIL', process.env.INVISTA_MASTER_EMAIL],
+          ['MASTER_EMAIL', process.env.MASTER_EMAIL],
+          ['ADMIN_EMAIL', process.env.ADMIN_EMAIL],
+        ] as const;
+    const validEmail = (value: unknown) => /^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(String(value ?? '').trim());
+    // An obsolete non-empty alias must not shadow a later valid platform account email.
+    const selectedEmail = emailCandidates.find(([, value]) => validEmail(value));
+    const configuredEmail = String(selectedEmail?.[1] ?? '').trim().toLowerCase();
     const configuredPassword = String(
       platform === 'aura'
         ? (process.env.AURA_STYLE_ACCOUNT_PASSWORD || process.env.AURA_ACCOUNT_PASSWORD || process.env.AURA_MASTER_PASSWORD || process.env.INVISTA_AURA_ACCOUNT_PASSWORD || '')
         : (process.env.INVISTAPRO_ACCOUNT_PASSWORD || process.env.INVISTA_ACCOUNT_PASSWORD || process.env.INVISTA_MASTER_PASSWORD || process.env.MASTER_PASSWORD || process.env.ADMIN_PASSWORD || '')
     );
-    const emailConfigured = configuredEmail.includes('@');
+    const emailConfigured = validEmail(configuredEmail);
     const passwordConfigured = configuredPassword.length > 0;
     if (!emailConfigured || !passwordConfigured) {
       console.error('[PLATFORM_AUTOMATION] Account environment incomplete:', JSON.stringify({
