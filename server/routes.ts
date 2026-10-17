@@ -613,7 +613,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
           ['MASTER_EMAIL', process.env.MASTER_EMAIL],
           ['ADMIN_EMAIL', process.env.ADMIN_EMAIL],
         ] as const;
-    const validEmail = (value: unknown) => /^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(String(value ?? '').trim());
+    const validEmail = (value: unknown) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(value ?? '').trim());
     // An obsolete non-empty alias must not shadow a later valid platform account email.
     const selectedEmail = emailCandidates.find(([, value]) => validEmail(value));
     const configuredEmail = String(selectedEmail?.[1] ?? '').trim().toLowerCase();
