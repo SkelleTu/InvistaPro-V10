@@ -19,10 +19,8 @@ export function getSecretHealth() {
   // Automation credentials must be visible as presence/format checks too.
   // The public health endpoint reports only states, never the values.
   const platform = process.env.INVISTA_PLATFORM === "aura" ? "aura" : "main";
-  const emailCandidates = platform === "aura"
-    ? [process.env.AURA_STYLE_ACCOUNT_EMAIL, process.env.AURA_ACCOUNT_EMAIL, process.env.AURA_MASTER_EMAIL, process.env.INVISTA_MASTER_EMAIL, process.env.INVISTAPRO_ACCOUNT_EMAIL, process.env.ADMIN_EMAIL]
-    : [process.env.INVISTAPRO_ACCOUNT_EMAIL, process.env.INVISTA_ACCOUNT_EMAIL, process.env.INVISTA_MASTER_EMAIL, process.env.MASTER_EMAIL, process.env.ADMIN_EMAIL];
-  const emailPattern = /^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/;
+  const emailCandidates = [process.env.ADMIN_EMAIL];
+  const emailPattern = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
   const automationEmail = String(emailCandidates.find(value => emailPattern.test(String(value ?? "").trim())) ?? "").trim();
   const automationPassword = String(platform === "aura"
     ? (process.env.AURA_STYLE_ACCOUNT_PASSWORD || process.env.AURA_ACCOUNT_PASSWORD || process.env.AURA_MASTER_PASSWORD || process.env.INVISTA_AURA_ACCOUNT_PASSWORD || "")
