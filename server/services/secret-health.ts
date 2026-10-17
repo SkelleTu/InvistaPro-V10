@@ -16,7 +16,30 @@ function optionalState(name: string, validator?: (value: string) => boolean): { 
 }
 
 export function getSecretHealth() {
+  // Automation credentials must be visible as presence/format checks too.
+  // The public health endpoint reports only states, never the values.
+  const platform = process.env.INVISTA_PLATFORM === "aura" ? "aura" : "main";
+  const automationEmail = String(platform === "aura"
+    ? (process.env.AURA_STYLE_ACCOUNT_EMAIL || process.env.AURA_ACCOUNT_EMAIL || process.env.AURA_MASTER_EMAIL || process.env.INVISTA_MASTER_EMAIL || process.env.INVISTAPRO_ACCOUNT_EMAIL || process.env.ADMIN_EMAIL || "")
+    : (process.env.INVISTAPRO_ACCOUNT_EMAIL || process.env.INVISTA_ACCOUNT_EMAIL || process.env.INVISTA_MASTER_EMAIL || process.env.MASTER_EMAIL || process.env.ADMIN_EMAIL || "")
+  ).trim();
+  const automationPassword = String(platform === "aura"
+    ? (process.env.AURA_STYLE_ACCOUNT_PASSWORD || process.env.AURA_ACCOUNT_PASSWORD || process.env.AURA_MASTER_PASSWORD || process.env.INVISTA_AURA_ACCOUNT_PASSWORD || "")
+    : (process.env.INVISTAPRO_ACCOUNT_PASSWORD || process.env.INVISTA_ACCOUNT_PASSWORD || process.env.INVISTA_MASTER_PASSWORD || process.env.MASTER_PASSWORD || process.env.ADMIN_PASSWORD || "")
+  ).trim();
+  const automationToken = String(platform === "aura"
+    ? process.env.AURA_STYLE_AUTOMATION_TOKEN ?? ""
+    : process.env.INVISTAPRO_AUTOMATION_TOKEN ?? ""
+  ).trim();
+  const emailState: SecretState = !automationEmail
+    ? "missing"
+    : /^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(automationEmail)
+      ? "configured"
+      : "invalid_format";
   const checks = [
+    { name: `AUTOMATION_ENTRY_TOKEN_${platform.toUpperCase()}`, state: automationToken ? "configured" as const : "missing" as const },
+    { name: `AUTOMATION_ACCOUNT_EMAIL_${platform.toUpperCase()}`, state: emailState },
+    { name: `AUTOMATION_ACCOUNT_PASSWORD_${platform.toUpperCase()}`, state: automationPassword ? "configured" as const : "missing" as const },
     state("ENCRYPTION_KEY", v => /^[0-9a-fA-F]{64}$/.test(v)),
     state("DERIV_APP_ID", v => /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(v)),
     optionalState("DERIV_API_KEY_DEMO"),
