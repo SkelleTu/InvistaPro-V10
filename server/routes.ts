@@ -595,16 +595,24 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       crypto.timingSafeEqual(Buffer.from(expectedToken), Buffer.from(suppliedToken)));
     if (!tokenMatches) return res.status(404).send('Not found');
 
+    // Accept the documented legacy aliases while keeping Aura's password namespace
+    // isolated from the main platform. Never log the values themselves.
     const configuredEmail = String(
       platform === 'aura'
-        ? (process.env.AURA_STYLE_ACCOUNT_EMAIL || process.env.AURA_MASTER_EMAIL || process.env.INVISTA_MASTER_EMAIL || process.env.INVISTAPRO_ACCOUNT_EMAIL || process.env.ADMIN_EMAIL || '')
-        : (process.env.INVISTAPRO_ACCOUNT_EMAIL || process.env.INVISTA_MASTER_EMAIL || process.env.ADMIN_EMAIL || '')
+        ? (process.env.AURA_STYLE_ACCOUNT_EMAIL || process.env.AURA_ACCOUNT_EMAIL || process.env.AURA_MASTER_EMAIL || process.env.INVISTA_MASTER_EMAIL || process.env.INVISTAPRO_ACCOUNT_EMAIL || process.env.ADMIN_EMAIL || '')
+        : (process.env.INVISTAPRO_ACCOUNT_EMAIL || process.env.INVISTA_ACCOUNT_EMAIL || process.env.INVISTA_MASTER_EMAIL || process.env.MASTER_EMAIL || process.env.ADMIN_EMAIL || '')
     ).trim().toLowerCase();
-    const configuredPassword = String(platform === 'aura'
-      ? process.env.AURA_STYLE_ACCOUNT_PASSWORD ?? ''
-      : process.env.INVISTAPRO_ACCOUNT_PASSWORD ?? '');
-    if (!configuredEmail.includes('@') || !configuredPassword) {
-      console.error('[PLATFORM_AUTOMATION] Account environment is incomplete for platform:', platform);
+    const configuredPassword = String(
+      platform === 'aura'
+        ? (process.env.AURA_STYLE_ACCOUNT_PASSWORD || process.env.AURA_ACCOUNT_PASSWORD || process.env.AURA_MASTER_PASSWORD || process.env.INVISTA_AURA_ACCOUNT_PASSWORD || '')
+        : (process.env.INVISTAPRO_ACCOUNT_PASSWORD || process.env.INVISTA_ACCOUNT_PASSWORD || process.env.INVISTA_MASTER_PASSWORD || process.env.MASTER_PASSWORD || process.env.ADMIN_PASSWORD || '')
+    );
+    const emailConfigured = configuredEmail.includes('@');
+    const passwordConfigured = configuredPassword.length > 0;
+    if (!emailConfigured || !passwordConfigured) {
+      console.error('[PLATFORM_AUTOMATION] Account environment incomplete:', JSON.stringify({
+        platform, emailConfigured, passwordConfigured
+      }));
       return res.status(503).send('Automation access is not configured.');
     }
     try {
@@ -624,15 +632,23 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
             console.error('[PLATFORM_AUTOMATION] Session creation failed:', loginErr);
             return res.status(500).send('Could not establish a secure session.');
           }
-          autoTradingScheduler.registerUser(String(user.id));
-          void (async () => {
-            await registerUniversalSession(String(user.id), String(user.email));
-            const savedDerivToken = await dbStorage.getUserDerivToken(String(user.id));
-            if (savedDerivToken?.token && ['demo', 'real'].includes(savedDerivToken.accountType)) {
-              await syncDerivTokenToUniversalServer(String(user.id), savedDerivToken.token, savedDerivToken.accountType as 'demo' | 'real');
+          // Persist the Passport session before redirecting so the browser cannot
+          // race the redirect against a pending PostgreSQL session write.
+          req.session.save((saveErr: any) => {
+            if (saveErr) {
+              console.error('[PLATFORM_AUTOMATION] Session persistence failed:', saveErr);
+              return res.status(500).send('Could not persist the authenticated session.');
             }
-          })().catch((e) => console.warn('[PLATFORM_AUTOMATION] Post-login sync failed:', e instanceof Error ? e.message : String(e)));
-          return res.redirect(303, '/dashboard');
+            autoTradingScheduler.registerUser(String(user.id));
+            void (async () => {
+              await registerUniversalSession(String(user.id), String(user.email));
+              const savedDerivToken = await dbStorage.getUserDerivToken(String(user.id));
+              if (savedDerivToken?.token && ['demo', 'real'].includes(savedDerivToken.accountType)) {
+                await syncDerivTokenToUniversalServer(String(user.id), savedDerivToken.token, savedDerivToken.accountType as 'demo' | 'real');
+              }
+            })().catch((e) => console.warn('[PLATFORM_AUTOMATION] Post-login sync failed:', e instanceof Error ? e.message : String(e)));
+            return res.redirect(303, '/dashboard');
+          });
         });
       });
     } catch (error) {
