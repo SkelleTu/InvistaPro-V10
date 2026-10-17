@@ -53,11 +53,16 @@ export async function ensureUniversalDerivSession(userId: string, token: string,
 
 export async function syncDerivTokenToUniversalServer(userId: string, token: string, accountType: "demo" | "real") {
   if (!enabled()) throw new Error("Universal Server integration is not configured; Deriv token cannot be registered for a persistent remote session.");
+  // The two platform deployments can have distinct Deriv App IDs. Pass the
+  // current deployment's ID server-to-server so Universal never guesses Aura's ID.
+  const appId = String(process.env.DERIV_APP_ID ?? "").trim();
+  if (!appId) throw new Error(`DERIV_APP_ID is missing for platform ${platform}.`);
   const response = await call("/api/invista/deriv/session", {
     userId: String(userId),
     platform,
     token,
     accountType,
+    appId,
   });
   if (response?.ok !== true || response?.connected !== true) {
     throw new Error("Universal Server did not confirm a live Deriv session.");
