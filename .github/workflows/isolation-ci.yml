@@ -149,6 +149,9 @@ jobs:
           DATABASE_URL: "postgresql://audit:auditaudit@127.0.0.1:5432/audit"
           INVISTA_PLATFORM: "v10"
           ADMIN_EMAIL: "audit@example.invalid"
+          # Non-secret CI fixtures satisfy presence-only automation readiness checks.
+          INVISTAPRO_ACCOUNT_PASSWORD: "audit-only-password-fixture"
+          INVISTAPRO_AUTOMATION_TOKEN: "audit-only-token-fixture"
           SENDGRID_API_KEY: "SG.audit"
           HUGGINGFACE_API_KEY: "hf_audit"
           UNIVERSAL_SERVER_URL: "http://127.0.0.1:5123"
