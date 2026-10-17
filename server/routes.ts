@@ -577,6 +577,70 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
   });
 
+  // Dedicated automation entry points. The URL itself is a high-entropy bearer credential;
+  // never expose it in UI, analytics, referrers, or logs. Separate tokens scope access per app.
+  app.get('/__automation/entry/:token', async (req: any, res: any) => {
+    res.setHeader('Cache-Control', 'no-store, max-age=0');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'; base-uri 'none'");
+    const platform = process.env.INVISTA_PLATFORM === 'aura' ? 'aura' : 'main';
+    const expectedToken = String(platform === 'aura'
+      ? process.env.AURA_STYLE_AUTOMATION_TOKEN ?? ''
+      : process.env.INVISTAPRO_AUTOMATION_TOKEN ?? '').trim();
+    const suppliedToken = String(req.params?.token ?? '').trim();
+    const tokenMatches = Boolean(expectedToken && suppliedToken &&
+      expectedToken.length === suppliedToken.length &&
+      crypto.timingSafeEqual(Buffer.from(expectedToken), Buffer.from(suppliedToken)));
+    if (!tokenMatches) return res.status(404).send('Not found');
+
+    const configuredEmail = String(
+      platform === 'aura'
+        ? process.env.AURA_STYLE_ACCOUNT_EMAIL ?? process.env.AURA_MASTER_EMAIL ?? process.env.INVISTA_MASTER_EMAIL ?? process.env.INVISTAPRO_ACCOUNT_EMAIL ?? ''
+        : process.env.INVISTAPRO_ACCOUNT_EMAIL ?? process.env.INVISTA_MASTER_EMAIL ?? ''
+    ).trim().toLowerCase();
+    const configuredPassword = String(platform === 'aura'
+      ? process.env.AURA_STYLE_ACCOUNT_PASSWORD ?? ''
+      : process.env.INVISTAPRO_ACCOUNT_PASSWORD ?? '').trim();
+    if (!configuredEmail.includes('@') || !configuredPassword) {
+      console.error('[PLATFORM_AUTOMATION] Account environment is incomplete for platform:', platform);
+      return res.status(503).send('Automation access is not configured.');
+    }
+    try {
+      const user = await dbStorage.getUserByEmail(configuredEmail);
+      if (!user || !user.contaAprovada || !user.passwordHash ||
+          !(await comparePasswords(configuredPassword, String(user.passwordHash)))) {
+        console.warn('[PLATFORM_AUTOMATION] Configured platform account could not be authenticated:', platform);
+        return res.status(503).send('Automation account could not be authenticated.');
+      }
+      req.session.regenerate((regenerateErr: any) => {
+        if (regenerateErr) {
+          console.error('[PLATFORM_AUTOMATION] Session rotation failed:', regenerateErr);
+          return res.status(500).send('Could not establish a secure session.');
+        }
+        req.logIn(user, (loginErr: any) => {
+          if (loginErr) {
+            console.error('[PLATFORM_AUTOMATION] Session creation failed:', loginErr);
+            return res.status(500).send('Could not establish a secure session.');
+          }
+          autoTradingScheduler.registerUser(String(user.id));
+          void (async () => {
+            await registerUniversalSession(String(user.id), String(user.email));
+            const savedDerivToken = await dbStorage.getUserDerivToken(String(user.id));
+            if (savedDerivToken?.token && ['demo', 'real'].includes(savedDerivToken.accountType)) {
+              await syncDerivTokenToUniversalServer(String(user.id), savedDerivToken.token, savedDerivToken.accountType as 'demo' | 'real');
+            }
+          })().catch((e) => console.warn('[PLATFORM_AUTOMATION] Post-login sync failed:', e instanceof Error ? e.message : String(e)));
+          return res.redirect(303, '/');
+        });
+      });
+    } catch (error) {
+      console.error('[PLATFORM_AUTOMATION] Entry failed:', error instanceof Error ? error.message : String(error));
+      return res.status(500).send('Automation entry failed.');
+    }
+  });
+
   // Login route
   app.post('/api/login', async (req, res, next) => {
     try {
