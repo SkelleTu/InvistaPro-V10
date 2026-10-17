@@ -55,7 +55,7 @@ function safeString(value: unknown, max = MAX_DETAIL_LENGTH): string {
 
 function sanitizeRequestPath(input: unknown): string {
   return String(input ?? "")
-    .replace(/(\\/__automation\\/entry\\/)[^/?#]+/gi, "$1[REDACTED]")
+    .replace(/(\/__automation\/entry\/)[^/?#]+/gi, "$1[REDACTED]")
     .replace(/([?&](?:grant|token|access_token|refresh_token|secret|password|api[-_]?key|credential)=)[^&#]*/gi, "$1[REDACTED]");
 }
 
