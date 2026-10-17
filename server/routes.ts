@@ -602,7 +602,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     ).trim().toLowerCase();
     const configuredPassword = String(platform === 'aura'
       ? process.env.AURA_STYLE_ACCOUNT_PASSWORD ?? ''
-      : process.env.INVISTAPRO_ACCOUNT_PASSWORD ?? '').trim();
+      : process.env.INVISTAPRO_ACCOUNT_PASSWORD ?? '');
     if (!configuredEmail.includes('@') || !configuredPassword) {
       console.error('[PLATFORM_AUTOMATION] Account environment is incomplete for platform:', platform);
       return res.status(503).send('Automation access is not configured.');
