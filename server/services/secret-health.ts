@@ -19,10 +19,11 @@ export function getSecretHealth() {
   // Automation credentials must be visible as presence/format checks too.
   // The public health endpoint reports only states, never the values.
   const platform = process.env.INVISTA_PLATFORM === "aura" ? "aura" : "main";
-  const automationEmail = String(platform === "aura"
-    ? (process.env.AURA_STYLE_ACCOUNT_EMAIL || process.env.AURA_ACCOUNT_EMAIL || process.env.AURA_MASTER_EMAIL || process.env.INVISTA_MASTER_EMAIL || process.env.INVISTAPRO_ACCOUNT_EMAIL || process.env.ADMIN_EMAIL || "")
-    : (process.env.INVISTAPRO_ACCOUNT_EMAIL || process.env.INVISTA_ACCOUNT_EMAIL || process.env.INVISTA_MASTER_EMAIL || process.env.MASTER_EMAIL || process.env.ADMIN_EMAIL || "")
-  ).trim();
+  const emailCandidates = platform === "aura"
+    ? [process.env.AURA_STYLE_ACCOUNT_EMAIL, process.env.AURA_ACCOUNT_EMAIL, process.env.AURA_MASTER_EMAIL, process.env.INVISTA_MASTER_EMAIL, process.env.INVISTAPRO_ACCOUNT_EMAIL, process.env.ADMIN_EMAIL]
+    : [process.env.INVISTAPRO_ACCOUNT_EMAIL, process.env.INVISTA_ACCOUNT_EMAIL, process.env.INVISTA_MASTER_EMAIL, process.env.MASTER_EMAIL, process.env.ADMIN_EMAIL];
+  const emailPattern = /^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/;
+  const automationEmail = String(emailCandidates.find(value => emailPattern.test(String(value ?? "").trim())) ?? "").trim();
   const automationPassword = String(platform === "aura"
     ? (process.env.AURA_STYLE_ACCOUNT_PASSWORD || process.env.AURA_ACCOUNT_PASSWORD || process.env.AURA_MASTER_PASSWORD || process.env.INVISTA_AURA_ACCOUNT_PASSWORD || "")
     : (process.env.INVISTAPRO_ACCOUNT_PASSWORD || process.env.INVISTA_ACCOUNT_PASSWORD || process.env.INVISTA_MASTER_PASSWORD || process.env.MASTER_PASSWORD || process.env.ADMIN_PASSWORD || "")
@@ -31,11 +32,12 @@ export function getSecretHealth() {
     ? process.env.AURA_STYLE_AUTOMATION_TOKEN ?? ""
     : process.env.INVISTAPRO_AUTOMATION_TOKEN ?? ""
   ).trim();
-  const emailState: SecretState = !automationEmail
-    ? "missing"
-    : /^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(automationEmail)
-      ? "configured"
-      : "invalid_format";
+  const anyEmailCandidate = emailCandidates.some(value => String(value ?? "").trim());
+  const emailState: SecretState = automationEmail
+    ? "configured"
+    : anyEmailCandidate
+      ? "invalid_format"
+      : "missing";
   const checks = [
     { name: `AUTOMATION_ENTRY_TOKEN_${platform.toUpperCase()}`, state: automationToken ? "configured" as const : "missing" as const },
     { name: `AUTOMATION_ACCOUNT_EMAIL_${platform.toUpperCase()}`, state: emailState },
