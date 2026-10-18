@@ -1932,7 +1932,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         }
       ],
       source,
-      historicalSeries: fallback ? 'fallback-current-rate' : 'BCB-SGS-4389',
+      historicalSeries: fallback ? 'current-rate-only' : 'BCB-SGS-4389',
       message: fallback
         ? 'Fonte do Banco Central temporariamente indisponível; gráfico mantido com a última taxa conhecida para evitar área vazia.'
         : 'CDI diário obtido da série SGS 4389 do Banco Central do Brasil.'
@@ -2009,15 +2009,14 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
 
           if (alternativeCdi !== null && alternativeSelic !== null) {
             const now = Date.now();
-            const alternativeRows = Array.from({ length: 30 }, (_, index) => ({
-              time: now - (29 - index) * 24 * 60 * 60 * 1000,
-              price: alternativeCdi
-            }));
-            console.warn('⚠️ [CDI] Usando taxas atuais da BrasilAPI; série histórica é aproximada.');
+            // BrasilAPI fornece taxas atuais, não uma série diária histórica.
+            // Retornar apenas o ponto atual evita fabricar 30 observações passadas.
+            const currentRatePoint = [{ time: now, price: alternativeCdi }];
+            console.warn('⚠️ [CDI] Usando somente taxas atuais da BrasilAPI; histórico do BCB indisponível.');
             res.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=600');
             return res.json({
-              ...buildSeries(alternativeRows, alternativeCdi, alternativeSelic, new Date(now).toISOString().slice(0, 10), 'BrasilAPI - taxas atuais; histórico aproximado', true),
-              message: 'Banco Central temporariamente indisponível. Taxas atuais obtidas via BrasilAPI; a série do gráfico é aproximada e não representa histórico diário real.'
+              ...buildSeries(currentRatePoint, alternativeCdi, alternativeSelic, new Date(now).toISOString().slice(0, 10), 'BrasilAPI - taxas atuais; sem série histórica', true),
+              message: 'Banco Central temporariamente indisponível. Taxas atuais obtidas via BrasilAPI; não há histórico diário disponível neste retorno.'
             });
           }
         }
@@ -2025,19 +2024,17 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         console.warn('⚠️ [CDI] Fonte alternativa BrasilAPI indisponível:', alternativeError);
       }
 
-      // Emergency fallback only if both external providers fail.
-      // Keep the response explicitly marked as fallback so these values are never presented as live data.
-      const fallbackCdi = 10.65;
-      const fallbackSelic = 10.75;
-      const now = Date.now();
-      const fallbackRows = Array.from({ length: 30 }, (_, index) => ({
-        time: now - (29 - index) * 24 * 60 * 60 * 1000,
-        price: fallbackCdi
-      }));
-
-      return res.json({
-        ...buildSeries(fallbackRows, fallbackCdi, fallbackSelic, new Date(now).toISOString().slice(0, 10), 'emergency-fallback; rates may be stale', true),
-        message: 'Banco Central e BrasilAPI indisponíveis. Valores de contingência podem estar desatualizados e não devem ser usados como taxas atuais.'
+      // Sem resposta confiável das duas fontes, não apresentar taxas antigas como atuais.
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(503).json({
+        success: false,
+        fallback: true,
+        date: new Date().toISOString().slice(0, 10),
+        realRates: null,
+        assets: [],
+        source: null,
+        historicalSeries: null,
+        message: 'Banco Central e BrasilAPI indisponíveis. Taxas e histórico foram omitidos para evitar exibir dados desatualizados como atuais.'
       });
     }
   });
@@ -2284,9 +2281,15 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
 
     try {
-      // Informações detalhadas do sistema para monitoramento
-      const autoTradingStats = autoTradingScheduler.getSessionStats();
+      // Reportar o runtime isolado real, não a existência de sessões registradas.
+      const runtimeStatus = autoTradingScheduler.getSchedulerStatus();
       const activeSessions = autoTradingScheduler.getActiveSessions();
+      const readySessions = activeSessions.filter((session: any) =>
+        Boolean(session.isActive && session.workerReady && session.marketDataReady && session.contractCapabilityReady)
+      );
+      const activeSessionCount = activeSessions.filter((session: any) => Boolean(session.isActive)).length;
+      const tradingActive = Boolean(runtimeStatus.isRunning && readySessions.length > 0);
+      const totalExecuted = activeSessions.reduce((sum: number, session: any) => sum + Number(session.totalExecutedOperations || 0), 0);
       
       res.json({ 
         status: 'online',
@@ -2296,16 +2299,18 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         uptimeSeconds: Math.floor(process.uptime()),
         workspace: 'active',
         trading: {
-          active: activeSessions.length > 0,
-          sessions: activeSessions.length,
-          totalExecuted: autoTradingScheduler.getSchedulerStatus().totalExecutedOperations,
-          scheduler: 'running'
+          active: tradingActive,
+          sessions: activeSessionCount,
+          totalExecuted,
+          scheduler: tradingActive ? 'running' : 'waiting_for_explicit_play_and_readiness'
         },
         memory: {
           used: `${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB`,
           total: `${Math.round(process.memoryUsage().heapTotal / 1024 / 1024)}MB`
         },
-        message: '🚀 Sistema operando 24/7 - Trading ativo e autônomo'
+        message: tradingActive
+          ? 'Runtime de trading ativo; consulte os indicadores de prontidão para confirmar a coleta e os contratos.'
+          : 'Plataforma online. Trading não está ativo; aguardando Play explícito e validação de mercado/contratos.'
       });
     } catch (error) {
       res.status(500).json({ 
