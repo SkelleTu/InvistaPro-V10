@@ -1947,10 +1947,28 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       ]);
 
       if (!cdiResponse.ok) throw new Error(`BCB CDI API error: ${cdiResponse.status}`);
-      const cdiRows = await cdiResponse.json() as Array<{ data: string; valor: string }>;
-      const selicRows = selicResponse.ok
-        ? await selicResponse.json() as Array<{ data: string; valor: string }>
-        : [];
+
+      // The BCB gateway can return an XML error page with HTTP 200.
+      // Parse each series independently so a bad Selic response cannot discard valid CDI data.
+      const readBcbRows = async (response: Response, label: string): Promise<Array<{ data: string; valor: string }>> => {
+        if (!response.ok) {
+          console.warn(`⚠️ [CDI] BCB ${label} indisponível: HTTP ${response.status}`);
+          return [];
+        }
+        const body = await response.text();
+        try {
+          const parsed = JSON.parse(body);
+          if (Array.isArray(parsed)) return parsed as Array<{ data: string; valor: string }>;
+          console.warn(`⚠️ [CDI] BCB ${label} retornou JSON em formato inesperado`);
+          return [];
+        } catch {
+          console.warn(`⚠️ [CDI] BCB ${label} retornou resposta não JSON; ignorando esta série`);
+          return [];
+        }
+      };
+
+      const cdiRows = await readBcbRows(cdiResponse, 'CDI');
+      const selicRows = await readBcbRows(selicResponse, 'Selic');
 
       const parsedCdi = cdiRows
         .map(row => ({ time: new Date(row.data.split('/').reverse().join('-') + 'T12:00:00-03:00').getTime(), price: Number(String(row.valor).replace(',', '.')) }))
