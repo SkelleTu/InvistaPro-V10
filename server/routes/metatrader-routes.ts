@@ -17,6 +17,7 @@ import {
 import { brazilNewsService } from '../services/brazil-news-service';
 import { computeSyntheticGirassol } from '../services/synthetic-girassol';
 import { isAllowedProductionSymbol } from '../services/production-symbol-policy';
+import { getMt5ProductionBlock, isMt5ProductionTradingEnabled } from '../services/mt5-production-policy';
 import { consensusCache } from '../services/consensus-cache';
 
 
@@ -68,23 +69,26 @@ router.get('/signal', (req: Request, res: Response) => {
     }
     const resolvedSymbol = symbolStr || config.symbols[0] || 'EURUSD';
 
-    // MT5 emits direct BUY/SELL positions, which are not ACCU/DIGITDIFF
-    // Deriv contracts. In production it must never authorize an order.
-    if (process.env.NODE_ENV === 'production') {
-      if (symbolStr && !isAllowedProductionSymbol(symbolStr)) {
-        return res.status(403).json({
-          action: 'HOLD',
-          executionEnabled: false,
-          code: 'PRODUCTION_SYMBOL_BLOCKED',
-          reason: 'Ativo fora da allowlist de produção.',
-          timestamp: Date.now(),
-        });
-      }
+    // MT5 orders are placed by the user's logged-in MT5 terminal, not as Deriv contracts.
+    if (process.env.NODE_ENV === 'production' && symbolStr && !isAllowedProductionSymbol(symbolStr)) {
+      return res.status(403).json({
+        action: 'HOLD',
+        executionEnabled: false,
+        code: 'PRODUCTION_SYMBOL_BLOCKED',
+        reason: 'Símbolo inválido ou não permitido para este canal MT5.',
+        timestamp: Date.now(),
+      });
+    }
+    const productionBlock = getMt5ProductionBlock(config.apiToken);
+    if (productionBlock) {
+      return res.status(productionBlock.status).json({ action: 'HOLD', ...productionBlock, timestamp: Date.now() });
+    }
+    if (!config.enabled) {
       return res.json({
         action: 'HOLD',
         executionEnabled: false,
-        code: 'PRODUCTION_CONTRACT_TYPE_BLOCKED',
-        reason: 'Ordens diretas BUY/SELL do MT5 estão desativadas; a política permite somente contratos Deriv ACCU e DIGITDIFF.',
+        code: 'MT5_TRADING_DISABLED',
+        reason: 'O sistema MetaTrader está desativado nas configurações. Ative-o no painel antes de permitir sinais.',
         timestamp: Date.now(),
       });
     }
@@ -216,12 +220,11 @@ router.post('/signal-with-indicators', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'symbol é obrigatório' });
     }
 
-    if (process.env.NODE_ENV === 'production') {
-      return res.json({
+    const productionBlock = getMt5ProductionBlock(config.apiToken);
+    if (productionBlock) {
+      return res.status(productionBlock.status).json({
         action: 'HOLD',
-        executionEnabled: false,
-        code: 'PRODUCTION_CONTRACT_TYPE_BLOCKED',
-        reason: 'Sinais MT5 BUY/SELL desativados em produção; somente contratos Deriv ACCU e DIGITDIFF são permitidos.',
+        ...productionBlock,
         confidence: 0,
         timestamp: Date.now(),
       });
@@ -1756,12 +1759,12 @@ router.post('/config', (req: Request, res: Response) => {
 
 router.post('/signal/generate', async (req: Request, res: Response) => {
   try {
-    if (process.env.NODE_ENV === 'production') {
-      return res.json({
+    if (process.env.NODE_ENV === 'production' && !isMt5ProductionTradingEnabled()) {
+      return res.status(503).json({
         action: 'HOLD',
         executionEnabled: false,
-        code: 'PRODUCTION_CONTRACT_TYPE_BLOCKED',
-        reason: 'Geração de sinais MT5 BUY/SELL desativada em produção.',
+        code: 'MT5_PRODUCTION_TRADING_DISABLED',
+        reason: 'A geração de sinais MT5 em produção exige MT5_PRODUCTION_TRADING_ENABLED=true.',
         confidence: 0,
         timestamp: Date.now(),
       });
