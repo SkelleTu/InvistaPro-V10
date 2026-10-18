@@ -21,9 +21,9 @@ interface MarketApiResponse {
   realRates: {
     cdi: number;
     selic: number;
-  };
+  } | null;
   assets: Asset[];
-  source: string;
+  source: string | null;
   message: string;
   fallback?: boolean;
 }
@@ -206,7 +206,17 @@ export default function SimpleMarketChart() {
   }
 
   if (!currentAsset) {
-    return null;
+    return (
+      <Card className="bg-slate-800/50 border border-white/10 backdrop-blur-sm mb-8">
+        <CardContent className="p-6">
+          <div className="text-center space-y-2">
+            <h3 className="text-white font-semibold">Dados de mercado indisponíveis</h3>
+            <p className="text-amber-300 text-sm">{marketData.message || 'As fontes de taxas não responderam com dados atuais confiáveis.'}</p>
+            <button onClick={() => refetch()} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded">Tentar novamente</button>
+          </div>
+        </CardContent>
+      </Card>
+    );
   }
 
   return (
@@ -234,9 +244,9 @@ export default function SimpleMarketChart() {
                    color: currentAsset.color 
                  }}>
               <div className="flex items-center space-x-1">
-                <div className="w-1.5 h-1.5 rounded-full animate-pulse" 
+                <div className={`w-1.5 h-1.5 rounded-full ${marketData.success && !marketData.fallback ? 'animate-pulse' : ''}`}
                      style={{ backgroundColor: currentAsset.color }}></div>
-                <span>LIVE</span>
+                <span>{marketData.success && !marketData.fallback ? 'BCB AO VIVO' : marketData.fallback ? 'TAXA ATUAL' : 'INDISPONÍVEL'}</span>
               </div>
             </div>
           </div>
@@ -255,18 +265,22 @@ export default function SimpleMarketChart() {
         <div className="mt-3 pt-3 border-t border-white/10">
           <div className="flex items-center justify-between">
             <p className="text-slate-400 text-xs">
-              ⚡ Dados reais em tempo real
+              {marketData.success && !marketData.fallback
+                ? 'Histórico diário oficial do Banco Central'
+                : marketData.fallback
+                  ? 'Taxa atual alternativa; histórico diário indisponível'
+                  : 'Dados atuais indisponíveis'}
             </p>
             <div className="flex items-center space-x-2">
-              <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-              <span className="text-green-400 text-xs font-medium">
-                {marketData?.source || 'HG Brasil Finance API'}
+              <div className={`w-2 h-2 rounded-full ${marketData.success && !marketData.fallback ? 'bg-green-400 animate-pulse' : marketData.fallback ? 'bg-amber-400' : 'bg-red-400'}`}></div>
+              <span className={`text-xs font-medium ${marketData.success && !marketData.fallback ? 'text-green-400' : marketData.fallback ? 'text-amber-300' : 'text-red-400'}`}>
+                {marketData.source || 'Fonte indisponível'}
               </span>
             </div>
           </div>
-          {marketData?.fallback && (
+          {(!marketData.success || marketData.fallback) && (
             <p className="text-amber-400 text-xs text-center mt-2">
-              ⚠️ API temporariamente indisponível - usando dados de fallback
+              ⚠️ {marketData.message || 'Dados históricos não estão disponíveis neste momento.'}
             </p>
           )}
         </div>
