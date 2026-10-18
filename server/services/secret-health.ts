@@ -31,15 +31,19 @@ export function getSecretHealth() {
     : process.env.INVISTAPRO_AUTOMATION_TOKEN ?? ""
   ).trim();
   const anyEmailCandidate = emailCandidates.some(value => String(value ?? "").trim());
+  // These global automation values are legacy fallbacks. The current system
+  // stores account credentials per user in encrypted storage, so absent global
+  // fallbacks must not make the whole service look degraded. If a fallback is
+  // supplied, still validate/report its presence without ever exposing values.
   const emailState: SecretState = automationEmail
     ? "configured"
     : anyEmailCandidate
       ? "invalid_format"
-      : "missing";
+      : "not_applicable";
   const checks = [
-    { name: `AUTOMATION_ENTRY_TOKEN_${platform.toUpperCase()}`, state: automationToken ? "configured" as const : "missing" as const },
+    { name: `AUTOMATION_ENTRY_TOKEN_${platform.toUpperCase()}`, state: optionalState(`AUTOMATION_ENTRY_TOKEN_${platform.toUpperCase()}`).state },
     { name: `AUTOMATION_ACCOUNT_EMAIL_${platform.toUpperCase()}`, state: emailState },
-    { name: `AUTOMATION_ACCOUNT_PASSWORD_${platform.toUpperCase()}`, state: automationPassword ? "configured" as const : "missing" as const },
+    { name: `AUTOMATION_ACCOUNT_PASSWORD_${platform.toUpperCase()}`, state: optionalState(`AUTOMATION_ACCOUNT_PASSWORD_${platform.toUpperCase()}`).state },
     state("ENCRYPTION_KEY", v => /^[0-9a-fA-F]{64}$/.test(v)),
     state("DERIV_APP_ID", v => /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(v)),
     optionalState("DERIV_API_KEY_DEMO"),
