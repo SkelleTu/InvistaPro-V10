@@ -1,0 +1,11 @@
+INVISTA PRO V10 - URL DE ACESSO
+
+URL:
+https://invista-pro-v10-kzlv.onrender.com/api/auth/browser-access/master-consent
+
+Esta URL abre a tela de autorização existente e exige uma sessão autenticada e aprovada. Ela não concede acesso automaticamente nem substitui o login.
+
+Configuração do serviço Render:
+INVISTA_PLATFORM=main
+
+Não armazene tokens de sessão, senhas ou chaves secretas neste arquivo.
