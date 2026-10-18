@@ -29,6 +29,48 @@ import { startUniversalHeartbeatLoop } from "./services/universal-server-session
 import { getSecretHealth } from "./services/secret-health";
 
 const app = express();
+
+// INVISTAPRO_CORS_MIDDLEWARE
+// Allow only explicitly configured frontend origins plus the current Lovable preview.
+const defaultFrontendOrigins = [
+  "https://id-preview--af4b9653-c591-4de6-bc83-be8ebb423930.lovable.app",
+];
+const configuredFrontendOrigins = [
+  process.env.FRONTEND_URL,
+  process.env.CLIENT_URL,
+  process.env.APP_URL,
+  ...(process.env.FRONTEND_URLS || "").split(","),
+]
+  .map((value) => value?.trim().replace(/\/$/, ""))
+  .filter((value): value is string => Boolean(value));
+const allowedFrontendOrigins = new Set([
+  ...defaultFrontendOrigins,
+  ...configuredFrontendOrigins,
+]);
+
+app.set("trust proxy", 1);
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && allowedFrontendOrigins.has(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+    res.setHeader("Vary", "Origin");
+    res.setHeader("Access-Control-Allow-Methods", "GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS");
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      req.headers["access-control-request-headers"] || "Content-Type, Authorization, X-Requested-With"
+    );
+    res.setHeader("Access-Control-Max-Age", "600");
+  }
+
+  if (req.method === "OPTIONS") {
+    if (origin && !allowedFrontendOrigins.has(origin)) {
+      return res.status(403).end();
+    }
+    return res.status(204).end();
+  }
+  next();
+});
 let routesReady = false;
 let persistenceReady = false;
 let routeRegistrationError: string | null = null;
