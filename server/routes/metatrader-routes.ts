@@ -1165,14 +1165,14 @@ router.get('/config', mt5DashboardAccess, (_req: Request, res: Response) => {
  */
 router.get('/download-ea', mt5DashboardAccess, (req: Request, res: Response) => {
   try {
-    const config = metaTraderBridge.getConfig();
-    const token = String(config.apiToken ?? '').trim();
+    let config = metaTraderBridge.getConfig();
+    let token = String(config.apiToken ?? '').trim();
     if (process.env.NODE_ENV === 'production' && !token) {
-      return res.status(409).json({
-        ok: false,
-        code: 'MT5_API_TOKEN_NOT_CONFIGURED',
-        error: 'Salve as configurações do MetaTrader primeiro; isso cria um token seguro antes do download do EA.',
-      });
+      // The authorized EA download creates the first strong token automatically,
+      // so a blank default can never make the live EA heartbeat unauthenticated.
+      token = randomBytes(32).toString('hex');
+      metaTraderBridge.updateConfig({ apiToken: token });
+      config = metaTraderBridge.getConfig();
     }
 
     // In Render production, never inject a legacy REPLIT_DEV_DOMAIN into the EA.
