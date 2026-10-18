@@ -601,18 +601,30 @@ export class DerivAPIService extends EventEmitter {
           // Do not discard every allowed synthetic just because a flag is absent.
           // Explicitly suspended symbols remain excluded; order execution performs
           // its own live contract/availability validation before any purchase.
+          // The current Deriv API renamed active_symbols fields:
+          // symbol -> underlying_symbol and display_name -> underlying_symbol_name.
+          // Normalize both current and legacy response shapes into our internal contract.
           const symbols = message.active_symbols
+            .map((s: any) => ({
+              ...s,
+              symbol: String(s?.underlying_symbol ?? s?.symbol ?? ''),
+              display_name: String(s?.underlying_symbol_name ?? s?.display_name ?? s?.underlying_symbol ?? s?.symbol ?? ''),
+              market: String(s?.market ?? s?.underlying_symbol_type ?? ''),
+              market_display_name: String(s?.market_display_name ?? s?.market ?? s?.underlying_symbol_type ?? ''),
+              submarket: String(s?.submarket ?? s?.subgroup ?? ''),
+              submarket_display_name: String(s?.submarket_display_name ?? s?.submarket ?? s?.subgroup ?? ''),
+            }))
             .filter((s: any) =>
-              isAllowedProductionSymbol(s?.symbol) &&
+              isAllowedProductionSymbol(s.symbol) &&
               Number(s?.is_trading_suspended ?? 0) !== 1
             )
             .map((s: any) => ({
-              symbol: String(s.symbol),
-              display_name: String(s.display_name ?? s.symbol),
-              market: String(s.market ?? ''),
-              market_display_name: String(s.market_display_name ?? s.market ?? ''),
-              submarket: String(s.submarket ?? ''),
-              submarket_display_name: String(s.submarket_display_name ?? s.submarket ?? ''),
+              symbol: s.symbol,
+              display_name: s.display_name,
+              market: s.market,
+              market_display_name: s.market_display_name,
+              submarket: s.submarket,
+              submarket_display_name: s.submarket_display_name,
               exchange_is_open: Number(s.exchange_is_open ?? 0),
               is_trading_suspended: Number(s.is_trading_suspended ?? 0)
             }));
