@@ -1990,9 +1990,43 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       res.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=600');
       return res.json(result);
     } catch (error) {
-      console.error('❌ [CDI] Erro na fonte do Banco Central:', error);
+      console.warn('⚠️ [CDI] Banco Central indisponível; tentando fonte alternativa:', error);
 
-      // Never return an empty series: preserve chart rendering during an upstream outage.
+      // BrasilAPI supplies current rates when the BCB SGS endpoint returns an upstream error.
+      // Its response has current rates, not historical daily observations, so the chart explicitly
+      // marks its 30-point series as an approximation rather than pretending it is historical data.
+      try {
+        const alternativeResponse = await fetch('https://brasilapi.com.br/api/taxas/v1');
+        if (alternativeResponse.ok) {
+          const alternativeRates = await alternativeResponse.json() as Array<{ nome?: string; valor?: number | string }>;
+          const readRate = (name: string): number | null => {
+            const item = alternativeRates.find(rate => String(rate.nome || '').toUpperCase() === name.toUpperCase());
+            const value = Number(item?.valor);
+            return Number.isFinite(value) && value > 0 ? value : null;
+          };
+          const alternativeCdi = readRate('CDI');
+          const alternativeSelic = readRate('Selic');
+
+          if (alternativeCdi !== null && alternativeSelic !== null) {
+            const now = Date.now();
+            const alternativeRows = Array.from({ length: 30 }, (_, index) => ({
+              time: now - (29 - index) * 24 * 60 * 60 * 1000,
+              price: alternativeCdi
+            }));
+            console.warn('⚠️ [CDI] Usando taxas atuais da BrasilAPI; série histórica é aproximada.');
+            res.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=600');
+            return res.json({
+              ...buildSeries(alternativeRows, alternativeCdi, alternativeSelic, new Date(now).toISOString().slice(0, 10), 'BrasilAPI - taxas atuais; histórico aproximado', true),
+              message: 'Banco Central temporariamente indisponível. Taxas atuais obtidas via BrasilAPI; a série do gráfico é aproximada e não representa histórico diário real.'
+            });
+          }
+        }
+      } catch (alternativeError) {
+        console.warn('⚠️ [CDI] Fonte alternativa BrasilAPI indisponível:', alternativeError);
+      }
+
+      // Emergency fallback only if both external providers fail.
+      // Keep the response explicitly marked as fallback so these values are never presented as live data.
       const fallbackCdi = 10.65;
       const fallbackSelic = 10.75;
       const now = Date.now();
@@ -2001,14 +2035,10 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         price: fallbackCdi
       }));
 
-      return res.json(buildSeries(
-        fallbackRows,
-        fallbackCdi,
-        fallbackSelic,
-        new Date(now).toISOString().slice(0, 10),
-        'fallback',
-        true
-      ));
+      return res.json({
+        ...buildSeries(fallbackRows, fallbackCdi, fallbackSelic, new Date(now).toISOString().slice(0, 10), 'emergency-fallback; rates may be stale', true),
+        message: 'Banco Central e BrasilAPI indisponíveis. Valores de contingência podem estar desatualizados e não devem ser usados como taxas atuais.'
+      });
     }
   });
 
