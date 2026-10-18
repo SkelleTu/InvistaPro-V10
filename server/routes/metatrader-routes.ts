@@ -4,6 +4,8 @@
  */
 
 import { Router, Request, Response } from 'express';
+import { randomBytes } from 'crypto';
+import { isAuthenticated, isApproved, isAuthorizedForTradingSystem } from '../auth';
 import path from 'path';
 import fs from 'fs';
 import { metaTraderBridge, MT5Position, MT5TradeResult } from '../services/metatrader-bridge';
@@ -23,14 +25,59 @@ import { consensusCache } from '../services/consensus-cache';
 
 const router = Router();
 
-router.post('/heartbeat', (req: Request, res: Response) => {
+function mt5DashboardAccess(req: any, res: any, next: any) {
+  return isAuthenticated(req, res, () =>
+    isApproved(req, res, () => isAuthorizedForTradingSystem(req, res, next))
+  );
+}
+
+/** EA calls must carry the per-deployment MT5 token in production. */
+function mt5EaTokenAccess(req: any, res: any, next: any) {
+  const config = metaTraderBridge.getConfig();
+  const configuredToken = String(config.apiToken ?? '').trim();
+  if (process.env.NODE_ENV === 'production' && !configuredToken) {
+    return res.status(503).json({
+      ok: false,
+      code: 'MT5_API_TOKEN_NOT_CONFIGURED',
+      error: 'O token do Expert Advisor ainda não foi configurado no painel MetaTrader.',
+    });
+  }
+  const suppliedToken = String(req.body?.token ?? '').trim();
+  if (configuredToken && suppliedToken !== configuredToken) {
+    return res.status(401).json({ ok: false, code: 'MT5_INVALID_TOKEN', error: 'Token inválido.' });
+  }
+  return next();
+}
+
+/** The polling endpoint is shared by the signed-in dashboard and the EA. */
+function mt5SignalAccess(req: any, res: any, next: any) {
+  const config = metaTraderBridge.getConfig();
+  const configuredToken = String(config.apiToken ?? '').trim();
+  const suppliedToken = String(req.query?.token ?? '').trim();
+
+  if (process.env.NODE_ENV === 'production' && !configuredToken) {
+    return res.status(503).json({
+      action: 'HOLD',
+      executionEnabled: false,
+      code: 'MT5_API_TOKEN_NOT_CONFIGURED',
+      reason: 'Configure o token do Expert Advisor no painel MetaTrader e baixe novamente o EA.',
+      timestamp: Date.now(),
+    });
+  }
+  if (suppliedToken) {
+    if (!configuredToken || suppliedToken !== configuredToken) {
+      return res.status(401).json({ action: 'HOLD', code: 'MT5_INVALID_TOKEN', reason: 'Token inválido.' });
+    }
+    return next();
+  }
+  return mt5DashboardAccess(req, res, next);
+}
+
+router.post('/heartbeat', mt5EaTokenAccess, (req: Request, res: Response) => {
   try {
     const { accountId, broker, balance, equity, freeMargin, openPositions, platform, token } = req.body;
     if (!accountId) return res.status(400).json({ error: 'accountId obrigatório' });
     const config = metaTraderBridge.getConfig();
-    if (config.apiToken && token !== config.apiToken) {
-      return res.status(401).json({ error: 'Token inválido' });
-    }
     metaTraderBridge.recordHeartbeat({ accountId, broker: broker || 'Unknown', balance, equity, freeMargin, openPositionsCount: typeof openPositions === 'number' ? openPositions : undefined });
     const updatedConfig = metaTraderBridge.getConfig();
     console.log(`[MT5Bridge] 💚 Heartbeat: ${broker || 'Unknown'} | Conta: ${accountId} | Saldo: $${balance} | Posições abertas EA: ${openPositions ?? '?'} | Habilitado: ${updatedConfig.enabled}`);
@@ -47,13 +94,10 @@ router.post('/heartbeat', (req: Request, res: Response) => {
   }
 });
 
-router.get('/signal', (req: Request, res: Response) => {
+router.get('/signal', mt5SignalAccess, (req: Request, res: Response) => {
   try {
-    const { symbol, token, accountId } = req.query;
+    const { symbol, accountId } = req.query;
     const config = metaTraderBridge.getConfig();
-    if (config.apiToken && token !== config.apiToken) {
-      return res.status(401).json({ error: 'Token inválido' });
-    }
     // Registrar heartbeat apenas quando o EA faz polling (tem parâmetro symbol)
     // Isso evita que o dashboard (sem symbol) mantenha o heartbeat vivo falsamente
     const symbolStr = (symbol as string) || '';
@@ -198,7 +242,7 @@ router.get('/signal', (req: Request, res: Response) => {
  * Recebe candles + dados reais dos indicadores instalados no gráfico
  * (Girassol, Fibonacci automático e qualquer outro) e retorna sinal da IA.
  */
-router.post('/signal-with-indicators', async (req: Request, res: Response) => {
+router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, res: Response) => {
   try {
     const {
       symbol,
@@ -976,7 +1020,7 @@ router.get('/asset-profile/:symbol', (req: Request, res: Response) => {
   }
 });
 
-router.post('/market-data', (req: Request, res: Response) => {
+router.post('/market-data', mt5EaTokenAccess, (req: Request, res: Response) => {
   try {
     const { symbol, candles } = req.body;
     if (!symbol || !Array.isArray(candles)) {
@@ -1011,7 +1055,7 @@ router.post('/market-data', (req: Request, res: Response) => {
   }
 });
 
-router.post('/trade/open', (req: Request, res: Response) => {
+router.post('/trade/open', mt5EaTokenAccess, (req: Request, res: Response) => {
   try {
     const { ticket, symbol, type, lots, openPrice, stopLoss, takeProfit, openTime, signalId, currentPrice } = req.body;
     if (!ticket || !symbol || !type) {
@@ -1037,7 +1081,7 @@ router.post('/trade/open', (req: Request, res: Response) => {
   }
 });
 
-router.post('/trade/update', (req: Request, res: Response) => {
+router.post('/trade/update', mt5EaTokenAccess, (req: Request, res: Response) => {
   try {
     const { ticket, currentPrice, profit, stopLoss, takeProfit } = req.body;
     if (!ticket) return res.status(400).json({ error: 'ticket obrigatório' });
@@ -1053,7 +1097,7 @@ router.post('/trade/update', (req: Request, res: Response) => {
   }
 });
 
-router.post('/trade/close', (req: Request, res: Response) => {
+router.post('/trade/close', mt5EaTokenAccess, (req: Request, res: Response) => {
   try {
     const { ticket, signalId, symbol, type, lots, openPrice, closePrice, profit, pips, openTime, closeTime, closeReason } = req.body;
     if (!ticket) return res.status(400).json({ error: 'ticket obrigatório' });
@@ -1078,7 +1122,7 @@ router.post('/trade/close', (req: Request, res: Response) => {
   }
 });
 
-router.get('/positions', (_req: Request, res: Response) => {
+router.get('/positions', mt5DashboardAccess, (_req: Request, res: Response) => {
   try {
     const bridgePositions = metaTraderBridge.getOpenPositions();
     res.json(bridgePositions);
@@ -1087,7 +1131,7 @@ router.get('/positions', (_req: Request, res: Response) => {
   }
 });
 
-router.get('/trades', (_req: Request, res: Response) => {
+router.get('/trades', mt5DashboardAccess, (_req: Request, res: Response) => {
   try {
     const bridgeTrades = metaTraderBridge.getRecentTrades();
     res.json(bridgeTrades);
@@ -1096,7 +1140,7 @@ router.get('/trades', (_req: Request, res: Response) => {
   }
 });
 
-router.get('/status', (_req: Request, res: Response) => {
+router.get('/status', mt5DashboardAccess, (_req: Request, res: Response) => {
   try {
     const bridgeStatus = metaTraderBridge.getStatus();
     res.json(bridgeStatus);
@@ -1105,11 +1149,11 @@ router.get('/status', (_req: Request, res: Response) => {
   }
 });
 
-router.get('/config', (_req: Request, res: Response) => {
+router.get('/config', mt5DashboardAccess, (_req: Request, res: Response) => {
   try {
     const config = metaTraderBridge.getConfig();
     const { apiToken: _, ...safeConfig } = config;
-    res.json(safeConfig);
+    res.json({ ...safeConfig, apiTokenConfigured: Boolean(String(config.apiToken ?? '').trim()) });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -1119,30 +1163,49 @@ router.get('/config', (_req: Request, res: Response) => {
  * GET /api/mt5/download-ea
  * Serve o EA v8.0 com ServerURL pré-preenchida (lê arquivo do disco).
  */
-router.get('/download-ea', (req: Request, res: Response) => {
+router.get('/download-ea', mt5DashboardAccess, (req: Request, res: Response) => {
   try {
-    const replitDomain = process.env.REPLIT_DEV_DOMAIN;
-    const serverUrl = replitDomain
-      ? `https://${replitDomain}`
-      : `${req.protocol}://${req.get('host')}`;
+    const config = metaTraderBridge.getConfig();
+    const token = String(config.apiToken ?? '').trim();
+    if (process.env.NODE_ENV === 'production' && !token) {
+      return res.status(409).json({
+        ok: false,
+        code: 'MT5_API_TOKEN_NOT_CONFIGURED',
+        error: 'Salve as configurações do MetaTrader primeiro; isso cria um token seguro antes do download do EA.',
+      });
+    }
 
-    // Lê o EA v8.0 do arquivo estático e substitui a URL do servidor
+    // In Render production, never inject a legacy REPLIT_DEV_DOMAIN into the EA.
+    const requestHost = String(req.get('host') ?? '').trim();
+    const serverUrl = (process.env.NODE_ENV === 'production'
+      ? (String(process.env.RENDER_EXTERNAL_URL ?? '').trim() || (requestHost ? `https://${requestHost}` : ''))
+      : (String(process.env.REPLIT_DEV_DOMAIN ?? '').trim()
+          ? `https://${String(process.env.REPLIT_DEV_DOMAIN).trim()}`
+          : `${req.protocol}://${requestHost}`)).replace(/\/+$/, '');
+    if (!serverUrl) {
+      return res.status(500).json({ ok: false, error: 'Não foi possível determinar a URL pública do servidor MT5.' });
+    }
+
+    // Authorized download: inject both the live Render URL and the saved token.
     const eaPath = path.join(process.cwd(), 'public', 'downloads', 'InvistaPRO_EA.mq5');
     let content: string;
     try {
       content = fs.readFileSync(eaPath, 'utf-8');
-      // Injeta URL atual do servidor no parâmetro ServerURL
-      content = content.replace(
-        /input string   ServerURL        = ".*?";/,
-        `input string   ServerURL        = "${serverUrl}"; // URL do servidor InvistaPRO`
-      );
-    } catch (_e) {
-      // Fallback: usa a função legada se o arquivo não for encontrado
-      const config = metaTraderBridge.getConfig();
-      const token = config.apiToken || '';
+      const escapeMqlString = (value: string) => value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/[\r\n]/g, '');
+      const serverPattern = /input\s+string\s+ServerURL\s*=\s*"[^"]*";/;
+      const tokenPattern = /input\s+string\s+ApiToken\s*=\s*"[^"]*";/;
+      if (!serverPattern.test(content) || !tokenPattern.test(content)) {
+        throw new Error('O EA estático não contém os parâmetros ServerURL e ApiToken esperados.');
+      }
+      content = content.replace(serverPattern, `input string   ServerURL        = "${escapeMqlString(serverUrl)}"; // URL do servidor InvistaPRO`);
+      content = content.replace(tokenPattern, `input string   ApiToken         = "${escapeMqlString(token)}"; // Token de autenticação`);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') throw err;
       content = generateEAContent(serverUrl, token, config);
     }
 
+    res.setHeader('Cache-Control', 'no-store, max-age=0');
+    res.setHeader('Pragma', 'no-cache');
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="InvistaPRO_EA.mq5"');
     res.send(content);
@@ -1150,7 +1213,6 @@ router.get('/download-ea', (req: Request, res: Response) => {
     res.status(500).json({ error: err.message });
   }
 });
-
 function generateEAContent(serverUrl: string, token: string, config: any): string {
   const lotSize           = config.defaultLotSize       ?? 0.01;
   const stopLoss          = config.stopLossPips          ?? 30;
@@ -1747,24 +1809,40 @@ bool ExtractJsonBool(string json, string key) {
 `;
 }
 
-router.post('/config', (req: Request, res: Response) => {
+router.post('/config', mt5DashboardAccess, (req: Request, res: Response) => {
   try {
-    const updates = req.body;
+    const updates = { ...(req.body ?? {}) };
+    const currentConfig = metaTraderBridge.getConfig();
+    let generatedToken = false;
+    if (!String(currentConfig.apiToken ?? '').trim() && !String(updates.apiToken ?? '').trim()) {
+      updates.apiToken = randomBytes(32).toString('hex');
+      generatedToken = true;
+    }
+    if (updates.apiToken !== undefined && updates.apiToken !== null && String(updates.apiToken).length > 0 && String(updates.apiToken).length < 24) {
+      return res.status(400).json({ ok: false, error: 'O token MT5 precisa ter pelo menos 24 caracteres.' });
+    }
     metaTraderBridge.updateConfig(updates);
-    res.json({ ok: true, message: 'Configuração atualizada' });
+    res.json({
+      ok: true,
+      apiTokenConfigured: true,
+      tokenGenerated: generatedToken,
+      message: generatedToken
+        ? 'Configuração salva e token seguro gerado. Baixe novamente o EA para receber a URL e o token corretos.'
+        : 'Configuração atualizada',
+    });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-router.post('/signal/generate', async (req: Request, res: Response) => {
+router.post('/signal/generate', mt5DashboardAccess, async (req: Request, res: Response) => {
   try {
-    if (process.env.NODE_ENV === 'production' && !isMt5ProductionTradingEnabled()) {
-      return res.status(503).json({
+    const config = metaTraderBridge.getConfig();
+    const productionBlock = getMt5ProductionBlock(config.apiToken);
+    if (productionBlock) {
+      return res.status(productionBlock.status).json({
         action: 'HOLD',
-        executionEnabled: false,
-        code: 'MT5_PRODUCTION_TRADING_DISABLED',
-        reason: 'A geração de sinais MT5 em produção exige MT5_PRODUCTION_TRADING_ENABLED=true.',
+        ...productionBlock,
         confidence: 0,
         timestamp: Date.now(),
       });
@@ -1780,7 +1858,7 @@ router.post('/signal/generate', async (req: Request, res: Response) => {
   }
 });
 
-router.get('/ai-analysis', (_req: Request, res: Response) => {
+router.get('/ai-analysis', mt5DashboardAccess, (_req: Request, res: Response) => {
   try {
     const bridgeLog = metaTraderBridge.getAnalysisLog();
     const bridgeLatest = metaTraderBridge.getLatestAnalysis();
@@ -1836,7 +1914,7 @@ router.get('/ai-analysis', (_req: Request, res: Response) => {
  * Body: { position: MT5Position, marketData: candle[], symbol: string }
  * Returns: PositionMonitorResult with action (HOLD/CLOSE_PROFIT/CLOSE_SPIKE_EXIT/CLOSE_LOSS_PREVENTION)
  */
-router.post('/position/monitor', (req: Request, res: Response) => {
+router.post('/position/monitor', mt5EaTokenAccess, (req: Request, res: Response) => {
   try {
     const { position, marketData, symbol } = req.body;
     if (!position || !marketData || !symbol) {
