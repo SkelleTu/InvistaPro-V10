@@ -19,7 +19,7 @@ import {
 import { brazilNewsService } from '../services/brazil-news-service';
 import { computeSyntheticGirassol } from '../services/synthetic-girassol';
 import { isAllowedProductionSymbol } from '../services/production-symbol-policy';
-import { getMt5ProductionBlock, isMt5ProductionTradingEnabled } from '../services/mt5-production-policy';
+import { getMt5ProductionBlock } from '../services/mt5-production-policy';
 import { consensusCache } from '../services/consensus-cache';
 
 
@@ -1848,7 +1848,6 @@ router.post('/signal/generate', mt5DashboardAccess, async (req: Request, res: Re
       });
     }
     const { symbol } = req.body;
-    const config = metaTraderBridge.getConfig();
     const targetSymbol = symbol || config.symbols[0] || 'EURUSD';
     const signal = await metaTraderBridge.generateSignal(targetSymbol);
     if (!signal) return res.json({ action: 'HOLD', reason: 'Análise em progresso' });
