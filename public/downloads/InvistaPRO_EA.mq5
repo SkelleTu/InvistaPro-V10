@@ -957,6 +957,7 @@ void MonitorOpenPositions()
       body += "\"symbol\":\""         + g_symbol         + "\",";
       body += "\"indicatorSignals\":" + structuredSignals + ",";
       body += "\"indicatorBuffers\":" + allBuffers;
+      if (g_apiToken != "") body += ",\"token\":\"" + g_apiToken + "\"";
       body += "}";
 
       string url     = g_serverUrl + "/api/mt5/position/monitor";
