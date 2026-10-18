@@ -188,60 +188,82 @@ export class DerivAPIService extends EventEmitter {
     );
   }
 
+  private pendingPublicConnectPromise: Promise<boolean> | null = null;
+
   async connectPublic(operationId?: string): Promise<boolean> {
-    // Reuse the dedicated public socket instead of creating parallel sockets.
+    // Reuse the dedicated public socket and coalesce concurrent callers. Without
+    // this guard, parallel dashboard/worker requests can open a connection storm
+    // and trigger Deriv HTTP 429 rate limits.
     if (this.isConnected && this.ws?.readyState === WebSocket.OPEN && !this.apiToken) {
       return true;
     }
-    // Conexão pública sem autenticação para ticks
+    if (this.pendingPublicConnectPromise) return this.pendingPublicConnectPromise;
+
     this.operationId = operationId || `CONNECT_PUBLIC_${Date.now()}`;
     this.isShuttingDown = false;
-    
+
     const endpoint = 'wss://api.derivws.com/trading/v1/options/ws/public';
-
-    console.log(`🔌 Conectando Deriv (público) - Operation ID: ${this.operationId}`);
-
-    return new Promise((resolve, reject) => {
+    const connectPromise = new Promise<boolean>((resolve, reject) => {
+      let settled = false;
+      const finish = (error?: Error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(connectionTimer);
+        if (this.pendingPublicConnectPromise === connectPromise) {
+          this.pendingPublicConnectPromise = null;
+        }
+        if (error) reject(error);
+        else resolve(true);
+      };
       const connectionTimer = setTimeout(() => {
-        const timeoutError = new Error('Connection timeout after 10 seconds');
+        const timeoutError = new Error('Deriv public connection timed out after 10 seconds');
         this.cleanup();
-        reject(timeoutError);
+        finish(timeoutError);
       }, 10000);
 
       try {
         this.ws = new WebSocket(endpoint, {
-          headers: {
-            'Origin': 'https://app.deriv.com'
+          headers: { 'Origin': 'https://app.deriv.com' }
+        });
+
+        this.ws.once('open', async () => {
+          if (settled) return;
+          this.isConnected = true;
+          this.reconnectAttempts = 0;
+          this.emit('connected');
+          this.processMessageQueue();
+          try {
+            await this.resubscribeActiveSubscriptions();
+            this.startHeartbeat();
+            finish();
+          } catch (error) {
+            finish(error instanceof Error ? error : new Error(String(error)));
           }
         });
 
-        this.ws.on('open', async () => {
-          clearTimeout(connectionTimer);
-          console.log(`🔗 Deriv WebSocket conectado (público) - Operation ID: ${this.operationId}`);
-          this.isConnected = true;
-          this.reconnectAttempts = 0;
-          
-          // Sem autenticação - só configurar listeners e heartbeat
-          this.emit('connected');
-          this.processMessageQueue();
-          await this.resubscribeActiveSubscriptions();
-          this.startHeartbeat();
-          
-          // Resubscrever todas as subscrições após reconexão
-          // TEMPORARIAMENTE DESABILITADO: await this.resubscribeAll();
-          // Motivo: 11,396 subscrições estão bloqueando a inicialização do servidor
-          
-          resolve(true);
+        this.ws.once('error', (error: Error) => {
+          this.isConnected = false;
+          finish(error);
         });
-
-        this.setupWebSocketListeners(reject, connectionTimer, endpoint, 'demo');
-
+        this.ws.once('unexpected-response', (_request: any, response: any) => {
+          const status = Number(response?.statusCode || 0);
+          this.isConnected = false;
+          finish(new Error(status === 429
+            ? 'Deriv is rate-limiting public WebSocket connections (HTTP 429). Retry after a short cooldown.'
+            : `Deriv public WebSocket rejected the connection (HTTP ${status || 'unknown'}).`));
+        });
+        this.ws.once('close', (code: number) => {
+          if (!settled) {
+            this.isConnected = false;
+            finish(new Error(`Deriv public WebSocket closed before connecting (code=${code}).`));
+          }
+        });
       } catch (error) {
-        clearTimeout(connectionTimer);
-        console.error(`❌ Erro ao configurar conexão Deriv (público) - Operation ID: ${this.operationId}:`, error);
-        reject(error);
+        finish(error instanceof Error ? error : new Error(String(error)));
       }
     });
+    this.pendingPublicConnectPromise = connectPromise;
+    return connectPromise;
   }
 
   async connect(apiToken: string, accountType: 'demo' | 'real' = this.fixedAccountType, operationId?: string): Promise<boolean> {
