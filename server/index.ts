@@ -34,6 +34,7 @@ const app = express();
 // Allow only explicitly configured frontend origins plus the current Lovable preview.
 const defaultFrontendOrigins = [
   "https://id-preview--af4b9653-c591-4de6-bc83-be8ebb423930.lovable.app",
+  "https://invistapro-connect.lovable.app",
 ];
 const configuredFrontendOrigins = [
   process.env.FRONTEND_URL,
