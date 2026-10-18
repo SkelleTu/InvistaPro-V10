@@ -1950,7 +1950,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
 
       // The BCB gateway can return an XML error page with HTTP 200.
       // Parse each series independently so a bad Selic response cannot discard valid CDI data.
-      const readBcbRows = async (response: Response, label: string): Promise<Array<{ data: string; valor: string }>> => {
+      const readBcbRows = async (response: Awaited<ReturnType<typeof fetch>>, label: string): Promise<Array<{ data: string; valor: string }>> => {
         if (!response.ok) {
           console.warn(`⚠️ [CDI] BCB ${label} indisponível: HTTP ${response.status}`);
           return [];
