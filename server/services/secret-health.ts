@@ -22,14 +22,6 @@ export function getSecretHealth() {
   const emailCandidates = [process.env.ADMIN_EMAIL];
   const emailPattern = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
   const automationEmail = String(emailCandidates.find(value => emailPattern.test(String(value ?? "").trim())) ?? "").trim();
-  const automationPassword = String(platform === "aura"
-    ? (process.env.AURA_STYLE_ACCOUNT_PASSWORD || process.env.AURA_ACCOUNT_PASSWORD || process.env.AURA_MASTER_PASSWORD || process.env.INVISTA_AURA_ACCOUNT_PASSWORD || "")
-    : (process.env.INVISTAPRO_ACCOUNT_PASSWORD || process.env.INVISTA_ACCOUNT_PASSWORD || process.env.INVISTA_MASTER_PASSWORD || process.env.MASTER_PASSWORD || process.env.ADMIN_PASSWORD || "")
-  ).trim();
-  const automationToken = String(platform === "aura"
-    ? process.env.AURA_STYLE_AUTOMATION_TOKEN ?? ""
-    : process.env.INVISTAPRO_AUTOMATION_TOKEN ?? ""
-  ).trim();
   const anyEmailCandidate = emailCandidates.some(value => String(value ?? "").trim());
   // These global automation values are legacy fallbacks. The current system
   // stores account credentials per user in encrypted storage, so absent global
