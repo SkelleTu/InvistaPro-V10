@@ -1942,8 +1942,8 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       console.log('🔍 [CDI] Buscando CDI diário no Banco Central (SGS 4389)...');
 
       const [cdiResponse, selicResponse] = await Promise.all([
-        fetch('https://api.bcb.gov.br/dados/serie/bcdata.sgs.4389/dados/ultimos/20?formato=json'),
-        fetch('https://api.bcb.gov.br/dados/serie/bcdata.sgs.11/dados/ultimos/20?formato=json')
+        fetch('https://api.bcb.gov.br/dados/serie/bcdata.sgs.4389/dados/ultimos/20?formato=json', { signal: AbortSignal.timeout(5000) }),
+        fetch('https://api.bcb.gov.br/dados/serie/bcdata.sgs.11/dados/ultimos/20?formato=json', { signal: AbortSignal.timeout(5000) })
       ]);
 
       if (!cdiResponse.ok) throw new Error(`BCB CDI API error: ${cdiResponse.status}`);
@@ -1996,7 +1996,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       // Its response has current rates, not historical daily observations, so the chart explicitly
       // marks its 30-point series as an approximation rather than pretending it is historical data.
       try {
-        const alternativeResponse = await fetch('https://brasilapi.com.br/api/taxas/v1');
+        const alternativeResponse = await fetch('https://brasilapi.com.br/api/taxas/v1', { signal: AbortSignal.timeout(5000) });
         if (alternativeResponse.ok) {
           const alternativeRates = await alternativeResponse.json() as Array<{ nome?: string; valor?: number | string }>;
           const readRate = (name: string): number | null => {
