@@ -35,6 +35,16 @@ export default function SimpleMarketChart() {
   // Buscar dados reais de CDI/CDB da API
   const { data: marketData, isLoading, error, refetch } = useQuery<MarketApiResponse>({
     queryKey: ['/api/market/cdi-data'],
+    queryFn: async () => {
+      const response = await fetch('/api/market/cdi-data', { credentials: 'include' });
+      const payload = await response.json() as MarketApiResponse;
+      // Preserve the server's explanatory 503 payload so the UI can show the
+      // source outage message instead of replacing it with a generic fetch error.
+      if (!response.ok && !payload?.message) {
+        throw new Error(`Market data request failed with HTTP ${response.status}`);
+      }
+      return payload;
+    },
     refetchInterval: 60000, // Atualiza a cada 1 minuto
     refetchOnWindowFocus: false,
     staleTime: 30000, // Considera dados frescos por 30 segundos
@@ -234,8 +244,8 @@ export default function SimpleMarketChart() {
           <div className="flex items-center space-x-3">
             <div className="text-right">
               <div className="text-white text-sm font-mono">{formatPrice(currentPrice)}</div>
-              <div className={`text-xs ${isPositive ? 'text-green-400' : 'text-red-400'}`}>
-                ({isPositive ? '+' : ''}{priceChangePercent.toFixed(2)}%)
+              <div className={`text-xs ${priceHistory.length < 2 ? 'text-amber-300' : isPositive ? 'text-green-400' : 'text-red-400'}`}>
+                {priceHistory.length < 2 ? 'Variação histórica indisponível' : `(${isPositive ? '+' : ''}${priceChangePercent.toFixed(2)}%)`}
               </div>
             </div>
             <div className={`px-2 py-1 rounded text-xs font-semibold bg-opacity-20`} 
