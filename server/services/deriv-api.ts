@@ -1259,11 +1259,53 @@ export class DerivAPIService extends EventEmitter {
    * Retorna o multiplicador (ex: 8.5 significa que $1 stake retorna $8.50 total).
    * Usado para calibrar o tamanho do burst: burst seguro = floor(payout) - 1
    */
-  async getDigitMatchPayoutMultiplier(_symbol: string, _duration: number, _amount: number, _barrier: string): Promise<number | null> {
-    // DIGITMATCH is outside the explicitly approved production contract set.
-    // Keep the method for compatibility, but never request a proposal for it.
-    console.warn('[DERIV_POLICY] DIGITMATCH payout query blocked by production contract allowlist.');
-    return null;
+  async getDigitMatchPayoutMultiplier(symbol: string, duration: number, amount: number, barrier: string): Promise<number | null> {
+    if (!isAllowedProductionSymbol(symbol) || isBlockedOneSecondSymbol(symbol) ||
+        !isValidProductionStake('DIGITMATCH', amount)) {
+      console.warn('[DERIV_POLICY] DIGITMATCH payout query blocked by symbol/stake policy.');
+      return null;
+    }
+    this.requireAuthenticatedAccountSession('proposal');
+    const available = await this.getContractsFor(symbol);
+    if (!available.some((contract: any) => String(contract?.contract_type ?? '').toUpperCase() === 'DIGITMATCH')) {
+      console.warn(`[DERIV_POLICY] DIGITMATCH unavailable for ${symbol}; payout query skipped.`);
+      return null;
+    }
+
+    const reqId = this.generateRequestId();
+    return new Promise((resolve) => {
+      const handler = (message: any) => {
+        if (message.req_id !== reqId) return;
+        this.removeListener('message', handler);
+        clearTimeout(timer);
+        const proposal = message.proposal;
+        const askPrice = Number(proposal?.ask_price);
+        const payout = Number(proposal?.payout);
+        if (proposal && Number.isFinite(askPrice) && askPrice > 0 && Number.isFinite(payout) && payout > 0) {
+          resolve(payout / askPrice);
+        } else {
+          console.warn('[DERIV_API] DIGITMATCH payout proposal rejected:', message.error?.message || message.error || 'invalid proposal response');
+          resolve(null);
+        }
+      };
+      const timer = setTimeout(() => {
+        this.removeListener('message', handler);
+        resolve(null);
+      }, 10000);
+      this.on('message', handler);
+      this.sendMessage({
+        proposal: 1,
+        contract_type: 'DIGITMATCH',
+        symbol,
+        duration: Math.max(1, Math.floor(duration)),
+        duration_unit: 't',
+        barrier,
+        currency: this.accountContext?.currency || 'USD',
+        amount,
+        basis: 'stake',
+        req_id: reqId,
+      });
+    });
   }
 
   /**
