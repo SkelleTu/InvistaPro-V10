@@ -176,25 +176,37 @@ router.get('/active-configs', isAuthenticated, isTradingAuthorized, asyncErrorHa
 
 // Obter operações recentes do sistema automático
 router.get('/recent-operations', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
-  const operations = await storage.getActiveTradeOperations(req.user.id);
-  
-  // Filtrar apenas operações do sistema automático (que não têm interação manual)
-  const autoOperations = operations.filter(op => 
-    op.aiConsensus && op.aiConsensus.includes('cooperativa')
-  ).slice(0, 20); // Últimas 20 operações
-  
+  // Pull the user's persisted history across pending, active, won, lost and closed states.
+  // Do not infer "automatic" origin from a substring in aiConsensus: current trade records
+  // serialize the full consensus object and were being silently hidden by that filter.
+  const operations = await storage.getUserTradeOperations(req.user.id, 100);
+  const recentOperations = [...operations]
+    .sort((a: any, b: any) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
+    .slice(0, 20);
+
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
   res.json({
-    count: autoOperations.length,
-    operations: autoOperations.map(op => ({
-      id: op.id,
-      symbol: op.symbol,
-      direction: op.direction,
-      amount: op.amount,
-      status: op.status,
-      profit: op.profit,
-      createdAt: op.createdAt,
-      aiConsensus: op.aiConsensus ? JSON.parse(op.aiConsensus) : null
-    }))
+    count: recentOperations.length,
+    operations: recentOperations.map((op: any) => {
+      let aiConsensus: any = null;
+      if (op.aiConsensus) {
+        try { aiConsensus = JSON.parse(op.aiConsensus); }
+        catch { aiConsensus = { raw: String(op.aiConsensus).slice(0, 500) }; }
+      }
+      return {
+        id: op.id,
+        symbol: op.symbol,
+        direction: op.direction,
+        amount: op.amount,
+        status: op.status,
+        profit: op.profit,
+        createdAt: op.createdAt,
+        derivContractId: op.derivContractId ?? null,
+        contractType: op.contractType ?? null,
+        tradeType: op.tradeType ?? null,
+        aiConsensus,
+      };
+    })
   });
 }));
 
