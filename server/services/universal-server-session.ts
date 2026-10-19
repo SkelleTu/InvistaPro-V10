@@ -22,7 +22,7 @@ async function call(path: string, body: any) {
   // the Universal Server. Registration/arm are on the critical Play path, so
   // give those idempotent session operations enough time to complete instead
   // of aborting just as the sleeping service wakes up.
-  const sessionStartupRequest = path === "/api/invista/session/register" || path === "/api/invista/session/arm";
+  const sessionStartupRequest = path === "/api/invista/session/register" || path === "/api/invista/session/arm" || path === "/api/invista/deriv/session";
   const timeoutMs = sessionStartupRequest ? 60000 : 20000;
   const startedAt = Date.now();
   try {
@@ -53,14 +53,24 @@ export async function ensureUniversalDerivSession(userId: string, token: string,
   const now = Date.now();
   if (now - (derivEnsureAttemptAt.get(id) ?? 0) < 30_000) return { connected: false, throttled: true };
   derivEnsureAttemptAt.set(id, now);
-  const response = await fetch(`${universalUrl}/api/invista/deriv/session/${platform}/${encodeURIComponent(id)}`, {
-    method: "GET",
-    headers: { "x-invista-server-key": serviceKey },
-    signal: AbortSignal.timeout(10000),
-  });
-  if (response.ok) {
-    const state: any = await response.json();
-    if (state?.ok === true && state?.connected === true && state?.active === true) return { connected: true, alreadyActive: true };
+  // This GET is only a fast-path optimization. On Render Free, a cold start
+  // can outlast the short probe timeout; a failed probe must not prevent the
+  // authoritative token-sync request from waking the service and establishing
+  // the remote Deriv session.
+  try {
+    const response = await fetch(`${universalUrl}/api/invista/deriv/session/${platform}/${encodeURIComponent(id)}`, {
+      method: "GET",
+      headers: { "x-invista-server-key": serviceKey },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (response.ok) {
+      const state: any = await response.json();
+      if (state?.ok === true && state?.connected === true && state?.active === true) {
+        return { connected: true, alreadyActive: true };
+      }
+    }
+  } catch (error) {
+    console.warn(`⚠️ [UNIVERSAL] Deriv session probe failed for user=${id}; falling back to token sync: ${error instanceof Error ? error.message : String(error)}`);
   }
   return await syncDerivTokenToUniversalServer(id, token, accountType);
 }
