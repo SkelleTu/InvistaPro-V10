@@ -825,7 +825,7 @@ class UniversalContractMonitor extends EventEmitter {
 
     return new Promise((resolve) => {
       const configuredAppId = String(process.env.DERIV_APP_ID ?? '').trim();
-      const appId = /^\\d+$/.test(configuredAppId) ? configuredAppId : '1089';
+      const appId = /^\d+$/.test(configuredAppId) ? configuredAppId : '1089';
       if (appId === '1089' && configuredAppId !== '1089') {
         console.warn('⚠️ [MONITOR] DERIV_APP_ID ausente ou inválido; usando app_id legado 1089 como fallback');
       }
