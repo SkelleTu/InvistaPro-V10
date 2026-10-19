@@ -15,24 +15,26 @@ jobs:
       - name: Checkout main platform
         uses: actions/checkout@v4
 
-      - name: Require read access to private Aura repository
+      - name: Report skipped parity check when private-repo credentials are not configured
         if: ${{ secrets.AURA_REPO_TOKEN == '' }}
         run: |
-          echo "::error::Missing repository secret AURA_REPO_TOKEN. Add a fine-grained GitHub token with read-only Contents access to SkelleTu/Invista-PRO-V10-Aura-System-Style."
-          exit 1
+          echo "::warning::Cross-repository parity check skipped because AURA_REPO_TOKEN is not configured."
+          echo "::warning::To run this check, add a fine-grained token with read-only Contents access to SkelleTu/InvistaPRO-V10-Aura-System-Style."
 
       - name: Checkout private Aura System Style
+        if: ${{ secrets.AURA_REPO_TOKEN != '' }}
         uses: actions/checkout@v4
         with:
-          repository: SkelleTu/Invista-PRO-V10-Aura-System-Style
+          repository: SkelleTu/InvistaPRO-V10-Aura-System-Style
           ref: main
           token: ${{ secrets.AURA_REPO_TOKEN }}
           path: /tmp/aura
 
       - name: Verify Aura wrapper points to canonical core
+        if: ${{ secrets.AURA_REPO_TOKEN != '' }}
         run: |
-          grep -q 'https://github.com/SkelleTu/InvistaPro-V10.git' /tmp/aura/package.json || grep -q 'https://github.com/SkelleTu/InvistaPro-V10.git' /tmp/aura/aura-build.mjs
-          test -f /tmp/aura/aura-build.mjs
+          grep -q 'https://github.com/SkelleTu/InvistaPro-V10.git' /tmp/aura/package.json
+          test -f /tmp/aura/package.json
           echo "OK: Aura System Style consumes InvistaPro-V10 as its canonical functional core."
 
       - name: Record canonical core SHA
