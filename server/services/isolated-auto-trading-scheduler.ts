@@ -33,6 +33,13 @@ interface UserRuntime {
   marketDataTicks: number;
   marketDataSymbols: number;
   currentPhase: string;
+  currentPhaseDetail: string;
+  activityLog: Array<{ time: number; message: string; type: string }>;
+  marketQuality: number;
+  lastCycleStartedAt: number;
+  nextCycleAt: number;
+  cycleIntervalMs: number;
+  lastError: string | null;
   totalExecutedOperations: number;
   contractCapabilityReady: boolean;
   contractCapabilitySymbols: number;
@@ -73,6 +80,13 @@ class IsolatedAutoTradingScheduler {
         marketDataTicks: 0,
         marketDataSymbols: 0,
         currentPhase: "AGUARDANDO_PLAY",
+        currentPhaseDetail: "Aguardando Play",
+        activityLog: [],
+        marketQuality: 0,
+        lastCycleStartedAt: 0,
+        nextCycleAt: 0,
+        cycleIntervalMs: 2000,
+        lastError: null,
         totalExecutedOperations: 0,
         contractCapabilityReady: false,
         contractCapabilitySymbols: 0,
@@ -147,18 +161,47 @@ class IsolatedAutoTradingScheduler {
         runtime.marketDataTicks = Number(message.marketDataTicks || 0);
         runtime.marketDataSymbols = Number(message.marketDataSymbols || 0);
         runtime.currentPhase = String(message.currentPhase || runtime.currentPhase);
+        runtime.currentPhaseDetail = String(message.currentPhaseDetail || runtime.currentPhaseDetail);
+        if (Array.isArray(message.activityLog)) {
+          runtime.activityLog = message.activityLog
+            .filter((entry: any) => entry && typeof entry.message === "string")
+            .slice(0, 20)
+            .map((entry: any) => ({
+              time: Number(entry.time || Date.now()),
+              message: entry.message.slice(0, 500),
+              type: String(entry.type || "info").slice(0, 24),
+            }));
+        }
+        runtime.marketQuality = Number.isFinite(Number(message.marketQuality)) ? Number(message.marketQuality) : runtime.marketQuality;
+        runtime.lastCycleStartedAt = Number(message.lastCycleStartedAt || 0);
+        runtime.nextCycleAt = Number(message.nextCycleAt || 0);
+        runtime.cycleIntervalMs = Math.max(250, Number(message.cycleIntervalMs || runtime.cycleIntervalMs || 2000));
+        if (message.armed === true) runtime.lastError = null;
         runtime.totalExecutedOperations = Number(message.totalExecutedOperations || 0);
         runtime.contractCapabilityReady = Boolean(message.contractCapabilityReady);
         runtime.contractCapabilitySymbols = Number(message.contractCapabilitySymbols || 0);
         runtime.contractCapabilityCheckedAt = Number(message.contractCapabilityCheckedAt || 0);
         runtime.contractCapabilityModes = Array.isArray(message.contractCapabilityModes) ? message.contractCapabilityModes : [];
       } else if (message?.type === "error") {
-        console.error(`❌ [USER-RUNTIME] user=${runtime.userId} session=${runtime.sessionId}: ${message.error}`);
-        if (!settled) settle(new Error(String(message.error || "Worker failed before readiness.")));
+        const errorMessage = String(message.error || "Worker failed before readiness.").slice(0, 500);
+        runtime.lastError = errorMessage;
+        runtime.currentPhase = "BLOQUEADO";
+        runtime.currentPhaseDetail = errorMessage;
+        runtime.activityLog.unshift({ time: Date.now(), message: errorMessage, type: "warning" });
+        runtime.activityLog = runtime.activityLog.slice(0, 20);
+        console.error(`❌ [USER-RUNTIME] user=${runtime.userId} session=${runtime.sessionId}: ${errorMessage}`);
+        if (!settled) settle(new Error(errorMessage));
       }
     });
 
     const cleanup = (error?: Error) => {
+      if (error && !runtime.lastError) {
+        runtime.lastError = error.message.slice(0, 500);
+        runtime.currentPhase = "BLOQUEADO";
+        runtime.currentPhaseDetail = runtime.lastError;
+        runtime.activityLog.unshift({ time: Date.now(), message: runtime.lastError, type: "warning" });
+        runtime.activityLog = runtime.activityLog.slice(0, 20);
+      }
       if (runtime.worker === worker) {
         runtime.worker = null;
         runtime.workerReady = false;
@@ -330,6 +373,14 @@ class IsolatedAutoTradingScheduler {
       marketDataTicks: r.marketDataTicks,
       marketDataSymbols: r.marketDataSymbols,
       currentPhase: r.currentPhase,
+      currentPhaseDetail: r.currentPhaseDetail,
+      activityLog: r.activityLog,
+      marketQuality: r.marketQuality,
+      lastCycleStartedAt: r.lastCycleStartedAt,
+      nextCycleAt: r.nextCycleAt,
+      cycleIntervalMs: r.cycleIntervalMs,
+      lastError: r.lastError,
+      status: r.status,
       totalExecutedOperations: r.totalExecutedOperations,
       contractCapabilityReady: r.contractCapabilityReady,
       contractCapabilitySymbols: r.contractCapabilitySymbols,

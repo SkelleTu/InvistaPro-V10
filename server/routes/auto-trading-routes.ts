@@ -34,10 +34,13 @@ const isSystemAdmin = (req: any, res: any, next: any) => {
 // Obter status do scheduler
 router.get('/status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
   const userId = String(req.user.id);
-  // Runtime state comes from the isolated worker manager, not the legacy
-  // process-global scheduler singleton.
+  // Runtime state comes only from this user's isolated worker.
   const activeSessions = isolatedAutoTradingScheduler.getActiveSessions()
     .filter((session: any) => String(session.userId) === userId);
+  const runtime = activeSessions.find((session: any) => session.isActive && session.workerReady)
+    || activeSessions.find((session: any) => session.workerReady)
+    || activeSessions[0]
+    || null;
   const legacySafetyStatus = autoTradingScheduler.getSchedulerStatus();
   const isolatedSafetyStatus = isolatedAutoTradingScheduler.getSchedulerStatus();
   const emergencyStop = Boolean(legacySafetyStatus.emergencyStop || isolatedSafetyStatus.emergencyStop);
@@ -47,40 +50,60 @@ router.get('/status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(as
   const contractCapabilityReady = activeSessions.some((session: any) =>
     Boolean(session.workerReady && session.contractCapabilityReady && Number(session.contractCapabilitySymbols || 0) > 0)
   );
-  const schedulerActiveForUser = isolatedAutoTradingScheduler.getArmedUserIds().includes(userId) &&
-    activeSessions.some((session: any) => session.isActive && session.workerReady) &&
-    marketDataReady &&
-    !emergencyStop;
-  // Expose only this user's runtime; never disclose other users' IDs or counts.
+  // Keep the actual worker/Play state separate from market readiness. Otherwise a live
+  // worker with a Deriv blocker is mislabeled as paused and its diagnostic activity vanishes.
+  const schedulerActiveForUser = !emergencyStop &&
+    isolatedAutoTradingScheduler.getArmedUserIds().includes(userId) &&
+    activeSessions.some((session: any) => session.isActive && session.workerReady);
+
+  const runtimePhase = runtime?.lastError
+    ? 'BLOQUEADO'
+    : String(runtime?.currentPhase || (schedulerActiveForUser ? 'ATIVO' : 'AGUARDANDO_PLAY'));
   const schedulerStatus = {
     isRunning: schedulerActiveForUser,
     hasActiveSessions: schedulerActiveForUser,
     emergencyStop,
-    isInitialized: activeSessions.some((session: any) => session.workerReady),
-    currentPhase: schedulerActiveForUser ? 'ATIVO' : 'AGUARDANDO_PLAY',
-    currentPhaseDetail: schedulerActiveForUser ? 'Runtime isolado ativo para este usuário' : 'Nenhuma atividade ativa para este usuário',
+    isInitialized: Boolean(runtime?.isInitialized || runtime?.workerReady),
+    currentPhase: runtimePhase,
+    currentPhaseDetail: String(
+      runtime?.lastError
+      || runtime?.currentPhaseDetail
+      || (schedulerActiveForUser ? 'Worker de trading ativo; aguardando atividade confirmada.' : 'Aguardando Play.')
+    ),
+    activityLog: Array.isArray(runtime?.activityLog) ? runtime.activityLog.slice(0, 20) : [],
+    marketQuality: Number(runtime?.marketQuality || 0),
+    lastCycleStartedAt: Number(runtime?.lastCycleStartedAt || 0),
+    nextCycleAt: Number(runtime?.nextCycleAt || 0),
+    cycleIntervalMs: Math.max(250, Number(runtime?.cycleIntervalMs || 2000)),
+    lastError: runtime?.lastError || null,
   };
 
-  // Verificar se o token Deriv está configurado para este usuário
   const derivToken = await storage.getUserDerivToken(userId);
   const derivTokenConfigured = !!derivToken && !!derivToken.isActive;
-
-  // Verificar se há configurações ativas no banco
   const activeConfigs = await storage.getActiveTradeConfigurations();
-  const userActiveConfigs = activeConfigs.filter((c: any) => String(c.userId) === String(userId));
+  const userActiveConfigs = activeConfigs.filter((c: any) => String(c.userId) === userId);
   const activeConfigsCount = userActiveConfigs.length;
+  const canExecuteTrades = schedulerActiveForUser &&
+    marketDataReady &&
+    contractCapabilityReady &&
+    derivTokenConfigured &&
+    activeConfigsCount > 0 &&
+    !emergencyStop;
 
-  // O sistema só está realmente operando se: scheduler rodando + token configurado + configurações ativas
-  const canExecuteTrades = schedulerActiveForUser && marketDataReady && contractCapabilityReady && derivTokenConfigured && activeConfigsCount > 0;
-
-  // Bloqueios que impedem trading
   const tradingBlockers: string[] = [];
-  if (!schedulerActiveForUser) tradingBlockers.push('Runtime ou coleta de mercado não está pronto para esta sessão');
-  if (!marketDataReady) tradingBlockers.push('Coleta ainda não confirmou ticks reais persistidos da Deriv');
-  if (!contractCapabilityReady) tradingBlockers.push('Nenhum contrato compatível foi confirmado para as modalidades e ativos permitidos');
-  if (!derivTokenConfigured) tradingBlockers.push('Token Deriv não configurado');
-  if (activeConfigsCount === 0) tradingBlockers.push('Nenhuma configuração de trading ativa');
+  if (emergencyStop) {
+    tradingBlockers.push('Parada de emergência ativa; Play permanece bloqueado até liberação explícita.');
+  } else if (!schedulerActiveForUser && !runtime?.lastError) {
+    tradingBlockers.push('Runtime de trading não confirmou uma sessão ativa para este usuário.');
+  }
+  if (runtime?.lastError) tradingBlockers.push(`Falha do runtime: ${String(runtime.lastError).slice(0, 500)}`);
+  if (!marketDataReady) tradingBlockers.push('Coleta ainda não confirmou ticks reais recentes e persistidos da Deriv.');
+  if (!contractCapabilityReady) tradingBlockers.push('Nenhum contrato compatível foi confirmado para as modalidades e ativos permitidos.');
+  if (!derivTokenConfigured) tradingBlockers.push('Token Deriv não configurado ou inativo.');
+  if (activeConfigsCount === 0) tradingBlockers.push('Nenhuma configuração de trading ativa.');
 
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  res.setHeader('Pragma', 'no-cache');
   res.json({
     schedulerActive: schedulerActiveForUser,
     canExecuteTrades,
@@ -97,13 +120,14 @@ router.get('/status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(as
       contractCapabilityReady,
       contractCapabilitySymbols: activeSessions.reduce((sum: number, session: any) => sum + Number(session.contractCapabilitySymbols || 0), 0),
       contractCapabilityModes: [...new Set(activeSessions.flatMap((session: any) => Array.isArray(session.contractCapabilityModes) ? session.contractCapabilityModes : []))],
-      activeSessions: activeSessions.filter((session: any) => session.isActive).length,
+      activeSessions: activeSessions.filter((session: any) => session.isActive && session.workerReady).length,
       isolatedUsers: activeSessions.length > 0 ? 1 : 0,
       armedUsers: schedulerActiveForUser ? 1 : 0,
     },
     activeSessions: activeSessions.map((session: any) => ({
       userId: session.userId,
       sessionId: session.sessionId,
+      status: String(session.status || 'unknown'),
       isActive: Boolean(session.isActive),
       workerReady: Boolean(session.workerReady),
       isInitialized: Boolean(session.isInitialized),
@@ -113,7 +137,14 @@ router.get('/status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(as
       contractCapabilityReady: Boolean(session.contractCapabilityReady),
       contractCapabilitySymbols: Number(session.contractCapabilitySymbols || 0),
       contractCapabilityModes: Array.isArray(session.contractCapabilityModes) ? session.contractCapabilityModes : [],
-      currentPhase: String(session.currentPhase || 'AGUARDANDO_PLAY'),
+      currentPhase: String(session.lastError ? 'BLOQUEADO' : session.currentPhase || 'AGUARDANDO_PLAY'),
+      currentPhaseDetail: String(session.lastError || session.currentPhaseDetail || ''),
+      activityLog: Array.isArray(session.activityLog) ? session.activityLog.slice(0, 20) : [],
+      marketQuality: Number(session.marketQuality || 0),
+      lastCycleStartedAt: Number(session.lastCycleStartedAt || 0),
+      nextCycleAt: Number(session.nextCycleAt || 0),
+      cycleIntervalMs: Math.max(250, Number(session.cycleIntervalMs || 2000)),
+      lastError: session.lastError || null,
       totalExecutedOperations: Number(session.totalExecutedOperations || 0),
       lastHeartbeatAt: session.lastHeartbeatAt,
       progress: { executed: Number(session.totalExecutedOperations || 0), total: 0, percentage: 0 },

@@ -2039,51 +2039,67 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
   });
 
-  // USD/BRL Exchange Rate - AwesomeAPI (oficial e gratuita)
-  app.get('/api/market/exchange-rate', async (req, res) => {
+  // USD/BRL Exchange Rate - current provider response only; never manufacture a quote.
+  app.get('/api/market/exchange-rate', async (_req, res) => {
+    const checkedAt = new Date().toISOString();
+    const readPositiveRate = (value: unknown): number | null => {
+      const rate = Number.parseFloat(String(value ?? ''));
+      return Number.isFinite(rate) && rate > 0 ? rate : null;
+    };
+
     try {
-      const response = await fetch('https://economia.awesomeapi.com.br/json/last/USD-BRL,EUR-BRL');
-      if (!response.ok) throw new Error(`AwesomeAPI error: ${response.status}`);
+      const response = await fetch(
+        'https://economia.awesomeapi.com.br/json/last/USD-BRL,EUR-BRL',
+        { signal: AbortSignal.timeout(4500) },
+      );
+      if (!response.ok) throw new Error(`AwesomeAPI HTTP ${response.status}`);
       const data = await response.json() as any;
+      const usdBrl = readPositiveRate(data?.USDBRL?.bid);
+      const eurBrl = readPositiveRate(data?.EURBRL?.bid);
+      if (usdBrl === null) throw new Error('AwesomeAPI returned no valid USD/BRL quote');
 
-      const usdBrl = parseFloat(data.USDBRL?.bid || '0');
-      const eurBrl = parseFloat(data.EURBRL?.bid || '0');
-
-      if (!usdBrl) throw new Error('Invalid exchange rate data');
-
-      res.json({
+      res.setHeader('Cache-Control', 'no-store');
+      return res.json({
         success: true,
-        rates: {
-          USD_BRL: usdBrl,
-          EUR_BRL: eurBrl || null,
-        },
+        rates: { USD_BRL: usdBrl, EUR_BRL: eurBrl },
         source: 'AwesomeAPI',
-        timestamp: new Date().toISOString(),
+        timestamp: checkedAt,
       });
-    } catch (error: any) {
-      // Fallback: tentar HG Brasil API
-      try {
-        const hgRes = await fetch('https://api.hgbrasil.com/finance?fields=only_results');
-        const hgData = await hgRes.json() as any;
-        const usdBrl = parseFloat(hgData?.results?.currencies?.USD?.buy || '0');
-        if (usdBrl) {
-          return res.json({
-            success: true,
-            rates: { USD_BRL: usdBrl, EUR_BRL: null },
-            source: 'HGBrasil',
-            timestamp: new Date().toISOString(),
-          });
-        }
-      } catch (_) {}
-
-      res.status(500).json({
-        success: false,
-        error: error.message,
-        rates: { USD_BRL: 5.20, EUR_BRL: null },
-        source: 'fallback',
-        timestamp: new Date().toISOString(),
-      });
+    } catch (awesomeError) {
+      console.warn('[EXCHANGE_RATE] AwesomeAPI indisponível; tentando fonte alternativa:', awesomeError);
     }
+
+    try {
+      const response = await fetch(
+        'https://api.hgbrasil.com/finance?fields=only_results',
+        { signal: AbortSignal.timeout(4000) },
+      );
+      if (!response.ok) throw new Error(`HGBrasil HTTP ${response.status}`);
+      const data = await response.json() as any;
+      const usdBrl = readPositiveRate(data?.results?.currencies?.USD?.buy);
+      const eurBrl = readPositiveRate(data?.results?.currencies?.EUR?.buy);
+      if (usdBrl === null) throw new Error('HGBrasil returned no valid USD/BRL quote');
+
+      res.setHeader('Cache-Control', 'no-store');
+      return res.json({
+        success: true,
+        rates: { USD_BRL: usdBrl, EUR_BRL: eurBrl },
+        source: 'HGBrasil',
+        timestamp: checkedAt,
+      });
+    } catch (fallbackError) {
+      console.error('[EXCHANGE_RATE] Nenhuma fonte confirmou cotação atual:', fallbackError);
+    }
+
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(503).json({
+      success: false,
+      rates: { USD_BRL: null, EUR_BRL: null },
+      source: null,
+      timestamp: null,
+      checkedAt,
+      message: 'Cotação indisponível: as fontes em tempo real não responderam. Nenhum valor estimado será exibido como atual.',
+    });
   });
 
   // KYC routes
