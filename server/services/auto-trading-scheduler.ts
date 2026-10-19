@@ -835,14 +835,26 @@ export class AutoTradingScheduler {
 
       // 🚀 MODO ALAVANCAGEM: verificar se o mercado geral está excepcional para disparo cirúrgico
       // Roda em paralelo com o ciclo normal — não bloqueia, não adiciona latência às operações normais
-      const leverageConfig = activeConfigs[0] as any;
-      const userEnableLeverage = leverageConfig?.enableLeverage ?? true;
-      if (userEnableLeverage) {
-        this.checkAndExecuteLeverageTrade(operationId).catch(err =>
+      // O caminho de alavancagem é uma estratégia adicional e deve ser opt-in.
+      // Nunca herdar "true" quando o usuário não habilitou explicitamente a opção.
+      const leverageConfig = activeConfigs.find((candidate: any) => {
+        const raw = candidate?.selectedModalities;
+        let modalities: string[] = [];
+        try {
+          const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+          modalities = Array.isArray(parsed) ? parsed.map(String) : (typeof raw === 'string' ? raw.split(',').map((v: string) => v.trim()) : []);
+        } catch {
+          modalities = typeof raw === 'string' ? raw.split(',').map((v: string) => v.trim()) : [];
+        }
+        return (candidate?.enableLeverage === true || candidate?.enableLeverage === 'true') &&
+          modalities.map(normalizeProductionMode).includes('accumulator');
+      }) as any;
+      if (leverageConfig) {
+        this.checkAndExecuteLeverageTrade(operationId, String(leverageConfig.userId)).catch(err =>
           console.error(`⚠️ [LEVERAGE] Erro no ciclo de alavancagem:`, err)
         );
       } else {
-        console.log(`🚀 [LEVERAGE] Desabilitado pelo usuário — pulando ciclo de alavancagem`);
+        console.log(`🚀 [LEVERAGE] Desabilitado: nenhum usuário armado habilitou explicitamente a alavancagem ACCU.`);
       }
 
       // Executar TODAS as análises em paralelo total - sem limitações de burst
@@ -870,7 +882,7 @@ export class AutoTradingScheduler {
   // ─────────────────────────────────────────────────────────────────────────
   // 🚀 MODO ALAVANCAGEM — 1 contrato cirúrgico quando o mercado geral brilha
   // ─────────────────────────────────────────────────────────────────────────
-  private async checkAndExecuteLeverageTrade(operationId: string): Promise<void> {
+  private async checkAndExecuteLeverageTrade(operationId: string, requestedUserId?: string): Promise<void> {
     // 1. Cooldown: não disparar com frequência
     const now = Date.now();
     if (now - this.leverageLastFiredAt < this.LEVERAGE_COOLDOWN_MS) {
@@ -942,9 +954,25 @@ export class AutoTradingScheduler {
     }
 
     // 7. Buscar dados do usuário ativo (primeiro config ativo encontrado)
-    const activeConfigs = await storage.getActiveTradeConfigurations();
+    const activeConfigs = (await storage.getActiveTradeConfigurations()).filter((candidate: any) =>
+      this.armedUserIds.has(String(candidate.userId)) &&
+      (!requestedUserId || String(candidate.userId) === requestedUserId)
+    );
     if (!activeConfigs.length) return;
-    const config = activeConfigs[0];
+    const config = activeConfigs.find((candidate: any) => {
+      let modalities: string[] = [];
+      try {
+        const raw = candidate?.selectedModalities;
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        modalities = Array.isArray(parsed) ? parsed.map(String) : (typeof raw === 'string' ? raw.split(',').map((v: string) => v.trim()) : []);
+      } catch {
+        modalities = typeof candidate?.selectedModalities === 'string'
+          ? candidate.selectedModalities.split(',').map((v: string) => v.trim()) : [];
+      }
+      return (candidate?.enableLeverage === true || candidate?.enableLeverage === 'true') &&
+        modalities.map(normalizeProductionMode).includes('accumulator');
+    });
+    if (!config) return;
     const tokenData = await storage.getUserDerivToken(config.userId);
     if (!tokenData) return;
     const tradeDerivAPI = this.getUserDerivAPI(String(config.userId), (tokenData.accountType as 'demo' | 'real') || 'demo');
@@ -973,11 +1001,19 @@ export class AutoTradingScheduler {
       console.log(`🚀 [LEVERAGE] Saldo em cache indisponível — abortando`);
       return;
     }
-    const leverageStake = Math.min(
+    const calculatedLeverageStake = Math.min(
       this.LEVERAGE_MAX_STAKE,
       Math.min(bankBalance * this.LEVERAGE_MAX_BALANCE_PCT, // nunca arriscar mais de 20% da banca
       Math.max(this.LEVERAGE_MIN_STAKE, Math.round(bankBalance * this.LEVERAGE_STAKE_PCT * 100) / 100))
     );
+    // Se a modalidade ACCU usa stake fixo/manual, não substituir a configuração do usuário
+    // pelo percentual interno da estratégia de alavancagem.
+    const leverageStakeMode = String((config as any).stakeMode || 'ai').toLowerCase();
+    const configuredLeverageStake = Number((config as any).fixedStake ?? 0);
+    const leverageStake = (leverageStakeMode === 'fixed' || leverageStakeMode === 'manual') &&
+      Number.isFinite(configuredLeverageStake) && configuredLeverageStake > 0
+      ? Math.min(this.LEVERAGE_MAX_STAKE, configuredLeverageStake)
+      : calculatedLeverageStake;
     // Proteção: saldo muito baixo para o stake mínimo
     if (leverageStake < this.LEVERAGE_MIN_STAKE) {
       console.log(`🚀 [LEVERAGE] Saldo insuficiente para stake mínimo ($${leverageStake.toFixed(2)} < $${this.LEVERAGE_MIN_STAKE}) — abortando`);
@@ -1013,7 +1049,8 @@ export class AutoTradingScheduler {
         if (parsed && typeof parsed === 'object') {
           const converted: Record<number, number> = {};
           for (const [k, v] of Object.entries(parsed)) {
-            const rateKey = Number(k) / 100;
+            const numericKey = Number(k);
+            const rateKey = numericKey > 0 && numericKey <= 0.05 ? numericKey : numericKey / 100;
             const tickVal = Math.round(Number(v));
             // Aceita positivo (fixo) ou negativo (IA dinâmico com máximo |n|)
             if (rateKey > 0 && rateKey <= 0.05 && ((tickVal >= 1 && tickVal <= 30) || (tickVal >= -30 && tickVal <= -1))) {
@@ -2233,7 +2270,8 @@ export class AutoTradingScheduler {
             if (parsed && typeof parsed === 'object') {
               const converted: Record<number, number> = {};
               for (const [k, v] of Object.entries(parsed)) {
-                const rateKey = Number(k) / 100;
+                const numericKey = Number(k);
+                const rateKey = numericKey > 0 && numericKey <= 0.05 ? numericKey : numericKey / 100;
                 const tickVal = Math.round(Number(v));
                 // Positivo = fixo em N ticks; Negativo = IA dinâmico com máximo |N| ticks
                 if (rateKey > 0 && rateKey <= 0.05 && ((tickVal >= 1 && tickVal <= 30) || (tickVal >= -30 && tickVal <= -1))) {
@@ -3520,7 +3558,7 @@ export class AutoTradingScheduler {
             contractType: contractTypeForMonitor,
             direction: safeDirection,
             amount: tradeParams.amount,
-            duration: tradeParams.duration,
+            duration: resolvedTradeType === 'accumulator' ? (accuTargetTicks ?? 1) : tradeParams.duration,
             status: 'pending',
             aiConsensus: JSON.stringify(aiConsensus),
             isRecoveryMode,
