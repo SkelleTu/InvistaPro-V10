@@ -2048,11 +2048,34 @@ export class AutoTradingScheduler {
             // Atualizar cache
             this.cachedBalance = { value: rb, currency: realBalance.currency, loginid: realBalance.loginid, fetchedAt: Date.now() };
             console.log(`💳 [${operationId}] Saldo REAL Deriv: $${rb} ${realBalance.currency} (conta: ${realBalance.loginid})`);
+            // Preserve the day's opening balance; replacing it with every live balance
+            // erased daily drawdown/P&L and weakened the opening-balance risk guard.
+            const existingDailyPnL = await storage.getDailyPnL(config.userId);
+            const yesterdayDate = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+            const previousDailyPnL = await storage.getDailyPnL(config.userId, yesterdayDate);
+            const existingOpeningBalance = Number(existingDailyPnL?.openingBalance ?? 0);
+            const previousClosingBalance = Number(previousDailyPnL?.currentBalance ?? 0);
+            let openingBalance = existingOpeningBalance;
+            if (!Number.isFinite(openingBalance) || openingBalance <= 0) {
+              openingBalance = previousClosingBalance > 0
+                ? previousClosingBalance
+                : ((tokenData.accountType as string) === 'demo' ? Math.max(10000, rb) : rb);
+            } else if (previousClosingBalance > openingBalance) {
+              // Recover a baseline that older code may have overwritten with a lower live balance.
+              openingBalance = previousClosingBalance;
+            }
+            if ((tokenData.accountType as string) === 'demo' && rb < 10000 && openingBalance < 10000) {
+              // The standard Deriv demo account starts at $10,000; restore that baseline
+              // when previous cycles have already overwritten today's opening balance.
+              openingBalance = 10000;
+            }
+            const dailyPnL = rb - openingBalance;
             await storage.createOrUpdateDailyPnL(config.userId, {
               currentBalance: rb,
-              openingBalance: rb,
+              openingBalance,
+              dailyPnL,
             });
-            console.log(`🔄 [${operationId}] Saldo sincronizado com Deriv: currentBalance=$${rb} | openingBalance=$${rb}`);
+            console.log(`🔄 [${operationId}] Saldo sincronizado com Deriv: currentBalance=${rb} | openingBalance=${openingBalance} | dailyPnL=${dailyPnL.toFixed(2)}`);
           } else {
             console.log(`⚠️ [${operationId}] Saldo da Deriv não disponível — usando saldo do banco`);
           }
