@@ -800,8 +800,11 @@ export class DerivAPIService extends EventEmitter {
       /synthetic|derived/i.test(String(entry?.market || entry?.market_display_name || ''))
     );
 
-    for (let i = 0; i < candidates.length; i += 5) {
-      const batch = candidates.slice(i, i + 5);
+    // A bounded wider batch reduces the number of serial network round-trips
+    // during Play while keeping concurrency below a burst against Deriv.
+    const discoveryBatchSize = 10;
+    for (let i = 0; i < candidates.length; i += discoveryBatchSize) {
+      const batch = candidates.slice(i, i + discoveryBatchSize);
       const scanned = await Promise.all(batch.map(async (entry: any) => {
         const symbol = String(entry.symbol);
         try {
@@ -816,6 +819,7 @@ export class DerivAPIService extends EventEmitter {
         }
       }));
 
+      console.log(`[DERIV_DISCOVERY] scanned=${Math.min(i + batch.length, candidates.length)}/${candidates.length} symbols across ${normalizedModes.length} modalities`);
       for (const {entry, types} of scanned) {
         for (const mode of normalizedModes) {
           const required = requiredTypes.get(mode) ?? [];
