@@ -242,13 +242,18 @@ router.post('/scheduler/:action', isAuthenticated, isTradingAuthorized, asyncErr
       return res.status(409).json({ message: 'Play bloqueado: parada de emergência ativa.', schedulerActive: false });
     }
     console.log(`▶️ [SCHEDULER] Ativando somente a sessão isolada do usuário ${userId}...`);
-    // Remote session first. If local startup fails, roll back the remote arm.
+    // Confirm the remote arm before starting the local runtime. If the remote
+    // request fails or times out, do not block error handling on a second
+    // network round-trip; make a best-effort asynchronous disarm because the
+    // remote request may have completed while its response was delayed.
     try {
       await setUniversalTradingArmed(userId, true);
       await isolatedAutoTradingScheduler.startSchedulerForUser(userId);
     } catch (error) {
       try { await isolatedAutoTradingScheduler.disarmUserTrading(userId); } catch {}
-      try { await setUniversalTradingArmed(userId, false); } catch {}
+      void setUniversalTradingArmed(userId, false).catch((rollbackError) => {
+        console.warn(`[SCHEDULER] Remote disarm rollback could not be confirmed for user=${userId}:`, rollbackError instanceof Error ? rollbackError.message : String(rollbackError));
+      });
       throw error;
     }
     const schedulerActive = isolatedAutoTradingScheduler.getArmedUserIds().includes(userId);
