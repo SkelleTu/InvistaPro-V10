@@ -824,7 +824,12 @@ class UniversalContractMonitor extends EventEmitter {
     console.log('🔌 [MONITOR] Conectando WebSocket dedicado...');
 
     return new Promise((resolve) => {
-      const ws = new WebSocket('wss://ws.derivws.com/websockets/v3?app_id=1089');
+      const configuredAppId = String(process.env.DERIV_APP_ID ?? '').trim();
+      const appId = /^\\d+$/.test(configuredAppId) ? configuredAppId : '1089';
+      if (appId === '1089' && configuredAppId !== '1089') {
+        console.warn('⚠️ [MONITOR] DERIV_APP_ID ausente ou inválido; usando app_id legado 1089 como fallback');
+      }
+      const ws = new WebSocket(`wss://ws.derivws.com/websockets/v3?app_id=${encodeURIComponent(appId)}`);
       this.ws = ws;
 
       const timeout = setTimeout(() => {
