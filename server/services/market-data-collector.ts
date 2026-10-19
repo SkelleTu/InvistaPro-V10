@@ -4,7 +4,7 @@ import { storage } from '../storage.js';
 import { microscopicAnalyzer } from './microscopic-technical-analysis.js';
 import { digitFrequencyAnalyzer } from './digit-frequency-analyzer.js';
 import { supremeAnalyzer } from './supreme-market-analyzer.js';
-import { isAllowedProductionSymbol } from './production-symbol-policy.js';
+import { isAllowedProductionSymbol, normalizeProductionMode, PRODUCTION_MODALITY_CONTRACT_TYPES } from './production-symbol-policy.js';
 
 interface TickBuffer {
   symbol: string;
@@ -33,14 +33,11 @@ export class MarketDataCollector extends EventEmitter {
   // Limite rígido para produção no Render Free. Nunca abrir centenas/milhares de streams.
   private static readonly MAX_STREAM_SYMBOLS = 9;
 
-  // Never subscribe to every Deriv symbol. Runtime discovery selects a small union
-  // of symbols that actually support DIGITDIFF and/or ACCU.
+  // Never subscribe to every Deriv symbol. Runtime discovery selects a small,
+  // coverage-optimized union across every modality exposed by the trading UI.
   private static readonly BLOCKED_SYMBOLS_PATTERN = /\(1s\)|^1HZ|_1S/i;
   private DIGITDIFF_SUPPORTED_SYMBOLS: string[] = [];
-  private supportedSymbolsByMode: Record<'digit_differs' | 'accumulator', string[]> = {
-    digit_differs: [],
-    accumulator: [],
-  };
+  private supportedSymbolsByMode: Record<string, string[]> = {};
   private allDerivSymbols: Map<string, any> = new Map();
   private symbolsRefreshInterval: NodeJS.Timeout | null = null;
   private lastSymbolsUpdate: number = 0;
@@ -115,13 +112,8 @@ export class MarketDataCollector extends EventEmitter {
   }
 
   getSupportedSymbolsByTradeMode(mode: string): string[] {
-    const normalized = String(mode ?? '').trim().toLowerCase().replace(/[-\s]/g, '_');
-    const key = ['digit_diff', 'digitdiff', 'digit_differs'].includes(normalized)
-      ? 'digit_differs'
-      : ['accu', 'accumulator'].includes(normalized)
-        ? 'accumulator'
-        : null;
-    return key ? [...this.supportedSymbolsByMode[key]] : [];
+    const key = normalizeProductionMode(mode);
+    return [...(this.supportedSymbolsByMode[key] ?? [])];
   }
 
   /**
@@ -282,40 +274,71 @@ export class MarketDataCollector extends EventEmitter {
       console.log('[DISCOVERY] Consultando ativos sintéticos disponíveis por modalidade...');
       if (!this.derivAPI.getIsConnected()) await this.derivAPI.connectPublic('MARKET_MODE_DISCOVERY');
       const allSymbols = await this.derivAPI.getActiveSymbolsCached();
-      const digit = await this.derivAPI.getAvailableSymbolsByTradeMode('digit_differs');
-      const accumulators = await this.derivAPI.getAvailableSymbolsByTradeMode('accumulator');
-      const digitSymbols = digit.map((entry: any) => String(entry.symbol));
-      const accuSymbols = accumulators.map((entry: any) => String(entry.symbol));
-      this.supportedSymbolsByMode = {
-        digit_differs: [...new Set(digitSymbols)],
-        accumulator: [...new Set(accuSymbols)],
-      };
+      const modes = Object.keys(PRODUCTION_MODALITY_CONTRACT_TYPES);
+      const availableByMode = await this.derivAPI.getAvailableSymbolsByTradeModes(modes);
+      this.supportedSymbolsByMode = Object.fromEntries(
+        modes.map((mode) => [
+          mode,
+          [...new Set((availableByMode[mode] ?? []).map((entry: any) => String(entry.symbol)))],
+        ])
+      );
 
-      // Keep the stream budget small, while guaranteeing representation from each
-      // modality when Deriv has eligible symbols for both.
-      const preferred = [
-        ...digitSymbols.slice(0, 4),
-        ...accuSymbols.slice(0, 4),
-      ];
-      const candidates = [...new Set([
-        ...preferred,
-        ...digitSymbols,
-        ...accuSymbols,
-      ])].filter((symbol) =>
-        isAllowedProductionSymbol(symbol) && !MarketDataCollector.BLOCKED_SYMBOLS_PATTERN.test(symbol)
-      ).slice(0, MarketDataCollector.MAX_STREAM_SYMBOLS);
+      // Pick a small set of live streams that covers as many available modalities
+      // as possible. This keeps Render Free within its stream budget without
+      // hard-coding the collector to only Digit Differs and Accumulators.
+      const coverageBySymbol = new Map<string, Set<string>>();
+      for (const mode of modes) {
+        for (const entry of availableByMode[mode] ?? []) {
+          const symbol = String(entry.symbol);
+          if (!isAllowedProductionSymbol(symbol) || MarketDataCollector.BLOCKED_SYMBOLS_PATTERN.test(symbol)) continue;
+          if (!coverageBySymbol.has(symbol)) coverageBySymbol.set(symbol, new Set<string>());
+          coverageBySymbol.get(symbol)!.add(mode);
+        }
+      }
+
+      const selected: string[] = [];
+      const uncovered = new Set(modes.filter((mode) => (availableByMode[mode] ?? []).length > 0));
+      while (selected.length < MarketDataCollector.MAX_STREAM_SYMBOLS && uncovered.size > 0) {
+        let bestSymbol: string | null = null;
+        let bestGain = 0;
+        for (const [symbol, coverage] of coverageBySymbol) {
+          if (selected.includes(symbol)) continue;
+          const gain = [...coverage].filter((mode) => uncovered.has(mode)).length;
+          if (gain > bestGain) {
+            bestSymbol = symbol;
+            bestGain = gain;
+          }
+        }
+        if (!bestSymbol || bestGain === 0) break;
+        selected.push(bestSymbol);
+        for (const mode of coverageBySymbol.get(bestSymbol) ?? []) uncovered.delete(mode);
+      }
+
+      const remaining = [...coverageBySymbol.entries()]
+        .filter(([symbol]) => !selected.includes(symbol))
+        .sort((a, b) => b[1].size - a[1].size)
+        .map(([symbol]) => symbol);
+      for (const symbol of remaining) {
+        if (selected.length >= MarketDataCollector.MAX_STREAM_SYMBOLS) break;
+        selected.push(symbol);
+      }
+      const candidates = selected;
 
       if (candidates.length === 0) {
         this.isDiscoveryComplete = true;
         this.DIGITDIFF_SUPPORTED_SYMBOLS = [];
-        this.supportedSymbolsByMode = { digit_differs: [], accumulator: [] };
-        throw new Error('Deriv não retornou símbolos sintéticos compatíveis com DIGITDIFF ou ACCU; coleta não iniciada.');
+        this.supportedSymbolsByMode = {};
+        throw new Error('Deriv não retornou símbolos sintéticos compatíveis com as modalidades habilitadas; coleta não iniciada.');
       }
       this.DIGITDIFF_SUPPORTED_SYMBOLS = candidates;
       this.allDerivSymbols = new Map(allSymbols.map((entry: any) => [entry.symbol, entry]));
       this.lastSymbolsUpdate = Date.now();
       this.isDiscoveryComplete = true;
-      console.log(`[DISCOVERY] ${candidates.length} símbolos elegíveis selecionados; DIGITDIFF=${digitSymbols.length}, ACCU=${accuSymbols.length}`);
+      const modeSummary = modes.map((mode) => `${mode}=${(availableByMode[mode] ?? []).length}`).join(', ');
+      console.log(`[DISCOVERY] ${candidates.length} streams escolhidos por cobertura de modalidades: ${modeSummary}`);
+      if (uncovered.size > 0) {
+        console.warn(`[DISCOVERY] Modalidades sem cobertura nos ${candidates.length} streams limitados: ${[...uncovered].join(', ')}`);
+      }
       return [...candidates];
     } catch (error) {
       console.error('[DISCOVERY] Não foi possível confirmar símbolos por modalidade:', error);
@@ -345,7 +368,7 @@ export class MarketDataCollector extends EventEmitter {
         .slice(0, MarketDataCollector.MAX_STREAM_SYMBOLS);
 
       if (supportedSymbols.length === 0) {
-        throw new Error('Nenhum símbolo elegível foi confirmado pela Deriv para DIGITDIFF/ACCU; coleta bloqueada.');
+        throw new Error('Nenhum símbolo elegível foi confirmado pela Deriv para as modalidades habilitadas; coleta bloqueada.');
       }
       this.DIGITDIFF_SUPPORTED_SYMBOLS = supportedSymbols;
       this.tickBuffers.clear();

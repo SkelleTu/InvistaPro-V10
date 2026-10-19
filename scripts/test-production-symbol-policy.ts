@@ -7,6 +7,8 @@ import {
   isValidProductionStake,
   isBlockedOneSecondSymbol,
   contractTypesForProductionMode,
+  normalizeProductionMode,
+  PRODUCTION_MODALITY_CONTRACT_TYPES,
 } from "../server/services/production-symbol-policy";
 
 const allowed = ["BOOM500", "BOOM1000", "CRASH500", "CRASH1000", "R_10", "R_25", "R_50", "R_75", "R_100", "BOOM300", "CRASH300", "JD10", "RDBULL"];
@@ -25,24 +27,54 @@ for (const symbol of ["1HZ10V", "Volatility 100 (1s) Index", "R_50_1S"]) {
 for (const symbol of ["R_10", "BOOM500", "JD10"]) {
   assert.equal(isBlockedOneSecondSymbol(symbol), false, `Regular symbol must not be treated as 1s: ${symbol}`);
 }
-assert.deepEqual(contractTypesForProductionMode("digit_differs"), ["DIGITDIFF"]);
-assert.deepEqual(contractTypesForProductionMode("digit-diff"), ["DIGITDIFF"]);
-assert.deepEqual(contractTypesForProductionMode("accumulator"), ["ACCU"]);
-assert.deepEqual(contractTypesForProductionMode("accu"), ["ACCU"]);
-assert.deepEqual(contractTypesForProductionMode("unsupported-mode"), []);
 
-for (const type of ["ACCU", "DIGITDIFF"]) {
-  assert.equal(isAllowedProductionContractType(type), true, `Expected allowed contract type: ${type}`);
+const expectedMappings: Record<string, string> = {
+  digit_differs: "DIGITDIFF",
+  digit_matches: "DIGITMATCH",
+  digit_even: "DIGITEVEN",
+  digit_odd: "DIGITODD",
+  digit_over: "DIGITOVER",
+  digit_under: "DIGITUNDER",
+  rise: "CALL",
+  fall: "PUT",
+  higher: "CALLE",
+  lower: "PUTE",
+  ends_between: "EXPIRYRANGE",
+  ends_outside: "EXPIRYMISS",
+  stays_between: "RANGE",
+  goes_outside: "UPORDOWN",
+  touch: "ONETOUCH",
+  no_touch: "NOTOUCH",
+  multiplier_up: "MULTUP",
+  multiplier_down: "MULTDOWN",
+  accumulator: "ACCU",
+  turbo_up: "TURBOSLONG",
+  turbo_down: "TURBOSSHORT",
+  vanilla_call: "VANILLALONGCALL",
+  vanilla_put: "VANILLALONGPUT",
+  lookback_high_close: "LBFLOATPUT",
+  lookback_close_low: "LBFLOATCALL",
+  lookback_high_low: "LBHIGHLOW",
+};
+
+assert.deepEqual(PRODUCTION_MODALITY_CONTRACT_TYPES, expectedMappings);
+for (const [mode, contractType] of Object.entries(expectedMappings)) {
+  assert.deepEqual(contractTypesForProductionMode(mode), [contractType], `Mapping failed for ${mode}`);
+  assert.equal(isAllowedProductionContractType(contractType), true, `Expected allowed contract type: ${contractType}`);
 }
-for (const type of ["DIGITMATCH", "DIGITEVEN", "DIGITODD", "DIGITOVER", "DIGITUNDER"]) {
-  assert.equal(isAllowedProductionContractType(type), false, `Expected denied contract type: ${type}`);
+assert.deepEqual(contractTypesForProductionMode("digit-diff"), ["DIGITDIFF"]);
+assert.deepEqual(contractTypesForProductionMode("accu"), ["ACCU"]);
+assert.equal(normalizeProductionMode("MULTUP"), "multiplier_up");
+assert.equal(normalizeProductionMode("CALL"), "rise");
+assert.deepEqual(contractTypesForProductionMode("unsupported-mode"), []);
+for (const type of ["UNKNOWN", "", null, undefined]) {
+  assert.equal(isAllowedProductionContractType(type), false, `Unknown contract must fail closed: ${String(type)}`);
 }
-for (const type of ["CALL", "PUT", "MULTUP", "MULTDOWN", "ONETOUCH", "LBFLOATCALL", ""]) {
-  assert.equal(isAllowedProductionContractType(type), false, `Expected denied contract type: ${type}`);
-}
+
 assert.equal(minimumStakeForContract("DIGITDIFF"), 0.35);
 assert.equal(minimumStakeForContract("ACCU"), 1);
-for (const type of ["CALL", "PUT", "MULTUP", "UNKNOWN", "", null, undefined]) {
+assert.equal(minimumStakeForContract("MULTUP"), 1);
+for (const type of ["UNKNOWN", "", null, undefined]) {
   assert.throws(
     () => minimumStakeForContract(type),
     /Blocked Deriv contract type/,
@@ -54,12 +86,13 @@ assert.equal(isValidProductionStake("DIGITDIFF", 0.35), true);
 assert.equal(isValidProductionStake("DIGITDIFF", 0.34), false);
 assert.equal(isValidProductionStake("ACCU", 1), true);
 assert.equal(isValidProductionStake("ACCU", 0.99), false);
+assert.equal(isValidProductionStake("CALL", 0.35), true);
+assert.equal(isValidProductionStake("CALL", 0.34), false);
+assert.equal(isValidProductionStake("MULTUP", 1), true);
+assert.equal(isValidProductionStake("MULTUP", 0.99), false);
 for (const amount of [NaN, Infinity, -Infinity, -1, 0, "1", null, undefined]) {
   assert.equal(isValidProductionStake("DIGITDIFF", amount), false, `Invalid stake must fail closed: ${String(amount)}`);
 }
-assert.equal(isValidProductionStake("CALL", 10), false);
-for (const type of ["DIGITMATCH", "DIGITEVEN", "DIGITODD", "DIGITOVER", "DIGITUNDER", "CALL", "PUT", "MULTUP"]) {
-  assert.equal(isValidProductionStake(type, 100), false, `Disallowed contract must fail closed: ${type}`);
-}
+assert.equal(isValidProductionStake("UNKNOWN", 100), false);
 
-console.log(`Production policy passed: ${allowed.length} dynamic Deriv symbols, ${aliases.length} aliases, ${denied.length} invalid/1s symbols blocked, modality-to-contract mapping, ACCU/DIGITDIFF-only contract allowlist, and fail-closed minimum stakes.`);
+console.log(`Production policy passed: ${allowed.length} Deriv symbols, ${aliases.length} aliases, ${denied.length} invalid/1s symbols blocked, and all ${Object.keys(expectedMappings).length} platform modalities mapped to live-validated Deriv contracts.`);

@@ -4,7 +4,7 @@ import { errorTracker } from './error-tracker';
 import { dualStorage as storage } from '../storage-dual';
 import { resilienceSupervisor } from './resilience-supervisor';
 import { connectDerivAccount, waitForDerivConnectionStartSlot, type DerivAccountContext } from './deriv-account-gateway';
-import { isAllowedProductionSymbol, isAllowedProductionContractType, minimumStakeForContract, isValidProductionStake, isBlockedOneSecondSymbol, contractTypesForProductionMode } from './production-symbol-policy';
+import { isAllowedProductionSymbol, isAllowedProductionContractType, minimumStakeForContract, isValidProductionStake, isBlockedOneSecondSymbol, contractTypesForProductionMode, normalizeProductionMode, PRODUCTION_MODALITY_CONTRACT_TYPES } from './production-symbol-policy';
 
 // ☠️ PROTOCOLO DE EXECUÇÃO IMEDIATA — tolerância zero para ativos criminosos
 // Qualquer símbolo que viole as regras é executado aqui: blacklistado, logado e morto.
@@ -777,6 +777,63 @@ export class DerivAPIService extends EventEmitter {
     return supported;
   }
 
+  /**
+   * Discover all requested modality capabilities with one contracts_for request
+   * per eligible symbol, avoiding N repeated scans for N modality names.
+   */
+  async getAvailableSymbolsByTradeModes(modes: string[]): Promise<Record<string, Array<{symbol: string; display_name: string; market: string}>>> {
+    const normalizedModes = [...new Set(modes.map(normalizeProductionMode))]
+      .filter((mode) => Boolean(PRODUCTION_MODALITY_CONTRACT_TYPES[mode]));
+    const result: Record<string, Array<{symbol: string; display_name: string; market: string}>> = {};
+    const requiredTypes = new Map<string, string[]>();
+    for (const mode of normalizedModes) {
+      result[mode] = [];
+      requiredTypes.set(mode, contractTypesForProductionMode(mode));
+    }
+    if (normalizedModes.length === 0) return result;
+
+    if (!this.isConnected) await this.connectPublic('GET_SYMBOLS_ALL_MODALITIES');
+    const symbols = await this.getActiveSymbolsCached();
+    const candidates = symbols.filter((entry: any) =>
+      isAllowedProductionSymbol(entry?.symbol) &&
+      !isBlockedOneSecondSymbol(entry?.symbol) &&
+      /synthetic|derived/i.test(String(entry?.market || entry?.market_display_name || ''))
+    );
+
+    for (let i = 0; i < candidates.length; i += 5) {
+      const batch = candidates.slice(i, i + 5);
+      const scanned = await Promise.all(batch.map(async (entry: any) => {
+        const symbol = String(entry.symbol);
+        try {
+          const contracts = await this.getContractsFor(symbol);
+          const types = new Set(contracts.map((contract: any) =>
+            String(contract?.contract_type ?? '').trim().toUpperCase()
+          ));
+          return { entry, types };
+        } catch (error) {
+          console.warn(`[DERIV_DISCOVERY] ${symbol}/all-modalities: ${error instanceof Error ? error.message : String(error)}`);
+          return { entry, types: new Set<string>() };
+        }
+      }));
+
+      for (const {entry, types} of scanned) {
+        for (const mode of normalizedModes) {
+          const required = requiredTypes.get(mode) ?? [];
+          if (required.some((type) => types.has(type))) {
+            result[mode].push({
+              symbol: String(entry.symbol),
+              display_name: String(entry.display_name || entry.symbol),
+              market: String(entry.market || 'synthetic_index'),
+            });
+          }
+        }
+      }
+    }
+
+    console.log(`[DERIV_DISCOVERY] modalidades=${normalizedModes.length}; ${candidates.length} ativos consultados; ${normalizedModes.map((mode) => `${mode}:${result[mode].length}`).join(', ')}`);
+    return result;
+  }
+
   // Helper method for generic requests
   private async wsRequest(payload: any): Promise<any> {
     return new Promise((resolve, reject) => {
@@ -890,8 +947,22 @@ export class DerivAPIService extends EventEmitter {
   }
 
   async buyCallPutContract(symbol: string, direction: 'up' | 'down', duration: number, amount: number): Promise<DerivContractInfo | null> {
-    console.warn(`[DERIV_POLICY] CALL/PUT contracts are disabled in production. Rejected ${direction} on ${symbol}.`);
-    return null;
+    const contractType = direction === 'up' ? 'CALL' : 'PUT';
+    if (!isAllowedProductionSymbol(symbol) || isBlockedOneSecondSymbol(symbol)) {
+      console.warn(`[DERIV_POLICY] ${contractType} blocked for invalid or prohibited symbol: ${symbol}`);
+      return null;
+    }
+    // Rise/Fall are tick-duration contracts. Reuse the same proposal -> buy ->
+    // contract confirmation path as the other modalities instead of returning null.
+    return this.buyFlexibleContract({
+      contract_type: contractType,
+      symbol,
+      amount,
+      duration: Math.max(1, Math.floor(duration)),
+      duration_unit: 't',
+      currency: 'USD',
+      basis: 'stake',
+    });
   }
 
   async buyDigitDifferContract(params: DigitDifferContract): Promise<DerivContractInfo | null> {
@@ -1050,7 +1121,7 @@ export class DerivAPIService extends EventEmitter {
       const proposalMessage = {
         proposal: 1,
         contract_type: 'DIGITDIFF',
-        symbol: normalizedSymbol,
+        underlying_symbol: normalizedSymbol,
         duration: params.duration,
         duration_unit: 't',
         barrier: params.barrier,
@@ -1107,7 +1178,7 @@ export class DerivAPIService extends EventEmitter {
     const proposalMsg: any = {
       proposal: 1,
       contract_type: params.contract_type,
-      symbol: normalizedSymbol,
+      underlying_symbol: normalizedSymbol,
       duration: params.duration,
       duration_unit: 't',
       currency,
@@ -1188,11 +1259,53 @@ export class DerivAPIService extends EventEmitter {
    * Retorna o multiplicador (ex: 8.5 significa que $1 stake retorna $8.50 total).
    * Usado para calibrar o tamanho do burst: burst seguro = floor(payout) - 1
    */
-  async getDigitMatchPayoutMultiplier(_symbol: string, _duration: number, _amount: number, _barrier: string): Promise<number | null> {
-    // DIGITMATCH is outside the explicitly approved production contract set.
-    // Keep the method for compatibility, but never request a proposal for it.
-    console.warn('[DERIV_POLICY] DIGITMATCH payout query blocked by production contract allowlist.');
-    return null;
+  async getDigitMatchPayoutMultiplier(symbol: string, duration: number, amount: number, barrier: string): Promise<number | null> {
+    if (!isAllowedProductionSymbol(symbol) || isBlockedOneSecondSymbol(symbol) ||
+        !isValidProductionStake('DIGITMATCH', amount)) {
+      console.warn('[DERIV_POLICY] DIGITMATCH payout query blocked by symbol/stake policy.');
+      return null;
+    }
+    this.requireAuthenticatedAccountSession('proposal');
+    const available = await this.getContractsFor(symbol);
+    if (!available.some((contract: any) => String(contract?.contract_type ?? '').toUpperCase() === 'DIGITMATCH')) {
+      console.warn(`[DERIV_POLICY] DIGITMATCH unavailable for ${symbol}; payout query skipped.`);
+      return null;
+    }
+
+    const reqId = this.generateRequestId();
+    return new Promise((resolve) => {
+      const handler = (message: any) => {
+        if (message.req_id !== reqId) return;
+        this.removeListener('message', handler);
+        clearTimeout(timer);
+        const proposal = message.proposal;
+        const askPrice = Number(proposal?.ask_price);
+        const payout = Number(proposal?.payout);
+        if (proposal && Number.isFinite(askPrice) && askPrice > 0 && Number.isFinite(payout) && payout > 0) {
+          resolve(payout / askPrice);
+        } else {
+          console.warn('[DERIV_API] DIGITMATCH payout proposal rejected:', message.error?.message || message.error || 'invalid proposal response');
+          resolve(null);
+        }
+      };
+      const timer = setTimeout(() => {
+        this.removeListener('message', handler);
+        resolve(null);
+      }, 10000);
+      this.on('message', handler);
+      this.sendMessage({
+        proposal: 1,
+        contract_type: 'DIGITMATCH',
+        underlying_symbol: symbol,
+        duration: Math.max(1, Math.floor(duration)),
+        duration_unit: 't',
+        barrier,
+        currency: 'USD',
+        amount,
+        basis: 'stake',
+        req_id: reqId,
+      });
+    });
   }
 
   /**
@@ -1297,7 +1410,7 @@ export class DerivAPIService extends EventEmitter {
     const proposalMsg: any = {
       proposal: 1,
       contract_type: params.contract_type,
-      symbol: params.symbol,
+      underlying_symbol: params.symbol,
       currency,
       req_id: reqProposalId,
     };

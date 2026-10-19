@@ -18,7 +18,7 @@ import { analyzeCrashBoomSpike } from './crash-boom-spike-engine';
 import { setSignal } from './signal-store';
 import { classifyAsset, getGateThreshold } from '../utils/asset-classifier';
 import { consensusCache } from './consensus-cache';
-import { isAllowedProductionSymbol, isAllowedProductionContractType } from './production-symbol-policy';
+import { isAllowedProductionSymbol, isAllowedProductionContractType, PRODUCTION_MODALITY_CONTRACT_TYPES, contractTypesForProductionMode, normalizeProductionMode } from './production-symbol-policy';
 
 function derivToMT5Name(derivSymbol: string): string | null {
   const map: Record<string, string> = {
@@ -119,28 +119,31 @@ export class AutoTradingScheduler {
       const requested = new Set<string>();
       for (const config of userConfigs) {
         const modalities = this.parseConfiguredModalities(config);
-        if (modalities.includes('__auto__') || modalities.length === 0) {
-          requested.add('digit_differs');
-          requested.add('accumulator');
-        } else {
-          for (const modality of modalities) {
-            const normalized = modality.toLowerCase();
-            if (['digit_diff', 'digitdiff', 'digit_differs'].includes(normalized)) requested.add('digit_differs');
-            if (['accumulator', 'accu'].includes(normalized)) requested.add('accumulator');
-          }
+        if (modalities.includes('__auto__')) {
+          for (const mode of Object.keys(PRODUCTION_MODALITY_CONTRACT_TYPES)) requested.add(mode);
+          continue;
         }
+        for (const modality of modalities) {
+          const normalized = normalizeProductionMode(modality);
+          if (PRODUCTION_MODALITY_CONTRACT_TYPES[normalized]) requested.add(normalized);
+        }
+      }
+      if (requested.size === 0) {
+        throw new Error('Play bloqueado: nenhuma modalidade válida foi selecionada na configuração ativa.');
       }
 
       const symbols = marketDataCollector.getSupportedSymbols().filter(isAllowedProductionSymbol);
       const checks = await Promise.all(symbols.map(async (symbol) => {
         const types = await this.getLiveProductionContractTypes(api, userId, accountType, symbol);
-        const modes: string[] = [];
-        if (requested.has('digit_differs') && types.has('DIGITDIFF')) modes.push('digit_differs');
-        if (requested.has('accumulator') && types.has('ACCU')) modes.push('accumulator');
+        const modes = [...requested].filter((mode) =>
+          contractTypesForProductionMode(mode).some((contractType) => types.has(contractType))
+        );
         return { symbol, types, modes };
       }));
       const compatibleSymbols = checks.filter((check) => check.modes.length > 0).map((check) => check.symbol);
-      const availableModalities = [...requested].filter((mode) => checks.some((check) => check.modes.includes(mode)));
+      const availableModalities = [...requested].filter((mode) =>
+        checks.some((check) => contractTypesForProductionMode(mode).some((contractType) => check.types.has(contractType)))
+      );
       const unavailableModalities = [...requested].filter((mode) => !availableModalities.includes(mode));
       this.lastContractCapabilityStatus = {
         userId,
@@ -2246,6 +2249,11 @@ export class AutoTradingScheduler {
         // Escolher modalidade por rotação: pega baseado na hora atual para distribuir
         const DIGIT_TYPES: Record<string, string> = {
           'digit_differs': 'DIGITDIFF',
+          'digit_matches': 'DIGITMATCH',
+          'digit_even': 'DIGITEVEN',
+          'digit_odd': 'DIGITODD',
+          'digit_over': 'DIGITOVER',
+          'digit_under': 'DIGITUNDER',
         };
         // 'rise'/'fall' → CALL/PUT (contrato de ticks simples, sem barreira)
         // 'higher'/'lower' → CALLE/PUTE (contrato com barreira — preço termina acima/abaixo do barrier)
@@ -2281,22 +2289,19 @@ export class AutoTradingScheduler {
         };
 
         // Only modalities returned by Deriv's live contracts_for API may be selected.
-        const ALL_SUPPORTED = new Set(['digit_differs', 'accumulator']);
+        const ALL_SUPPORTED = new Set(Object.keys(PRODUCTION_MODALITY_CONTRACT_TYPES));
         const liveContractTypes = await this.getLiveProductionContractTypes(
           tradeDerivAPI,
           String(config.userId),
           (tokenData.accountType as 'demo' | 'real') || 'demo',
           selectedSymbol
         );
-        const symbolCompatible = new Set<string>();
-        if (liveContractTypes.has('DIGITDIFF')) symbolCompatible.add('digit_differs');
-        if (liveContractTypes.has('ACCU')) symbolCompatible.add('accumulator');
-        const canonicalModalities = activeModalities.map((modality: string) => {
-          const normalized = String(modality).trim().toLowerCase();
-          if (['digit_diff', 'digitdiff', 'digit_differs'].includes(normalized)) return 'digit_differs';
-          if (['accumulator', 'accu'].includes(normalized)) return 'accumulator';
-          return normalized;
-        });
+        const symbolCompatible = new Set<string>(
+          Object.entries(PRODUCTION_MODALITY_CONTRACT_TYPES)
+            .filter(([, contractType]) => liveContractTypes.has(contractType))
+            .map(([modality]) => modality)
+        );
+        const canonicalModalities = activeModalities.map((modality: string) => normalizeProductionMode(modality));
 
         // 🤖 MODO AUTOMÁTICO: usar todas as modalidades compatíveis com o símbolo
         // A IA (selectModalityByMarketFit) escolhe a melhor para cada ciclo.
@@ -2354,7 +2359,7 @@ export class AutoTradingScheduler {
         const supremeAnalysis = supremeAnalyzer.getLatestAnalysis(selectedSymbol);
 
         if (supremeAnalysis && supremeAnalysis.adaptiveParams && supremeAnalysis.adaptiveParams.modalityScore > 30) {
-          const recommended = supremeAnalysis.adaptiveParams.recommendedModality;
+          const recommended = normalizeProductionMode(supremeAnalysis.adaptiveParams.recommendedModality);
           if (compatibleModalities.includes(recommended)) {
             selectedModality = recommended;
             console.log(`🧠 [${operationId}] Modalidade pelo Motor Supremo: ${selectedModality} (score=${supremeAnalysis.adaptiveParams.modalityScore.toFixed(0)}% | regime=${supremeAnalysis.regime} | hurst=${supremeAnalysis.statistics.hurstExponent.toFixed(2)} | entropy=${supremeAnalysis.statistics.shannonEntropy.toFixed(2)} | opp=${supremeAnalysis.opportunityScore.toFixed(0)}%)`);
