@@ -1058,7 +1058,7 @@ export class AutoTradingScheduler {
           await storage.createTradeOperation({
             userId: config.userId,
             symbol: best.symbol,
-            direction: 'accumulator',
+            direction: 'up',
             contractType: 'ACCU',
             tradeType: 'accumulator',
             amount: leverageStake,
@@ -2048,11 +2048,34 @@ export class AutoTradingScheduler {
             // Atualizar cache
             this.cachedBalance = { value: rb, currency: realBalance.currency, loginid: realBalance.loginid, fetchedAt: Date.now() };
             console.log(`💳 [${operationId}] Saldo REAL Deriv: $${rb} ${realBalance.currency} (conta: ${realBalance.loginid})`);
+            // Preserve the day's opening balance; replacing it with every live balance
+            // erased daily drawdown/P&L and weakened the opening-balance risk guard.
+            const existingDailyPnL = await storage.getDailyPnL(config.userId);
+            const yesterdayDate = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+            const previousDailyPnL = await storage.getDailyPnL(config.userId, yesterdayDate);
+            const existingOpeningBalance = Number(existingDailyPnL?.openingBalance ?? 0);
+            const previousClosingBalance = Number(previousDailyPnL?.currentBalance ?? 0);
+            let openingBalance = existingOpeningBalance;
+            if (!Number.isFinite(openingBalance) || openingBalance <= 0) {
+              openingBalance = previousClosingBalance > 0
+                ? previousClosingBalance
+                : ((tokenData.accountType as string) === 'demo' ? Math.max(10000, rb) : rb);
+            } else if (previousClosingBalance > openingBalance) {
+              // Recover a baseline that older code may have overwritten with a lower live balance.
+              openingBalance = previousClosingBalance;
+            }
+            if ((tokenData.accountType as string) === 'demo' && rb < 10000 && openingBalance < 10000) {
+              // The standard Deriv demo account starts at $10,000; restore that baseline
+              // when previous cycles have already overwritten today's opening balance.
+              openingBalance = 10000;
+            }
+            const dailyPnL = rb - openingBalance;
             await storage.createOrUpdateDailyPnL(config.userId, {
               currentBalance: rb,
-              openingBalance: rb,
+              openingBalance,
+              dailyPnL,
             });
-            console.log(`🔄 [${operationId}] Saldo sincronizado com Deriv: currentBalance=$${rb} | openingBalance=$${rb}`);
+            console.log(`🔄 [${operationId}] Saldo sincronizado com Deriv: currentBalance=${rb} | openingBalance=${openingBalance} | dailyPnL=${dailyPnL.toFixed(2)}`);
           } else {
             console.log(`⚠️ [${operationId}] Saldo da Deriv não disponível — usando saldo do banco`);
           }
@@ -3485,6 +3508,30 @@ export class AutoTradingScheduler {
           LOOKBACK_TYPES[selectedModality] ||
           'DIGITDIFF'
         );
+
+        // Persist the Deriv contract before starting monitors or dependent modules.
+        // ACCU contracts can settle quickly, so the close event must always find its DB row.
+        try {
+          await storage.createTradeOperation({
+            userId: config.userId,
+            derivContractId: String(contract.contract_id),
+            symbol: selectedSymbol,
+            tradeType: resolvedTradeType,
+            contractType: contractTypeForMonitor,
+            direction: safeDirection,
+            amount: tradeParams.amount,
+            duration: tradeParams.duration,
+            status: 'pending',
+            aiConsensus: JSON.stringify(aiConsensus),
+            isRecoveryMode,
+            recoveryMultiplier,
+            operationMode: this.getCurrentOperationLabel(config.userId, config.mode)
+          });
+          console.log(`💾 [${operationId}] Operação ${contract.contract_id} persistida antes do monitor/módulos.`);
+        } catch (persistErr: any) {
+          console.error(`❌ [${operationId}] CRÍTICO: contrato ${contract.contract_id} abriu, mas a persistência falhou; monitoramento seguirá:`, persistErr?.message || persistErr);
+        }
+
         try {
           contractMonitor.setToken(tokenData.token);
           await contractMonitor.startMonitoring({
@@ -3501,33 +3548,6 @@ export class AutoTradingScheduler {
             ...(resolvedTradeType === 'accumulator' && accuTargetTicks !== undefined && { targetTicks: accuTargetTicks }),
           });
           console.log(`🔭 [MONITOR] Iniciado para contrato ${contract.contract_id} (${contractTypeForMonitor}) em ${selectedSymbol}`);
-
-          // 🔥 MÓDULOS DE CÓPIA SIMULTÂNEA — disparar em paralelo, sem bloquear o fluxo principal
-          try {
-            import('./module-executor').then(({ executeModulesTrade, recordModuleExecution }) => {
-              const moduleParams = {
-                userId: config.userId,
-                modality: selectedModality,
-                contractType: contractTypeForMonitor,
-                symbol: selectedSymbol,
-                aiStake: tradeParams.amount,
-                duration: tradeParams.duration,
-                durationUnit: (tradeParams as any).duration_unit || 't',
-                barrier: tradeParams.barrier,
-                growthRate: (tradeParams as any).growth_rate,
-              };
-              executeModulesTrade(moduleParams).then(result => {
-                if (result.totalModules > 0) {
-                  console.log(`🔥 [MÓDULOS] ${selectedModality} | ${result.succeeded}/${result.totalModules} módulos executados | ${result.executionDurationMs}ms`);
-                  recordModuleExecution(config.userId, selectedModality, result);
-                }
-              }).catch(e => {
-                console.warn(`⚠️ [MÓDULOS] Erro ao executar módulos para ${selectedModality}:`, e?.message);
-              });
-            });
-          } catch (modErr: any) {
-            console.warn(`⚠️ [MÓDULOS] Falha ao importar executor:`, modErr?.message);
-          }
 
           // 🧠 REGISTRAR CONTEXTO DE APRENDIZADO: captura o que cada modelo previu
           try {
@@ -3593,22 +3613,33 @@ export class AutoTradingScheduler {
           console.warn(`⚠️ [MONITOR] Falha ao iniciar monitoramento (trade executado normalmente): ${monitorErr}`);
         }
 
-        // Salvar operação no banco com informações de recuperação
-        await storage.createTradeOperation({
-          userId: config.userId,
-          derivContractId: String(contract.contract_id),
-          symbol: selectedSymbol,
-          tradeType: resolvedTradeType,
-          contractType: contractTypeForMonitor,
-          direction: safeDirection,
-          amount: tradeParams.amount,
-          duration: tradeParams.duration,
-          status: 'pending',
-          aiConsensus: JSON.stringify(aiConsensus),
-          isRecoveryMode,
-          recoveryMultiplier,
-          operationMode: this.getCurrentOperationLabel(config.userId, config.mode)
-        });
+        // Replicate the already-confirmed primary trade independently of monitor startup.
+        // A monitor exception must not silently suppress configured module executions.
+        try {
+          import('./module-executor').then(({ executeModulesTrade, recordModuleExecution }) => {
+            const moduleParams = {
+              userId: config.userId,
+              modality: selectedModality,
+              contractType: contractTypeForMonitor,
+              symbol: selectedSymbol,
+              aiStake: tradeParams.amount,
+              duration: tradeParams.duration,
+              durationUnit: (tradeParams as any).duration_unit || 't',
+              barrier: tradeParams.barrier,
+              growthRate: (tradeParams as any).growth_rate,
+            };
+            executeModulesTrade(moduleParams).then(result => {
+              if (result.totalModules > 0) {
+                console.log(`🔥 [MÓDULOS] ${selectedModality} | ${result.succeeded}/${result.totalModules} módulos executados | ${result.executionDurationMs}ms`);
+                recordModuleExecution(config.userId, selectedModality, result);
+              }
+            }).catch(e => {
+              console.warn(`⚠️ [MÓDULOS] Erro ao executar módulos para ${selectedModality}:`, e?.message);
+            });
+          });
+        } catch (modErr: any) {
+          console.warn(`⚠️ [MÓDULOS] Falha ao importar executor:`, modErr?.message);
+        }
 
         // 🎯 Incrementar contador PERSISTENTE de operações conservadoras (só para modos de produção)
         if (config.mode.includes('production')) {
@@ -3886,7 +3917,11 @@ export class AutoTradingScheduler {
       
       console.log(`🔥 [${operationId}] Analisando ${filteredSymbolsData.length} ativos (expansão 5 → 120+)...`);
       
-      // Análise paralela de TODOS os símbolos filtrados
+      // Análise paralela de TODOS os símbolos filtrados. Keep drop reasons so a
+      // no-candidate cycle does not collapse into the unhelpful generic "Erro ao analisar símbolos".
+      const analysisErrors: string[] = [];
+      const insufficientDataSymbols: string[] = [];
+      const staleDataSymbols: string[] = [];
       const analysisPromises = filteredSymbolsData.map(async (symbolData: any) => {
         try {
           const symbol = symbolData.symbol;
@@ -3896,6 +3931,7 @@ export class AutoTradingScheduler {
           // Com menos dados, os indicadores oscilam aleatoriamente e o sinal não tem valor.
           const priceHistory = JSON.parse(symbolData.priceHistory);
           if (priceHistory.length < 100) {
+            insufficientDataSymbols.push(`${symbol}=${priceHistory.length}`);
             console.log(`📉 [ANALISE] ${symbol}: dados insuficientes (${priceHistory.length} ticks < 100 mínimo) — aguardando coleta`);
             return null;
           }
@@ -3909,6 +3945,7 @@ export class AutoTradingScheduler {
           
           if (isDataStale) {
             const ageMin = Math.round(dataAge / 60000);
+            staleDataSymbols.push(`${symbol}=${ageMin}min`);
             console.log(`⏰ [ANALISE] ${symbol}: dados desatualizados (${ageMin}min > ${Math.round(STALE_LIMIT_MS/60000)}min limite) — aguardando WebSocket`);
             return null;
           }
@@ -4169,7 +4206,9 @@ export class AutoTradingScheduler {
             scoreResult
           };
         } catch (error) {
-          console.log(`⚠️ [${operationId}] Erro ao analisar ${symbolData.symbol}: ${error}`);
+          const message = error instanceof Error ? error.message : String(error);
+          analysisErrors.push(`${symbolData.symbol}: ${message.slice(0, 180)}`);
+          console.warn(`⚠️ [${operationId}] Erro ao analisar ${symbolData.symbol}: ${message}`);
           return null;
         }
       });
@@ -4184,11 +4223,18 @@ export class AutoTradingScheduler {
         .sort((a, b) => b!.consensus - a!.consensus);
       
       if (validResults.length === 0) {
-        return { 
-          success: false, 
-          error: 'Erro ao analisar símbolos', 
-          totalAnalyzed: allSymbolsData.length, 
-          top5Symbols: [] 
+        const diagnostics = [
+          `compatíveis=${filteredSymbolsData.length}`,
+          `ticksInsuficientes=${insufficientDataSymbols.length}[${insufficientDataSymbols.slice(0, 5).join(',')}]`,
+          `desatualizados=${staleDataSymbols.length}[${staleDataSymbols.slice(0, 5).join(',')}]`,
+          `falhasIA/processamento=${analysisErrors.length}[${analysisErrors.slice(0, 3).join(' | ')}]`,
+        ].join('; ');
+        console.warn(`⚠️ [${operationId}] Nenhum símbolo elegível após análise: ${diagnostics}`);
+        return {
+          success: false,
+          error: `Nenhum símbolo passou pela análise: ${diagnostics}`,
+          totalAnalyzed: allSymbolsData.length,
+          top5Symbols: []
         };
       }
       
