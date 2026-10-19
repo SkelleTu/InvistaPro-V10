@@ -1102,7 +1102,7 @@ export class AutoTradingScheduler {
             duration: 1,
             status: 'pending',
             derivContractId: contract.contract_id?.toString(),
-            aiConsensus: JSON.stringify({ leverageMode: true, assetsAligned: exceptional.length, score: best.consensus, growthRate: levGrowth }),
+            aiConsensus: JSON.stringify({ leverageMode: true, assetsAligned: exceptional.length, score: best.consensus, growthRate: levGrowth, targetTicks: levTargetTicks }),
           });
           console.log(`💾 [LEVERAGE] Operação salva no banco: contrato ${contract.contract_id}`);
         } catch (dbErr) {
