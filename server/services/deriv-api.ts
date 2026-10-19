@@ -3,7 +3,7 @@ import { EventEmitter } from 'events';
 import { errorTracker } from './error-tracker';
 import { dualStorage as storage } from '../storage-dual';
 import { resilienceSupervisor } from './resilience-supervisor';
-import { connectDerivAccount, type DerivAccountContext } from './deriv-account-gateway';
+import { connectDerivAccount, waitForDerivConnectionStartSlot, type DerivAccountContext } from './deriv-account-gateway';
 import { isAllowedProductionSymbol, isAllowedProductionContractType, minimumStakeForContract, isValidProductionStake, isBlockedOneSecondSymbol, contractTypesForProductionMode } from './production-symbol-policy';
 
 // ☠️ PROTOCOLO DE EXECUÇÃO IMEDIATA — tolerância zero para ativos criminosos
@@ -189,61 +189,82 @@ export class DerivAPIService extends EventEmitter {
   }
 
   private pendingPublicConnectPromise: Promise<boolean> | null = null;
+  private publicConnectionCooldownUntil = 0;
 
   async connectPublic(operationId?: string): Promise<boolean> {
     // Coalesce concurrent public-socket requests. Parallel callers must share
     // one handshake or they can trigger Deriv's HTTP 429 connection limit.
     if (this.isConnected && this.ws?.readyState === WebSocket.OPEN && !this.apiToken) return true;
     if (this.pendingPublicConnectPromise) return this.pendingPublicConnectPromise;
+    if (Date.now() < this.publicConnectionCooldownUntil) {
+      const secondsLeft = Math.ceil((this.publicConnectionCooldownUntil - Date.now()) / 1000);
+      throw new Error(`Deriv public WebSocket is cooling down after HTTP 429; retry in about ${secondsLeft}s.`);
+    }
 
     this.operationId = operationId || `CONNECT_PUBLIC_${Date.now()}`;
     this.isShuttingDown = false;
     const endpoint = 'wss://api.derivws.com/trading/v1/options/ws/public';
     const connectPromise = new Promise<boolean>((resolve, reject) => {
       let settled = false;
-      const connectionTimer = setTimeout(() => {
-        this.cleanup();
-        finish(new Error('Deriv public connection timed out after 10 seconds'));
-      }, 10000);
+      let connectionTimer: NodeJS.Timeout | null = null;
       const finish = (error?: Error) => {
         if (settled) return;
         settled = true;
-        clearTimeout(connectionTimer);
+        if (connectionTimer) clearTimeout(connectionTimer);
         if (error) reject(error);
         else resolve(true);
       };
 
-      try {
-        this.ws = new WebSocket(endpoint, {
-          headers: { 'Origin': 'https://app.deriv.com' }
-        });
-        this.ws.once('open', async () => {
+      void (async () => {
+        try {
+          await waitForDerivConnectionStartSlot();
           if (settled) return;
-          this.isConnected = true;
-          this.reconnectAttempts = 0;
-          this.emit('connected');
-          this.processMessageQueue();
-          try {
-            await this.resubscribeActiveSubscriptions();
-            this.startHeartbeat();
-            finish();
-          } catch (error) {
-            finish(error instanceof Error ? error : new Error(String(error)));
-          }
-        });
-        this.ws.once('unexpected-response', (_request: any, response: any) => {
-          const status = Number(response?.statusCode || 0);
-          this.isConnected = false;
-          finish(new Error(status === 429
-            ? 'Deriv rate-limited the public WebSocket (HTTP 429); wait briefly before retrying.'
-            : `Deriv rejected the public WebSocket connection (HTTP ${status || 'unknown'}).`));
-        });
-        // Keep the standard message/close/error listeners; they process Deriv
-        // messages and maintain reconnect/heartbeat behavior for the socket.
-        this.setupWebSocketListeners((error: Error) => finish(error), connectionTimer, endpoint, 'demo');
-      } catch (error) {
-        finish(error instanceof Error ? error : new Error(String(error)));
-      }
+          connectionTimer = setTimeout(() => {
+            this.cleanup();
+            finish(new Error('Deriv public connection timed out after 10 seconds'));
+          }, 10000);
+
+          this.ws = new WebSocket(endpoint, {
+            headers: { 'Origin': 'https://app.deriv.com' }
+          });
+          this.ws.once('open', async () => {
+            if (settled) return;
+            this.isConnected = true;
+            this.reconnectAttempts = 0;
+            this.publicConnectionCooldownUntil = 0;
+            this.emit('connected');
+            this.processMessageQueue();
+            try {
+              await this.resubscribeActiveSubscriptions();
+              this.startHeartbeat();
+              finish();
+            } catch (error) {
+              finish(error instanceof Error ? error : new Error(String(error)));
+            }
+          });
+          this.ws.once('unexpected-response', (_request: any, response: any) => {
+            const status = Number(response?.statusCode || 0);
+            this.isConnected = false;
+            if (status === 429) {
+              // Stop the instance reconnect loop; a later explicit request can retry after cooldown.
+              this.publicConnectionCooldownUntil = Date.now() + 15000;
+              this.isShuttingDown = true;
+            }
+            finish(new Error(status === 429
+              ? 'Deriv rate-limited the public WebSocket (HTTP 429); retry after cooldown.'
+              : `Deriv rejected the public WebSocket connection (HTTP ${status || 'unknown'}).`));
+          });
+          // Standard listeners handle messages and unexpected closes after opening.
+          this.setupWebSocketListeners(
+            (error: Error) => finish(error),
+            connectionTimer,
+            endpoint,
+            'demo'
+          );
+        } catch (error) {
+          finish(error instanceof Error ? error : new Error(String(error)));
+        }
+      })();
     });
     this.pendingPublicConnectPromise = connectPromise;
     void connectPromise.then(
