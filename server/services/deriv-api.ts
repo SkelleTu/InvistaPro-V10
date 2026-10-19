@@ -1300,7 +1300,7 @@ export class DerivAPIService extends EventEmitter {
         duration: Math.max(1, Math.floor(duration)),
         duration_unit: 't',
         barrier,
-        currency: this.accountContext?.currency || 'USD',
+        currency: 'USD',
         amount,
         basis: 'stake',
         req_id: reqId,
