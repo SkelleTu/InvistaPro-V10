@@ -2249,6 +2249,11 @@ export class AutoTradingScheduler {
         // Escolher modalidade por rotação: pega baseado na hora atual para distribuir
         const DIGIT_TYPES: Record<string, string> = {
           'digit_differs': 'DIGITDIFF',
+          'digit_matches': 'DIGITMATCH',
+          'digit_even': 'DIGITEVEN',
+          'digit_odd': 'DIGITODD',
+          'digit_over': 'DIGITOVER',
+          'digit_under': 'DIGITUNDER',
         };
         // 'rise'/'fall' → CALL/PUT (contrato de ticks simples, sem barreira)
         // 'higher'/'lower' → CALLE/PUTE (contrato com barreira — preço termina acima/abaixo do barrier)
