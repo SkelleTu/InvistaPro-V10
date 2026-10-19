@@ -12,15 +12,20 @@ export interface Mt5ProductionBlock {
   executionEnabled: false;
 }
 
+export interface Mt5ProductionEnvironment {
+  MT5_PRODUCTION_TRADING_ENABLED?: string;
+  NODE_ENV?: string;
+}
+
 export function isMt5ProductionTradingEnabled(
-  env: Pick<NodeJS.ProcessEnv, "MT5_PRODUCTION_TRADING_ENABLED"> = process.env,
+  env: Mt5ProductionEnvironment = process.env,
 ): boolean {
   return String(env.MT5_PRODUCTION_TRADING_ENABLED ?? "").trim().toLowerCase() === "true";
 }
 
 export function getMt5ProductionBlock(
   apiToken: string | null | undefined,
-  env: Pick<NodeJS.ProcessEnv, "NODE_ENV" | "MT5_PRODUCTION_TRADING_ENABLED"> = process.env,
+  env: Mt5ProductionEnvironment = process.env,
 ): Mt5ProductionBlock | null {
   if (env.NODE_ENV !== "production") return null;
 
