@@ -1121,7 +1121,7 @@ export class DerivAPIService extends EventEmitter {
       const proposalMessage = {
         proposal: 1,
         contract_type: 'DIGITDIFF',
-        symbol: normalizedSymbol,
+        underlying_symbol: normalizedSymbol,
         duration: params.duration,
         duration_unit: 't',
         barrier: params.barrier,
@@ -1178,7 +1178,7 @@ export class DerivAPIService extends EventEmitter {
     const proposalMsg: any = {
       proposal: 1,
       contract_type: params.contract_type,
-      symbol: normalizedSymbol,
+      underlying_symbol: normalizedSymbol,
       duration: params.duration,
       duration_unit: 't',
       currency,
@@ -1296,7 +1296,7 @@ export class DerivAPIService extends EventEmitter {
       this.sendMessage({
         proposal: 1,
         contract_type: 'DIGITMATCH',
-        symbol,
+        underlying_symbol: symbol,
         duration: Math.max(1, Math.floor(duration)),
         duration_unit: 't',
         barrier,
@@ -1410,7 +1410,7 @@ export class DerivAPIService extends EventEmitter {
     const proposalMsg: any = {
       proposal: 1,
       contract_type: params.contract_type,
-      symbol: params.symbol,
+      underlying_symbol: params.symbol,
       currency,
       req_id: reqProposalId,
     };
