@@ -127,6 +127,7 @@ export async function executeModulesTrade(params: ModuleExecutionParams): Promis
 
   const enabledSlots = slotConfigs.filter(s => s.enabled);
   if (enabledSlots.length === 0) {
+    console.info(`ℹ️ [MODULE EXECUTOR] Nenhum slot habilitado para user=${params.userId}, modalidade=${params.modality}; trade principal não será replicado em módulos.`);
     return {
       totalModules: 0, executed: 0, succeeded: 0, failed: 0, skipped: 0,
       results: [], executionDurationMs: Date.now() - startTime,
