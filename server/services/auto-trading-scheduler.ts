@@ -1058,7 +1058,7 @@ export class AutoTradingScheduler {
           await storage.createTradeOperation({
             userId: config.userId,
             symbol: best.symbol,
-            direction: 'accumulator',
+            direction: 'up',
             contractType: 'ACCU',
             tradeType: 'accumulator',
             amount: leverageStake,
@@ -3485,6 +3485,30 @@ export class AutoTradingScheduler {
           LOOKBACK_TYPES[selectedModality] ||
           'DIGITDIFF'
         );
+
+        // Persist the Deriv contract before starting monitors or dependent modules.
+        // ACCU contracts can settle quickly, so the close event must always find its DB row.
+        try {
+          await storage.createTradeOperation({
+            userId: config.userId,
+            derivContractId: String(contract.contract_id),
+            symbol: selectedSymbol,
+            tradeType: resolvedTradeType,
+            contractType: contractTypeForMonitor,
+            direction: safeDirection,
+            amount: tradeParams.amount,
+            duration: tradeParams.duration,
+            status: 'pending',
+            aiConsensus: JSON.stringify(aiConsensus),
+            isRecoveryMode,
+            recoveryMultiplier,
+            operationMode: this.getCurrentOperationLabel(config.userId, config.mode)
+          });
+          console.log(`💾 [${operationId}] Operação ${contract.contract_id} persistida antes do monitor/módulos.`);
+        } catch (persistErr: any) {
+          console.error(`❌ [${operationId}] CRÍTICO: contrato ${contract.contract_id} abriu, mas a persistência falhou; monitoramento seguirá:`, persistErr?.message || persistErr);
+        }
+
         try {
           contractMonitor.setToken(tokenData.token);
           await contractMonitor.startMonitoring({
@@ -3592,23 +3616,6 @@ export class AutoTradingScheduler {
         } catch (monitorErr) {
           console.warn(`⚠️ [MONITOR] Falha ao iniciar monitoramento (trade executado normalmente): ${monitorErr}`);
         }
-
-        // Salvar operação no banco com informações de recuperação
-        await storage.createTradeOperation({
-          userId: config.userId,
-          derivContractId: String(contract.contract_id),
-          symbol: selectedSymbol,
-          tradeType: resolvedTradeType,
-          contractType: contractTypeForMonitor,
-          direction: safeDirection,
-          amount: tradeParams.amount,
-          duration: tradeParams.duration,
-          status: 'pending',
-          aiConsensus: JSON.stringify(aiConsensus),
-          isRecoveryMode,
-          recoveryMultiplier,
-          operationMode: this.getCurrentOperationLabel(config.userId, config.mode)
-        });
 
         // 🎯 Incrementar contador PERSISTENTE de operações conservadoras (só para modos de produção)
         if (config.mode.includes('production')) {
@@ -3886,7 +3893,11 @@ export class AutoTradingScheduler {
       
       console.log(`🔥 [${operationId}] Analisando ${filteredSymbolsData.length} ativos (expansão 5 → 120+)...`);
       
-      // Análise paralela de TODOS os símbolos filtrados
+      // Análise paralela de TODOS os símbolos filtrados. Keep drop reasons so a
+      // no-candidate cycle does not collapse into the unhelpful generic "Erro ao analisar símbolos".
+      const analysisErrors: string[] = [];
+      const insufficientDataSymbols: string[] = [];
+      const staleDataSymbols: string[] = [];
       const analysisPromises = filteredSymbolsData.map(async (symbolData: any) => {
         try {
           const symbol = symbolData.symbol;
@@ -3896,6 +3907,7 @@ export class AutoTradingScheduler {
           // Com menos dados, os indicadores oscilam aleatoriamente e o sinal não tem valor.
           const priceHistory = JSON.parse(symbolData.priceHistory);
           if (priceHistory.length < 100) {
+            insufficientDataSymbols.push(`${symbol}=${priceHistory.length}`);
             console.log(`📉 [ANALISE] ${symbol}: dados insuficientes (${priceHistory.length} ticks < 100 mínimo) — aguardando coleta`);
             return null;
           }
@@ -3909,6 +3921,7 @@ export class AutoTradingScheduler {
           
           if (isDataStale) {
             const ageMin = Math.round(dataAge / 60000);
+            staleDataSymbols.push(`${symbol}=${ageMin}min`);
             console.log(`⏰ [ANALISE] ${symbol}: dados desatualizados (${ageMin}min > ${Math.round(STALE_LIMIT_MS/60000)}min limite) — aguardando WebSocket`);
             return null;
           }
@@ -4169,7 +4182,9 @@ export class AutoTradingScheduler {
             scoreResult
           };
         } catch (error) {
-          console.log(`⚠️ [${operationId}] Erro ao analisar ${symbolData.symbol}: ${error}`);
+          const message = error instanceof Error ? error.message : String(error);
+          analysisErrors.push(`${symbolData.symbol}: ${message.slice(0, 180)}`);
+          console.warn(`⚠️ [${operationId}] Erro ao analisar ${symbolData.symbol}: ${message}`);
           return null;
         }
       });
@@ -4184,11 +4199,18 @@ export class AutoTradingScheduler {
         .sort((a, b) => b!.consensus - a!.consensus);
       
       if (validResults.length === 0) {
-        return { 
-          success: false, 
-          error: 'Erro ao analisar símbolos', 
-          totalAnalyzed: allSymbolsData.length, 
-          top5Symbols: [] 
+        const diagnostics = [
+          `compatíveis=${filteredSymbolsData.length}`,
+          `ticksInsuficientes=${insufficientDataSymbols.length}[${insufficientDataSymbols.slice(0, 5).join(',')}]`,
+          `desatualizados=${staleDataSymbols.length}[${staleDataSymbols.slice(0, 5).join(',')}]`,
+          `falhasIA/processamento=${analysisErrors.length}[${analysisErrors.slice(0, 3).join(' | ')}]`,
+        ].join('; ');
+        console.warn(`⚠️ [${operationId}] Nenhum símbolo elegível após análise: ${diagnostics}`);
+        return {
+          success: false,
+          error: `Nenhum símbolo passou pela análise: ${diagnostics}`,
+          totalAnalyzed: allSymbolsData.length,
+          top5Symbols: []
         };
       }
       
