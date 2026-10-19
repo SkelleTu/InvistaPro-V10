@@ -18,6 +18,14 @@ import LearningDashboard from "@/components/learning-dashboard";
 import TradingConfigPanel from "@/components/trading-config-panel";
 import ModulosPanel from "@/components/modulos-panel";
 import ModalityModuleSelector from "@/components/modality-module-selector";
+import { TradingActivityPanel } from "@/components/dashboard/trading-activity-panel";
+import {
+  getConfirmedUsdBrl,
+  getTradingActivity,
+  tradingStatusRefreshOptions,
+  type ExchangeRateResponse,
+  type TradingDashboardStatus,
+} from "@/lib/trading-dashboard-status";
 import { 
   TrendingUp, 
   TrendingDown, 
@@ -1024,10 +1032,12 @@ export default function TradingSystemPage() {
     refetchInterval: 4000, // Saldo — 4s suficiente
   });
 
-  // Cotação USD/BRL em tempo real
-  const { data: exchangeRate } = useQuery({
+  // Cotação USD/BRL: somente uma resposta válida do backend pode fornecer valor.
+  const { data: exchangeRate, isError: exchangeRateUnavailable } = useQuery<ExchangeRateResponse>({
     queryKey: ["/api/market/exchange-rate"],
-    refetchInterval: 60000, // Atualiza a cada 1 minuto
+    refetchInterval: 60000,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
   });
 
   const { data: monitorData } = useQuery({
@@ -1110,12 +1120,13 @@ export default function TradingSystemPage() {
     }
   });
 
-  // Status do scheduler (sistema de trading)
-  const { data: schedulerStatus } = useQuery({
+  // Status do scheduler (sistema de trading): sem cache residual e com atualização rápida.
+  const { data: schedulerStatus } = useQuery<TradingDashboardStatus>({
     queryKey: ["/api/auto-trading/status"],
     enabled: hasAccess,
-    refetchInterval: 4000, // 4s — status do scheduler não precisa ser instantâneo
+    ...tradingStatusRefreshOptions,
   });
+  const tradingActivity = getTradingActivity(schedulerStatus);
 
   // Keep-Alive: polling do status de pings (externos + pull interno)
   const [pingButtonClicking, setPingButtonClicking] = useState(false);
@@ -1663,7 +1674,7 @@ export default function TradingSystemPage() {
     }).format(value);
   };
 
-  const usdBrlRate = (exchangeRate as any)?.rates?.USD_BRL;
+  const usdBrlRate = exchangeRateUnavailable ? null : getConfirmedUsdBrl(exchangeRate);
 
   const formatBRL = (usdValue: number) => {
     if (!usdBrlRate) return null;
@@ -1904,15 +1915,13 @@ export default function TradingSystemPage() {
                       <span className="w-2 h-2 rounded-full inline-block mr-1 bg-green-300"></span>
                       Operando
                     </Badge>
-                  ) : (schedulerStatus as any)?.schedulerActive ? (
-                    <Badge variant="outline" className="border-orange-400 text-orange-600" data-testid="badge-system-status">
-                      <AlertTriangle className="h-3 w-3 mr-1" />
-                      Incompleto
-                    </Badge>
                   ) : (
-                    <Badge variant="secondary" data-testid="badge-system-status">
-                      <span className="w-2 h-2 rounded-full inline-block mr-1 bg-gray-400"></span>
-                      Pausado
+                    <Badge
+                      variant={tradingActivity.label === "Pausado/Bloqueado" ? "destructive" : "secondary"}
+                      data-testid="badge-system-status"
+                    >
+                      <AlertTriangle className="h-3 w-3 mr-1" />
+                      {tradingActivity.label}
                     </Badge>
                   )}
                 </CardTitle>
@@ -1948,72 +1957,8 @@ export default function TradingSystemPage() {
                   </div>
                 </div>
 
-                {/* 📡 Painel de Atividade em Tempo Real */}
-                {(schedulerStatus as any)?.schedulerActive && (
-                  <div className="rounded-lg border border-border/60 bg-muted/30 p-4 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className={`inline-flex h-2 w-2 rounded-full ${
-                          (schedulerStatus as any)?.schedulerStatus?.currentPhase === 'EXECUTANDO'
-                            ? 'bg-yellow-400 animate-ping'
-                            : (schedulerStatus as any)?.schedulerStatus?.currentPhase === 'ANALISANDO' || (schedulerStatus as any)?.schedulerStatus?.currentPhase === 'SELECIONADO'
-                            ? 'bg-blue-400 animate-pulse'
-                            : 'bg-green-400 animate-pulse'
-                        }`} />
-                        <span className="text-sm font-semibold text-foreground">
-                          {(schedulerStatus as any)?.schedulerStatus?.currentPhase ?? 'AGUARDANDO'}
-                        </span>
-                      </div>
-                      {nextCycleCountdown > 0 && (schedulerStatus as any)?.schedulerStatus?.currentPhase === 'AGUARDANDO' && (
-                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                          <Clock className="h-3.5 w-3.5" />
-                          <span>Próximo ciclo em <span className="font-mono font-bold text-foreground">{nextCycleCountdown}s</span></span>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Barra de progresso do ciclo */}
-                    {(schedulerStatus as any)?.schedulerStatus?.nextCycleAt > 0 && (
-                      <div className="space-y-1">
-                        <Progress
-                          value={Math.min(100, Math.max(0,
-                            ((60000 - Math.max(0, (schedulerStatus as any)?.schedulerStatus?.nextCycleAt - Date.now())) / 60000) * 100
-                          ))}
-                          className="h-1.5"
-                        />
-                      </div>
-                    )}
-
-                    {/* Última mensagem de atividade */}
-                    <p className="text-xs text-muted-foreground leading-relaxed" data-testid="text-current-activity">
-                      {(schedulerStatus as any)?.schedulerStatus?.currentPhaseDetail ?? 'Aguardando...'}
-                    </p>
-
-                    {/* Log de atividade recente */}
-                    {((schedulerStatus as any)?.schedulerStatus?.activityLog?.length ?? 0) > 0 && (
-                      <div className="space-y-1 pt-1 border-t border-border/40">
-                        <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">Atividade Recente</p>
-                        <div className="space-y-1 max-h-36 overflow-y-auto">
-                          {((schedulerStatus as any)?.schedulerStatus?.activityLog ?? []).slice(0, 8).map((entry: any, idx: number) => (
-                            <div key={idx} className="flex items-start gap-2 text-xs">
-                              <span className="text-muted-foreground/60 font-mono shrink-0 mt-0.5">
-                                {new Date(entry.time).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                              </span>
-                              <span className={
-                                entry.type === 'success' ? 'text-green-500' :
-                                entry.type === 'warning' ? 'text-yellow-500' :
-                                entry.type === 'trade' ? 'text-blue-400 font-medium' :
-                                'text-foreground/80'
-                              }>
-                                {entry.message}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
+                {/* Mantém a atividade e os bloqueios visíveis mesmo com Play inativo. */}
+                <TradingActivityPanel status={schedulerStatus} nextCycleCountdown={nextCycleCountdown} />
 
                 <div className="flex">
                   {(schedulerStatus as any)?.schedulerActive ? (
@@ -2145,8 +2090,10 @@ export default function TradingSystemPage() {
                     {(realTimeData as any)?.lastUpdate && (
                       <span className="text-green-500 ml-2 animate-pulse">• Ao vivo</span>
                     )}
-                    {usdBrlRate && (
+                    {usdBrlRate !== null ? (
                       <span className="text-blue-500 ml-2">USD/BRL: {usdBrlRate.toFixed(2)}</span>
+                    ) : (
+                      <span className="text-muted-foreground ml-2" data-testid="text-exchange-rate-unavailable">Cotação indisponível</span>
                     )}
                   </p>
                 </CardContent>
