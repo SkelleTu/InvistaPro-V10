@@ -18,17 +18,31 @@ function enabled() {
 
 async function call(path: string, body: any) {
   if (!enabled()) return null;
-  const response = await fetch(`${universalUrl}${path}`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-invista-server-key": serviceKey,
-    },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(20000),
-  });
-  if (!response.ok) throw new Error(`Universal Server ${path} returned HTTP ${response.status}`);
-  return await response.json() as any;
+  // Render Free may need a cold-start window before the first request reaches
+  // the Universal Server. Registration/arm are on the critical Play path, so
+  // give those idempotent session operations enough time to complete instead
+  // of aborting just as the sleeping service wakes up.
+  const sessionStartupRequest = path === "/api/invista/session/register" || path === "/api/invista/session/arm";
+  const timeoutMs = sessionStartupRequest ? 60000 : 20000;
+  const startedAt = Date.now();
+  try {
+    const response = await fetch(`${universalUrl}${path}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-invista-server-key": serviceKey,
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!response.ok) throw new Error(`Universal Server ${path} returned HTTP ${response.status}`);
+    const result = await response.json() as any;
+    console.log(`[UNIVERSAL_HTTP] ${path} status=${response.status} durationMs=${Date.now() - startedAt} timeoutMs=${timeoutMs}`);
+    return result;
+  } catch (error) {
+    console.warn(`[UNIVERSAL_HTTP] ${path} failed durationMs=${Date.now() - startedAt} timeoutMs=${timeoutMs}: ${error instanceof Error ? error.message : String(error)}`);
+    throw error;
+  }
 }
 
 const derivEnsureAttemptAt = new Map<string, number>();
