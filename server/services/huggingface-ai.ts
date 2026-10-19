@@ -577,77 +577,62 @@ export class HuggingFaceAIService {
       const requiredConsensusValue = Math.round(recoveryThreshold * 100);
 
       // ═══════════════════════════════════════════════════════════════════
-      // ANÁLISES POR MODELO: perspectivas independentes com variação real
-      // Cada modelo aplica sensibilidade própria ao sinal e pode divergir
-      // ═══════════════════════════════════════════════════════════════════
-      // Sensibilidades distintas: cada modelo amplifica diferente parte do sinal
-      const modelSensitivities = [
-        { base: 0.90, bias: 0.05,  name: 'sentiment',      specialty: 'financial-sentiment' },   // FinBERT: sentimento financeiro
-        { base: 0.85, bias: -0.03, name: 'trend',          specialty: 'social-trend' },           // RoBERTa Market: tendência social
-        { base: 0.83, bias: 0.0,   name: 'multilingual',   specialty: 'global-sentiment' },       // XLM-RoBERTa: multilíngue neutro
-        { base: 0.82, bias: 0.02,  name: 'momentum',       specialty: 'momentum-trend' },         // RoBERTa Trend: momentum
-        { base: 0.83, bias: -0.01, name: 'speed',          specialty: 'fast-inference' },         // DistilRoBERTa: velocidade
-        { base: 0.91, bias: 0.03,  name: 'price-action',   specialty: 'crypto-patterns' },        // CryptoBERT: price action cripto
-        { base: 0.87, bias: 0.0,   name: 'tone',           specialty: 'bullish-bearish-tone' },   // FinBERT Tone: tom direcional
-        { base: 0.85, bias: -0.02, name: 'fintwits',       specialty: 'trader-sentiment' },       // FinTwits: sentimento de traders
-        { base: 0.88, bias: 0.04,  name: 'large-fintwits', specialty: 'deep-trader-analysis' },   // RoBERTa Large FinTwits: análise profunda
-        { base: 0.86, bias: 0.01,  name: 'zero-shot',      specialty: 'pattern-classification' }, // Zero-Shot: padrões técnicos
-      ];
-
-      // Signal strength: quão forte é o sinal do sistema avançado
-      const signalStrength = advConf / 100; // 0.0 a 1.0
-
-      const perModelAnalyses = this.activeModels.map((m, idx) => {
-        const sens = modelSensitivities[idx] || { base: 0.85, bias: 0, name: 'default' };
-
-        // Confiança individual: sinal base * sensibilidade + variação aleatória pequena
-        const randVariation = (Math.random() - 0.5) * 8; // ±4%
-        const modelConf = Math.round(Math.min(97, Math.max(15,
-          signalStrength * 100 * sens.base + sens.bias * 100 + randVariation
-        )));
-
-        // Direção: modelos com confiança abaixo do limiar têm chance de divergir
-        // proporcional ao quão fraco é o sinal
-        let modelPrediction: 'up' | 'down' | 'neutral' = finalDir;
-        const weakSignal = modelConf < 58;
-        const divergenceChance = weakSignal ? (1 - signalStrength) * 0.25 : 0;
-        if (Math.random() < divergenceChance) {
-          // Divergência realista: modelos mais lentos ficam neutros, não invertem
-          modelPrediction = 'neutral';
+      // Execute inferência real nos modelos externos listados. Não fabricar votos/confianças
+      // com Math.random: um modelo só participa quando devolve uma resposta válida.
+      console.log(`🌐 [HF INFERENCE] Iniciando inferência real em ${this.activeModels.length} modelos para ${symbol}; amostras=${tickData.length}`);
+      const modelResults = await Promise.allSettled(
+        this.activeModels.map(model => this.analyzeWithModel(model, tickData, symbol, isRecoveryMode, recoveryThreshold))
+      );
+      const perModelAnalyses: MarketAnalysis[] = [];
+      modelResults.forEach((result, index) => {
+        const model = this.activeModels[index];
+        if (result.status === 'fulfilled' && result.value) {
+          perModelAnalyses.push(result.value);
+          console.log(`✅ [HF INFERENCE] ${model.name}: ${result.value.prediction} (${result.value.confidence}%)`);
+        } else {
+          const reason = result.status === 'rejected'
+            ? (result.reason instanceof Error ? result.reason.message : String(result.reason))
+            : 'modelo sem resposta válida';
+          console.warn(`⚠️ [HF INFERENCE] ${model.name} indisponível: ${reason.slice(0, 240)}`);
         }
-
-        return {
-          modelName: m.name,
-          prediction: modelPrediction,
-          confidence: modelConf,
-          reasoning: hybridResult.reasoning,
-          marketData: tickData,
-          timestamp: new Date()
-        };
       });
+      console.log(`🌐 [HF INFERENCE] Resultado: ${perModelAnalyses.length}/${this.activeModels.length} modelos externos responderam de verdade.`);
 
-      console.log(`📊 [CONSENSUS] Concordância entre sistemas: ${(agreementRatio * 100).toFixed(0)}% | Conf média: ${weightedConf.toFixed(0)}% | Consenso final: ${finalConsensus}%`);
-      console.log(`🎯 [PER-MODEL] ${perModelAnalyses.map(a => `${a.modelName.split(' ')[0]}:${a.prediction}(${a.confidence}%)`).join(' | ')}`);
-
-      // ═══════════════════════════════════════════════════════════════════
-      // RECALCULAR CONSENSO BASEADO NOS 10 MODELOS REAIS (visíveis no PER-MODEL log)
-      // Antes o consenso vinha de apenas 3 sistemas internos, criando um gap
-      // entre o que era exibido (80% de acordo nos modelos) e o que era usado (37%).
-      // Agora o consenso reflete fielmente os votos dos 10 modelos para TODAS as modalidades.
-      // ═══════════════════════════════════════════════════════════════════
+      // Combinar votos externos reais com o consenso técnico híbrido. Neutros abstêm;
+      // desacordo reduz o score em vez de inflá-lo ou forçar unanimidade artificial.
       if (perModelAnalyses.length > 0) {
-        const pmDir = contextInjectedDir; // direção final após boosts de Crash/Boom e contexto externo
-        const pmAgreeing = perModelAnalyses.filter(a => a.prediction === pmDir);
-        const pmAgreePct = (pmAgreeing.length / perModelAnalyses.length) * 100;
-        const pmConfAvg  = pmAgreeing.length > 0
-          ? pmAgreeing.reduce((s, a) => s + a.confidence, 0) / pmAgreeing.length
-          : weightedConf;
-        // Consenso = 60% baseado em votos dos modelos + 40% na confiança média deles
-        const pmConsensus = Math.round(Math.min(95, pmAgreePct * 0.6 + pmConfAvg * 0.4));
-        // Preservar boosts externos (Crash/Boom, Girassol): usa o máximo
-        adjustedConsensus = Math.max(pmConsensus, adjustedConsensus);
-        console.log(`🔄 [CONSENSUS RECALC] ${pmDir.toUpperCase()} | Modelos: ${pmAgreeing.length}/${perModelAnalyses.length} concordam (${pmAgreePct.toFixed(0)}%) | Conf=${pmConfAvg.toFixed(0)}% | Consenso per-model=${pmConsensus}% | Final=${adjustedConsensus}%`);
+        const directional = perModelAnalyses.filter(a => a.prediction === 'up' || a.prediction === 'down');
+        const upWeight = directional.filter(a => a.prediction === 'up')
+          .reduce((sum, a) => sum + Math.max(1, Math.min(100, a.confidence)), 0);
+        const downWeight = directional.filter(a => a.prediction === 'down')
+          .reduce((sum, a) => sum + Math.max(1, Math.min(100, a.confidence)), 0);
+        const totalDirectionalWeight = upWeight + downWeight;
+        const externalDirection: 'up' | 'down' | 'neutral' = upWeight === downWeight
+          ? 'neutral'
+          : upWeight > downWeight ? 'up' : 'down';
+        const winningWeight = Math.max(upWeight, downWeight);
+        const externalAgreement = totalDirectionalWeight > 0 ? winningWeight / totalDirectionalWeight * 100 : 0;
+        const winningModels = directional.filter(a => a.prediction === externalDirection);
+        const externalConfidence = winningModels.length > 0
+          ? winningModels.reduce((sum, a) => sum + a.confidence, 0) / winningModels.length
+          : 0;
+        const externalConsensus = Math.round(externalAgreement * 0.6 + externalConfidence * 0.4);
+        const internalDirection = contextInjectedDir;
+        if (externalDirection !== 'neutral' && internalDirection === 'neutral') {
+          contextInjectedDir = externalDirection;
+          adjustedConsensus = externalConsensus;
+        } else if (externalDirection !== 'neutral' && externalDirection === internalDirection) {
+          adjustedConsensus = Math.round((adjustedConsensus + externalConsensus) / 2);
+        } else if (externalDirection !== 'neutral' && internalDirection !== 'neutral' && externalDirection !== internalDirection) {
+          adjustedConsensus = Math.round(Math.min(adjustedConsensus, externalConsensus) * 0.85);
+          console.warn(`⚠️ [AI DISAGREEMENT] Híbrido=${internalDirection}, modelos externos=${externalDirection}; consenso reduzido para ${adjustedConsensus}%.`);
+        }
+        console.log(`🧮 [REAL AI CONSENSUS] externo=${externalDirection} | acordo=${externalAgreement.toFixed(1)}% | confiança vencedora=${externalConfidence.toFixed(1)}% | score externo=${externalConsensus}% | final=${adjustedConsensus}%`);
+      } else {
+        console.error(`🛑 [HF INFERENCE] Nenhum modelo externo respondeu para ${symbol}. O score não será apresentado como consenso dos ${this.activeModels.length} modelos externos.`);
       }
+
+      console.log(`📊 [REAL MODEL VOTES] ${perModelAnalyses.map(a => `${a.modelName.split(' ')[0]}:${a.prediction}(${a.confidence}%)`).join(' | ') || 'nenhum voto externo válido'}`);
 
       // Calcular volatilidade dos ticks para popular o campo
       const tickPrices = tickData.map(t => t.quote);
@@ -690,9 +675,9 @@ export class HuggingFaceAIService {
         upScore: upScoreVal,
         downScore: downScoreVal,
         neutralScore: neutralScoreVal,
-        participatingModels: models.length + (hybridResult.systems.quantum ? 1 : 0) + (hybridResult.systems.microscopic ? 1 : 0),
+        participatingModels: perModelAnalyses.length + 1 + (hybridResult.systems.quantum ? 1 : 0) + (hybridResult.systems.microscopic ? 1 : 0),
         analyses: perModelAnalyses,
-        reasoning: `🌌 HÍBRIDO: ${hybridResult.reasoning} | Concordância: ${(agreementRatio * 100).toFixed(0)}% | Consenso: ${finalConsensus}%${contextNote}`,
+        reasoning: `🌌 HÍBRIDO: ${hybridResult.reasoning} | Concordância interna: ${(agreementRatio * 100).toFixed(0)}% | Modelos externos respondentes: ${perModelAnalyses.length}/${this.activeModels.length} | Consenso final: ${adjustedConsensus}%${contextNote}`,
 
         // Campos dos motores cooperativos
         quantumPrediction: (hybridResult.systems.quantum?.prediction as 'up' | 'down' | 'neutral') ?? null,
