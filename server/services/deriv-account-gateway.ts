@@ -11,6 +11,30 @@ export interface DerivAccountContext {
 }
 
 const API_BASE = 'https://api.derivws.com';
+const ACCOUNT_WS_START_GAP_MS = 1800;
+let nextDerivSocketStartAt = 0;
+let derivSocketStartQueue: Promise<void> = Promise.resolve();
+
+const delay = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+
+/**
+ * Process-wide pacing shared by public and account-scoped Deriv sockets.
+ * A fresh OTP is acquired for each authenticated attempt; account/token isolation
+ * is retained while rapid parallel handshakes that trigger HTTP 429 are avoided.
+ */
+export async function waitForDerivConnectionStartSlot(): Promise<void> {
+  const previous = derivSocketStartQueue;
+  let release!: () => void;
+  derivSocketStartQueue = new Promise<void>(resolve => { release = resolve; });
+  await previous;
+  try {
+    const waitMs = Math.max(0, nextDerivSocketStartAt - Date.now());
+    if (waitMs > 0) await delay(waitMs);
+    nextDerivSocketStartAt = Date.now() + ACCOUNT_WS_START_GAP_MS;
+  } finally {
+    release();
+  }
+}
 
 function isOAuthAccessToken(token: string): boolean {
   return String(process.env.DERIV_AUTH_MODE ?? '').trim().toLowerCase() === 'oauth'
@@ -160,28 +184,70 @@ export async function connectDerivAccount(
   accountType: DerivAccountType,
   preferredAccountId?: string,
 ): Promise<{ ws: WebSocket; context: DerivAccountContext }> {
-  const context = await createDerivAccountContext(token, accountType, preferredAccountId);
-  assertDerivAccountContext(context);
+  let lastError: Error | null = null;
+  const maxAttempts = 3;
 
-  const ws = new WebSocket(context.websocketUrl, {
-    headers: { Origin: 'https://app.deriv.com' },
-  });
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    let ws: WebSocket | null = null;
+    try {
+      // Obtain a fresh, single-use OTP for every handshake attempt.
+      const context = await createDerivAccountContext(token, accountType, preferredAccountId);
+      assertDerivAccountContext(context);
+      await waitForDerivConnectionStartSlot();
 
-  await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      ws.terminate();
-      reject(new Error('Deriv authenticated WebSocket connection timeout after 10 seconds'));
-    }, 10000);
+      ws = new WebSocket(context.websocketUrl, {
+        headers: { Origin: 'https://app.deriv.com' },
+      });
 
-    ws.once('open', () => {
-      clearTimeout(timer);
-      resolve();
-    });
-    ws.once('error', (error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
-  });
+      await new Promise<void>((resolve, reject) => {
+        let settled = false;
+        const finish = (error?: Error) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          ws?.off('open', onOpen);
+          ws?.off('error', onError);
+          ws?.off('unexpected-response', onUnexpectedResponse);
+          if (error) {
+            try { ws?.terminate(); } catch {}
+            reject(error);
+          } else {
+            resolve();
+          }
+        };
+        const onOpen = () => finish();
+        const onError = (error: Error) => finish(error);
+        const onUnexpectedResponse = (_request: unknown, response: { statusCode?: number }) => {
+          const status = Number(response?.statusCode || 0);
+          finish(new Error(status === 429
+            ? 'Deriv authenticated WebSocket rate limited the connection (HTTP 429).'
+            : `Deriv authenticated WebSocket rejected the connection (HTTP ${status || 'unknown'}).`));
+        };
+        const timer = setTimeout(() => {
+          finish(new Error('Deriv authenticated WebSocket connection timeout after 10 seconds'));
+        }, 10000);
 
-  return { ws, context };
+        ws!.once('open', onOpen);
+        ws!.once('error', onError);
+        ws!.once('unexpected-response', onUnexpectedResponse);
+      });
+
+      return { ws, context };
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      try {
+        if (ws && ws.readyState !== WebSocket.CLOSED) ws.terminate();
+      } catch {}
+
+      const rateLimited = /\b429\b|rate.?limit/i.test(lastError.message);
+      if (!rateLimited || attempt >= maxAttempts - 1) throw lastError;
+
+      // Bounded, increasing delay. Do not loop rapidly during a Deriv throttle.
+      const backoffMs = attempt === 0 ? 8000 : 18000;
+      console.warn(`[DERIV_GATEWAY] HTTP 429 during ${accountType} handshake; retry ${attempt + 2}/${maxAttempts} in ${Math.round(backoffMs / 1000)}s.`);
+      await delay(backoffMs);
+    }
+  }
+
+  throw lastError || new Error('Unable to establish Deriv authenticated WebSocket connection.');
 }
