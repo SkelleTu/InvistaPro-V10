@@ -4,7 +4,7 @@ import { errorTracker } from './error-tracker';
 import { dualStorage as storage } from '../storage-dual';
 import { resilienceSupervisor } from './resilience-supervisor';
 import { connectDerivAccount, waitForDerivConnectionStartSlot, type DerivAccountContext } from './deriv-account-gateway';
-import { isAllowedProductionSymbol, isAllowedProductionContractType, minimumStakeForContract, isValidProductionStake, isBlockedOneSecondSymbol, contractTypesForProductionMode } from './production-symbol-policy';
+import { isAllowedProductionSymbol, isAllowedProductionContractType, minimumStakeForContract, isValidProductionStake, isBlockedOneSecondSymbol, contractTypesForProductionMode, normalizeProductionMode, PRODUCTION_MODALITY_CONTRACT_TYPES } from './production-symbol-policy';
 
 // ☠️ PROTOCOLO DE EXECUÇÃO IMEDIATA — tolerância zero para ativos criminosos
 // Qualquer símbolo que viole as regras é executado aqui: blacklistado, logado e morto.
@@ -777,6 +777,63 @@ export class DerivAPIService extends EventEmitter {
     return supported;
   }
 
+  /**
+   * Discover all requested modality capabilities with one contracts_for request
+   * per eligible symbol, avoiding N repeated scans for N modality names.
+   */
+  async getAvailableSymbolsByTradeModes(modes: string[]): Promise<Record<string, Array<{symbol: string; display_name: string; market: string}>>> {
+    const normalizedModes = [...new Set(modes.map(normalizeProductionMode))]
+      .filter((mode) => Boolean(PRODUCTION_MODALITY_CONTRACT_TYPES[mode]));
+    const result: Record<string, Array<{symbol: string; display_name: string; market: string}>> = {};
+    const requiredTypes = new Map<string, string[]>();
+    for (const mode of normalizedModes) {
+      result[mode] = [];
+      requiredTypes.set(mode, contractTypesForProductionMode(mode));
+    }
+    if (normalizedModes.length === 0) return result;
+
+    if (!this.isConnected) await this.connectPublic('GET_SYMBOLS_ALL_MODALITIES');
+    const symbols = await this.getActiveSymbolsCached();
+    const candidates = symbols.filter((entry: any) =>
+      isAllowedProductionSymbol(entry?.symbol) &&
+      !isBlockedOneSecondSymbol(entry?.symbol) &&
+      /synthetic|derived/i.test(String(entry?.market || entry?.market_display_name || ''))
+    );
+
+    for (let i = 0; i < candidates.length; i += 5) {
+      const batch = candidates.slice(i, i + 5);
+      const scanned = await Promise.all(batch.map(async (entry: any) => {
+        const symbol = String(entry.symbol);
+        try {
+          const contracts = await this.getContractsFor(symbol);
+          const types = new Set(contracts.map((contract: any) =>
+            String(contract?.contract_type ?? '').trim().toUpperCase()
+          ));
+          return { entry, types };
+        } catch (error) {
+          console.warn(`[DERIV_DISCOVERY] ${symbol}/all-modalities: ${error instanceof Error ? error.message : String(error)}`);
+          return { entry, types: new Set<string>() };
+        }
+      }));
+
+      for (const {entry, types} of scanned) {
+        for (const mode of normalizedModes) {
+          const required = requiredTypes.get(mode) ?? [];
+          if (required.some((type) => types.has(type))) {
+            result[mode].push({
+              symbol: String(entry.symbol),
+              display_name: String(entry.display_name || entry.symbol),
+              market: String(entry.market || 'synthetic_index'),
+            });
+          }
+        }
+      }
+    }
+
+    console.log(`[DERIV_DISCOVERY] modalidades=${normalizedModes.length}; ${candidates.length} ativos consultados; ${normalizedModes.map((mode) => `${mode}:${result[mode].length}`).join(', ')}`);
+    return result;
+  }
+
   // Helper method for generic requests
   private async wsRequest(payload: any): Promise<any> {
     return new Promise((resolve, reject) => {
@@ -890,8 +947,22 @@ export class DerivAPIService extends EventEmitter {
   }
 
   async buyCallPutContract(symbol: string, direction: 'up' | 'down', duration: number, amount: number): Promise<DerivContractInfo | null> {
-    console.warn(`[DERIV_POLICY] CALL/PUT contracts are disabled in production. Rejected ${direction} on ${symbol}.`);
-    return null;
+    const contractType = direction === 'up' ? 'CALL' : 'PUT';
+    if (!isAllowedProductionSymbol(symbol) || isBlockedOneSecondSymbol(symbol)) {
+      console.warn(`[DERIV_POLICY] ${contractType} blocked for invalid or prohibited symbol: ${symbol}`);
+      return null;
+    }
+    // Rise/Fall are tick-duration contracts. Reuse the same proposal -> buy ->
+    // contract confirmation path as the other modalities instead of returning null.
+    return this.buyFlexibleContract({
+      contract_type: contractType,
+      symbol,
+      amount,
+      duration: Math.max(1, Math.floor(duration)),
+      duration_unit: 't',
+      currency: 'USD',
+      basis: 'stake',
+    });
   }
 
   async buyDigitDifferContract(params: DigitDifferContract): Promise<DerivContractInfo | null> {
