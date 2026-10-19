@@ -603,7 +603,8 @@ class UniversalContractMonitor extends EventEmitter {
 
         // Buscar tanto 'active' quanto 'pending' — contratos novos começam como pending
         const activeOps = await storage.getActiveTradeOperations(user.id);
-        const recentOps = await storage.getUserTradeOperations(user.id, 20);
+        // Consultar uma janela maior: contratos pendentes podem sair das últimas 20 operações rapidamente.
+        const recentOps = await storage.getUserTradeOperations(user.id, 500);
         const pendingOps = recentOps.filter(op => op.status === 'pending');
 
         // Unificar sem duplicatas
@@ -639,6 +640,12 @@ class UniversalContractMonitor extends EventEmitter {
           }
 
           const contractTypeRaw = (op.contractType || op.tradeType || 'CALL').toUpperCase();
+          let recoveredTargetTicks: number | undefined;
+          try {
+            const metadata = typeof op.aiConsensus === 'string' ? JSON.parse(op.aiConsensus) : op.aiConsensus;
+            const parsedTargetTicks = Number(metadata?.targetTicks);
+            if (Number.isFinite(parsedTargetTicks) && parsedTargetTicks > 0) recoveredTargetTicks = parsedTargetTicks;
+          } catch { /* metadata legado pode não ser JSON */ }
           console.log(`♻️ [MONITOR] Recuperando contrato órfão: ${contractId} | ${contractTypeRaw} | ${op.symbol} | status=${op.status}`);
           try {
             await this.startMonitoring({
@@ -650,6 +657,7 @@ class UniversalContractMonitor extends EventEmitter {
               direction: (op.direction as 'up' | 'down' | 'neutral') ?? 'neutral',
               userId: user.id,
               openedAt,
+              ...(recoveredTargetTicks ? { targetTicks: recoveredTargetTicks } : {}),
             });
             recovered++;
           } catch (err: any) {
