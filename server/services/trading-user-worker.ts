@@ -32,7 +32,15 @@ function sendStatus() {
       contractCapabilitySymbols: Number(status?.contractCapabilitySymbols || 0),
       contractCapabilityCheckedAt: Number(status?.contractCapabilityCheckedAt || 0),
       contractCapabilityModes: Array.isArray(status?.contractCapabilityModes) ? status.contractCapabilityModes : [],
+      contractCapabilityAvailableModes: Array.isArray(status?.contractCapabilityAvailableModes) ? status.contractCapabilityAvailableModes : [],
+      contractCapabilityUnavailableModes: Array.isArray(status?.contractCapabilityUnavailableModes) ? status.contractCapabilityUnavailableModes : [],
       currentPhase: String(status?.currentPhase || "AGUARDANDO_PLAY"),
+      currentPhaseDetail: String(status?.currentPhaseDetail || "Aguardando Play"),
+      activityLog: Array.isArray(status?.activityLog) ? status.activityLog.slice(0, 20) : [],
+      marketQuality: Number(status?.marketQuality || 0),
+      lastCycleStartedAt: Number(status?.lastCycleStartedAt || 0),
+      nextCycleAt: Number(status?.nextCycleAt || 0),
+      cycleIntervalMs: Number(status?.cycleIntervalMs || 2000),
       totalExecutedOperations: Number(scheduler?.getSessionStats().totalExecutedOperations || 0),
     });
   } catch {}
