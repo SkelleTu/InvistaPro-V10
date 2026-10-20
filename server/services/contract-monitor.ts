@@ -724,8 +724,12 @@ class UniversalContractMonitor extends EventEmitter {
 
     this.monitored.set(input.contractId, state);
 
-    // Conectar se necessário e subscrever
+    // Conectar se necessário e nunca considerar iniciado sem socket autenticado.
     await this.ensureConnected();
+    if (!this.connected || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      this.monitored.delete(input.contractId);
+      throw new Error(`Monitor Deriv indisponível para contrato ${input.contractId}; contrato mantido para recuperação posterior`);
+    }
     this.subscribeToContract(input.contractId);
 
     // Para contratos auto-close, agendar cleanup
@@ -819,16 +823,23 @@ class UniversalContractMonitor extends EventEmitter {
   // ── WebSocket interno ────────────────────────────────────
 
   private async ensureConnected(): Promise<void> {
-    if (this.connected) return;
+    if (this.connected && this.ws?.readyState === WebSocket.OPEN) return;
+    // A flag connected pode ficar momentaneamente desatualizada durante o evento close.
+    if (this.connected && this.ws?.readyState !== WebSocket.OPEN) this.connected = false;
     if (this.reconnecting) {
-      // Esperar conexão atual
+      // Esperar a conexão atual, mas nunca tratar timeout como conexão saudável.
       await new Promise<void>((resolve) => {
         const check = setInterval(() => {
-          if (this.connected) { clearInterval(check); resolve(); }
+          if (this.connected && this.ws?.readyState === WebSocket.OPEN) {
+            clearInterval(check);
+            resolve();
+          }
         }, 200);
         setTimeout(() => { clearInterval(check); resolve(); }, 8000);
       });
-      return;
+      if (this.connected && this.ws?.readyState === WebSocket.OPEN) return;
+      // A tentativa anterior terminou sem conexão válida; permitir uma nova tentativa.
+      if (this.reconnecting) return;
     }
     await this.connect();
   }
@@ -927,6 +938,20 @@ class UniversalContractMonitor extends EventEmitter {
           soldFor: msg.sell.sold_for,
           referenceId: msg.sell.reference,
         });
+        // A sell response is authoritative confirmation. Do not wait indefinitely for
+        // a second proposal_open_contract update to persist the final outcome.
+        const soldContractId = Number(msg.sell.contract_id);
+        const soldState = this.monitored.get(soldContractId);
+        if (soldState) {
+          const soldFor = Number(msg.sell.sold_for);
+          const realizedProfit = Number.isFinite(soldFor) ? soldFor - soldState.input.buyPrice : soldState.profit;
+          this.handleContractClosed(soldState, {
+            status: 'sold',
+            is_sold: 1,
+            profit: realizedProfit,
+            sell_price: Number.isFinite(soldFor) ? soldFor : undefined,
+          });
+        }
       } else if (msg.error) {
         console.warn(`⚠️ [MONITOR] Erro na venda: ${msg.error.message} (code: ${msg.error.code})`);
         // Se havia um reqId pendente, reverter o estado do contrato para 'monitoring' se targetTicksReached
@@ -1570,7 +1595,7 @@ class UniversalContractMonitor extends EventEmitter {
       await this.ensureConnected();
     }
 
-    if (this.connected && this.ws) {
+    if (this.connected && this.ws && this.ws.readyState === WebSocket.OPEN) {
       const reqId = ++this.reqIdCounter;
       this.pendingSellReqs.set(reqId, contractId);
       this.ws.send(JSON.stringify({ sell: contractId, price: 0, req_id: reqId }));
