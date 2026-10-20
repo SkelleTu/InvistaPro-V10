@@ -1881,7 +1881,10 @@ class MetaTraderBridge extends EventEmitter {
   async flushDurableConfig(): Promise<void> {
     await this.durableConfigWrite;
     if (!isPostgresAvailable || !pgDb) {
-      throw new Error('MT5_DURABLE_STORE_UNAVAILABLE: PostgreSQL/Neon não está disponível.');
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error('MT5_DURABLE_STORE_UNAVAILABLE: PostgreSQL/Neon não está disponível.');
+      }
+      return;
     }
     if (this.durableConfigError) {
       throw new Error('MT5_DURABLE_WRITE_FAILED: configuração MT5 não foi confirmada na Neon.', { cause: this.durableConfigError });
