@@ -1341,6 +1341,7 @@ function resolveDerivProfile(symbol: string): DerivSyntheticProfile | null {
 class MetaTraderBridge extends EventEmitter {
   private config: MT5Config = { ...DEFAULT_CONFIG };
   private durableConfigWrite: Promise<void> = Promise.resolve();
+  private durableConfigError: Error | null = null;
   private status: MT5Status;
   private pendingSignals: Map<string, MT5Signal> = new Map();
   private openPositions: Map<number, MT5Position> = new Map();
@@ -1839,7 +1840,9 @@ class MetaTraderBridge extends EventEmitter {
           target: pgSchema.mt5BridgeState.key,
           set: { value: snapshot, updatedAt: new Date() },
         });
+      this.durableConfigError = null;
     }).catch((err: any) => {
+      this.durableConfigError = err instanceof Error ? err : new Error(String(err));
       console.error('[MT5Bridge] ❌ Falha ao persistir configuração MT5 na Neon:', err?.message || err);
     });
   }
@@ -1879,6 +1882,9 @@ class MetaTraderBridge extends EventEmitter {
     await this.durableConfigWrite;
     if (!isPostgresAvailable || !pgDb) {
       throw new Error('MT5_DURABLE_STORE_UNAVAILABLE: PostgreSQL/Neon não está disponível.');
+    }
+    if (this.durableConfigError) {
+      throw new Error('MT5_DURABLE_WRITE_FAILED: configuração MT5 não foi confirmada na Neon.', { cause: this.durableConfigError });
     }
   }
 
