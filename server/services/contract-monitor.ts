@@ -1034,12 +1034,13 @@ class UniversalContractMonitor extends EventEmitter {
 
   private async reconnectAndResubscribe(): Promise<void> {
     if (this.isShuttingDown || this.reconnecting) return;
-    // Resetar contratos travados em 'closing' — a resposta da venda foi perdida na reconexão
+    // Qualquer venda em andamento pode ter perdido a resposta durante a desconexão.
+    // Reabrir a avaliação; a próxima assinatura confirma se o contrato já foi vendido/expirou.
     for (const [id, state] of Array.from(this.monitored.entries())) {
-      if (state.status === 'closing' && state.targetTicksReached) {
+      if (state.status === 'closing') {
         state.status = 'monitoring';
         state.closingSince = undefined;
-        console.log(`🔄 [MONITOR] ${id} — reconectando: status 'closing' resetado para 'monitoring' (retry automático)`);
+        console.log(`🔄 [MONITOR] ${id} — reconexão: estado 'closing' resetado; aguardando confirmação Deriv e retry se necessário`);
       }
     }
     await this.connect();
