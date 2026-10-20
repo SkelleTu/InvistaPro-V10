@@ -755,6 +755,12 @@ export class HuggingFaceAIService {
           }
         });
 
+        // Keep readiness accurate when the legacy individual-model fallback is used too.
+        this.externalInferenceHealth.set(String(symbol).toUpperCase(), {
+          respondingModels: analyses.length,
+          checkedAt: Date.now(),
+        });
+
         // Generate consensus from all analyses (com símbolo explícito para evitar contaminação cruzada)
         const consensus = await this.generateConsensus(analyses, isRecoveryMode, recoveryThreshold, symbol);
         
