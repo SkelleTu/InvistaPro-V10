@@ -401,6 +401,7 @@ class IsolatedAutoTradingScheduler {
       contractCapabilitySymbols: r.contractCapabilitySymbols,
       contractCapabilityCheckedAt: r.contractCapabilityCheckedAt,
       contractCapabilityModes: r.contractCapabilityModes,
+      executionReadiness: r.executionReadiness,
     }));
   }
 
