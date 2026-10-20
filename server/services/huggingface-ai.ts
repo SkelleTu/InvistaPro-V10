@@ -105,6 +105,11 @@ export class HuggingFaceAIService {
   private apiKey: string = '';
   private isConfigured: boolean = true;
   private baseURL = 'https://router.huggingface.co';
+  private externalInferenceHealth = new Map<string, { respondingModels: number; checkedAt: number }>();
+
+  getExternalInferenceHealth(symbol: string): { respondingModels: number; checkedAt: number } | null {
+    return this.externalInferenceHealth.get(String(symbol).toUpperCase()) ?? null;
+  }
   private hybridOrchestrator: HybridOrchestrator;
   private activeModels: AIModel[] = [
     {
@@ -597,6 +602,10 @@ export class HuggingFaceAIService {
         }
       });
       console.log(`🌐 [HF INFERENCE] Resultado: ${perModelAnalyses.length}/${this.activeModels.length} modelos externos responderam de verdade.`);
+      this.externalInferenceHealth.set(String(symbol).toUpperCase(), {
+        respondingModels: perModelAnalyses.length,
+        checkedAt: Date.now(),
+      });
 
       // Combinar votos externos reais com o consenso técnico híbrido. Neutros abstêm;
       // desacordo reduz o score em vez de inflá-lo ou forçar unanimidade artificial.
