@@ -13,6 +13,12 @@ import {
 } from "drizzle-orm/pg-core";
 
 // One shared Neon database backs both V10 and Aura visual deployments.
+export const mt5BridgeState = pgTable("mt5_bridge_state", {
+  key: varchar("key", { length: 100 }).primaryKey(),
+  value: jsonb("value").notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 export const invistaDatabaseIdentity = pgTable("invista_database_identity", {
   id: integer("id").primaryKey(),
   platformId: varchar("platform_id", { length: 20 }).notNull(),
