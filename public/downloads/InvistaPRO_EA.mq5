@@ -64,6 +64,7 @@ string   g_discoverUrl    = "";
 string   g_symbol         = "";
 string   g_apiToken       = "";
 datetime g_lastHeartbeat  = 0;
+datetime g_lastTimerHeartbeat = 0;
 datetime g_lastSignal     = 0;
 int      g_failCount      = 0;
 bool     g_isDiscovering  = false;
@@ -163,10 +164,11 @@ void OnDeinit(const int reason)
 // Timer independent of market ticks: keep heartbeat/reconnect diagnostics alive.
 void OnTimer()
 {
-   datetime now = TimeCurrent();
-   if (HeartbeatSeconds > 0 && now - g_lastHeartbeat >= HeartbeatSeconds)
+   datetime localNow = TimeLocal();
+   if (HeartbeatSeconds > 0 && (g_lastTimerHeartbeat == 0 || localNow - g_lastTimerHeartbeat >= HeartbeatSeconds))
    {
-      g_lastHeartbeat = now;
+      g_lastTimerHeartbeat = localNow;
+      g_lastHeartbeat = TimeCurrent();
       bool ok = SendHeartbeat();
       if (!ok && AutoReconnect && !g_isDiscovering)
          TryReconnect();
