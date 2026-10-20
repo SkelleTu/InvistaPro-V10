@@ -113,6 +113,8 @@ int OnInit()
    g_failCount   = 0;
 
    trade.SetExpertMagicNumber(MagicNumber);
+   // Timer keeps connectivity checks alive even when the chart receives no ticks.
+   EventSetTimer(1);
 
    datetime now = TimeCurrent();
    g_lastSignal      = now;
@@ -150,6 +152,25 @@ int OnInit()
    g_lastHeartbeat = TimeCurrent();
 
    return(INIT_SUCCEEDED);
+}
+
+void OnDeinit(const int reason)
+{
+   EventKillTimer();
+   Print("[MT5-DIAG] EA encerrado. reason=", reason);
+}
+
+// Timer independent of market ticks: keep heartbeat/reconnect diagnostics alive.
+void OnTimer()
+{
+   datetime now = TimeCurrent();
+   if (HeartbeatSeconds > 0 && now - g_lastHeartbeat >= HeartbeatSeconds)
+   {
+      g_lastHeartbeat = now;
+      bool ok = SendHeartbeat();
+      if (!ok && AutoReconnect && !g_isDiscovering)
+         TryReconnect();
+   }
 }
 
 //+------------------------------------------------------------------+
@@ -711,7 +732,12 @@ void FetchAndProcessSignal()
       if (AutoReconnect && !g_isDiscovering) TryReconnect();
       return;
    }
-   if (res != 200) return;
+   if (res != 200)
+   {
+      string errorBody = CharArrayToString(result);
+      Print("[MT5-DIAG] Sinal recusado/indisponível. HTTP=", res, " URL=", url, " body=", StringSubstr(errorBody, 0, 300));
+      return;
+   }
 
    string resp   = CharArrayToString(result);
    string action = ExtractJsonString(resp, "action");
