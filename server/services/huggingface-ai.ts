@@ -136,74 +136,27 @@ export class HuggingFaceAIService {
     };
   }
   private hybridOrchestrator: HybridOrchestrator;
+  // Use the current Hugging Face Inference Providers OpenAI-compatible router.
+  // These are chat-completion models, not legacy task-specific /models endpoints.
   private activeModels: AIModel[] = [
     {
-      name: 'FinBERT Financial Sentiment',
-      id: 'ProsusAI/finbert',
-      description: 'Treinado em 4.9B tokens de texto financeiro (Reuters, FT, SEC, Bloomberg) — detecta sentimento positivo/negativo/neutro em linguagem financeira profissional',
-      confidence: 0.90
-    },
-    {
-      name: 'RoBERTa Market Analyzer',
-      id: 'cardiffnlp/twitter-roberta-base-sentiment-latest',
-      description: 'RoBERTa ajustado para classificação de sentimento de mercado — capta tendências bullish/bearish em descrições quantitativas de ativos sintéticos',
-      confidence: 0.85
-    },
-    {
-      name: 'XLM-RoBERTa Multilingual',
-      id: 'cardiffnlp/twitter-xlm-roberta-base-sentiment',
-      description: 'XLM-RoBERTa multilingual — análise de sentimento de mercado com capacidade multilíngue e alta generalização para dados financeiros',
-      confidence: 0.83
-    },
-    {
-      name: 'RoBERTa Trend Detector',
-      id: 'cardiffnlp/twitter-roberta-base-sentiment',
-      description: 'RoBERTa robusto para detecção de tendência de mercado — identifica momentum positivo/negativo em análises técnicas e quantitativas',
-      confidence: 0.82
-    },
-    {
-      name: 'DistilRoBERTa Financial',
-      id: 'mrm8488/distilroberta-finetuned-financial-news-sentiment-analysis',
-      description: 'DistilRoBERTa ajustado para análise financeira — combinação de velocidade e precisão para inferência em alta frequência',
-      confidence: 0.83,
-      type: 'sentiment'
-    },
-    {
-      name: 'CryptoBERT Price Action',
-      id: 'ElKulako/cryptobert',
-      description: 'BERT treinado exclusivamente em dados de mercados cripto e sintéticos — detecta padrões de price action, momentum e reversão em ativos digitais de alta frequência',
-      confidence: 0.88,
-      type: 'crypto'
-    },
-    {
-      name: 'FinBERT Tone Bullish/Bearish',
-      id: 'yiyanghkust/finbert-tone',
-      description: 'FinBERT especializado em identificar tom bullish/bearish/neutro — treinado em análises financeiras profissionais, identifica viés direcional com alta precisão',
-      confidence: 0.87,
-      type: 'tone'
-    },
-    {
-      name: 'FinTwits Sentiment Classifier',
-      id: 'nickmuchi/finbert-tone-finetuned-fintwits-classification',
-      description: 'Fine-tuned em FinTwits (plataforma social de traders) — identifica sentimento bullish/bearish de traders profissionais analisando ativos financeiros em tempo real',
-      confidence: 0.85,
-      type: 'tone'
-    },
-    {
-      name: 'RoBERTa Large FinTwits',
-      id: 'nickmuchi/roberta-large-finetuned-fintwits-classification',
-      description: 'RoBERTa Large ajustado para FinTwits — maior capacidade de reconhecimento de padrões bullish/bearish com arquitetura profunda, excelente para tendências complexas',
-      confidence: 0.89,
-      type: 'tone'
-    },
-    {
-      name: 'Zero-Shot Pattern Classifier',
-      id: 'facebook/bart-large-mnli',
-      description: 'BART-Large com inferência de linguagem natural (NLI) — classifica padrões técnicos como reversão, continuidade, breakout, Fibonacci e consolidação em zero-shot',
+      name: 'OpenAI GPT-OSS 120B',
+      id: 'openai/gpt-oss-120b:cheapest',
+      description: 'Modelo conversacional roteado pelo Hugging Face Inference Providers.',
       confidence: 0.86,
-      type: 'zero-shot',
-      candidateLabels: ['bullish reversal', 'bearish reversal', 'bullish continuation', 'bearish continuation', 'consolidation breakout', 'fibonacci support bounce', 'fibonacci resistance rejection']
-    }
+    },
+    {
+      name: 'DeepSeek V3',
+      id: 'deepseek-ai/DeepSeek-V3:cheapest',
+      description: 'Modelo conversacional alternativo para análise de sequência de ticks.',
+      confidence: 0.84,
+    },
+    {
+      name: 'Qwen QwQ 32B',
+      id: 'Qwen/QwQ-32B:cheapest',
+      description: 'Modelo conversacional alternativo para análise de sequência de ticks.',
+      confidence: 0.82,
+    },
   ];
 
   constructor() {
@@ -888,58 +841,81 @@ export class HuggingFaceAIService {
 
   private async analyzeWithModel(model: AIModel, tickData: DerivTickData[], symbol: string, isRecoveryMode = false, recoveryThreshold = 0.75): Promise<MarketAnalysis | null> {
     try {
-      console.log(`🔍 [DEBUG] Iniciando análise com modelo: ${model.name} (${model.id})`);
-      
-      // Gera prompt especializado baseado no tipo de modelo
-      const prompt = model.type === 'crypto'
-        ? ((this as any).buildCryptoPrompt ?? this.buildCompactDNA).call(this, tickData, symbol)
-        : model.type === 'zero-shot'
-        ? ((this as any).buildTechnicalPatternPrompt ?? this.buildCompactDNA).call(this, tickData, symbol)
-        : model.type === 'tone'
-        ? ((this as any).buildTonePrompt ?? this.buildCompactDNA).call(this, tickData, symbol)
-        : this.buildCompactDNA(tickData, symbol);
-      
-      console.log(`🧬 [${model.name}] Prompt especializado (${prompt.length} chars): ${prompt.substring(0, 120)}...`);
-      
-      // Payload varia: zero-shot precisa de candidate_labels
-      const payload: any = { inputs: prompt };
-      if (model.type === 'zero-shot' && model.candidateLabels) {
-        payload.parameters = { candidate_labels: model.candidateLabels };
+      if (!this.apiKey || this.apiKey === 'missing-key') {
+        console.warn(`⚠️ [HF ROUTER] Token Hugging Face ausente; pulando ${model.name}.`);
+        return null;
       }
-      
-      // Send request to Hugging Face
-      console.log(`📡 [DEBUG] Enviando requisição para Hugging Face: ${model.id}`);
+
+      const prompt = [
+        `Ativo Deriv: ${symbol}`,
+        this.buildCompactDNA(tickData, symbol),
+        'Analise somente os dados numéricos fornecidos. Não invente notícias, dados externos ou garantias de lucro.',
+        'Estime o viés direcional dos próximos ticks. Use neutral quando os dados forem fracos ou contraditórios.',
+        'Retorne somente JSON válido no formato {"prediction":"up|down|neutral","confidence":0-100,"reasoning":"justificativa curta baseada nos dados"}.',
+        `Modo recuperação: ${isRecoveryMode ? 'sim' : 'não'}; consenso mínimo configurado: ${Math.round(recoveryThreshold * 100)}%.`,
+      ].join('\n');
+
+      console.log(`📡 [HF ROUTER] Solicitando inferência para ${model.name} (${model.id}) em ${symbol}`);
       const response = await axios.post(
-        `${this.baseURL}/hf-inference/models/${model.id}`,
-        payload,
+        `${this.baseURL}/v1/chat/completions`,
+        {
+          model: model.id,
+          messages: [
+            { role: 'system', content: 'Você é um analista quantitativo prudente. Baseie a resposta exclusivamente nos ticks fornecidos. Nunca prometa lucro. Responda apenas JSON válido.' },
+            { role: 'user', content: prompt },
+          ],
+          temperature: 0.1,
+          max_tokens: 220,
+          stream: false,
+        },
         {
           headers: {
-            'Authorization': `Bearer ${this.apiKey}`,
-            'Content-Type': 'application/json'
+            Authorization: `Bearer ${this.apiKey}`,
+            'Content-Type': 'application/json',
           },
-          timeout: 30000
-        }
+          timeout: 25000,
+        },
       );
 
-      console.log(`📨 [DEBUG] Resposta recebida de ${model.name}:`, JSON.stringify(response.data).substring(0, 200));
-
-      // Process model response
-      const analysis = this.processModelResponse(model, response.data, tickData);
-      console.log(`✅ [DEBUG] Análise processada - Modelo: ${model.name}, Predição: ${analysis.prediction}, Confiança: ${analysis.confidence}%`);
-      
-      return analysis;
-
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      console.error(`❌ [DEBUG] Falha no modelo ${model.name}:`, errorMessage);
-      
-      // Log detalhes do erro
-      if (error instanceof Error && 'response' in error) {
-        const axiosError = error as any;
-        console.error(`📋 [DEBUG] Status HTTP: ${axiosError.response?.status}`);
-        console.error(`📋 [DEBUG] Dados da resposta:`, axiosError.response?.data);
+      const content = String(response.data?.choices?.[0]?.message?.content ?? '').trim();
+      const jsonStart = content.indexOf('{');
+      const jsonEnd = content.lastIndexOf('}');
+      if (jsonStart < 0 || jsonEnd <= jsonStart) {
+        console.warn(`⚠️ [HF ROUTER] ${model.name} retornou resposta sem JSON válido.`);
+        return null;
       }
-      
+
+      const parsed = JSON.parse(content.slice(jsonStart, jsonEnd + 1));
+      const prediction = String(parsed?.prediction ?? '').toLowerCase();
+      const confidence = Number(parsed?.confidence);
+      if (!['up', 'down', 'neutral'].includes(prediction) || !Number.isFinite(confidence)) {
+        console.warn(`⚠️ [HF ROUTER] Resposta inválida de ${model.name}; não conta como inferência saudável.`);
+        return null;
+      }
+
+      const analysis: MarketAnalysis = {
+        modelName: model.name,
+        prediction: prediction as 'up' | 'down' | 'neutral',
+        confidence: Math.max(0, Math.min(100, Math.round(confidence))),
+        reasoning: String(parsed?.reasoning ?? 'Inferência baseada nos ticks fornecidos.').slice(0, 500),
+        marketData: tickData,
+        timestamp: new Date(),
+      };
+      console.log(`✅ [HF ROUTER] ${model.name}: ${analysis.prediction} (${analysis.confidence}%) para ${symbol}`);
+      return analysis;
+    } catch (error) {
+      const axiosError = error as any;
+      const status = axiosError?.response?.status;
+      const detail = typeof axiosError?.response?.data === 'string'
+        ? axiosError.response.data
+        : JSON.stringify(axiosError?.response?.data ?? axiosError?.message ?? error);
+      if (status === 402) {
+        console.error(`❌ [HF ROUTER] HTTP 402 para ${model.name}: créditos/faturamento do Inference Providers indisponíveis. Trocar o modelo não remove essa exigência.`);
+      } else if (status === 401 || status === 403) {
+        console.error(`❌ [HF ROUTER] HTTP ${status} para ${model.name}: token inválido ou sem permissão Inference Providers.`);
+      } else {
+        console.warn(`⚠️ [HF ROUTER] ${model.name} falhou (HTTP ${status ?? 'sem resposta'}): ${String(detail).slice(0, 350)}`);
+      }
       return null;
     }
   }
