@@ -401,16 +401,61 @@ export default function MetaTraderPage() {
     });
   };
 
-  const downloadEA = () => {
-    const a = document.createElement('a');
-    a.href = '/api/mt5/download-ea';
-    a.download = 'InvistaPRO_EA.mq5';
-    a.click();
-    toast({
-      title: '✅ InvistaPRO EA v8.0 baixado!',
-      description: 'IMPORTANTE: Substitua o EA anterior por este novo arquivo. Copie para MQL5/Experts → Compilar (F7) → Arraste ao gráfico e habilite AlgoTrading. A URL do servidor já está pré-configurada.',
-      duration: 8000,
-    });
+  const downloadEA = async () => {
+    try {
+      const response = await fetch('/api/mt5/download-ea', {
+        method: 'GET',
+        credentials: 'same-origin',
+        headers: { Accept: 'text/plain' },
+      });
+
+      if (!response.ok) {
+        let message = `O servidor recusou o download do EA (HTTP ${response.status}).`;
+        try {
+          const payload = await response.json();
+          message = payload.error || payload.message || payload.reason || message;
+        } catch {
+          // Keep the HTTP status message when the server did not return JSON.
+        }
+        toast({
+          title: 'Não foi possível baixar o EA',
+          description: message,
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      const contentType = (response.headers.get('content-type') || '').toLowerCase();
+      if (!contentType.includes('text/plain')) {
+        throw new Error('A resposta do servidor não parece ser o arquivo EA. Confirme que sua sessão está autenticada e tente novamente.');
+      }
+
+      const blob = await response.blob();
+      if (blob.size === 0) {
+        throw new Error('O servidor retornou um arquivo vazio.');
+      }
+
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = 'InvistaPRO_EA.mq5';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+
+      toast({
+        title: '✅ InvistaPRO EA v8.0 baixado!',
+        description: 'IMPORTANTE: Substitua o EA anterior por este novo arquivo. Copie para MQL5/Experts → Compilar (F7) → Arraste ao gráfico e habilite AlgoTrading. A URL do servidor já está pré-configurada.',
+        duration: 8000,
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Falha no download do EA',
+        description: error?.message || 'Não foi possível acessar o servidor MT5.',
+        variant: 'destructive',
+      });
+    }
   };
 
   return (

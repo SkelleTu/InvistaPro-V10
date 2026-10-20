@@ -64,6 +64,7 @@ string   g_discoverUrl    = "";
 string   g_symbol         = "";
 string   g_apiToken       = "";
 datetime g_lastHeartbeat  = 0;
+datetime g_lastTimerHeartbeat = 0;
 datetime g_lastSignal     = 0;
 int      g_failCount      = 0;
 bool     g_isDiscovering  = false;
@@ -113,6 +114,8 @@ int OnInit()
    g_failCount   = 0;
 
    trade.SetExpertMagicNumber(MagicNumber);
+   // Timer keeps connectivity checks alive even when the chart receives no ticks.
+   EventSetTimer(1);
 
    datetime now = TimeCurrent();
    g_lastSignal      = now;
@@ -150,6 +153,26 @@ int OnInit()
    g_lastHeartbeat = TimeCurrent();
 
    return(INIT_SUCCEEDED);
+}
+
+void OnDeinit(const int reason)
+{
+   EventKillTimer();
+   Print("[MT5-DIAG] EA encerrado. reason=", reason);
+}
+
+// Timer independent of market ticks: keep heartbeat/reconnect diagnostics alive.
+void OnTimer()
+{
+   datetime localNow = TimeLocal();
+   if (HeartbeatSeconds > 0 && (g_lastTimerHeartbeat == 0 || localNow - g_lastTimerHeartbeat >= HeartbeatSeconds))
+   {
+      g_lastTimerHeartbeat = localNow;
+      g_lastHeartbeat = TimeCurrent();
+      bool ok = SendHeartbeat();
+      if (!ok && AutoReconnect && !g_isDiscovering)
+         TryReconnect();
+   }
 }
 
 //+------------------------------------------------------------------+
@@ -711,7 +734,14 @@ void FetchAndProcessSignal()
       if (AutoReconnect && !g_isDiscovering) TryReconnect();
       return;
    }
-   if (res != 200) return;
+   if (res != 200)
+   {
+      string errorBody = CharArrayToString(result);
+      if (StringLen(ApiToken) > 0) StringReplace(errorBody, ApiToken, "[REDACTED]");
+      // Never print the full URL: the EA's query string can contain its bearer token.
+      Print("[MT5-DIAG] Sinal recusado/indisponível. HTTP=", res, " symbol=", g_symbol, " body=", StringSubstr(errorBody, 0, 300));
+      return;
+   }
 
    string resp   = CharArrayToString(result);
    string action = ExtractJsonString(resp, "action");

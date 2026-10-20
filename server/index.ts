@@ -27,6 +27,7 @@ import { initUrlRegistry } from "./services/url-registry";
 import { startDerivObservabilityBridge } from "./services/deriv-observability-bridge";
 import { startUniversalHeartbeatLoop } from "./services/universal-server-session";
 import { getSecretHealth } from "./services/secret-health";
+import { metaTraderBridge } from "./services/metatrader-bridge";
 
 const app = express();
 
@@ -356,6 +357,10 @@ app.use((req, res, next) => {
         console.log('✅ [SQLITE→NEON] Backfill aditivo de essenciais concluído', backfill);
         const restored = await restoreEssentialDataToSqlite();
         console.log('✅ [NEON→SQLITE] Dados essenciais restaurados', restored);
+        const mt5ConfigRestored = await metaTraderBridge.restoreDurableConfig();
+        console.log(mt5ConfigRestored
+          ? '✅ [MT5] Configuração restaurada da persistência durável.'
+          : '✅ [MT5] Configuração local inicial copiada para persistência durável.');
         persistenceReady = true;
         app.locals.persistenceReady = true;
         app.locals.serviceReady = routesReady;

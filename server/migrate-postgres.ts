@@ -37,6 +37,15 @@ async function migratePostgres() {
     }
     console.log(`🔒 [NEON] Fonte de dados compartilhada confirmada para Invista Core; visual=${visualPlatform}.`);
     
+    // Durable MT5 bridge configuration survives ephemeral Render instances.
+    await pgDb.execute(sql`
+      CREATE TABLE IF NOT EXISTS mt5_bridge_state (
+        key VARCHAR(100) PRIMARY KEY,
+        value JSONB NOT NULL,
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      )
+    `);
+
     // Criar tabela de sessões
     await pgDb.execute(sql`
       CREATE TABLE IF NOT EXISTS sessions (
