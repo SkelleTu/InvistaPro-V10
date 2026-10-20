@@ -3414,8 +3414,23 @@ export class AutoTradingScheduler {
               accuTicks = configuredTicks;
             }
             accuTargetTicks = accuTicks;
+            // Final fail-closed gate immediately before the ACCU purchase. The generic
+            // scheduler path must enforce the same external-AI and monitor requirements
+            // as LEVERAGE, not merely check that an analyses array exists.
+            const accuHfHealth = huggingFaceAI.getExternalInferenceHealth(selectedSymbol);
+            if (!accuHfHealth || accuHfHealth.respondingModels < 1 || Date.now() - accuHfHealth.checkedAt > 60000) {
+              console.error(`🛑 [${operationId}] Compra ACCU bloqueada: nenhuma inferência HF válida e recente para ${selectedSymbol}.`);
+              this.setPhase('BLOQUEADO', `HF indisponível para ${selectedSymbol}; ACCU bloqueado`, 'warning');
+              return { success: false, error: `Entrada ACCU bloqueada: IA externa indisponível para ${selectedSymbol}.` };
+            }
+            const accuMonitorReady = await contractMonitor.prepareMonitoring(tokenData.token);
+            if (!accuMonitorReady) {
+              console.error(`🛑 [${operationId}] Compra ACCU bloqueada: monitor Deriv não autenticado/conectado.`);
+              this.setPhase('BLOQUEADO', 'Monitor Deriv indisponível; ACCU bloqueado', 'warning');
+              return { success: false, error: 'Entrada ACCU bloqueada: monitor Deriv indisponível.' };
+            }
             const opportunityQuality = consensus >= 75 ? 'ALTA' : consensus >= 50 ? 'MÉDIA' : 'BAIXA';
-            console.log(`📊 [${operationId}] ACCU MODO-OPS: stake=$${accuStake} [${opportunityQuality}] (banca=$${bankBalance.toFixed(2)} | consenso=${consensus}% | risco=${accuRisk}) | growth=${(adaptiveGrowth*100).toFixed(0)}% ${growthModeLabel} | ticks=${accuTicks}${supremeAnalysis ? ` | regime=${regime} | hurst=${supremeAnalysis.statistics.hurstExponent.toFixed(2)}` : ''} | ${selectedSymbol}`);
+            console.log(`📊 [${operationId}] ACCU MODO-OPS: stake=${accuStake} [${opportunityQuality}] (banca=${bankBalance.toFixed(2)} | consenso=${consensus}% | risco=${accuRisk}) | growth=${(adaptiveGrowth*100).toFixed(0)}% ${growthModeLabel} | ticks=${accuTicks}${supremeAnalysis ? ` | regime=${regime} | hurst=${supremeAnalysis.statistics.hurstExponent.toFixed(2)}` : ''} | ${selectedSymbol}`);
             contract = await tradeDerivAPI.buyFlexibleContract({
               contract_type: 'ACCU',
               symbol: selectedSymbol,
