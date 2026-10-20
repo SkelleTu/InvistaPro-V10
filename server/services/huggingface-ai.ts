@@ -110,6 +110,29 @@ export class HuggingFaceAIService {
   getExternalInferenceHealth(symbol: string): { respondingModels: number; checkedAt: number } | null {
     return this.externalInferenceHealth.get(String(symbol).toUpperCase()) ?? null;
   }
+
+  /** Safe operational summary for the dashboard; never returns credentials. */
+  getExternalInferenceSummary(): {
+    configured: boolean;
+    activeModelCount: number;
+    healthySymbols: Array<{ symbol: string; respondingModels: number; ageMs: number }>;
+    checkedSymbols: number;
+  } {
+    const now = Date.now();
+    const healthySymbols = Array.from(this.externalInferenceHealth.entries())
+      .filter(([, health]) => health.respondingModels > 0 && now - health.checkedAt <= 60000)
+      .map(([symbol, health]) => ({
+        symbol,
+        respondingModels: health.respondingModels,
+        ageMs: Math.max(0, now - health.checkedAt),
+      }));
+    return {
+      configured: this.isConfigured,
+      activeModelCount: this.activeModels.length,
+      healthySymbols,
+      checkedSymbols: this.externalInferenceHealth.size,
+    };
+  }
   private hybridOrchestrator: HybridOrchestrator;
   private activeModels: AIModel[] = [
     {
