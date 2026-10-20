@@ -425,6 +425,11 @@ export default function MetaTraderPage() {
         return;
       }
 
+      const contentType = (response.headers.get('content-type') || '').toLowerCase();
+      if (!contentType.includes('text/plain')) {
+        throw new Error('A resposta do servidor não parece ser o arquivo EA. Confirme que sua sessão está autenticada e tente novamente.');
+      }
+
       const blob = await response.blob();
       if (blob.size === 0) {
         throw new Error('O servidor retornou um arquivo vazio.');
