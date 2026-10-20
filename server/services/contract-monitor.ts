@@ -768,7 +768,7 @@ class UniversalContractMonitor extends EventEmitter {
       authenticated: this.connected && socketOpen,
       socketOpen,
       reconnecting: this.reconnecting,
-      appIdConfigured: /^\\d+$/.test(String(process.env.DERIV_APP_ID ?? '').trim()),
+      appIdConfigured: /^\d+$/.test(String(process.env.DERIV_APP_ID ?? '').trim()),
       monitoredContracts: monitored.length,
       staleContracts: monitored.filter(state => now - state.lastUpdate > 15000).length,
     };
