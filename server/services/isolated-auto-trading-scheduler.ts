@@ -45,6 +45,13 @@ interface UserRuntime {
   contractCapabilitySymbols: number;
   contractCapabilityCheckedAt: number;
   contractCapabilityModes: string[];
+  executionReadiness: {
+    executionReady: boolean;
+    status: "ready" | "blocked";
+    reasons: string[];
+    externalAI?: unknown;
+    contractMonitor?: unknown;
+  } | null;
 }
 
 class IsolatedAutoTradingScheduler {
@@ -92,6 +99,7 @@ class IsolatedAutoTradingScheduler {
         contractCapabilitySymbols: 0,
         contractCapabilityCheckedAt: 0,
         contractCapabilityModes: [],
+        executionReadiness: null,
       };
       this.runtimes.set(id, runtime);
       console.log(`🧩 [USER-RUNTIME] sessão leve criada | user=${id} | session=${runtime.sessionId}`);
@@ -182,6 +190,9 @@ class IsolatedAutoTradingScheduler {
         runtime.contractCapabilitySymbols = Number(message.contractCapabilitySymbols || 0);
         runtime.contractCapabilityCheckedAt = Number(message.contractCapabilityCheckedAt || 0);
         runtime.contractCapabilityModes = Array.isArray(message.contractCapabilityModes) ? message.contractCapabilityModes : [];
+        runtime.executionReadiness = message.executionReadiness && typeof message.executionReadiness === "object"
+          ? message.executionReadiness
+          : null;
       } else if (message?.type === "error") {
         const errorMessage = String(message.error || "Worker failed before readiness.").slice(0, 500);
         runtime.lastError = errorMessage;
@@ -335,6 +346,10 @@ class IsolatedAutoTradingScheduler {
 
   getArmedUserIds(): string[] {
     return [...this.runtimes.values()].filter(r => r.armed).map(r => r.userId);
+  }
+
+  getUserReadiness(userId: string) {
+    return this.runtimes.get(String(userId))?.executionReadiness ?? null;
   }
 
   getSchedulerStatus() {
