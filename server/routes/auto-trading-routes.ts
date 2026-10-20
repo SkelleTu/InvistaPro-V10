@@ -56,6 +56,8 @@ router.get('/status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(as
     isolatedAutoTradingScheduler.getArmedUserIds().includes(userId) &&
     activeSessions.some((session: any) => session.isActive && session.workerReady);
 
+  const executionReadiness = runtime?.executionReadiness ?? null;
+  const executionReadinessReady = Boolean(executionReadiness?.executionReady);
   const runtimePhase = runtime?.lastError
     ? 'BLOQUEADO'
     : String(runtime?.currentPhase || (schedulerActiveForUser ? 'ATIVO' : 'AGUARDANDO_PLAY'));
@@ -84,8 +86,6 @@ router.get('/status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(as
   const activeConfigs = await storage.getActiveTradeConfigurations();
   const userActiveConfigs = activeConfigs.filter((c: any) => String(c.userId) === userId);
   const activeConfigsCount = userActiveConfigs.length;
-  const executionReadiness = runtime?.executionReadiness ?? null;
-  const executionReadinessReady = Boolean(executionReadiness?.executionReady);
   const canExecuteTrades = schedulerActiveForUser &&
     marketDataReady &&
     contractCapabilityReady &&
