@@ -784,7 +784,8 @@ export class HuggingFaceAIService {
       'Use neutral se o sinal for fraco ou contraditório.'
     ].join('\n');
 
-    const models = ['llama-3.3-70b-versatile', 'llama3-70b-8192', 'llama3-8b-8192'];
+    // IDs atuais listados pela Groq. Evita modelos removidos/depreciados.
+    const models = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b'];
     for (const model of models) {
       try {
         const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
