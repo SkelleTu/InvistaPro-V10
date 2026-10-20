@@ -849,6 +849,7 @@ class UniversalContractMonitor extends EventEmitter {
       if (!/^\d+$/.test(configuredAppId)) {
         this.reconnecting = false;
         console.error('🛑 [MONITOR] DERIV_APP_ID ausente/inválido. Monitor não conectará e novas operações ACCU devem ser bloqueadas.');
+        resolve();
         return;
       }
       const appId = configuredAppId;
