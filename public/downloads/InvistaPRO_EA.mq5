@@ -737,7 +737,9 @@ void FetchAndProcessSignal()
    if (res != 200)
    {
       string errorBody = CharArrayToString(result);
-      Print("[MT5-DIAG] Sinal recusado/indisponível. HTTP=", res, " URL=", url, " body=", StringSubstr(errorBody, 0, 300));
+      if (StringLen(ApiToken) > 0) StringReplace(errorBody, ApiToken, "[REDACTED]");
+      // Never print the full URL: the EA's query string can contain its bearer token.
+      Print("[MT5-DIAG] Sinal recusado/indisponível. HTTP=", res, " symbol=", g_symbol, " body=", StringSubstr(errorBody, 0, 300));
       return;
    }
 
