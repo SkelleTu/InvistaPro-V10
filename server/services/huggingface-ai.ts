@@ -129,6 +129,7 @@ export class HuggingFaceAIService {
     return {
       configured: this.isConfigured,
       activeModelCount: this.activeModels.length,
+      groqFallbackConfigured: Boolean(process.env.GROQ_API_KEY?.trim()),
       healthySymbols,
       checkedSymbols: this.externalInferenceHealth.size,
     };
@@ -624,7 +625,16 @@ export class HuggingFaceAIService {
           console.warn(`⚠️ [HF INFERENCE] ${model.name} indisponível: ${reason.slice(0, 240)}`);
         }
       });
-      console.log(`🌐 [HF INFERENCE] Resultado: ${perModelAnalyses.length}/${this.activeModels.length} modelos externos responderam de verdade.`);
+      // If Hugging Face is out of credits or its selected providers reject the models,
+      // use the configured Groq key as a real external inference fallback. Never fabricate votes.
+      if (perModelAnalyses.length === 0) {
+        const groqAnalysis = await this.analyzeWithGroqFallback(tickData, symbol);
+        if (groqAnalysis) {
+          perModelAnalyses.push(groqAnalysis);
+          console.log(`✅ [GROQ FALLBACK] Inferência externa válida para ${symbol}: ${groqAnalysis.prediction} (${groqAnalysis.confidence}%)`);
+        }
+      }
+      console.log(`🌐 [EXTERNAL INFERENCE] ${perModelAnalyses.length} modelo(s) externo(s) responderam validamente; modelos HF configurados=${this.activeModels.length}; Groq fallback=${Boolean(process.env.GROQ_API_KEY?.trim()) ? 'configurado' : 'não configurado'}.`);
       this.externalInferenceHealth.set(String(symbol).toUpperCase(), {
         respondingModels: perModelAnalyses.length,
         checkedAt: Date.now(),
@@ -790,6 +800,89 @@ export class HuggingFaceAIService {
         throw new Error(`Failed to complete AI analysis: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`);
       }
     }
+  }
+
+  private async analyzeWithGroqFallback(tickData: DerivTickData[], symbol: string): Promise<MarketAnalysis | null> {
+    const apiKey = String(process.env.GROQ_API_KEY ?? '').trim();
+    if (!apiKey) return null;
+
+    const recentTicks = tickData.slice(-100).map((tick) => Number(tick.quote)).filter(Number.isFinite);
+    if (recentTicks.length < 20) {
+      console.warn(`⚠️ [GROQ FALLBACK] Dados insuficientes para ${symbol}: ${recentTicks.length}/20 ticks mínimos.`);
+      return null;
+    }
+
+    const changes = recentTicks.slice(1).map((price, index) => price - recentTicks[index]);
+    const upMoves = changes.filter((change) => change > 0).length;
+    const downMoves = changes.filter((change) => change < 0).length;
+    const netChangePct = recentTicks[0] !== 0
+      ? ((recentTicks[recentTicks.length - 1] - recentTicks[0]) / recentTicks[0]) * 100
+      : 0;
+    const prompt = [
+      `Ativo Deriv: ${symbol}`,
+      `Ticks reais mais recentes (antigo para novo): ${recentTicks.join(', ')}`,
+      `Variação líquida no intervalo: ${netChangePct.toFixed(5)}%`,
+      `Movimentos de alta: ${upMoves}; movimentos de baixa: ${downMoves}`,
+      'Analise apenas os números fornecidos para estimar a direção dos próximos ticks. Não invente notícias nem prometa lucro.',
+      'Responda somente JSON válido: {"prediction":"up|down|neutral","confidence":0-100,"reasoning":"explicação curta baseada nos ticks"}.',
+      'Use neutral se o sinal for fraco ou contraditório.'
+    ].join('\n');
+
+    const models = ['llama-3.3-70b-versatile', 'llama3-70b-8192', 'llama3-8b-8192'];
+    for (const model of models) {
+      try {
+        const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model,
+            messages: [
+              { role: 'system', content: 'Você é um analista quantitativo prudente. Use somente os ticks fornecidos e responda estritamente em JSON.' },
+              { role: 'user', content: prompt },
+            ],
+            temperature: 0.1,
+            max_tokens: 220,
+          }),
+          signal: AbortSignal.timeout(15000),
+        });
+        if (!response.ok) {
+          console.warn(`⚠️ [GROQ FALLBACK] Modelo ${model} retornou HTTP ${response.status}; tentando próximo modelo.`);
+          continue;
+        }
+
+        const payload = await response.json() as any;
+        const content = String(payload?.choices?.[0]?.message?.content ?? '').trim();
+        const jsonStart = content.indexOf('{');
+        const jsonEnd = content.lastIndexOf('}');
+        if (jsonStart < 0 || jsonEnd <= jsonStart) {
+          console.warn(`⚠️ [GROQ FALLBACK] Modelo ${model} não retornou JSON válido.`);
+          continue;
+        }
+
+        const parsed = JSON.parse(content.slice(jsonStart, jsonEnd + 1));
+        const prediction = String(parsed?.prediction ?? '').toLowerCase();
+        const confidence = Number(parsed?.confidence);
+        if (!['up', 'down', 'neutral'].includes(prediction) || !Number.isFinite(confidence)) {
+          console.warn(`⚠️ [GROQ FALLBACK] Resposta inválida do modelo ${model}; tentando próximo modelo.`);
+          continue;
+        }
+
+        return {
+          modelName: `Groq Tick Analyzer (${model})`,
+          prediction: prediction as 'up' | 'down' | 'neutral',
+          confidence: Math.max(0, Math.min(100, Math.round(confidence))),
+          reasoning: String(parsed?.reasoning ?? 'Inferência baseada na sequência de ticks fornecida.').slice(0, 500),
+          marketData: tickData,
+          timestamp: new Date(),
+        };
+      } catch (error) {
+        console.warn(`⚠️ [GROQ FALLBACK] Modelo ${model} falhou: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    return null;
   }
 
   private async analyzeWithModel(model: AIModel, tickData: DerivTickData[], symbol: string, isRecoveryMode = false, recoveryThreshold = 0.75): Promise<MarketAnalysis | null> {
