@@ -14,6 +14,8 @@ import { storage } from '../storage';
 import { getSignal } from './signal-store';
 import { sqlite } from '../db';
 import { consensusCache } from './consensus-cache';
+import { pgDb, pgSchema, isPostgresAvailable } from '../db-postgres';
+import { eq } from 'drizzle-orm';
 
 export interface MT5Signal {
   id: string;
@@ -1338,6 +1340,7 @@ function resolveDerivProfile(symbol: string): DerivSyntheticProfile | null {
 
 class MetaTraderBridge extends EventEmitter {
   private config: MT5Config = { ...DEFAULT_CONFIG };
+  private durableConfigWrite: Promise<void> = Promise.resolve();
   private status: MT5Status;
   private pendingSignals: Map<string, MT5Signal> = new Map();
   private openPositions: Map<number, MT5Position> = new Map();
@@ -1816,14 +1819,66 @@ class MetaTraderBridge extends EventEmitter {
   }
 
   saveConfigToDB(): void {
+    const snapshot: MT5Config = { ...this.config };
     try {
       sqlite.prepare(`
         INSERT INTO mt5_config_state (key, value, updated_at)
         VALUES ('bridge_config', ?, CURRENT_TIMESTAMP)
         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
-      `).run(JSON.stringify(this.config));
+      `).run(JSON.stringify(snapshot));
     } catch (err) {
-      console.error('[MT5Bridge] ⚠️ Falha ao salvar configuração no banco:', err);
+      console.error('[MT5Bridge] ⚠️ Falha ao salvar configuração no SQLite:', err);
+    }
+
+    // Serialize writes so rapid dashboard changes cannot leave an older snapshot last.
+    if (!isPostgresAvailable || !pgDb) return;
+    this.durableConfigWrite = this.durableConfigWrite.then(async () => {
+      await pgDb.insert(pgSchema.mt5BridgeState)
+        .values({ key: 'bridge_config', value: snapshot })
+        .onConflictDoUpdate({
+          target: pgSchema.mt5BridgeState.key,
+          set: { value: snapshot, updatedAt: new Date() },
+        });
+    }).catch((err: any) => {
+      console.error('[MT5Bridge] ❌ Falha ao persistir configuração MT5 na Neon:', err?.message || err);
+    });
+  }
+
+  /** Restore the authoritative MT5 configuration after PostgreSQL migrations complete. */
+  async restoreDurableConfig(): Promise<boolean> {
+    if (!isPostgresAvailable || !pgDb) {
+      throw new Error('MT5_DURABLE_STORE_UNAVAILABLE: PostgreSQL/Neon não está disponível.');
+    }
+    const [row] = await pgDb.select().from(pgSchema.mt5BridgeState)
+      .where(eq(pgSchema.mt5BridgeState.key, 'bridge_config')).limit(1);
+    if (row?.value && typeof row.value === 'object' && !Array.isArray(row.value)) {
+      this.config = { ...DEFAULT_CONFIG, ...(row.value as Partial<MT5Config>) };
+      // Refresh local cache only; the durable record remains authoritative.
+      try {
+        sqlite.prepare(`
+          INSERT INTO mt5_config_state (key, value, updated_at)
+          VALUES ('bridge_config', ?, CURRENT_TIMESTAMP)
+          ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+        `).run(JSON.stringify(this.config));
+      } catch (err) {
+        console.error('[MT5Bridge] ⚠️ Falha ao atualizar cache local da configuração:', err);
+      }
+      console.log('[MT5Bridge] 🔐 Configuração MT5 restaurada da Neon.');
+      return true;
+    }
+
+    // First durable boot: carry forward the existing SQLite configuration, if any.
+    this.saveConfigToDB();
+    await this.flushDurableConfig();
+    console.log('[MT5Bridge] 💾 Configuração MT5 inicializada na Neon a partir do estado local.');
+    return false;
+  }
+
+  /** Wait until the most recent configuration snapshot is confirmed by PostgreSQL. */
+  async flushDurableConfig(): Promise<void> {
+    await this.durableConfigWrite;
+    if (!isPostgresAvailable || !pgDb) {
+      throw new Error('MT5_DURABLE_STORE_UNAVAILABLE: PostgreSQL/Neon não está disponível.');
     }
   }
 
