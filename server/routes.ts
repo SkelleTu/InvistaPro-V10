@@ -2270,14 +2270,13 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     const activeForUser = autoTradingScheduler.getArmedUserIds().some((id: string) => String(id) === userId);
     const globalStatus = autoTradingScheduler.getSchedulerStatus();
     const emergencyStop = Boolean(legacyTradingScheduler.getSchedulerStatus().emergencyStop || globalStatus.emergencyStop);
-    const externalAI = huggingFaceAI.getExternalInferenceSummary();
-    const monitorHealth = contractMonitor.getHealthStatus();
-    const readinessReasons: string[] = [];
-    if (!externalAI.configured) readinessReasons.push('HUGGINGFACE_API_KEY ausente ou inválida');
-    if (externalAI.healthySymbols.length === 0) readinessReasons.push('Nenhuma inferência externa válida nos últimos 60 segundos');
-    if (!monitorHealth.appIdConfigured) readinessReasons.push('DERIV_APP_ID ausente ou inválido; precisa ser numérico');
-    if (!monitorHealth.authenticated) readinessReasons.push('Monitor Deriv não autenticado/conectado');
-    const executionReady = readinessReasons.length === 0;
+    // Read readiness from the user's isolated worker. The parent process has its
+    // own service singletons and cannot accurately report the child's WebSocket/AI state.
+    const readiness = autoTradingScheduler.getUserReadiness(userId);
+    const readinessReasons: string[] = Array.isArray(readiness?.reasons)
+      ? readiness.reasons
+      : ['Runtime isolado ainda não reportou o estado de prontidão'];
+    const executionReady = Boolean(readiness?.executionReady);
     res.json({
       success: true,
       status: {
@@ -2292,8 +2291,8 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
           executionReady,
           status: executionReady ? 'ready' : 'blocked',
           reasons: readinessReasons,
-          externalAI,
-          contractMonitor: monitorHealth,
+          externalAI: readiness?.externalAI ?? null,
+          contractMonitor: readiness?.contractMonitor ?? null,
         },
       },
       armedUsers: activeForUser ? [userId] : [],
