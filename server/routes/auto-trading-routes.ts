@@ -56,6 +56,8 @@ router.get('/status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(as
     isolatedAutoTradingScheduler.getArmedUserIds().includes(userId) &&
     activeSessions.some((session: any) => session.isActive && session.workerReady);
 
+  const executionReadiness = runtime?.executionReadiness ?? null;
+  const executionReadinessReady = Boolean(executionReadiness?.executionReady);
   const runtimePhase = runtime?.lastError
     ? 'BLOQUEADO'
     : String(runtime?.currentPhase || (schedulerActiveForUser ? 'ATIVO' : 'AGUARDANDO_PLAY'));
@@ -70,6 +72,7 @@ router.get('/status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(as
       || runtime?.currentPhaseDetail
       || (schedulerActiveForUser ? 'Worker de trading ativo; aguardando atividade confirmada.' : 'Aguardando Play.')
     ),
+    executionReadiness,
     activityLog: Array.isArray(runtime?.activityLog) ? runtime.activityLog.slice(0, 20) : [],
     marketQuality: Number(runtime?.marketQuality || 0),
     lastCycleStartedAt: Number(runtime?.lastCycleStartedAt || 0),
@@ -88,6 +91,7 @@ router.get('/status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(as
     contractCapabilityReady &&
     derivTokenConfigured &&
     activeConfigsCount > 0 &&
+    executionReadinessReady &&
     !emergencyStop;
 
   const tradingBlockers: string[] = [];
@@ -101,6 +105,11 @@ router.get('/status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(as
   if (!contractCapabilityReady) tradingBlockers.push('Nenhum contrato compatível foi confirmado para as modalidades e ativos permitidos.');
   if (!derivTokenConfigured) tradingBlockers.push('Token Deriv não configurado ou inativo.');
   if (activeConfigsCount === 0) tradingBlockers.push('Nenhuma configuração de trading ativa.');
+  if (!executionReadinessReady) {
+    const reasons = Array.isArray(executionReadiness?.reasons) ? executionReadiness.reasons : [];
+    if (reasons.length > 0) tradingBlockers.push(...reasons.map((reason: unknown) => `Prontidão de execução: ${String(reason).slice(0, 250)}`));
+    else tradingBlockers.push('Prontidão de execução ainda não confirmada pelo worker isolado.');
+  }
 
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
   res.setHeader('Pragma', 'no-cache');
@@ -137,6 +146,7 @@ router.get('/status', isAuthenticated, isTradingAuthorized, asyncErrorHandler(as
       contractCapabilityReady: Boolean(session.contractCapabilityReady),
       contractCapabilitySymbols: Number(session.contractCapabilitySymbols || 0),
       contractCapabilityModes: Array.isArray(session.contractCapabilityModes) ? session.contractCapabilityModes : [],
+      executionReadiness: session.executionReadiness ?? null,
       currentPhase: String(session.lastError ? 'BLOQUEADO' : session.currentPhase || 'AGUARDANDO_PLAY'),
       currentPhaseDetail: String(session.lastError || session.currentPhaseDetail || ''),
       activityLog: Array.isArray(session.activityLog) ? session.activityLog.slice(0, 20) : [],

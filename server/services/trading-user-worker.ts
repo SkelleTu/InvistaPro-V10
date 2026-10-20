@@ -34,6 +34,7 @@ function sendStatus() {
       contractCapabilityModes: Array.isArray(status?.contractCapabilityModes) ? status.contractCapabilityModes : [],
       contractCapabilityAvailableModes: Array.isArray(status?.contractCapabilityAvailableModes) ? status.contractCapabilityAvailableModes : [],
       contractCapabilityUnavailableModes: Array.isArray(status?.contractCapabilityUnavailableModes) ? status.contractCapabilityUnavailableModes : [],
+      executionReadiness: status?.executionReadiness ?? null,
       currentPhase: String(status?.currentPhase || "AGUARDANDO_PLAY"),
       currentPhaseDetail: String(status?.currentPhaseDetail || "Aguardando Play"),
       activityLog: Array.isArray(status?.activityLog) ? status.activityLog.slice(0, 20) : [],

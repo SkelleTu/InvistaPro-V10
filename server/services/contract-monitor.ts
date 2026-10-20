@@ -681,6 +681,17 @@ class UniversalContractMonitor extends EventEmitter {
     this.apiToken = token;
   }
 
+  /** Verify that the dedicated contract-monitor socket is authenticated before buying. */
+  async prepareMonitoring(token: string): Promise<boolean> {
+    this.setToken(token);
+    await this.ensureConnected();
+    const ready = this.connected && this.ws?.readyState === WebSocket.OPEN;
+    if (!ready) {
+      console.error('🛑 [MONITOR] Pré-verificação falhou: WebSocket de contratos não está autenticado/aberto.');
+    }
+    return Boolean(ready);
+  }
+
   async startMonitoring(input: MonitoredContractInput): Promise<void> {
     if (this.monitored.has(input.contractId)) {
       console.log(`📡 [MONITOR] Contrato ${input.contractId} já monitorado`);
@@ -713,8 +724,12 @@ class UniversalContractMonitor extends EventEmitter {
 
     this.monitored.set(input.contractId, state);
 
-    // Conectar se necessário e subscrever
+    // Conectar se necessário e nunca considerar iniciado sem socket autenticado.
     await this.ensureConnected();
+    if (!this.connected || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      this.monitored.delete(input.contractId);
+      throw new Error(`Monitor Deriv indisponível para contrato ${input.contractId}; contrato mantido para recuperação posterior`);
+    }
     this.subscribeToContract(input.contractId);
 
     // Para contratos auto-close, agendar cleanup
@@ -735,6 +750,28 @@ class UniversalContractMonitor extends EventEmitter {
 
     this.monitored.delete(contractId);
     console.log(`🔭 [MONITOR] Monitoramento encerrado: ${contractId} | Status: ${state.status}`);
+  }
+
+  /** Operational readiness without exposing API tokens or contract identifiers. */
+  getHealthStatus(): {
+    authenticated: boolean;
+    socketOpen: boolean;
+    reconnecting: boolean;
+    appIdConfigured: boolean;
+    monitoredContracts: number;
+    staleContracts: number;
+  } {
+    const socketOpen = Boolean(this.ws && this.ws.readyState === WebSocket.OPEN);
+    const now = Date.now();
+    const monitored = Array.from(this.monitored.values());
+    return {
+      authenticated: this.connected && socketOpen,
+      socketOpen,
+      reconnecting: this.reconnecting,
+      appIdConfigured: /^\d+$/.test(String(process.env.DERIV_APP_ID ?? '').trim()),
+      monitoredContracts: monitored.length,
+      staleContracts: monitored.filter(state => now - state.lastUpdate > 15000).length,
+    };
   }
 
   getMonitoredContracts(): Array<{ contractId: number; state: ContractState; finalResult?: string; finalProfit?: number; closedAt?: number }> {
@@ -808,16 +845,23 @@ class UniversalContractMonitor extends EventEmitter {
   // ── WebSocket interno ────────────────────────────────────
 
   private async ensureConnected(): Promise<void> {
-    if (this.connected) return;
+    if (this.connected && this.ws?.readyState === WebSocket.OPEN) return;
+    // A flag connected pode ficar momentaneamente desatualizada durante o evento close.
+    if (this.connected && this.ws?.readyState !== WebSocket.OPEN) this.connected = false;
     if (this.reconnecting) {
-      // Esperar conexão atual
+      // Esperar a conexão atual, mas nunca tratar timeout como conexão saudável.
       await new Promise<void>((resolve) => {
         const check = setInterval(() => {
-          if (this.connected) { clearInterval(check); resolve(); }
+          if (this.connected && this.ws?.readyState === WebSocket.OPEN) {
+            clearInterval(check);
+            resolve();
+          }
         }, 200);
         setTimeout(() => { clearInterval(check); resolve(); }, 8000);
       });
-      return;
+      if (this.connected && this.ws?.readyState === WebSocket.OPEN) return;
+      // A tentativa anterior terminou sem conexão válida; permitir uma nova tentativa.
+      if (this.reconnecting) return;
     }
     await this.connect();
   }
@@ -833,10 +877,15 @@ class UniversalContractMonitor extends EventEmitter {
 
     return new Promise((resolve) => {
       const configuredAppId = String(process.env.DERIV_APP_ID ?? '').trim();
-      const appId = /^\d+$/.test(configuredAppId) ? configuredAppId : '1089';
-      if (appId === '1089' && configuredAppId !== '1089') {
-        console.warn('⚠️ [MONITOR] DERIV_APP_ID ausente ou inválido; usando app_id legado 1089 como fallback');
+      // Fail closed: never silently fall back to the legacy public app id.
+      // An invalid/missing ID can leave purchased contracts without live monitoring.
+      if (!/^\d+$/.test(configuredAppId)) {
+        this.reconnecting = false;
+        console.error('🛑 [MONITOR] DERIV_APP_ID ausente/inválido. Monitor não conectará e novas operações ACCU devem ser bloqueadas.');
+        resolve();
+        return;
       }
+      const appId = configuredAppId;
       const ws = new WebSocket(`wss://ws.derivws.com/websockets/v3?app_id=${encodeURIComponent(appId)}`);
       this.ws = ws;
 
@@ -879,6 +928,16 @@ class UniversalContractMonitor extends EventEmitter {
   }
 
   private handleMessage(msg: any, authResolve?: () => void, authTimeout?: NodeJS.Timeout): void {
+    if (msg.req_id !== undefined && this.pendingSubAcks.has(Number(msg.req_id))) {
+      const subscribedContractId = this.pendingSubAcks.get(Number(msg.req_id))!;
+      this.pendingSubAcks.delete(Number(msg.req_id));
+      if (msg.error) {
+        console.error(`❌ [MONITOR] Falha ao subscrever contrato ${subscribedContractId}: ${msg.error.message} (${msg.error.code ?? 'sem código'})`);
+        this.emit('subscription_error', { contractId: subscribedContractId, error: msg.error });
+      } else if (msg.msg_type === 'proposal_open_contract') {
+        console.log(`✅ [MONITOR] Assinatura confirmada para contrato ${subscribedContractId}`);
+      }
+    }
     if (msg.msg_type === 'authorize' && msg.authorize) {
       clearTimeout(authTimeout!);
       this.connected = true;
@@ -911,6 +970,20 @@ class UniversalContractMonitor extends EventEmitter {
           soldFor: msg.sell.sold_for,
           referenceId: msg.sell.reference,
         });
+        // A sell response is authoritative confirmation. Do not wait indefinitely for
+        // a second proposal_open_contract update to persist the final outcome.
+        const soldContractId = Number(msg.sell.contract_id);
+        const soldState = this.monitored.get(soldContractId);
+        if (soldState) {
+          const soldFor = Number(msg.sell.sold_for);
+          const realizedProfit = Number.isFinite(soldFor) ? soldFor - soldState.input.buyPrice : soldState.profit;
+          this.handleContractClosed(soldState, {
+            status: 'sold',
+            is_sold: 1,
+            profit: realizedProfit,
+            sell_price: Number.isFinite(soldFor) ? soldFor : undefined,
+          });
+        }
       } else if (msg.error) {
         console.warn(`⚠️ [MONITOR] Erro na venda: ${msg.error.message} (code: ${msg.error.code})`);
         // Se havia um reqId pendente, reverter o estado do contrato para 'monitoring' se targetTicksReached
@@ -936,7 +1009,10 @@ class UniversalContractMonitor extends EventEmitter {
   }
 
   private subscribeToContract(contractId: number): void {
-    if (!this.connected || !this.ws) return;
+    if (!this.connected || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      console.warn(`⚠️ [MONITOR] Não foi possível subscrever ${contractId}: WebSocket não está aberto.`);
+      return;
+    }
     const reqId = ++this.reqIdCounter;
     this.pendingSubAcks.set(reqId, contractId);
     this.ws.send(JSON.stringify({
@@ -958,12 +1034,13 @@ class UniversalContractMonitor extends EventEmitter {
 
   private async reconnectAndResubscribe(): Promise<void> {
     if (this.isShuttingDown || this.reconnecting) return;
-    // Resetar contratos travados em 'closing' — a resposta da venda foi perdida na reconexão
+    // Qualquer venda em andamento pode ter perdido a resposta durante a desconexão.
+    // Reabrir a avaliação; a próxima assinatura confirma se o contrato já foi vendido/expirou.
     for (const [id, state] of Array.from(this.monitored.entries())) {
-      if (state.status === 'closing' && state.targetTicksReached) {
+      if (state.status === 'closing') {
         state.status = 'monitoring';
         state.closingSince = undefined;
-        console.log(`🔄 [MONITOR] ${id} — reconectando: status 'closing' resetado para 'monitoring' (retry automático)`);
+        console.log(`🔄 [MONITOR] ${id} — reconexão: estado 'closing' resetado; aguardando confirmação Deriv e retry se necessário`);
       }
     }
     await this.connect();
@@ -990,10 +1067,18 @@ class UniversalContractMonitor extends EventEmitter {
     state.entrySpot = parseFloat(contract.entry_spot || contract.entry_tick) || state.entrySpot;
     state.profit = parseFloat(contract.profit) || 0;
     state.profitPct = state.input.buyPrice > 0 ? (state.profit / state.input.buyPrice) * 100 : 0;
-    state.isValidToSell = !!contract.is_valid_to_sell;
-    state.isSold = !!contract.is_sold;
-    state.isExpired = !!contract.is_expired;
-    state.tickCount++;
+    const validToSellValue = contract.is_valid_to_sell;
+    state.isValidToSell = validToSellValue === true || Number(validToSellValue) === 1;
+    state.isSold = contract.is_sold === true || Number(contract.is_sold) === 1 || contract.status === 'sold';
+    state.isExpired = contract.is_expired === true || Number(contract.is_expired) === 1 || contract.status === 'expired';
+    // Prefer Deriv's authoritative tick counter so the initial snapshot is not
+    // mistakenly counted as a market tick (which could trigger ACCU autosell early).
+    const reportedTickCount = Number(contract.tick_count);
+    if (Number.isFinite(reportedTickCount) && reportedTickCount >= 0) {
+      state.tickCount = Math.max(state.tickCount, reportedTickCount);
+    } else {
+      state.tickCount++;
+    }
     state.lastUpdate = Date.now();
 
     // Rastrear histórico de spots do próprio contrato (para análise IA tick a tick)
@@ -1554,7 +1639,7 @@ class UniversalContractMonitor extends EventEmitter {
       await this.ensureConnected();
     }
 
-    if (this.connected && this.ws) {
+    if (this.connected && this.ws && this.ws.readyState === WebSocket.OPEN) {
       const reqId = ++this.reqIdCounter;
       this.pendingSellReqs.set(reqId, contractId);
       this.ws.send(JSON.stringify({ sell: contractId, price: 0, req_id: reqId }));

@@ -483,7 +483,8 @@ export class AutoTradingScheduler {
           const op = await storage.getTradeOperationByDerivContractId(contractIdStr);
           if (op && op.status !== 'won' && op.status !== 'lost') {
             const finalProfit = data.finalProfit ?? 0;
-            const newStatus = finalProfit > 0 ? 'won' : data.status === 'sold' ? 'won' : 'lost';
+            // A confirmed early sale is not automatically a win; classify by realized P/L.
+            const newStatus = finalProfit > 0 ? 'won' : 'lost';
             await storage.updateTradeOperation(op.id, {
               status: newStatus,
               profit: finalProfit,
@@ -1070,9 +1071,26 @@ export class AutoTradingScheduler {
     const levRawTicks = levTicksByGrowth[levGrowth] ?? LEV_TICKS_DEFAULT[levGrowth] ?? 5;
     const levTargetTicks = levRawTicks < 0 ? Math.abs(levRawTicks) : levRawTicks;
 
+    // Fail closed: leverage/ACCU may not open unless an external HF model recently
+    // returned a valid inference for this exact symbol.
+    const hfHealth = huggingFaceAI.getExternalInferenceHealth(best.symbol);
+    if (!hfHealth || hfHealth.respondingModels < 1 || Date.now() - hfHealth.checkedAt > 60000) {
+      console.error(`🛑 [LEVERAGE] Entrada ACCU bloqueada em ${best.symbol}: nenhuma inferência externa HF válida e recente para este ativo.`);
+      this.setPhase('BLOQUEADO', `HF indisponível para ${best.symbol}; entrada ACCU bloqueada`, 'warning');
+      return;
+    }
+
+    // Fail closed: never buy a contract unless the dedicated monitor is ready first.
+    const monitorReady = await contractMonitor.prepareMonitoring(tokenData.token);
+    if (!monitorReady) {
+      console.error(`🛑 [LEVERAGE] Entrada ACCU bloqueada em ${best.symbol}: monitor de contratos não está conectado.`);
+      this.setPhase('BLOQUEADO', 'Monitor Deriv indisponível; entrada ACCU bloqueada', 'warning');
+      return;
+    }
+
     const levOpId = `LEVERAGE_${now}_${best.symbol}`;
-    console.log(`🚀🚀 [LEVERAGE FIRE] Ativo: ${best.symbol} | Regime: ${best.regime} | Score: ${best.consensus.toFixed(1)} | Hurst: ${best.hurst.toFixed(3)} | Stake: $${leverageStake} (${(this.LEVERAGE_STAKE_PCT * 100).toFixed(0)}% de $${bankBalance.toFixed(2)}) | Ativos alinhados: ${exceptional.length} | growth=${(levGrowth*100).toFixed(0)}% (${levGrowthReason}) | ticks=${levTargetTicks}`);
-    this.setPhase('EXECUTANDO', `🚀 ALAVANCAGEM: ${best.symbol} $${leverageStake} (${exceptional.length} ativos alinhados)`, 'trade');
+    console.log(`🚀🚀 [LEVERAGE FIRE] Ativo: ${best.symbol} | Regime: ${best.regime} | Score: ${best.consensus.toFixed(1)} | Hurst: ${best.hurst.toFixed(3)} | Stake: ${leverageStake} (${(this.LEVERAGE_STAKE_PCT * 100).toFixed(0)}% de ${bankBalance.toFixed(2)}) | Ativos alinhados: ${exceptional.length} | growth=${(levGrowth*100).toFixed(0)}% (${levGrowthReason}) | ticks=${levTargetTicks}`);
+    this.setPhase('EXECUTANDO', `🚀 ALAVANCAGEM: ${best.symbol} ${leverageStake} (${exceptional.length} ativos alinhados)`, 'trade');
 
     try {
       await tradeDerivAPI.connect(tokenData.token, (tokenData.accountType as 'demo' | 'real') || 'demo', levOpId);
@@ -1867,6 +1885,15 @@ export class AutoTradingScheduler {
 
       // Usar consenso pré-calculado da análise de todos os símbolos
       const aiConsensus = aiConsensusPreCalculated;
+      // ACCU requires at least one valid external HF inference for the selected symbol.
+      const selectedModeText = [config.mode, config.selectedModalities, config.activeModalities]
+        .map((value: any) => Array.isArray(value) ? value.join(',') : String(value ?? ''))
+        .join(',').toLowerCase();
+      const isAccumulatorSelection = selectedModeText.includes('accumulator') || selectedModeText.includes('accu');
+      if (isAccumulatorSelection && (!aiConsensus.analyses || aiConsensus.analyses.length === 0)) {
+        console.error(`🛑 [${operationId}] Entrada bloqueada: nenhum modelo externo HF respondeu validamente para ${selectedSymbol}.`);
+        return { success: false, error: 'Entrada ACCU bloqueada: nenhuma IA externa respondeu validamente.' };
+      }
       // ⏱️ MARCADOR: Momento exato da decisão da IA (sinal confirmado)
       const signalDecisionAt = Date.now();
       console.log(`🕐 [${operationId}] SINAL DECIDIDO: ${aiConsensus.finalDecision.toUpperCase()} ${selectedSymbol} | Consenso: ${aiConsensus.consensusStrength}% | Preparando execução...`);
@@ -3388,8 +3415,23 @@ export class AutoTradingScheduler {
               accuTicks = configuredTicks;
             }
             accuTargetTicks = accuTicks;
+            // Final fail-closed gate immediately before the ACCU purchase. The generic
+            // scheduler path must enforce the same external-AI and monitor requirements
+            // as LEVERAGE, not merely check that an analyses array exists.
+            const accuHfHealth = huggingFaceAI.getExternalInferenceHealth(selectedSymbol);
+            if (!accuHfHealth || accuHfHealth.respondingModels < 1 || Date.now() - accuHfHealth.checkedAt > 60000) {
+              console.error(`🛑 [${operationId}] Compra ACCU bloqueada: nenhuma inferência HF válida e recente para ${selectedSymbol}.`);
+              this.setPhase('BLOQUEADO', `HF indisponível para ${selectedSymbol}; ACCU bloqueado`, 'warning');
+              return { success: false, error: `Entrada ACCU bloqueada: IA externa indisponível para ${selectedSymbol}.` };
+            }
+            const accuMonitorReady = await contractMonitor.prepareMonitoring(tokenData.token);
+            if (!accuMonitorReady) {
+              console.error(`🛑 [${operationId}] Compra ACCU bloqueada: monitor Deriv não autenticado/conectado.`);
+              this.setPhase('BLOQUEADO', 'Monitor Deriv indisponível; ACCU bloqueado', 'warning');
+              return { success: false, error: 'Entrada ACCU bloqueada: monitor Deriv indisponível.' };
+            }
             const opportunityQuality = consensus >= 75 ? 'ALTA' : consensus >= 50 ? 'MÉDIA' : 'BAIXA';
-            console.log(`📊 [${operationId}] ACCU MODO-OPS: stake=$${accuStake} [${opportunityQuality}] (banca=$${bankBalance.toFixed(2)} | consenso=${consensus}% | risco=${accuRisk}) | growth=${(adaptiveGrowth*100).toFixed(0)}% ${growthModeLabel} | ticks=${accuTicks}${supremeAnalysis ? ` | regime=${regime} | hurst=${supremeAnalysis.statistics.hurstExponent.toFixed(2)}` : ''} | ${selectedSymbol}`);
+            console.log(`📊 [${operationId}] ACCU MODO-OPS: stake=${accuStake} [${opportunityQuality}] (banca=${bankBalance.toFixed(2)} | consenso=${consensus}% | risco=${accuRisk}) | growth=${(adaptiveGrowth*100).toFixed(0)}% ${growthModeLabel} | ticks=${accuTicks}${supremeAnalysis ? ` | regime=${regime} | hurst=${supremeAnalysis.statistics.hurstExponent.toFixed(2)}` : ''} | ${selectedSymbol}`);
             contract = await tradeDerivAPI.buyFlexibleContract({
               contract_type: 'ACCU',
               symbol: selectedSymbol,
@@ -5191,6 +5233,13 @@ export class AutoTradingScheduler {
     badMarketPaused: boolean;
     badMarketPausedSecondsLeft: number;
     badMarketReducedGrowth: boolean;
+    executionReadiness: {
+      executionReady: boolean;
+      status: 'ready' | 'blocked';
+      reasons: string[];
+      externalAI: ReturnType<typeof huggingFaceAI.getExternalInferenceSummary>;
+      contractMonitor: ReturnType<typeof contractMonitor.getHealthStatus>;
+    };
   } {
     const nowSt = Date.now();
     const marketStats = marketDataCollector.getCollectionStats();
@@ -5198,7 +5247,22 @@ export class AutoTradingScheduler {
       marketStats.symbols.some((symbol) => Date.now() - symbol.lastUpdate < 30000);
     const isPaused = this.badMarketPausedUntil > nowSt;
     const secsLeft = isPaused ? Math.round((this.badMarketPausedUntil - nowSt) / 1000) : 0;
+    const externalAI = huggingFaceAI.getExternalInferenceSummary();
+    const monitorHealth = contractMonitor.getHealthStatus();
+    const readinessReasons: string[] = [];
+    if (!externalAI.configured) readinessReasons.push('HUGGINGFACE_API_KEY ausente ou inválida');
+    if (externalAI.healthySymbols.length === 0) readinessReasons.push('Nenhuma inferência externa válida nos últimos 60 segundos');
+    if (!monitorHealth.appIdConfigured) readinessReasons.push('DERIV_APP_ID ausente ou inválido; precisa ser numérico');
+    if (!monitorHealth.authenticated) readinessReasons.push('Monitor Deriv não autenticado/conectado');
+    const executionReady = readinessReasons.length === 0;
     return {
+      executionReadiness: {
+        executionReady,
+        status: executionReady ? 'ready' : 'blocked',
+        reasons: readinessReasons,
+        externalAI,
+        contractMonitor: monitorHealth,
+      },
       isRunning: this.continuousLoopActive,
       hasActiveSessions: this.activeSessions.size > 0,
       emergencyStop: this.emergencyStop,
