@@ -115,6 +115,7 @@ export class HuggingFaceAIService {
   getExternalInferenceSummary(): {
     configured: boolean;
     activeModelCount: number;
+    groqFallbackConfigured: boolean;
     healthySymbols: Array<{ symbol: string; respondingModels: number; ageMs: number }>;
     checkedSymbols: number;
   } {
