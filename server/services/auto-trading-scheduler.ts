@@ -1070,9 +1070,26 @@ export class AutoTradingScheduler {
     const levRawTicks = levTicksByGrowth[levGrowth] ?? LEV_TICKS_DEFAULT[levGrowth] ?? 5;
     const levTargetTicks = levRawTicks < 0 ? Math.abs(levRawTicks) : levRawTicks;
 
+    // Fail closed: leverage/ACCU may not open unless an external HF model recently
+    // returned a valid inference for this exact symbol.
+    const hfHealth = huggingFaceAI.getExternalInferenceHealth(best.symbol);
+    if (!hfHealth || hfHealth.respondingModels < 1 || Date.now() - hfHealth.checkedAt > 60000) {
+      console.error(`🛑 [LEVERAGE] Entrada ACCU bloqueada em ${best.symbol}: nenhuma inferência externa HF válida e recente para este ativo.`);
+      this.setPhase('BLOQUEADO', `HF indisponível para ${best.symbol}; entrada ACCU bloqueada`, 'warning');
+      return;
+    }
+
+    // Fail closed: never buy a contract unless the dedicated monitor is ready first.
+    const monitorReady = await contractMonitor.prepareMonitoring(tokenData.token);
+    if (!monitorReady) {
+      console.error(`🛑 [LEVERAGE] Entrada ACCU bloqueada em ${best.symbol}: monitor de contratos não está conectado.`);
+      this.setPhase('BLOQUEADO', 'Monitor Deriv indisponível; entrada ACCU bloqueada', 'warning');
+      return;
+    }
+
     const levOpId = `LEVERAGE_${now}_${best.symbol}`;
-    console.log(`🚀🚀 [LEVERAGE FIRE] Ativo: ${best.symbol} | Regime: ${best.regime} | Score: ${best.consensus.toFixed(1)} | Hurst: ${best.hurst.toFixed(3)} | Stake: $${leverageStake} (${(this.LEVERAGE_STAKE_PCT * 100).toFixed(0)}% de $${bankBalance.toFixed(2)}) | Ativos alinhados: ${exceptional.length} | growth=${(levGrowth*100).toFixed(0)}% (${levGrowthReason}) | ticks=${levTargetTicks}`);
-    this.setPhase('EXECUTANDO', `🚀 ALAVANCAGEM: ${best.symbol} $${leverageStake} (${exceptional.length} ativos alinhados)`, 'trade');
+    console.log(`🚀🚀 [LEVERAGE FIRE] Ativo: ${best.symbol} | Regime: ${best.regime} | Score: ${best.consensus.toFixed(1)} | Hurst: ${best.hurst.toFixed(3)} | Stake: ${leverageStake} (${(this.LEVERAGE_STAKE_PCT * 100).toFixed(0)}% de ${bankBalance.toFixed(2)}) | Ativos alinhados: ${exceptional.length} | growth=${(levGrowth*100).toFixed(0)}% (${levGrowthReason}) | ticks=${levTargetTicks}`);
+    this.setPhase('EXECUTANDO', `🚀 ALAVANCAGEM: ${best.symbol} ${leverageStake} (${exceptional.length} ativos alinhados)`, 'trade');
 
     try {
       await tradeDerivAPI.connect(tokenData.token, (tokenData.accountType as 'demo' | 'real') || 'demo', levOpId);
@@ -1867,6 +1884,15 @@ export class AutoTradingScheduler {
 
       // Usar consenso pré-calculado da análise de todos os símbolos
       const aiConsensus = aiConsensusPreCalculated;
+      // ACCU requires at least one valid external HF inference for the selected symbol.
+      const selectedModeText = [config.mode, config.selectedModalities, config.activeModalities]
+        .map((value: any) => Array.isArray(value) ? value.join(',') : String(value ?? ''))
+        .join(',').toLowerCase();
+      const isAccumulatorSelection = selectedModeText.includes('accumulator') || selectedModeText.includes('accu');
+      if (isAccumulatorSelection && (!aiConsensus.analyses || aiConsensus.analyses.length === 0)) {
+        console.error(`🛑 [${operationId}] Entrada bloqueada: nenhum modelo externo HF respondeu validamente para ${selectedSymbol}.`);
+        return { success: false, error: 'Entrada ACCU bloqueada: nenhuma IA externa respondeu validamente.' };
+      }
       // ⏱️ MARCADOR: Momento exato da decisão da IA (sinal confirmado)
       const signalDecisionAt = Date.now();
       console.log(`🕐 [${operationId}] SINAL DECIDIDO: ${aiConsensus.finalDecision.toUpperCase()} ${selectedSymbol} | Consenso: ${aiConsensus.consensusStrength}% | Preparando execução...`);
