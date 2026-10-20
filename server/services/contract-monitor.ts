@@ -681,6 +681,17 @@ class UniversalContractMonitor extends EventEmitter {
     this.apiToken = token;
   }
 
+  /** Verify that the dedicated contract-monitor socket is authenticated before buying. */
+  async prepareMonitoring(token: string): Promise<boolean> {
+    this.setToken(token);
+    await this.ensureConnected();
+    const ready = this.connected && this.ws?.readyState === WebSocket.OPEN;
+    if (!ready) {
+      console.error('🛑 [MONITOR] Pré-verificação falhou: WebSocket de contratos não está autenticado/aberto.');
+    }
+    return Boolean(ready);
+  }
+
   async startMonitoring(input: MonitoredContractInput): Promise<void> {
     if (this.monitored.has(input.contractId)) {
       console.log(`📡 [MONITOR] Contrato ${input.contractId} já monitorado`);
@@ -833,10 +844,14 @@ class UniversalContractMonitor extends EventEmitter {
 
     return new Promise((resolve) => {
       const configuredAppId = String(process.env.DERIV_APP_ID ?? '').trim();
-      const appId = /^\d+$/.test(configuredAppId) ? configuredAppId : '1089';
-      if (appId === '1089' && configuredAppId !== '1089') {
-        console.warn('⚠️ [MONITOR] DERIV_APP_ID ausente ou inválido; usando app_id legado 1089 como fallback');
+      // Fail closed: never silently fall back to the legacy public app id.
+      // An invalid/missing ID can leave purchased contracts without live monitoring.
+      if (!/^\d+$/.test(configuredAppId)) {
+        this.reconnecting = false;
+        console.error('🛑 [MONITOR] DERIV_APP_ID ausente/inválido. Monitor não conectará e novas operações ACCU devem ser bloqueadas.');
+        return;
       }
+      const appId = configuredAppId;
       const ws = new WebSocket(`wss://ws.derivws.com/websockets/v3?app_id=${encodeURIComponent(appId)}`);
       this.ws = ws;
 
