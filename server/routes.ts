@@ -2088,7 +2088,38 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         timestamp: checkedAt,
       });
     } catch (fallbackError) {
-      console.error('[EXCHANGE_RATE] Nenhuma fonte confirmou cotação atual:', fallbackError);
+      console.error('[EXCHANGE_RATE] HGBrasil indisponível; tentando fonte pública alternativa:', fallbackError);
+    }
+
+    // Frankfurter provides ECB reference rates without an API key. Use the source date,
+    // reject stale data, and derive EUR/BRL from the same USD-based snapshot.
+    try {
+      const response = await fetch(
+        'https://api.frankfurter.dev/v1/latest?base=USD&symbols=BRL,EUR',
+        { signal: AbortSignal.timeout(4500) },
+      );
+      if (!response.ok) throw new Error(`Frankfurter HTTP ${response.status}`);
+      const data = await response.json() as any;
+      const usdBrl = readPositiveRate(data?.rates?.BRL);
+      const usdEur = readPositiveRate(data?.rates?.EUR);
+      const sourceDate = typeof data?.date === 'string' ? data.date : '';
+      const sourceTime = sourceDate ? Date.parse(`${sourceDate}T00:00:00.000Z`) : NaN;
+      const ageMs = Date.now() - sourceTime;
+      const maxAgeMs = 5 * 24 * 60 * 60 * 1000;
+      if (usdBrl === null || usdEur === null || !Number.isFinite(sourceTime) || ageMs < -24 * 60 * 60 * 1000 || ageMs > maxAgeMs) {
+        throw new Error('Frankfurter returned invalid or stale reference rates');
+      }
+
+      res.setHeader('Cache-Control', 'no-store');
+      return res.json({
+        success: true,
+        rates: { USD_BRL: usdBrl, EUR_BRL: usdBrl / usdEur },
+        source: 'Frankfurter (ECB reference rates)',
+        timestamp: new Date(sourceTime).toISOString(),
+        checkedAt,
+      });
+    } catch (frankfurterError) {
+      console.error('[EXCHANGE_RATE] Frankfurter indisponível ou desatualizada:', frankfurterError);
     }
 
     res.setHeader('Cache-Control', 'no-store');
