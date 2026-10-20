@@ -483,7 +483,8 @@ export class AutoTradingScheduler {
           const op = await storage.getTradeOperationByDerivContractId(contractIdStr);
           if (op && op.status !== 'won' && op.status !== 'lost') {
             const finalProfit = data.finalProfit ?? 0;
-            const newStatus = finalProfit > 0 ? 'won' : data.status === 'sold' ? 'won' : 'lost';
+            // A confirmed early sale is not automatically a win; classify by realized P/L.
+            const newStatus = finalProfit > 0 ? 'won' : 'lost';
             await storage.updateTradeOperation(op.id, {
               status: newStatus,
               profit: finalProfit,
