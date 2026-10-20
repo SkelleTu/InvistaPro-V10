@@ -141,21 +141,21 @@ export class HuggingFaceAIService {
   private activeModels: AIModel[] = [
     {
       name: 'OpenAI GPT-OSS 120B',
-      id: 'openai/gpt-oss-120b:cheapest',
-      description: 'Modelo conversacional roteado pelo Hugging Face Inference Providers.',
+      id: 'openai/gpt-oss-120b:fastest',
+      description: 'Modelo de chat recomendado pela Hugging Face, com roteamento para provedor disponível.',
       confidence: 0.86,
     },
     {
-      name: 'DeepSeek V3',
-      id: 'deepseek-ai/DeepSeek-V3:cheapest',
-      description: 'Modelo conversacional alternativo para análise de sequência de ticks.',
-      confidence: 0.84,
+      name: 'Qwen3 4B Thinking 2507',
+      id: 'Qwen/Qwen3-4B-Thinking-2507:fastest',
+      description: 'Modelo de chat recomendado pela Hugging Face, alternativa de raciocínio leve.',
+      confidence: 0.82,
     },
     {
-      name: 'Qwen QwQ 32B',
-      id: 'Qwen/QwQ-32B:cheapest',
-      description: 'Modelo conversacional alternativo para análise de sequência de ticks.',
-      confidence: 0.82,
+      name: 'Qwen2.5 7B Instruct 1M',
+      id: 'Qwen/Qwen2.5-7B-Instruct-1M:fastest',
+      description: 'Modelo conversacional recomendado pela Hugging Face como alternativa de inferência.',
+      confidence: 0.80,
     },
   ];
 
@@ -231,7 +231,9 @@ export class HuggingFaceAIService {
 
   private initializeApiKey(): void {
     const validateApiKey = () => {
-      const apiKey = process.env.HUGGINGFACE_API_KEY;
+      // Aceita os dois nomes comuns de variável. Um valor vazio não deve ocultar HF_TOKEN.
+      const apiKey = String(process.env.HUGGINGFACE_API_KEY ?? '').trim()
+        || String(process.env.HF_TOKEN ?? '').trim();
       
       if (!apiKey || apiKey.trim() === '') {
         return { valid: false, key: null };
@@ -257,7 +259,7 @@ export class HuggingFaceAIService {
     } else {
       this.apiKey = validation.key!;
       this.isConfigured = true;
-      console.log('🤖 Hugging Face AI Service inicializado com 100% capacidades neurais MÁXIMAS');
+      console.log('🤖 Hugging Face AI Service configurado; inferência externa só será considerada saudável após resposta válida.');
       console.log(`🎯 Total de modelos cooperativos: ${this.activeModels.length}`);
       console.log('🔑 API Key validada e configurada com sucesso');
     }
