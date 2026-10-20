@@ -5233,6 +5233,13 @@ export class AutoTradingScheduler {
     badMarketPaused: boolean;
     badMarketPausedSecondsLeft: number;
     badMarketReducedGrowth: boolean;
+    executionReadiness: {
+      executionReady: boolean;
+      status: 'ready' | 'blocked';
+      reasons: string[];
+      externalAI: ReturnType<typeof huggingFaceAI.getExternalInferenceSummary>;
+      contractMonitor: ReturnType<typeof contractMonitor.getHealthStatus>;
+    };
   } {
     const nowSt = Date.now();
     const marketStats = marketDataCollector.getCollectionStats();
@@ -5240,7 +5247,22 @@ export class AutoTradingScheduler {
       marketStats.symbols.some((symbol) => Date.now() - symbol.lastUpdate < 30000);
     const isPaused = this.badMarketPausedUntil > nowSt;
     const secsLeft = isPaused ? Math.round((this.badMarketPausedUntil - nowSt) / 1000) : 0;
+    const externalAI = huggingFaceAI.getExternalInferenceSummary();
+    const monitorHealth = contractMonitor.getHealthStatus();
+    const readinessReasons: string[] = [];
+    if (!externalAI.configured) readinessReasons.push('HUGGINGFACE_API_KEY ausente ou inválida');
+    if (externalAI.healthySymbols.length === 0) readinessReasons.push('Nenhuma inferência externa válida nos últimos 60 segundos');
+    if (!monitorHealth.appIdConfigured) readinessReasons.push('DERIV_APP_ID ausente ou inválido; precisa ser numérico');
+    if (!monitorHealth.authenticated) readinessReasons.push('Monitor Deriv não autenticado/conectado');
+    const executionReady = readinessReasons.length === 0;
     return {
+      executionReadiness: {
+        executionReady,
+        status: executionReady ? 'ready' : 'blocked',
+        reasons: readinessReasons,
+        externalAI,
+        contractMonitor: monitorHealth,
+      },
       isRunning: this.continuousLoopActive,
       hasActiveSessions: this.activeSessions.size > 0,
       emergencyStop: this.emergencyStop,
