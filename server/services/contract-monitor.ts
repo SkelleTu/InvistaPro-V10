@@ -906,6 +906,16 @@ class UniversalContractMonitor extends EventEmitter {
   }
 
   private handleMessage(msg: any, authResolve?: () => void, authTimeout?: NodeJS.Timeout): void {
+    if (msg.req_id !== undefined && this.pendingSubAcks.has(Number(msg.req_id))) {
+      const subscribedContractId = this.pendingSubAcks.get(Number(msg.req_id))!;
+      this.pendingSubAcks.delete(Number(msg.req_id));
+      if (msg.error) {
+        console.error(`❌ [MONITOR] Falha ao subscrever contrato ${subscribedContractId}: ${msg.error.message} (${msg.error.code ?? 'sem código'})`);
+        this.emit('subscription_error', { contractId: subscribedContractId, error: msg.error });
+      } else if (msg.msg_type === 'proposal_open_contract') {
+        console.log(`✅ [MONITOR] Assinatura confirmada para contrato ${subscribedContractId}`);
+      }
+    }
     if (msg.msg_type === 'authorize' && msg.authorize) {
       clearTimeout(authTimeout!);
       this.connected = true;
@@ -977,7 +987,10 @@ class UniversalContractMonitor extends EventEmitter {
   }
 
   private subscribeToContract(contractId: number): void {
-    if (!this.connected || !this.ws) return;
+    if (!this.connected || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      console.warn(`⚠️ [MONITOR] Não foi possível subscrever ${contractId}: WebSocket não está aberto.`);
+      return;
+    }
     const reqId = ++this.reqIdCounter;
     this.pendingSubAcks.set(reqId, contractId);
     this.ws.send(JSON.stringify({
@@ -1031,10 +1044,18 @@ class UniversalContractMonitor extends EventEmitter {
     state.entrySpot = parseFloat(contract.entry_spot || contract.entry_tick) || state.entrySpot;
     state.profit = parseFloat(contract.profit) || 0;
     state.profitPct = state.input.buyPrice > 0 ? (state.profit / state.input.buyPrice) * 100 : 0;
-    state.isValidToSell = !!contract.is_valid_to_sell;
-    state.isSold = !!contract.is_sold;
-    state.isExpired = !!contract.is_expired;
-    state.tickCount++;
+    const validToSellValue = contract.is_valid_to_sell;
+    state.isValidToSell = validToSellValue === true || Number(validToSellValue) === 1;
+    state.isSold = contract.is_sold === true || Number(contract.is_sold) === 1 || contract.status === 'sold';
+    state.isExpired = contract.is_expired === true || Number(contract.is_expired) === 1 || contract.status === 'expired';
+    // Prefer Deriv's authoritative tick counter so the initial snapshot is not
+    // mistakenly counted as a market tick (which could trigger ACCU autosell early).
+    const reportedTickCount = Number(contract.tick_count);
+    if (Number.isFinite(reportedTickCount) && reportedTickCount >= 0) {
+      state.tickCount = Math.max(state.tickCount, reportedTickCount);
+    } else {
+      state.tickCount++;
+    }
     state.lastUpdate = Date.now();
 
     // Rastrear histórico de spots do próprio contrato (para análise IA tick a tick)
