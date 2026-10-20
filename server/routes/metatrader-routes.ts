@@ -1163,7 +1163,7 @@ router.get('/config', mt5DashboardAccess, (_req: Request, res: Response) => {
  * GET /api/mt5/download-ea
  * Serve o EA v8.0 com ServerURL pré-preenchida (lê arquivo do disco).
  */
-router.get('/download-ea', mt5DashboardAccess, (req: Request, res: Response) => {
+router.get('/download-ea', mt5DashboardAccess, async (req: Request, res: Response) => {
   try {
     let config = metaTraderBridge.getConfig();
     let token = String(config.apiToken ?? '').trim();
@@ -1174,6 +1174,9 @@ router.get('/download-ea', mt5DashboardAccess, (req: Request, res: Response) => 
       metaTraderBridge.updateConfig({ apiToken: token });
       config = metaTraderBridge.getConfig();
     }
+
+    // Never hand out an EA with a token that has not been confirmed in durable storage.
+    await metaTraderBridge.flushDurableConfig();
 
     // In Render production, never inject a legacy REPLIT_DEV_DOMAIN into the EA.
     const requestHost = String(req.get('host') ?? '').trim();
