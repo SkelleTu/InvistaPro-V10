@@ -752,6 +752,28 @@ class UniversalContractMonitor extends EventEmitter {
     console.log(`🔭 [MONITOR] Monitoramento encerrado: ${contractId} | Status: ${state.status}`);
   }
 
+  /** Operational readiness without exposing API tokens or contract identifiers. */
+  getHealthStatus(): {
+    authenticated: boolean;
+    socketOpen: boolean;
+    reconnecting: boolean;
+    appIdConfigured: boolean;
+    monitoredContracts: number;
+    staleContracts: number;
+  } {
+    const socketOpen = Boolean(this.ws && this.ws.readyState === WebSocket.OPEN);
+    const now = Date.now();
+    const monitored = Array.from(this.monitored.values());
+    return {
+      authenticated: this.connected && socketOpen,
+      socketOpen,
+      reconnecting: this.reconnecting,
+      appIdConfigured: /^\\d+$/.test(String(process.env.DERIV_APP_ID ?? '').trim()),
+      monitoredContracts: monitored.length,
+      staleContracts: monitored.filter(state => now - state.lastUpdate > 15000).length,
+    };
+  }
+
   getMonitoredContracts(): Array<{ contractId: number; state: ContractState; finalResult?: string; finalProfit?: number; closedAt?: number }> {
     const active = Array.from(this.monitored.entries()).map(([id, s]) => ({ contractId: id, state: s }));
     const recent = Array.from(this.recentlyClosed.entries()).map(([id, entry]) => ({
