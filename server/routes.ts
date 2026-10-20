@@ -2270,6 +2270,14 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     const activeForUser = autoTradingScheduler.getArmedUserIds().some((id: string) => String(id) === userId);
     const globalStatus = autoTradingScheduler.getSchedulerStatus();
     const emergencyStop = Boolean(legacyTradingScheduler.getSchedulerStatus().emergencyStop || globalStatus.emergencyStop);
+    const externalAI = huggingFaceAI.getExternalInferenceSummary();
+    const monitorHealth = contractMonitor.getHealthStatus();
+    const readinessReasons: string[] = [];
+    if (!externalAI.configured) readinessReasons.push('HUGGINGFACE_API_KEY ausente ou inválida');
+    if (externalAI.healthySymbols.length === 0) readinessReasons.push('Nenhuma inferência externa válida nos últimos 60 segundos');
+    if (!monitorHealth.appIdConfigured) readinessReasons.push('DERIV_APP_ID ausente ou inválido; precisa ser numérico');
+    if (!monitorHealth.authenticated) readinessReasons.push('Monitor Deriv não autenticado/conectado');
+    const executionReady = readinessReasons.length === 0;
     res.json({
       success: true,
       status: {
@@ -2280,6 +2288,13 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         activeSessions: activeForUser && !emergencyStop ? 1 : 0,
         isolatedUsers: activeForUser ? 1 : 0,
         armedUsers: activeForUser && !emergencyStop ? [userId] : [],
+        readiness: {
+          executionReady,
+          status: executionReady ? 'ready' : 'blocked',
+          reasons: readinessReasons,
+          externalAI,
+          contractMonitor: monitorHealth,
+        },
       },
       armedUsers: activeForUser ? [userId] : [],
       timestamp: new Date().toISOString(),
