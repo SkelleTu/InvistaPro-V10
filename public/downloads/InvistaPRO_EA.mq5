@@ -29,8 +29,8 @@ enum ENUM_AI_CONTROL_MODE
 };
 
 //--- Parâmetros de entrada
-input string   ServerURL        = "https://122284a9-d70a-4277-9a4b-478d7fcd9327-00-16xr0ls10nbww.spock.replit.dev"; // URL do servidor InvistaPRO
-input string   DiscoveryBlobURL = "https://jsonblob.com/api/jsonBlob/019d0dd7-564d-7c0c-a833-9a25b3b70c81"; // URL de descoberta automática
+input string   ServerURL        = "https://invista-pro-v10-kzlv.onrender.com"; // URL do servidor InvistaPRO
+input string   DiscoveryBlobURL = "https://invista-pro-v10-kzlv.onrender.com/api/url"; // URL de descoberta automática
 input string   ApiToken         = "";          // Token de autenticação (opcional)
 input string   Symbol_Override  = "";          // Símbolo (vazio = gráfico atual)
 input int      HeartbeatSeconds = 30;          // Intervalo do heartbeat (segundos)
