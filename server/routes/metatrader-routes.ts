@@ -1843,6 +1843,9 @@ router.post('/config', mt5DashboardAccess, (req: Request, res: Response) => {
   try {
     const updates = { ...(req.body ?? {}) };
     const currentConfig = metaTraderBridge.getConfig();
+    if (updates.accountType !== undefined && !['demo', 'real'].includes(updates.accountType)) {
+      return res.status(400).json({ ok: false, code: 'MT5_INVALID_ACCOUNT_MODE', error: 'accountType deve ser demo ou real.' });
+    }
     let generatedToken = false;
     if (!String(currentConfig.apiToken ?? '').trim() && !String(updates.apiToken ?? '').trim()) {
       updates.apiToken = randomBytes(32).toString('hex');
