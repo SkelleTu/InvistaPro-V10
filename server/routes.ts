@@ -2175,7 +2175,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     res.setHeader('Cache-Control', 'no-store');
     res.json({
       serverUrl,
-      discoveryUrl: info.discoveryUrl,
+      discoveryUrl: info.discoveryUrl || `${serverUrl}/api/url`,
       blobId: info.blobId,
       timestamp: new Date().toISOString(),
     });
