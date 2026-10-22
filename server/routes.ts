@@ -2775,6 +2775,37 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
   }));
 
+
+  // Alterna somente o ambiente do Web Trading Deriv. O token salvo é validado
+  // no ambiente solicitado antes de persistir a mudança; o MT5 não é alterado.
+  app.post('/api/trading/account-mode', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
+    const accountType = req.body?.accountType;
+    if (!['demo', 'real'].includes(accountType)) {
+      return res.status(400).json({ message: 'accountType deve ser demo ou real.' });
+    }
+    const userId = String(req.user?.id ?? '');
+    if (!userId) return res.status(401).json({ message: 'Usuário não autenticado.' });
+    const saved = await dbStorage.getUserDerivToken(userId);
+    if (!saved?.token) return res.status(409).json({ message: 'Configure primeiro um token Deriv para o ambiente desejado.' });
+
+    const validationApi = new DerivAPIService(accountType);
+    try {
+      const connected = await validationApi.connect(saved.token, accountType, `WEB_MODE_SWITCH_${Date.now()}`);
+      if (!connected) return res.status(400).json({ message: `O token salvo não foi aceito no ambiente ${accountType.toUpperCase()}. Configure um token válido para essa conta.` });
+      const balance = await validationApi.getBalance();
+      if (!balance) return res.status(400).json({ message: 'A Deriv conectou, mas não confirmou o saldo da conta.' });
+
+      await dbStorage.updateDerivToken(userId, saved.token, accountType);
+      await syncDerivTokenToUniversalServer(userId, saved.token, accountType);
+      res.setHeader('Cache-Control', 'no-store');
+      return res.json({ success: true, accountType, balance: balance.balance, currency: balance.currency, connected: true });
+    } catch (error: any) {
+      return res.status(502).json({ message: error instanceof Error ? error.message : 'Falha ao validar e alternar a conta Deriv.' });
+    } finally {
+      await validationApi.disconnect().catch(() => {});
+    }
+  }));
+
   app.get('/api/trading/deriv-token', isAuthenticated, isTradingAuthorized, async (req, res) => {
     try {
       if (!req.user?.id) {
