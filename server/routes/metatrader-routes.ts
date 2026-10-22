@@ -1196,11 +1196,14 @@ router.get('/download-ea', mt5DashboardAccess, async (req: Request, res: Respons
       content = fs.readFileSync(eaPath, 'utf-8');
       const escapeMqlString = (value: string) => value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/[\r\n]/g, '');
       const serverPattern = /input\s+string\s+ServerURL\s*=\s*"[^"]*";/;
+      const discoveryPattern = /input\s+string\s+DiscoveryBlobURL\s*=\s*"[^"]*";/;
       const tokenPattern = /input\s+string\s+ApiToken\s*=\s*"[^"]*";/;
-      if (!serverPattern.test(content) || !tokenPattern.test(content)) {
-        throw new Error('O EA estático não contém os parâmetros ServerURL e ApiToken esperados.');
+      if (!serverPattern.test(content) || !discoveryPattern.test(content) || !tokenPattern.test(content)) {
+        throw new Error('O EA estático não contém os parâmetros ServerURL, DiscoveryBlobURL e ApiToken esperados.');
       }
+      const discoveryUrl = `${serverUrl}/api/url`;
       content = content.replace(serverPattern, `input string   ServerURL        = "${escapeMqlString(serverUrl)}"; // URL do servidor InvistaPRO`);
+      content = content.replace(discoveryPattern, `input string   DiscoveryBlobURL = "${escapeMqlString(discoveryUrl)}"; // URL de descoberta automática`);
       content = content.replace(tokenPattern, `input string   ApiToken         = "${escapeMqlString(token)}"; // Token de autenticação`);
     } catch (err) {
       if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') throw err;
