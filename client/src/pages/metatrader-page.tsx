@@ -605,7 +605,7 @@ export default function MetaTraderPage() {
             <div className="flex-1 min-w-0 space-y-3">
               <div>
                 <p className="font-semibold text-yellow-600 dark:text-yellow-400 text-sm">EA não conectado — URL do servidor pode ter mudado</p>
-                <p className="text-xs text-muted-foreground mt-0.5">Atualize nos dois lugares abaixo sempre que o Replit reiniciar.</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Use a URL pública atual nos dois lugares. O arquivo EA baixado recebe a URL do servidor automaticamente.</p>
               </div>
               <div className="space-y-2">
                 <div>
