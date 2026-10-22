@@ -2154,7 +2154,25 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   // 🌐 ENDPOINT PÚBLICO — Retorna URL atual do servidor para o EA MT5 auto-descobrir
   app.get('/api/url', (req, res) => {
     const info = getRegistryInfo();
-    const serverUrl = info.currentServerUrl || `https://${process.env.REPLIT_DEV_DOMAIN || req.hostname}`;
+    // Prefer the explicit public URL or Render's injected URL. req.hostname is
+    // only a final fallback because proxy/host headers may not identify the
+    // canonical service URL.
+    const configuredUrl = process.env.MT5_PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL || '';
+    let serverUrl = info.currentServerUrl || '';
+    if (!serverUrl && configuredUrl) {
+      try {
+        serverUrl = new URL(configuredUrl).origin;
+      } catch {
+        serverUrl = '';
+      }
+    }
+    if (!serverUrl) {
+      const legacyDomain = process.env.REPLIT_DEV_DOMAIN || process.env.REPLIT_DOMAINS?.split(',')[0] || req.hostname;
+      serverUrl = legacyDomain.startsWith('http://') || legacyDomain.startsWith('https://')
+        ? new URL(legacyDomain).origin
+        : `https://${legacyDomain}`;
+    }
+    res.setHeader('Cache-Control', 'no-store');
     res.json({
       serverUrl,
       discoveryUrl: info.discoveryUrl,
