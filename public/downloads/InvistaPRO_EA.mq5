@@ -1056,6 +1056,9 @@ bool SendHeartbeat()
    long   accId     = AccountInfoInteger(ACCOUNT_LOGIN);
    string broker    = AccountInfoString(ACCOUNT_COMPANY);
    int    openPos   = PositionsTotal();
+   long   tradeMode = AccountInfoInteger(ACCOUNT_TRADE_MODE);
+   string accountType = (tradeMode == ACCOUNT_TRADE_MODE_REAL) ? "real" :
+                        (tradeMode == ACCOUNT_TRADE_MODE_DEMO) ? "demo" : "contest";
 
    string url     = g_serverUrl + "/api/metatrader/heartbeat";
    string headers = "Content-Type: application/json\r\n";
@@ -1067,6 +1070,7 @@ bool SendHeartbeat()
    body += "\"freeMargin\":"   + DoubleToString(margin,  2) + ",";
    body += "\"openPositions\":" + IntegerToString(openPos)  + ",";
    body += "\"platform\":\"MT5\",";
+   body += "\"accountType\":\"" + accountType + "\",";
    body += "\"eaVersion\":\"8.0\"";
    if (g_apiToken != "") body += ",\"token\":\"" + g_apiToken + "\"";
    body += "}";

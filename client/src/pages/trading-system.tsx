@@ -966,6 +966,25 @@ export default function TradingSystemPage() {
     refetchInterval: 5000, // Dados de conta mudam raramente
   });
 
+  const switchWebTradingModeMutation = useMutation({
+    mutationFn: async (accountType: "demo" | "real") => {
+      const response = await apiRequest("/api/trading/account-mode", {
+        method: "POST",
+        body: JSON.stringify({ accountType }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Não foi possível alternar a conta Deriv");
+      return data;
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/trading/account-info"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/trading/deriv-token"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/trading/live-balance"] });
+      toast({ title: "Ambiente Web Trading atualizado", description: `Conta ${data.accountType === "demo" ? "DEMO" : "REAL"} conectada e saldo confirmado.` });
+    },
+    onError: (error: any) => toast({ title: "Falha ao alternar ambiente", description: error.message, variant: "destructive" }),
+  });
+
   const { data: tradeConfig } = useQuery<TradeConfig>({
     queryKey: ["/api/trading/config"],
     enabled: hasAccess,
@@ -1726,6 +1745,16 @@ export default function TradingSystemPage() {
                 {accountInfo.accountType === 'demo' ? 'Demo' : 'Real'}
               </Badge>
             )}
+            <div className="flex items-center gap-1 rounded-md border p-1" aria-label="Ambiente Web Trading">
+              <Button size="sm" variant={accountInfo?.accountType === "demo" ? "default" : "outline"}
+                disabled={switchWebTradingModeMutation.isPending || accountInfo?.accountType === "demo"}
+                onClick={() => switchWebTradingModeMutation.mutate("demo")}
+                data-testid="web-trading-mode-demo">DEMO</Button>
+              <Button size="sm" variant={accountInfo?.accountType === "real" ? "default" : "outline"}
+                disabled={switchWebTradingModeMutation.isPending || accountInfo?.accountType === "real"}
+                onClick={() => switchWebTradingModeMutation.mutate("real")}
+                data-testid="web-trading-mode-real">REAL</Button>
+            </div>
           </div>
         </div>
 

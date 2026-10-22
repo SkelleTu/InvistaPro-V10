@@ -170,6 +170,7 @@ export interface MT5TradeResult {
 
 export interface MT5Config {
   enabled: boolean;
+  accountType: 'demo' | 'real';
   accountId: string;
   broker: string;
   server: string;
@@ -234,6 +235,7 @@ export interface MT5Status {
 
 const DEFAULT_CONFIG: MT5Config = {
   enabled: false,
+  accountType: 'demo',
   accountId: '',
   broker: '',
   server: '',

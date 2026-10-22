@@ -50,6 +50,7 @@ interface MT5Status {
 
 interface MT5Config {
   enabled: boolean;
+  accountType?: 'demo' | 'real';
   symbols: string[];
   defaultLotSize: number;
   maxLotSize: number;
@@ -485,6 +486,17 @@ export default function MetaTraderPage() {
             </div>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-1 rounded-md border p-1" aria-label="Ambiente da conta MT5">
+              <span className="px-2 text-xs text-muted-foreground">Conta MT5</span>
+              <Button size="sm" variant={(config?.accountType ?? 'demo') === 'demo' ? 'default' : 'outline'}
+                disabled={updateConfigMutation.isPending || (config?.accountType ?? 'demo') === 'demo'}
+                onClick={() => updateConfigMutation.mutate({ accountType: 'demo' } as Partial<MT5Config>) }
+                data-testid="mt5-account-mode-demo">DEMO</Button>
+              <Button size="sm" variant={config?.accountType === 'real' ? 'default' : 'outline'}
+                disabled={updateConfigMutation.isPending || config?.accountType === 'real'}
+                onClick={() => updateConfigMutation.mutate({ accountType: 'real' } as Partial<MT5Config>) }
+                data-testid="mt5-account-mode-real">REAL</Button>
+            </div>
             {/* Badge tempo real */}
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground border rounded-full px-2.5 py-1">
               <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-breathe" />
