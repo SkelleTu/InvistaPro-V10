@@ -1181,7 +1181,7 @@ router.get('/download-ea', mt5DashboardAccess, async (req: Request, res: Respons
     // In Render production, never inject a legacy REPLIT_DEV_DOMAIN into the EA.
     const requestHost = String(req.get('host') ?? '').trim();
     const serverUrl = (process.env.NODE_ENV === 'production'
-      ? (String(process.env.RENDER_EXTERNAL_URL ?? '').trim() || (requestHost ? `https://${requestHost}` : ''))
+      ? (String(process.env.MT5_PUBLIC_BASE_URL ?? '').trim() || String(process.env.RENDER_EXTERNAL_URL ?? '').trim() || (requestHost ? `https://${requestHost}` : ''))
       : (String(process.env.REPLIT_DEV_DOMAIN ?? '').trim()
           ? `https://${String(process.env.REPLIT_DEV_DOMAIN).trim()}`
           : `${req.protocol}://${requestHost}`)).replace(/\/+$/, '');
