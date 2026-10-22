@@ -1165,11 +1165,16 @@ bool TryReconnect()
    {
       string body   = CharArrayToString(result);
       string newUrl = ExtractJsonString(body, "serverUrl");
-      if (newUrl != "" && newUrl != g_serverUrl)
+      if (newUrl != "")
       {
-         g_serverUrl = newUrl;
+         if (newUrl != g_serverUrl)
+         {
+            g_serverUrl = newUrl;
+            Print("✅ URL atualizada: ", g_serverUrl);
+         }
+         // A discovery endpoint responding successfully means connectivity is back,
+         // even when the canonical URL has not changed.
          g_failCount = 0;
-         Print("✅ URL atualizada: ", g_serverUrl);
          g_isDiscovering = false;
          return true;
       }
