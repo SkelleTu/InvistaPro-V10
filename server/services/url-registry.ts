@@ -79,9 +79,31 @@ async function updateBlob(blobId: string, url: string): Promise<boolean> {
   }
 }
 
+function resolvePublicServerUrl(): string {
+  // Render exposes RENDER_EXTERNAL_URL for public web services. Allow an explicit
+  // override for deployments behind a custom domain, then retain legacy Replit
+  // variables only as backward-compatible fallbacks.
+  const configuredUrl = process.env.MT5_PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL || '';
+  if (configuredUrl.trim()) {
+    try {
+      const parsed = new URL(configuredUrl.trim());
+      if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+        return parsed.origin;
+      }
+    } catch {
+      console.warn('⚠️ [URL Registry] MT5_PUBLIC_BASE_URL/RENDER_EXTERNAL_URL inválida');
+    }
+  }
+
+  const legacyDomain = process.env.REPLIT_DEV_DOMAIN || process.env.REPLIT_DOMAINS?.split(',')[0] || '';
+  if (!legacyDomain) return '';
+  return legacyDomain.startsWith('http://') || legacyDomain.startsWith('https://')
+    ? new URL(legacyDomain).origin
+    : `https://${legacyDomain}`;
+}
+
 export async function initUrlRegistry(): Promise<void> {
-  const domain = process.env.REPLIT_DEV_DOMAIN || process.env.REPLIT_DOMAINS?.split(',')[0] || '';
-  currentServerUrl = domain ? `https://${domain}` : '';
+  currentServerUrl = resolvePublicServerUrl();
 
   if (!currentServerUrl) {
     console.warn('⚠️ [URL Registry] REPLIT_DEV_DOMAIN não encontrado — URL Registry desativado');
