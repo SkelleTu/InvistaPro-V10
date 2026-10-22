@@ -25,6 +25,17 @@ import { consensusCache } from '../services/consensus-cache';
 
 const router = Router();
 
+// Último ambiente confirmado pelo próprio terminal MT5. Desconhecido após restart até novo heartbeat.
+let lastMt5ObservedAccountType: 'demo' | 'real' | 'contest' | null = null;
+let lastMt5EnvironmentHeartbeatAt = 0;
+
+function mt5EnvironmentMismatch() {
+  const config = metaTraderBridge.getConfig();
+  return !lastMt5ObservedAccountType || lastMt5ObservedAccountType === 'contest' ||
+    lastMt5ObservedAccountType !== config.accountType || Date.now() - lastMt5EnvironmentHeartbeatAt > 30_000;
+}
+
+
 function mt5DashboardAccess(req: any, res: any, next: any) {
   return isAuthenticated(req, res, () =>
     isApproved(req, res, () => isAuthorizedForTradingSystem(req, res, next))
@@ -75,9 +86,19 @@ function mt5SignalAccess(req: any, res: any, next: any) {
 
 router.post('/heartbeat', mt5EaTokenAccess, (req: Request, res: Response) => {
   try {
-    const { accountId, broker, balance, equity, freeMargin, openPositions, platform, token } = req.body;
+    const { accountId, broker, balance, equity, freeMargin, openPositions, platform, token, accountType } = req.body;
     if (!accountId) return res.status(400).json({ error: 'accountId obrigatório' });
+    if (!['demo', 'real', 'contest'].includes(accountType)) {
+      lastMt5ObservedAccountType = null;
+      lastMt5EnvironmentHeartbeatAt = 0;
+      return res.status(400).json({ ok: false, code: 'MT5_ACCOUNT_MODE_UNKNOWN', error: 'EA desatualizado: baixe e instale a versão que reporta o tipo real da conta MT5.' });
+    }
+    lastMt5ObservedAccountType = accountType;
+    lastMt5EnvironmentHeartbeatAt = Date.now();
     const config = metaTraderBridge.getConfig();
+    if (accountType !== config.accountType) {
+      return res.status(409).json({ ok: false, code: 'MT5_ACCOUNT_MODE_MISMATCH', expectedAccountType: config.accountType, actualAccountType: accountType, error: 'A conta conectada não corresponde ao ambiente selecionado no painel. Sinais bloqueados.' });
+    }
     metaTraderBridge.recordHeartbeat({ accountId, broker: broker || 'Unknown', balance, equity, freeMargin, openPositionsCount: typeof openPositions === 'number' ? openPositions : undefined });
     const updatedConfig = metaTraderBridge.getConfig();
     console.log(`[MT5Bridge] 💚 Heartbeat: ${broker || 'Unknown'} | Conta: ${accountId} | Saldo: $${balance} | Posições abertas EA: ${openPositions ?? '?'} | Habilitado: ${updatedConfig.enabled}`);
@@ -98,6 +119,9 @@ router.get('/signal', mt5SignalAccess, (req: Request, res: Response) => {
   try {
     const { symbol, accountId } = req.query;
     const config = metaTraderBridge.getConfig();
+    if (symbol && mt5EnvironmentMismatch()) {
+      return res.status(409).json({ action: 'HOLD', executionEnabled: false, code: 'MT5_ACCOUNT_MODE_MISMATCH', expectedAccountType: config.accountType, actualAccountType: lastMt5ObservedAccountType, reason: 'Ambiente MT5 não confirmado ou divergente. Verifique a conta conectada e mantenha as operações bloqueadas.', timestamp: Date.now() });
+    }
     // Registrar heartbeat apenas quando o EA faz polling (tem parâmetro symbol)
     // Isso evita que o dashboard (sem symbol) mantenha o heartbeat vivo falsamente
     const symbolStr = (symbol as string) || '';
@@ -1844,6 +1868,9 @@ router.post('/config', mt5DashboardAccess, (req: Request, res: Response) => {
 router.post('/signal/generate', mt5DashboardAccess, async (req: Request, res: Response) => {
   try {
     const config = metaTraderBridge.getConfig();
+    if (mt5EnvironmentMismatch()) {
+      return res.status(409).json({ action: 'HOLD', executionEnabled: false, code: 'MT5_ACCOUNT_MODE_MISMATCH', expectedAccountType: config.accountType, actualAccountType: lastMt5ObservedAccountType, reason: 'Ambiente MT5 não confirmado ou divergente. Geração de sinais bloqueada.', timestamp: Date.now() });
+    }
     const productionBlock = getMt5ProductionBlock(config.apiToken);
     if (productionBlock) {
       return res.status(productionBlock.status).json({
