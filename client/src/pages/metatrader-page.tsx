@@ -490,11 +490,11 @@ export default function MetaTraderPage() {
               <span className="px-2 text-xs text-muted-foreground">Conta MT5</span>
               <Button size="sm" variant={(config?.accountType ?? 'demo') === 'demo' ? 'default' : 'outline'}
                 disabled={updateConfigMutation.isPending || (config?.accountType ?? 'demo') === 'demo'}
-                onClick={() => updateConfigMutation.mutate({ accountType: 'demo' } as Partial<MT5Config)}
+                onClick={() => updateConfigMutation.mutate({ accountType: 'demo' } as Partial<MT5Config>}
                 data-testid="mt5-account-mode-demo">DEMO</Button>
               <Button size="sm" variant={config?.accountType === 'real' ? 'default' : 'outline'}
                 disabled={updateConfigMutation.isPending || config?.accountType === 'real'}
-                onClick={() => updateConfigMutation.mutate({ accountType: 'real' } as Partial<MT5Config)}
+                onClick={() => updateConfigMutation.mutate({ accountType: 'real' } as Partial<MT5Config>}
                 data-testid="mt5-account-mode-real">REAL</Button>
             </div>
             {/* Badge tempo real */}
