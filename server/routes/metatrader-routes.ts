@@ -2001,7 +2001,13 @@ router.post('/config', mt5DashboardAccess, async (req: Request, res: Response) =
       return res.status(400).json({ ok: false, error: 'O token MT5 precisa ter pelo menos 24 caracteres.' });
     }
     metaTraderBridge.updateConfig(updates);
-    await metaTraderBridge.flushDurableConfig();
+    try {
+      await metaTraderBridge.flushDurableConfig();
+    } catch (persistError) {
+      // Never leave a REAL authorization active in memory if durable persistence failed.
+      metaTraderBridge.updateConfig(currentConfig);
+      throw persistError;
+    }
     res.json({
       ok: true,
       apiTokenConfigured: true,
