@@ -19,6 +19,7 @@ export interface MarketContext {
   estimatedRoundTripCost?: number;
   highImpactNewsBlocked?: boolean;
   riskLimitOk?: boolean;
+  tradingSessionOpen?: boolean;
 }
 export interface PriceActionSetup {
   action: TradeSide | 'HOLD';
@@ -198,6 +199,8 @@ export function evaluatePriceActionSetup(
     features.entry = entry; features.stop = stop; features.target = target; features.riskReward = rr;
     checks.risk_reward = risk > 0 && rr >= 2;
     if (!checks.risk_reward) reasons.push('Relação risco/retorno inferior a 1:2 após custos estimados');
+    checks.stop_distance_limit = entry > 0 && risk > 0 && risk / entry <= 0.015;
+    if (!checks.stop_distance_limit) reasons.push('Stop estrutural excede o limite máximo de 1,5% do preço; não será comprimido artificialmente.');
     checks.spread = finite(context.spread) && finite(context.maxSpread) && context.spread >= 0 && context.maxSpread > 0 && context.spread <= context.maxSpread;
     if (!checks.spread) reasons.push('Spread ausente, inválido ou acima do limite configurado');
     checks.costs = finite(context.estimatedRoundTripCost) && context.estimatedRoundTripCost >= 0;
@@ -206,9 +209,11 @@ export function evaluatePriceActionSetup(
     checks.volume = false; checks.structure_confirmation = false; checks.valid_zone = false; checks.risk_reward = false; checks.spread = false; checks.costs = false;
   }
   checks.news_clear = context.highImpactNewsBlocked === false;
-  if (!checks.news_clear) reasons.push('Janela de notícia de alto impacto bloqueada');
+  if (!checks.news_clear) reasons.push('Janela de notícia de alto impacto bloqueada ou não validada');
   checks.risk_limit = context.riskLimitOk === true;
   if (!checks.risk_limit) reasons.push('Limite de risco/circuit breaker bloqueia a operação');
+  checks.trading_session = context.tradingSessionOpen === true;
+  if (!checks.trading_session) reasons.push('Fora das sessões operacionais autorizadas no horário de Brasília');
 
   const approved = Object.values(checks).every(Boolean) && side !== null;
   if (!approved) return { action: 'HOLD', approved: false, reasons, checks, features };
