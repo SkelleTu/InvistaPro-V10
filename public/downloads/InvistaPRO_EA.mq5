@@ -1160,7 +1160,11 @@ void MonitorOpenPositions()
           }
        }
 
-      string posJson = "{";
+// Autonomous Price Action mode uses only deterministic local protection and fixed SL/TP.
+      if (IsPriceActionCryptoSymbol() && !PriceActionUseAIReview)
+         continue;
+
+            string posJson = "{";
       posJson += "\"ticket\":"        + IntegerToString(ticket)             + ",";
       posJson += "\"symbol\":\""      + g_symbol                           + "\",";
       posJson += "\"type\":\""        + posType                             + "\",";
