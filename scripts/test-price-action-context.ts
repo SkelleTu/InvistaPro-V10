@@ -49,7 +49,7 @@ const config = {
   maxOpenPositions: 5,
 } as MT5Config;
 const status = {
-  lastEquity: 1000, dailyLoss: 0, dailyProfit: 0, openPositions: 0, circuitBreakerActive: false,
+  lastBalance: 1000, lastEquity: 1000, dailyLoss: 0, dailyProfit: 0, openPositions: 0, circuitBreakerActive: false,
 } as MT5Status;
 assert.equal(assessMt5RiskLimit({
   config, status, observedAccountType: 'demo', accountHeartbeatAt: now - 1000, now,
