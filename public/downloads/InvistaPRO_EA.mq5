@@ -1056,6 +1056,64 @@ void MonitorOpenPositions()
       double sl        = posInfo.StopLoss();
       double tp        = posInfo.TakeProfit();
       double profit    = posInfo.Profit();
+ 
+       // Deterministic Price Action management: breakeven at +1R and 50% partial at +1.5R.
+       // These controls run locally and never depend on AI availability.
+       if (IsPriceActionCryptoSymbol() && sl > 0 && tp > 0)
+       {
+          string riskKey = "InvistaPA_R_" + IntegerToString((long)ticket);
+          string partialKey = "InvistaPA_TP1_" + IntegerToString((long)ticket);
+          double initialRisk = GlobalVariableCheck(riskKey) ? GlobalVariableGet(riskKey) : 0.0;
+          if (initialRisk <= 0.0 && MathAbs(openPrice - sl) > _Point * 2.0)
+          {
+             initialRisk = MathAbs(openPrice - sl);
+             GlobalVariableSet(riskKey, initialRisk);
+          }
+          if (initialRisk > 0.0)
+          {
+             double favorableMove = (posType == "BUY") ? curPrice - openPrice : openPrice - curPrice;
+             if (favorableMove >= initialRisk)
+             {
+                bool needsBreakeven = (posType == "BUY" && sl < openPrice) ||
+                                      (posType == "SELL" && sl > openPrice);
+                if (needsBreakeven)
+                {
+                   double breakevenSL = NormalizeDouble(openPrice, _Digits);
+                   if (trade.PositionModify(ticket, breakevenSL, tp))
+                   {
+                      sl = breakevenSL;
+                      Print("🛡️ Price Action: stop movido para breakeven em +1R. Ticket=", ticket);
+                   }
+                   else
+                      Print("⛔ Price Action: falha ao mover stop para breakeven; ticket=", ticket, " retcode=", trade.ResultRetcode());
+                }
+             }
+             if (favorableMove >= initialRisk * 1.5 && !GlobalVariableCheck(partialKey))
+             {
+                double volume = posInfo.Volume();
+                double volumeStep = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_STEP);
+                double minVolume = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_MIN);
+                int volumeDigits = (int)SymbolInfoInteger(g_symbol, SYMBOL_VOLUME_DIGITS);
+                double partialVolume = (volumeStep > 0) ? MathFloor((volume * 0.5) / volumeStep) * volumeStep : 0.0;
+                partialVolume = NormalizeDouble(partialVolume, volumeDigits);
+                if (partialVolume >= minVolume && volume - partialVolume >= minVolume)
+                {
+                   if (trade.PositionClosePartial(ticket, partialVolume))
+                   {
+                      GlobalVariableSet(partialKey, 1.0);
+                      Print("🎯 Price Action: parcial de 50% realizada em +1,5R. Ticket=", ticket);
+                      continue;
+                   }
+                   Print("⛔ Price Action: parcial falhou; ticket=", ticket, " retcode=", trade.ResultRetcode());
+                }
+                else
+                {
+                   GlobalVariableSet(partialKey, -1.0);
+                   Print("ℹ️ Price Action: lote mínimo do broker impede parcial de 50%; posição segue protegida pelo SL/TP.");
+                }
+             }
+          }
+       }
 
       string posJson = "{";
       posJson += "\"ticket\":"        + IntegerToString(ticket)             + ",";
