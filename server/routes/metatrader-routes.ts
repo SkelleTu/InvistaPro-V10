@@ -321,7 +321,7 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
       });
     }
 
-    const productionBlock = getMt5ProductionBlock(config.apiToken, process.env, config.accountType);
+    const productionBlock = getMt5ProductionBlock(config.apiToken, process.env, config.accountType, config.realTradingAuthorized);
     if (productionBlock) {
       return res.status(productionBlock.status).json({
         action: 'HOLD',
