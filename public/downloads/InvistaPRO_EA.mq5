@@ -41,6 +41,7 @@ input int      MaxReconnectTries= 5;           // Tentativas máximas de reconex
 input int      IndicatorBars    = 5;           // Quantas barras recentes dos indicadores ler
 input int      CandleCount      = 200;         // Candles para enviar à IA (histórico)
 input double   PriceActionRiskPercent = 1.0; // Risco por trade para Price Action (1% a 2%)
+input bool     PriceActionUseAIReview = true; // true = estratégia + IA; false = estratégia autônoma com os mesmos gates
 
 //--- Controle de Autonomia da IA
 input ENUM_AI_CONTROL_MODE AIControlMode = AI_FULL; // Modo de Controle da IA
@@ -795,6 +796,7 @@ void FetchAndProcessSignal()
    body += "\"bid\":"               + DoubleToString(bid, _Digits)  + ",";
    body += "\"candles\":"           + candlesJson                   + ",";
    body += "\"timeframes\":"       + BuildMultiTimeframeJson()     + ",";
+   body += "\"priceActionUseAIReview\":" + (PriceActionUseAIReview ? "true" : "false") + ",";
    body += "\"indicatorSignals\":"  + structuredSignals             + ",";
    body += "\"indicatorBuffers\":"  + allBuffers                    + ",";
    body += "\"indicatorCount\":"    + IntegerToString(g_indicatorCount) + ",";
