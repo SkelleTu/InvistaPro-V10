@@ -276,6 +276,7 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
       bid,
       candles,
       timeframes,
+      accountType: requestAccountType,
       priceActionUseAIReview,
       indicatorSignals,   // { girassol: {...}, fibonacci: {...} }
       indicatorBuffers,   // array bruto de todos os buffers
@@ -292,6 +293,22 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
       return res.status(400).json({ error: 'symbol é obrigatório' });
     }
 
+    const requestedAccountMode = String(requestAccountType ?? '').trim().toLowerCase();
+    if (!['demo', 'real', 'contest'].includes(requestedAccountMode)
+      || requestedAccountMode !== config.accountType
+      || requestedAccountMode !== lastMt5ObservedAccountType) {
+      return res.status(409).json({
+        action: 'HOLD',
+        executionEnabled: false,
+        code: 'MT5_ACCOUNT_MODE_MISMATCH',
+        expectedAccountType: config.accountType,
+        requestedAccountType: requestedAccountMode || null,
+        actualAccountType: lastMt5ObservedAccountType,
+        reason: 'O modo informado pelo terminal diverge do modo configurado/observado; sinais bloqueados.',
+        timestamp: Date.now(),
+      });
+    }
+
     if (mt5EnvironmentMismatch()) {
       return res.status(409).json({
         action: 'HOLD',
@@ -299,7 +316,7 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
         code: 'MT5_ACCOUNT_MODE_MISMATCH',
         expectedAccountType: config.accountType,
         actualAccountType: lastMt5ObservedAccountType,
-        reason: 'Conta MT5 não confirmada ou divergente; sinais bloqueados até heartbeat real em modo DEMO.',
+        reason: 'Conta MT5 não confirmada ou heartbeat desatualizado; sinais bloqueados.',
         timestamp: Date.now(),
       });
     }
