@@ -96,6 +96,13 @@ async function loadCalendar(now = Date.now()): Promise<{ events: EconomicCalenda
     if (!events.some(event => typeof event.country === 'string' && typeof event.impact === 'string')) {
       throw new Error('Calendário econômico sem campos de país/impacto');
     }
+    const currentTime = Date.now();
+    const hasCurrentWindow = events.some(event => {
+      const timestamp = eventTimestamp(event);
+      return timestamp !== null && timestamp >= currentTime - 7 * 24 * 60 * 60_000
+        && timestamp <= currentTime + 7 * 24 * 60 * 60_000;
+    });
+    if (!hasCurrentWindow) throw new Error('Calendário econômico não contém eventos da semana atual');
     const cached = { events, fetchedAt: Date.now() };
     calendarCache = cached;
     return cached;
