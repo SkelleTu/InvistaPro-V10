@@ -56,15 +56,24 @@ function average(values: number[]): number {
   return values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
 }
 function trigger(c: Candle[]): TradeSide | null {
-  const a = c[c.length - 2], b = c[c.length - 1];
-  const body = Math.abs(b.close - b.open);
-  const range = Math.max(b.high - b.low, 1e-12);
-  const lowerWick = Math.min(b.open, b.close) - b.low;
-  const upperWick = b.high - Math.max(b.open, b.close);
-  const bullEngulf = b.close > b.open && a.close < a.open && b.open <= a.close && b.close >= a.open;
-  const bearEngulf = b.close < b.open && a.close > a.open && b.open >= a.close && b.close <= a.open;
-  if (bullEngulf || (lowerWick / range >= 0.55 && b.close > b.open && body / range >= 0.12)) return 'BUY';
-  if (bearEngulf || (upperWick / range >= 0.55 && b.close < b.open && body / range >= 0.12)) return 'SELL';
+  if (c.length < 3) return null;
+  const prior = c[c.length - 3];
+  const pattern = c[c.length - 2];
+  const confirmation = c[c.length - 1];
+  const body = Math.abs(pattern.close - pattern.open);
+  const range = Math.max(pattern.high - pattern.low, 1e-12);
+  const lowerWick = Math.min(pattern.open, pattern.close) - pattern.low;
+  const upperWick = pattern.high - Math.max(pattern.open, pattern.close);
+  const bullEngulf = pattern.close > pattern.open && prior.close < prior.open &&
+    pattern.open <= prior.close && pattern.close >= prior.open;
+  const bearEngulf = pattern.close < pattern.open && prior.close > prior.open &&
+    pattern.open >= prior.close && pattern.close <= prior.open;
+  const bullPin = lowerWick / range >= 0.55 && pattern.close > pattern.open && body / range >= 0.12;
+  const bearPin = upperWick / range >= 0.55 && pattern.close < pattern.open && body / range >= 0.12;
+  const insideBar = pattern.high < prior.high && pattern.low > prior.low;
+  // A pattern is only a setup. Entry requires a later candle to break its trigger level.
+  if ((bullEngulf || bullPin || insideBar) && confirmation.close > pattern.high) return 'BUY';
+  if ((bearEngulf || bearPin || insideBar) && confirmation.close < pattern.low) return 'SELL';
   return null;
 }
 function hasFvg(c: Candle[], side: TradeSide): boolean {
@@ -190,13 +199,18 @@ export function evaluatePriceActionSetup(
     const entry = entryFrame[entryFrame.length - 1].close;
     const swingLow = Math.min(...recent.map(c => c.low));
     const swingHigh = Math.max(...recent.map(c => c.high));
-    const stop = side === 'BUY' ? swingLow : swingHigh;
+    const averageRange = average(recent.map(c => c.high - c.low));
+    const stopBuffer = Math.max(averageRange * 0.1, entry * 0.00005);
+    const stop = side === 'BUY' ? swingLow - stopBuffer : swingHigh + stopBuffer;
     const risk = Math.abs(entry - stop);
     const costs = Math.max(0, context.estimatedRoundTripCost ?? 0);
-    const targetDistance = risk * 2 + costs * 2;
+    const targetDistance = risk * 2 + costs * 3;
     const target = side === 'BUY' ? entry + targetDistance : entry - targetDistance;
-    const rr = risk > 0 ? Math.abs(target - entry) / (risk + costs) : 0;
+    const rr = risk > 0 ? (Math.abs(target - entry) - costs) / (risk + costs) : 0;
     features.entry = entry; features.stop = stop; features.target = target; features.riskReward = rr;
+    features.stopBuffer = stopBuffer;
+    checks.stop_direction = entry > 0 && (side === 'BUY' ? stop < entry : stop > entry);
+    if (!checks.stop_direction) reasons.push('Stop estrutural está no lado incorreto da entrada');
     checks.risk_reward = risk > 0 && rr >= 2;
     if (!checks.risk_reward) reasons.push('Relação risco/retorno inferior a 1:2 após custos estimados');
     checks.stop_distance_limit = entry > 0 && risk > 0 && risk / entry <= 0.015;
