@@ -2031,7 +2031,7 @@ router.post('/signal/generate', mt5DashboardAccess, async (req: Request, res: Re
     if (mt5EnvironmentMismatch()) {
       return res.status(409).json({ action: 'HOLD', executionEnabled: false, code: 'MT5_ACCOUNT_MODE_MISMATCH', expectedAccountType: config.accountType, actualAccountType: lastMt5ObservedAccountType, reason: 'Ambiente MT5 não confirmado ou divergente. Geração de sinais bloqueada.', timestamp: Date.now() });
     }
-    const productionBlock = getMt5ProductionBlock(config.apiToken, process.env, config.accountType);
+    const productionBlock = getMt5ProductionBlock(config.apiToken, process.env, config.accountType, config.realTradingAuthorized);
     if (productionBlock) {
       return res.status(productionBlock.status).json({
         action: 'HOLD',
