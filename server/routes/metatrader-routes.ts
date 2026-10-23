@@ -382,6 +382,7 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
       // Optional strategy-only mode for controlled comparison. The deterministic setup and all
       // server safety gates remain mandatory; only the second-stage AI review is skipped.
       if (priceActionUseAIReview === false) {
+        if (Array.isArray(candles) && candles.length > 0) metaTraderBridge.addMarketData(sym, candles);
         const timestamp = Date.now();
         return res.json({
           id: 'pa-' + randomBytes(8).toString('hex'),
