@@ -175,12 +175,13 @@ export function evaluatePriceActionSetup(
   features.trigger = entrySide;
 
   if (side) {
-    const fvg = hasFvg(entryFrame, side);
-    const sweep = liquiditySweep(entryFrame, side);
-    const bos = breakOfStructure(entryFrame, side);
-    const choch = changeOfCharacter(entryFrame, side);
-    const ob = orderBlockZone(entryFrame, side);
-    const zoneNear = nearStructureZone(entryFrame, side) || ob !== null || sweep;
+    // M15 defines the operating zone; M5/M1 supplies the final trigger and microstructure.
+    const fvg = hasFvg(m15, side) || hasFvg(entryFrame, side);
+    const sweep = liquiditySweep(m15, side) || liquiditySweep(entryFrame, side);
+    const bos = breakOfStructure(m15, side) || breakOfStructure(entryFrame, side);
+    const choch = changeOfCharacter(m15, side) || changeOfCharacter(entryFrame, side);
+    const ob = orderBlockZone(m15, side) ?? orderBlockZone(entryFrame, side);
+    const zoneNear = nearStructureZone(m15, side) || ob !== null || sweep;
     const volumes = entryFrame.slice(-21, -1).map(c => c.volume);
     const volumeOk = average(volumes) > 0 && entryFrame[entryFrame.length - 1].volume >= average(volumes);
     features.fvg = fvg; features.liquiditySweep = sweep; features.bos = bos; features.choch = choch;
