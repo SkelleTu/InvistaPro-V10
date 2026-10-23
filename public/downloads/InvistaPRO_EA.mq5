@@ -790,7 +790,11 @@ void FetchAndProcessSignal()
    string url     = g_serverUrl + "/api/metatrader/signal-with-indicators";
    string headers = "Content-Type: application/json\r\n";
 
+   long requestTradeMode = AccountInfoInteger(ACCOUNT_TRADE_MODE);
+   string requestAccountType = (requestTradeMode == ACCOUNT_TRADE_MODE_REAL) ? "real" :
+                               (requestTradeMode == ACCOUNT_TRADE_MODE_DEMO) ? "demo" : "contest";
    string body = "{";
+   body += "\"accountType\":\"" + requestAccountType + "\",";
    body += "\"symbol\":\""          + g_symbol                     + "\",";
    body += "\"ask\":"               + DoubleToString(ask, _Digits)  + ",";
    body += "\"bid\":"               + DoubleToString(bid, _Digits)  + ",";
