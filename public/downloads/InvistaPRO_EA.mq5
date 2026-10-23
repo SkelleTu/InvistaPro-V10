@@ -1056,7 +1056,15 @@ void FetchAndProcessSignal()
 
    if (success)
    {
+      double executedVolume = trade.ResultVolume();
+      if (executedVolume > 0 && executedVolume < lotSize)
+      {
+         Print("⚠️ Execução parcial: solicitado=", DoubleToString(lotSize, 8),
+               " executado=", DoubleToString(executedVolume, 8));
+         lotSize = executedVolume;
+      }
       Print("✅ Ordem executada: ", action, " | Ticket: ", trade.ResultOrder(),
+            " | Volume confirmado: ", DoubleToString(lotSize, 8),
             " | SL: ", NormalizeDouble(stopLoss, _Digits),
             " | TP: ", NormalizeDouble(takeProfit, _Digits));
       ConfirmTradeOpen(signalId, (int)trade.ResultOrder(), action, lotSize, stopLoss, takeProfit);
