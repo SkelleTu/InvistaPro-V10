@@ -505,9 +505,11 @@ export default function MetaTraderPage() {
             </div>
             <Badge variant={config?.accountType === 'real' && config?.realTradingAuthorized === true ? 'destructive' : 'secondary'}
               data-testid="mt5-mode-authorization-status">
-              {config?.accountType === 'real' && config?.realTradingAuthorized === true
-                ? 'REAL AUTORIZADO'
-                : 'DEMO / REAL BLOQUEADO'}
+              {config?.accountType === 'demo'
+                ? 'MODO DEMO'
+                : config?.realTradingAuthorized === true
+                  ? 'REAL AUTORIZADO'
+                  : 'REAL BLOQUEADO'}
             </Badge>
             {/* Badge tempo real */}
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground border rounded-full px-2.5 py-1">
