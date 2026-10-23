@@ -34,7 +34,7 @@ let lastMt5EnvironmentHeartbeatAt = 0;
 function mt5EnvironmentMismatch() {
   const config = metaTraderBridge.getConfig();
   return !lastMt5ObservedAccountType || lastMt5ObservedAccountType === 'contest' ||
-    lastMt5ObservedAccountType !== config.accountType || Date.now() - lastMt5EnvironmentHeartbeatAt > 30_000;
+    lastMt5ObservedAccountType !== config.accountType || Date.now() - lastMt5EnvironmentHeartbeatAt > 90_000;
 }
 
 
