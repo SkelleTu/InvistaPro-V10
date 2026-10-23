@@ -19,7 +19,7 @@ assert.equal(
   "MT5_API_TOKEN_NOT_CONFIGURED",
 );
 assert.equal(
-  getMt5ProductionBlock("ea-token", { NODE_ENV: "production", MT5_PRODUCTION_TRADING_ENABLED: "true" }),
+  getMt5ProductionBlock("ea-token", { NODE_ENV: "production", MT5_PRODUCTION_TRADING_ENABLED: "true" }, "real", true),
   null,
 );
 
@@ -33,8 +33,18 @@ assert.equal(
   "MT5_DEMO_TRADING_DISABLED",
 );
 assert.equal(
-  getMt5ProductionBlock("ea-token", { NODE_ENV: "production", MT5_PRODUCTION_TRADING_ENABLED: "false" }, "real")?.code,
+  getMt5ProductionBlock("ea-token", { NODE_ENV: "production", MT5_PRODUCTION_TRADING_ENABLED: "false" }, "real", true)?.code,
   "MT5_PRODUCTION_TRADING_DISABLED",
+);
+assert.equal(
+  getMt5ProductionBlock("ea-token", { NODE_ENV: "production" }, "real")?.code,
+  "MT5_PRODUCTION_TRADING_DISABLED",
+  "REAL must remain blocked until dashboard authorization is explicitly enabled",
+);
+assert.equal(
+  getMt5ProductionBlock("ea-token", { NODE_ENV: "production" }, "real", true),
+  null,
+  "Explicit dashboard authorization may enable REAL when no global emergency block is set",
 );
 assert.equal(
   getMt5ProductionBlock("ea-token", { NODE_ENV: "production", MT5_PRODUCTION_TRADING_ENABLED: "true" }, "contest")?.code,
