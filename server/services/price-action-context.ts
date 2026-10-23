@@ -159,7 +159,11 @@ export function assessMt5RiskLimit(input: {
   if (!input.accountHeartbeatAt || now - input.accountHeartbeatAt > 90_000) reasons.push('Heartbeat real da conta MT5 ausente ou desatualizado');
   if (!status.lastEquity || !Number.isFinite(status.lastEquity) || status.lastEquity <= 0) reasons.push('Equity real da conta indisponível');
   if (!Number.isFinite(config.riskPercent) || config.riskPercent < 1 || config.riskPercent > 2) reasons.push('Risco por operação fora do intervalo permitido de 1% a 2%');
-  if (!Number.isFinite(config.maxDailyLoss) || config.maxDailyLoss <= 0 || status.dailyLoss >= config.maxDailyLoss) reasons.push('Limite diário de perda atingido ou inválido');
+  const unrealizedDrawdown = status.lastBalance && status.lastEquity
+    ? Math.max(0, status.lastBalance - status.lastEquity)
+    : Number.POSITIVE_INFINITY;
+  const effectiveDailyLoss = Number.isFinite(status.dailyLoss) ? status.dailyLoss + unrealizedDrawdown : Number.POSITIVE_INFINITY;
+  if (!Number.isFinite(config.maxDailyLoss) || config.maxDailyLoss <= 0 || effectiveDailyLoss >= config.maxDailyLoss) reasons.push('Limite diário de perda atingido, inválido ou incluindo drawdown aberto');
   if (!Number.isFinite(config.maxDailyProfit) || config.maxDailyProfit <= 0 || status.dailyProfit >= config.maxDailyProfit) reasons.push('Meta/limite diário de lucro atingido ou inválido');
   if (status.circuitBreakerActive) reasons.push('Circuit breaker ativo');
   if (!Number.isFinite(config.maxOpenPositions) || config.maxOpenPositions < 1 || status.openPositions >= config.maxOpenPositions) reasons.push('Limite de posições abertas atingido ou inválido');
