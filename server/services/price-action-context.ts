@@ -87,7 +87,8 @@ export function evaluateEconomicNewsWindow(
 
 async function loadCalendar(now = Date.now()): Promise<{ events: EconomicCalendarEvent[]; fetchedAt: number }> {
   if (calendarCache && now - calendarCache.fetchedAt <= CALENDAR_CACHE_TTL_MS) return calendarCache;
-  if (calendarFailure && now - calendarFailure.failedAt < 30_000 && (!calendarCache || now - calendarCache.fetchedAt > CALENDAR_MAX_STALE_MS)) {
+  if (calendarFailure && now - calendarFailure.failedAt < 30_000) {
+    if (calendarCache && now - calendarCache.fetchedAt <= CALENDAR_MAX_STALE_MS) return calendarCache;
     throw new Error(calendarFailure.message);
   }
   if (calendarFetch) return calendarFetch;
