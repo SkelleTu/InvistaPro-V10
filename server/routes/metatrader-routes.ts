@@ -322,7 +322,17 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
     let priceActionSetup: ReturnType<typeof evaluatePriceActionSetup> | null = null;
     if (isStrategyCrypto) {
       const frames = timeframes && typeof timeframes === 'object' ? timeframes as Partial<Record<'H4'|'H1'|'M15'|'M5'|'M1', Candle[]>> : {};
-      priceActionSetup = evaluatePriceActionSetup(frames, (marketContext && typeof marketContext === 'object' ? marketContext : {}) as MarketContext);
+      const submittedContext = marketContext && typeof marketContext === 'object' ? marketContext as Partial<MarketContext> : {};
+      // Trust terminal-reported spread/cost inputs only as observations. News clearance and
+      // risk-limit clearance must be server-derived; never let a client assert either as true.
+      const trustedContext: MarketContext = {
+        spread: submittedContext.spread,
+        maxSpread: submittedContext.maxSpread,
+        estimatedRoundTripCost: submittedContext.estimatedRoundTripCost,
+        highImpactNewsBlocked: undefined,
+        riskLimitOk: false
+      };
+      priceActionSetup = evaluatePriceActionSetup(frames, trustedContext);
       if (!priceActionSetup.approved) {
         return res.json({
           action: 'HOLD',
