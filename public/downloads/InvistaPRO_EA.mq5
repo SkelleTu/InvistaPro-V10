@@ -738,6 +738,41 @@ double CalculatePriceActionRiskLot(double entryPrice, double stopLoss)
    return NormalizeDouble(volume, volumeDigits);
 }
 
+bool ClosePriceActionPartial(ulong ticket, double volume, string positionType)
+{
+   long marginMode = AccountInfoInteger(ACCOUNT_MARGIN_MODE);
+   if (marginMode == ACCOUNT_MARGIN_MODE_RETAIL_HEDGING)
+      return trade.PositionClosePartial(ticket, volume);
+
+   // Netting accounts reduce the existing position with an opposite deal.
+   MqlTradeRequest request = {};
+   MqlTradeResult result = {};
+   request.action = TRADE_ACTION_DEAL;
+   request.position = ticket;
+   request.symbol = g_symbol;
+   request.volume = volume;
+   request.magic = MagicNumber;
+   request.deviation = 20;
+   request.type = (positionType == "BUY") ? ORDER_TYPE_SELL : ORDER_TYPE_BUY;
+   request.price = (positionType == "BUY")
+      ? SymbolInfoDouble(g_symbol, SYMBOL_BID)
+      : SymbolInfoDouble(g_symbol, SYMBOL_ASK);
+   long filling = SymbolInfoInteger(g_symbol, SYMBOL_FILLING_MODE);
+   if ((filling & SYMBOL_FILLING_IOC) == SYMBOL_FILLING_IOC)
+      request.type_filling = ORDER_FILLING_IOC;
+   else if ((filling & SYMBOL_FILLING_FOK) == SYMBOL_FILLING_FOK)
+      request.type_filling = ORDER_FILLING_FOK;
+   else
+      request.type_filling = ORDER_FILLING_RETURN;
+
+   if (request.price <= 0 || !OrderSend(request, result))
+   {
+      Print("⛔ Price Action: falha de envio da parcial netting. erro=", GetLastError());
+      return false;
+   }
+   return result.retcode == TRADE_RETCODE_DONE || result.retcode == TRADE_RETCODE_DONE_PARTIAL;
+}
+
 void FetchAndProcessSignal()
 {
    string structuredSignals = ReadStructuredIndicatorSignals();
@@ -1098,7 +1133,7 @@ void MonitorOpenPositions()
                 partialVolume = NormalizeDouble(partialVolume, volumeDigits);
                 if (partialVolume >= minVolume && volume - partialVolume >= minVolume)
                 {
-                   if (trade.PositionClosePartial(ticket, partialVolume))
+                   if (ClosePriceActionPartial(ticket, partialVolume, posType))
                    {
                       GlobalVariableSet(partialKey, 1.0);
                       Print("🎯 Price Action: parcial de 50% realizada em +1,5R. Ticket=", ticket);
