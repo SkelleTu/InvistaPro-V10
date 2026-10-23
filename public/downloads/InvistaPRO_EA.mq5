@@ -40,6 +40,7 @@ input bool     AutoReconnect    = true;        // Reconexão automática de URL
 input int      MaxReconnectTries= 5;           // Tentativas máximas de reconexão
 input int      IndicatorBars    = 5;           // Quantas barras recentes dos indicadores ler
 input int      CandleCount      = 200;         // Candles para enviar à IA (histórico)
+input double   PriceActionRiskPercent = 1.0; // Risco por trade para Price Action (1% a 2%)
 
 //--- Controle de Autonomia da IA
 input ENUM_AI_CONTROL_MODE AIControlMode = AI_FULL; // Modo de Controle da IA
@@ -700,6 +701,43 @@ void SendMarketDataForSyntheticGirassol()
 //+------------------------------------------------------------------+
 //| Busca e processa sinal com indicadores reais                      |
 //+------------------------------------------------------------------+
+bool IsPriceActionCryptoSymbol()
+{
+   string normalized = g_symbol;
+   StringToUpper(normalized);
+   StringReplace(normalized, "/", "");
+   StringReplace(normalized, ".", "");
+   StringReplace(normalized, "_", "");
+   StringReplace(normalized, "-", "");
+   return (StringFind(normalized, "BTCUSD") == 0 ||
+           StringFind(normalized, "ETHUSD") == 0 ||
+           StringFind(normalized, "SOLUSD") == 0);
+}
+
+double CalculatePriceActionRiskLot(double entryPrice, double stopLoss)
+{
+   if (entryPrice <= 0 || stopLoss <= 0 || PriceActionRiskPercent < 1.0 || PriceActionRiskPercent > 2.0)
+      return 0.0;
+   double tickSize = SymbolInfoDouble(g_symbol, SYMBOL_TRADE_TICK_SIZE);
+   double tickValue = SymbolInfoDouble(g_symbol, SYMBOL_TRADE_TICK_VALUE_LOSS);
+   if (tickValue <= 0) tickValue = SymbolInfoDouble(g_symbol, SYMBOL_TRADE_TICK_VALUE);
+   double volumeStep = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_STEP);
+   double minVolume = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_MIN);
+   double maxVolume = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_MAX);
+   double distance = MathAbs(entryPrice - stopLoss);
+   if (tickSize <= 0 || tickValue <= 0 || volumeStep <= 0 || minVolume <= 0 || maxVolume <= 0 || distance <= 0)
+      return 0.0;
+   double lossPerLot = (distance / tickSize) * tickValue;
+   double riskCash = AccountInfoDouble(ACCOUNT_EQUITY) * PriceActionRiskPercent / 100.0;
+   if (lossPerLot <= 0 || riskCash <= 0) return 0.0;
+   double rawVolume = riskCash / lossPerLot;
+   double volume = MathFloor(rawVolume / volumeStep) * volumeStep;
+   if (volume < minVolume) return 0.0;
+   if (volume > maxVolume) volume = maxVolume;
+   int volumeDigits = (int)SymbolInfoInteger(g_symbol, SYMBOL_VOLUME_DIGITS);
+   return NormalizeDouble(volume, volumeDigits);
+}
+
 void FetchAndProcessSignal()
 {
    string structuredSignals = ReadStructuredIndicatorSignals();
@@ -879,18 +917,47 @@ void FetchAndProcessSignal()
       if (action == "BUY")
       {
          double entry = ask;
-         if (stopLoss   > 0 && (entry - stopLoss)   < minDist) stopLoss   = NormalizeDouble(entry - minDist, _Digits);
-         if (takeProfit > 0 && (takeProfit - entry)  < minDist) takeProfit = NormalizeDouble(entry + minDist, _Digits);
+         if (stopLoss > 0 && (entry - stopLoss) < minDist) { if (IsPriceActionCryptoSymbol()) { Print("⛔ Price Action: distância mínima do broker exigiria alargar o stop; sinal cancelado."); return; } stopLoss = NormalizeDouble(entry - minDist, _Digits); }
+         if (takeProfit > 0 && (takeProfit - entry) < minDist) { if (IsPriceActionCryptoSymbol()) { Print("⛔ Price Action: TP abaixo da distância mínima do broker; sinal cancelado."); return; } takeProfit = NormalizeDouble(entry + minDist, _Digits); }
       }
       else if (action == "SELL")
       {
          double entry = bid;
-         if (stopLoss   > 0 && (stopLoss - entry)   < minDist) stopLoss   = NormalizeDouble(entry + minDist, _Digits);
-         if (takeProfit > 0 && (entry - takeProfit)  < minDist) takeProfit = NormalizeDouble(entry - minDist, _Digits);
+         if (stopLoss > 0 && (stopLoss - entry) < minDist) { if (IsPriceActionCryptoSymbol()) { Print("⛔ Price Action: distância mínima do broker exigiria alargar o stop; sinal cancelado."); return; } stopLoss = NormalizeDouble(entry + minDist, _Digits); }
+         if (takeProfit > 0 && (entry - takeProfit) < minDist) { if (IsPriceActionCryptoSymbol()) { Print("⛔ Price Action: TP abaixo da distância mínima do broker; sinal cancelado."); return; } takeProfit = NormalizeDouble(entry - minDist, _Digits); }
       }
    }
 
    Print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    bool isPriceActionCrypto = IsPriceActionCryptoSymbol();
+    if (isPriceActionCrypto)
+    {
+       double entry = (action == "BUY") ? ask : bid;
+       if (action != "BUY" && action != "SELL")
+       {
+          Print("⛔ Price Action recusado: ação inválida.");
+          return;
+       }
+       if (stopLoss <= 0 || takeProfit <= 0 || entry <= 0 || PriceActionRiskPercent < 1.0 || PriceActionRiskPercent > 2.0)
+       {
+          Print("⛔ Price Action recusado: preço, SL/TP ou risco configurado inválido.");
+          return;
+       }
+       double riskDistance = (action == "BUY") ? entry - stopLoss : stopLoss - entry;
+       double rewardDistance = (action == "BUY") ? takeProfit - entry : entry - takeProfit;
+       if (riskDistance <= 0 || rewardDistance <= 0 || riskDistance / entry > 0.015 || rewardDistance / riskDistance < 2.0)
+       {
+          Print("⛔ Price Action recusado: stop inválido, stop acima de 1,5% ou R:R abaixo de 1:2 no preço executável.");
+          return;
+       }
+       lotSize = CalculatePriceActionRiskLot(entry, stopLoss);
+       if (lotSize <= 0)
+       {
+          Print("⛔ Price Action recusado: lote mínimo do broker excede o orçamento de risco ou tick value indisponível.");
+          return;
+       }
+    }
+
    Print("📡 SINAL v8.0: ", action, " | ", g_symbol, " | Confiança: ", confidence, "%");
    if (assetFamily  != "") Print("   Ativo: ", assetFamily, " | ", assetTrend, " | Vol: ", assetVolClass);
    if (girassolBias != "") Print("   Girassol: ", girassolBias);
@@ -909,7 +976,7 @@ void FetchAndProcessSignal()
       success = trade.Sell(lotSize, g_symbol, 0, stopLoss, takeProfit, "InvistaPRO_" + signalId);
 
    // ── Retry automático se stops inválidos (10016) ───────────────────────
-   if (!success && trade.ResultRetcode() == 10016)
+   if (!success && trade.ResultRetcode() == 10016 && !isPriceActionCrypto)
    {
       Print("⚠️ Stops inválidos (10016) — recalculando...");
       double askNow   = SymbolInfoDouble(g_symbol, SYMBOL_ASK);
@@ -945,10 +1012,10 @@ void FetchAndProcessSignal()
 
       if (!success)
       {
-         Print("⚠️ Retry falhou — abrindo SEM SL/TP como último recurso");
-         if (action == "BUY")  success = trade.Buy(lotSize,  g_symbol, 0, 0, 0, "InvistaPRO_" + signalId);
-         else                    success = trade.Sell(lotSize, g_symbol, 0, 0, 0, "InvistaPRO_" + signalId);
-         if (success) Print("⚠️ Ordem aberta SEM SL/TP — monitore manualmente!");
+         Print("⛔ Retry falhou. Ordem cancelada; nunca abrir sem SL/TP de proteção.");
+         // A ordem permanece recusada se o broker não aceitar os stops protetivos.
+         
+         
       }
    }
 
