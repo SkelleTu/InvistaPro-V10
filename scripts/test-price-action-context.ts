@@ -64,4 +64,15 @@ assert.equal(assessMt5RiskLimit({
   config, status: { ...status, dailyLoss: 100 }, observedAccountType: 'demo', accountHeartbeatAt: now - 1000, now,
 }).ok, false, 'Daily loss limit must block entries');
 
+const realConfig = { ...config, accountType: 'real' } as MT5Config;
+assert.equal(assessMt5RiskLimit({
+  config: realConfig, status, observedAccountType: 'real', accountHeartbeatAt: now - 1000,
+  realTradingExplicitlyEnabled: false, now,
+}).ok, false, 'REAL account must remain blocked without explicit server authorization');
+assert.equal(assessMt5RiskLimit({
+  config: realConfig, status, observedAccountType: 'real', accountHeartbeatAt: now - 1000,
+  realTradingExplicitlyEnabled: true, now,
+}).ok, true, 'REAL risk gate can pass only when the separate explicit flag is enabled');
+
+
 console.log('Price Action context safety tests passed.');
