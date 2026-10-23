@@ -149,7 +149,7 @@ router.get('/signal', mt5SignalAccess, (req: Request, res: Response) => {
         timestamp: Date.now(),
       });
     }
-    const productionBlock = getMt5ProductionBlock(config.apiToken);
+    const productionBlock = getMt5ProductionBlock(config.apiToken, process.env, config.accountType);
     if (productionBlock) {
       return res.status(productionBlock.status).json({ action: 'HOLD', ...productionBlock, timestamp: Date.now() });
     }
@@ -291,7 +291,19 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
       return res.status(400).json({ error: 'symbol é obrigatório' });
     }
 
-    const productionBlock = getMt5ProductionBlock(config.apiToken);
+    if (mt5EnvironmentMismatch()) {
+      return res.status(409).json({
+        action: 'HOLD',
+        executionEnabled: false,
+        code: 'MT5_ACCOUNT_MODE_MISMATCH',
+        expectedAccountType: config.accountType,
+        actualAccountType: lastMt5ObservedAccountType,
+        reason: 'Conta MT5 não confirmada ou divergente; sinais bloqueados até heartbeat real em modo DEMO.',
+        timestamp: Date.now(),
+      });
+    }
+
+    const productionBlock = getMt5ProductionBlock(config.apiToken, process.env, config.accountType);
     if (productionBlock) {
       return res.status(productionBlock.status).json({
         action: 'HOLD',
@@ -1950,7 +1962,7 @@ router.post('/signal/generate', mt5DashboardAccess, async (req: Request, res: Re
     if (mt5EnvironmentMismatch()) {
       return res.status(409).json({ action: 'HOLD', executionEnabled: false, code: 'MT5_ACCOUNT_MODE_MISMATCH', expectedAccountType: config.accountType, actualAccountType: lastMt5ObservedAccountType, reason: 'Ambiente MT5 não confirmado ou divergente. Geração de sinais bloqueada.', timestamp: Date.now() });
     }
-    const productionBlock = getMt5ProductionBlock(config.apiToken);
+    const productionBlock = getMt5ProductionBlock(config.apiToken, process.env, config.accountType);
     if (productionBlock) {
       return res.status(productionBlock.status).json({
         action: 'HOLD',
