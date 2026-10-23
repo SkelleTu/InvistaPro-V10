@@ -184,9 +184,12 @@ export function assessMt5RiskLimit(input: {
     : Number.POSITIVE_INFINITY;
   const effectiveDailyLoss = Number.isFinite(status.dailyLoss) ? status.dailyLoss + unrealizedDrawdown : Number.POSITIVE_INFINITY;
   if (!Number.isFinite(config.maxDailyLoss) || config.maxDailyLoss <= 0 || effectiveDailyLoss >= config.maxDailyLoss) reasons.push('Limite diário de perda atingido, inválido ou incluindo drawdown aberto');
-  if (!Number.isFinite(config.maxDailyProfit) || config.maxDailyProfit <= 0 || status.dailyProfit >= config.maxDailyProfit) reasons.push('Meta/limite diário de lucro atingido ou inválido');
+  if (!Number.isFinite(config.maxDailyProfit) || config.maxDailyProfit <= 0
+    || !Number.isFinite(status.dailyProfit) || status.dailyProfit < 0 || status.dailyProfit >= config.maxDailyProfit) reasons.push('Meta/limite diário de lucro atingido, indisponível ou inválido');
   if (status.circuitBreakerActive) reasons.push('Circuit breaker ativo');
-  if (!Number.isFinite(config.maxOpenPositions) || config.maxOpenPositions < 1 || status.openPositions >= config.maxOpenPositions) reasons.push('Limite de posições abertas atingido ou inválido');
+  if (!Number.isFinite(config.maxOpenPositions) || config.maxOpenPositions < 1
+    || !Number.isFinite(status.openPositions) || status.openPositions < 0
+    || status.openPositions >= config.maxOpenPositions) reasons.push('Limite de posições abertas atingido, indisponível ou inválido');
   return { ok: reasons.length === 0, reasons };
 }
 
