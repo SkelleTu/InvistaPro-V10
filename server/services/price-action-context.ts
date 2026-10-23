@@ -165,13 +165,17 @@ export function assessMt5RiskLimit(input: {
   status: MT5Status;
   observedAccountType: 'demo' | 'real' | 'contest' | null;
   accountHeartbeatAt: number;
+  realTradingExplicitlyEnabled?: boolean;
   now?: number;
 }): { ok: boolean; reasons: string[] } {
   const now = input.now ?? Date.now();
   const { config, status } = input;
   const reasons: string[] = [];
   if (!config.enabled) reasons.push('MT5 desativado no servidor');
-  if (config.accountType !== 'demo' || input.observedAccountType !== 'demo') reasons.push('A conta MT5 não está confirmada em modo DEMO');
+  const demoConfirmed = config.accountType === 'demo' && input.observedAccountType === 'demo';
+  const realConfirmed = config.accountType === 'real' && input.observedAccountType === 'real'
+    && input.realTradingExplicitlyEnabled === true;
+  if (!demoConfirmed && !realConfirmed) reasons.push('A conta MT5 não está confirmada no modo selecionado ou REAL não foi explicitamente autorizado');
   if (!input.accountHeartbeatAt || now - input.accountHeartbeatAt > 90_000) reasons.push('Heartbeat real da conta MT5 ausente ou desatualizado');
   if (!status.lastEquity || !Number.isFinite(status.lastEquity) || status.lastEquity <= 0) reasons.push('Equity real da conta indisponível');
   if (!Number.isFinite(config.riskPercent) || config.riskPercent < 1 || config.riskPercent > 2) reasons.push('Risco por operação fora do intervalo permitido de 1% a 2%');
