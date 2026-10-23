@@ -52,18 +52,17 @@ export function evaluateEconomicNewsWindow(
     return { blocked: true, valid: false, reason: 'Calendário econômico vazio ou inválido; entradas bloqueadas por segurança.' };
   }
 
-  const highImpactUsd = events.filter(event =>
-    String(event.country ?? '').trim().toUpperCase() === 'USD' &&
+  const highImpactEvents = events.filter(event =>
     String(event.impact ?? '').trim().toLowerCase() === 'high',
   );
   let nextEventAt: number | undefined;
-  for (const event of highImpactUsd) {
+  for (const event of highImpactEvents) {
     const timestamp = eventTimestamp(event);
     if (timestamp === null) {
       return {
         blocked: true,
         valid: false,
-        reason: 'Evento USD de alto impacto sem horário/timezone verificável; entradas bloqueadas.',
+        reason: 'Evento de alto impacto sem horário/timezone verificável; entradas bloqueadas.',
       };
     }
     if (timestamp >= now && (nextEventAt === undefined || timestamp < nextEventAt)) nextEventAt = timestamp;
@@ -71,7 +70,7 @@ export function evaluateEconomicNewsWindow(
       return {
         blocked: true,
         valid: true,
-        reason: 'Janela de notícia USD de alto impacto: ' + String(event.title ?? 'evento econômico') + '.',
+        reason: 'Janela de notícia de alto impacto: ' + String(event.title ?? 'evento econômico') + '.',
         nextEventAt: timestamp,
       };
     }
@@ -80,7 +79,7 @@ export function evaluateEconomicNewsWindow(
   return {
     blocked: false,
     valid: true,
-    reason: 'Calendário econômico válido; nenhuma notícia USD de alto impacto na janela de bloqueio.',
+    reason: 'Calendário econômico válido; nenhuma notícia de alto impacto na janela de bloqueio.',
     nextEventAt,
   };
 }
