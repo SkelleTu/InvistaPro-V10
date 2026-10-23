@@ -40,6 +40,8 @@ input bool     AutoReconnect    = true;        // Reconexão automática de URL
 input int      MaxReconnectTries= 5;           // Tentativas máximas de reconexão
 input int      IndicatorBars    = 5;           // Quantas barras recentes dos indicadores ler
 input int      CandleCount      = 200;         // Candles para enviar à IA (histórico)
+input double   PriceActionRiskPercent = 1.0; // Risco por trade para Price Action (1% a 2%)
+input bool     PriceActionUseAIReview = true; // true = estratégia + IA; false = estratégia autônoma com os mesmos gates
 
 //--- Controle de Autonomia da IA
 input ENUM_AI_CONTROL_MODE AIControlMode = AI_FULL; // Modo de Controle da IA
@@ -601,6 +603,28 @@ string BuildCandlesJson(MqlRates &rates[], int count)
 }
 
 //+------------------------------------------------------------------+
+//| Serializa candles de um timeframe para a estratégia multi-timeframe|
+//+------------------------------------------------------------------+
+string BuildTimeframeCandlesJson(ENUM_TIMEFRAMES timeframe, int count)
+{
+   MqlRates rates[];
+   int copied = CopyRates(g_symbol, timeframe, 0, count, rates);
+   if (copied < 30) return "[]";
+   return BuildCandlesJson(rates, copied);
+}
+
+string BuildMultiTimeframeJson()
+{
+   string h4 = BuildTimeframeCandlesJson(PERIOD_H4, 80);
+   string h1 = BuildTimeframeCandlesJson(PERIOD_H1, 80);
+   string m15 = BuildTimeframeCandlesJson(PERIOD_M15, 80);
+   string m5 = BuildTimeframeCandlesJson(PERIOD_M5, 120);
+   string m1 = BuildTimeframeCandlesJson(PERIOD_M1, 120);
+   return "{\"H4\":" + h4 + ",\"H1\":" + h1 + ",\"M15\":" + m15 +
+          ",\"M5\":" + m5 + ",\"M1\":" + m1 + "}";
+}
+
+//+------------------------------------------------------------------+
 //| OnTick — lógica principal                                         |
 //+------------------------------------------------------------------+
 void OnTick()
@@ -678,6 +702,78 @@ void SendMarketDataForSyntheticGirassol()
 //+------------------------------------------------------------------+
 //| Busca e processa sinal com indicadores reais                      |
 //+------------------------------------------------------------------+
+bool IsPriceActionCryptoSymbol()
+{
+   string normalized = g_symbol;
+   StringToUpper(normalized);
+   StringReplace(normalized, "/", "");
+   StringReplace(normalized, ".", "");
+   StringReplace(normalized, "_", "");
+   StringReplace(normalized, "-", "");
+   return (StringFind(normalized, "BTCUSD") == 0 ||
+           StringFind(normalized, "ETHUSD") == 0 ||
+           StringFind(normalized, "SOLUSD") == 0);
+}
+
+double CalculatePriceActionRiskLot(double entryPrice, double stopLoss)
+{
+   if (entryPrice <= 0 || stopLoss <= 0 || PriceActionRiskPercent < 1.0 || PriceActionRiskPercent > 2.0)
+      return 0.0;
+   double tickSize = SymbolInfoDouble(g_symbol, SYMBOL_TRADE_TICK_SIZE);
+   double tickValue = SymbolInfoDouble(g_symbol, SYMBOL_TRADE_TICK_VALUE_LOSS);
+   if (tickValue <= 0) tickValue = SymbolInfoDouble(g_symbol, SYMBOL_TRADE_TICK_VALUE);
+   double volumeStep = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_STEP);
+   double minVolume = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_MIN);
+   double maxVolume = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_MAX);
+   double distance = MathAbs(entryPrice - stopLoss);
+   if (tickSize <= 0 || tickValue <= 0 || volumeStep <= 0 || minVolume <= 0 || maxVolume <= 0 || distance <= 0)
+      return 0.0;
+   double lossPerLot = (distance / tickSize) * tickValue;
+   double riskCash = AccountInfoDouble(ACCOUNT_EQUITY) * PriceActionRiskPercent / 100.0;
+   if (lossPerLot <= 0 || riskCash <= 0) return 0.0;
+   double rawVolume = riskCash / lossPerLot;
+   double volume = MathFloor(rawVolume / volumeStep) * volumeStep;
+   if (volume < minVolume) return 0.0;
+   if (volume > maxVolume) volume = maxVolume;
+   int volumeDigits = (int)SymbolInfoInteger(g_symbol, SYMBOL_VOLUME_DIGITS);
+   return NormalizeDouble(volume, volumeDigits);
+}
+
+bool ClosePriceActionPartial(ulong ticket, double volume, string positionType)
+{
+   long marginMode = AccountInfoInteger(ACCOUNT_MARGIN_MODE);
+   if (marginMode == ACCOUNT_MARGIN_MODE_RETAIL_HEDGING)
+      return trade.PositionClosePartial(ticket, volume);
+
+   // Netting accounts reduce the existing position with an opposite deal.
+   MqlTradeRequest request = {};
+   MqlTradeResult result = {};
+   request.action = TRADE_ACTION_DEAL;
+   request.position = ticket;
+   request.symbol = g_symbol;
+   request.volume = volume;
+   request.magic = MagicNumber;
+   request.deviation = 20;
+   request.type = (positionType == "BUY") ? ORDER_TYPE_SELL : ORDER_TYPE_BUY;
+   request.price = (positionType == "BUY")
+      ? SymbolInfoDouble(g_symbol, SYMBOL_BID)
+      : SymbolInfoDouble(g_symbol, SYMBOL_ASK);
+   long filling = SymbolInfoInteger(g_symbol, SYMBOL_FILLING_MODE);
+   if ((filling & SYMBOL_FILLING_IOC) == SYMBOL_FILLING_IOC)
+      request.type_filling = ORDER_FILLING_IOC;
+   else if ((filling & SYMBOL_FILLING_FOK) == SYMBOL_FILLING_FOK)
+      request.type_filling = ORDER_FILLING_FOK;
+   else
+      request.type_filling = ORDER_FILLING_RETURN;
+
+   if (request.price <= 0 || !OrderSend(request, result))
+   {
+      Print("⛔ Price Action: falha de envio da parcial netting. erro=", GetLastError());
+      return false;
+   }
+   return result.retcode == TRADE_RETCODE_DONE || result.retcode == TRADE_RETCODE_DONE_PARTIAL;
+}
+
 void FetchAndProcessSignal()
 {
    string structuredSignals = ReadStructuredIndicatorSignals();
@@ -694,11 +790,17 @@ void FetchAndProcessSignal()
    string url     = g_serverUrl + "/api/metatrader/signal-with-indicators";
    string headers = "Content-Type: application/json\r\n";
 
+   long requestTradeMode = AccountInfoInteger(ACCOUNT_TRADE_MODE);
+   string requestAccountType = (requestTradeMode == ACCOUNT_TRADE_MODE_REAL) ? "real" :
+                               (requestTradeMode == ACCOUNT_TRADE_MODE_DEMO) ? "demo" : "contest";
    string body = "{";
+   body += "\"accountType\":\"" + requestAccountType + "\",";
    body += "\"symbol\":\""          + g_symbol                     + "\",";
    body += "\"ask\":"               + DoubleToString(ask, _Digits)  + ",";
    body += "\"bid\":"               + DoubleToString(bid, _Digits)  + ",";
    body += "\"candles\":"           + candlesJson                   + ",";
+   body += "\"timeframes\":"       + BuildMultiTimeframeJson()     + ",";
+   body += "\"priceActionUseAIReview\":" + (PriceActionUseAIReview ? "true" : "false") + ",";
    body += "\"indicatorSignals\":"  + structuredSignals             + ",";
    body += "\"indicatorBuffers\":"  + allBuffers                    + ",";
    body += "\"indicatorCount\":"    + IntegerToString(g_indicatorCount) + ",";
@@ -856,18 +958,47 @@ void FetchAndProcessSignal()
       if (action == "BUY")
       {
          double entry = ask;
-         if (stopLoss   > 0 && (entry - stopLoss)   < minDist) stopLoss   = NormalizeDouble(entry - minDist, _Digits);
-         if (takeProfit > 0 && (takeProfit - entry)  < minDist) takeProfit = NormalizeDouble(entry + minDist, _Digits);
+         if (stopLoss > 0 && (entry - stopLoss) < minDist) { if (IsPriceActionCryptoSymbol()) { Print("⛔ Price Action: distância mínima do broker exigiria alargar o stop; sinal cancelado."); return; } stopLoss = NormalizeDouble(entry - minDist, _Digits); }
+         if (takeProfit > 0 && (takeProfit - entry) < minDist) { if (IsPriceActionCryptoSymbol()) { Print("⛔ Price Action: TP abaixo da distância mínima do broker; sinal cancelado."); return; } takeProfit = NormalizeDouble(entry + minDist, _Digits); }
       }
       else if (action == "SELL")
       {
          double entry = bid;
-         if (stopLoss   > 0 && (stopLoss - entry)   < minDist) stopLoss   = NormalizeDouble(entry + minDist, _Digits);
-         if (takeProfit > 0 && (entry - takeProfit)  < minDist) takeProfit = NormalizeDouble(entry - minDist, _Digits);
+         if (stopLoss > 0 && (stopLoss - entry) < minDist) { if (IsPriceActionCryptoSymbol()) { Print("⛔ Price Action: distância mínima do broker exigiria alargar o stop; sinal cancelado."); return; } stopLoss = NormalizeDouble(entry + minDist, _Digits); }
+         if (takeProfit > 0 && (entry - takeProfit) < minDist) { if (IsPriceActionCryptoSymbol()) { Print("⛔ Price Action: TP abaixo da distância mínima do broker; sinal cancelado."); return; } takeProfit = NormalizeDouble(entry - minDist, _Digits); }
       }
    }
 
    Print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    bool isPriceActionCrypto = IsPriceActionCryptoSymbol();
+    if (isPriceActionCrypto)
+    {
+       double entry = (action == "BUY") ? ask : bid;
+       if (action != "BUY" && action != "SELL")
+       {
+          Print("⛔ Price Action recusado: ação inválida.");
+          return;
+       }
+       if (stopLoss <= 0 || takeProfit <= 0 || entry <= 0 || PriceActionRiskPercent < 1.0 || PriceActionRiskPercent > 2.0)
+       {
+          Print("⛔ Price Action recusado: preço, SL/TP ou risco configurado inválido.");
+          return;
+       }
+       double riskDistance = (action == "BUY") ? entry - stopLoss : stopLoss - entry;
+       double rewardDistance = (action == "BUY") ? takeProfit - entry : entry - takeProfit;
+       if (riskDistance <= 0 || rewardDistance <= 0 || riskDistance / entry > 0.015 || rewardDistance / riskDistance < 2.0)
+       {
+          Print("⛔ Price Action recusado: stop inválido, stop acima de 1,5% ou R:R abaixo de 1:2 no preço executável.");
+          return;
+       }
+       lotSize = CalculatePriceActionRiskLot(entry, stopLoss);
+       if (lotSize <= 0)
+       {
+          Print("⛔ Price Action recusado: lote mínimo do broker excede o orçamento de risco ou tick value indisponível.");
+          return;
+       }
+    }
+
    Print("📡 SINAL v8.0: ", action, " | ", g_symbol, " | Confiança: ", confidence, "%");
    if (assetFamily  != "") Print("   Ativo: ", assetFamily, " | ", assetTrend, " | Vol: ", assetVolClass);
    if (girassolBias != "") Print("   Girassol: ", girassolBias);
@@ -886,7 +1017,7 @@ void FetchAndProcessSignal()
       success = trade.Sell(lotSize, g_symbol, 0, stopLoss, takeProfit, "InvistaPRO_" + signalId);
 
    // ── Retry automático se stops inválidos (10016) ───────────────────────
-   if (!success && trade.ResultRetcode() == 10016)
+   if (!success && trade.ResultRetcode() == 10016 && !isPriceActionCrypto)
    {
       Print("⚠️ Stops inválidos (10016) — recalculando...");
       double askNow   = SymbolInfoDouble(g_symbol, SYMBOL_ASK);
@@ -922,16 +1053,24 @@ void FetchAndProcessSignal()
 
       if (!success)
       {
-         Print("⚠️ Retry falhou — abrindo SEM SL/TP como último recurso");
-         if (action == "BUY")  success = trade.Buy(lotSize,  g_symbol, 0, 0, 0, "InvistaPRO_" + signalId);
-         else                    success = trade.Sell(lotSize, g_symbol, 0, 0, 0, "InvistaPRO_" + signalId);
-         if (success) Print("⚠️ Ordem aberta SEM SL/TP — monitore manualmente!");
+         Print("⛔ Retry falhou. Ordem cancelada; nunca abrir sem SL/TP de proteção.");
+         // A ordem permanece recusada se o broker não aceitar os stops protetivos.
+         
+         
       }
    }
 
    if (success)
    {
+      double executedVolume = trade.ResultVolume();
+      if (executedVolume > 0 && executedVolume < lotSize)
+      {
+         Print("⚠️ Execução parcial: solicitado=", DoubleToString(lotSize, 8),
+               " executado=", DoubleToString(executedVolume, 8));
+         lotSize = executedVolume;
+      }
       Print("✅ Ordem executada: ", action, " | Ticket: ", trade.ResultOrder(),
+            " | Volume confirmado: ", DoubleToString(lotSize, 8),
             " | SL: ", NormalizeDouble(stopLoss, _Digits),
             " | TP: ", NormalizeDouble(takeProfit, _Digits));
       ConfirmTradeOpen(signalId, (int)trade.ResultOrder(), action, lotSize, stopLoss, takeProfit);
@@ -966,8 +1105,70 @@ void MonitorOpenPositions()
       double sl        = posInfo.StopLoss();
       double tp        = posInfo.TakeProfit();
       double profit    = posInfo.Profit();
+ 
+       // Deterministic Price Action management: breakeven at +1R and 50% partial at +1.5R.
+       // These controls run locally and never depend on AI availability.
+       if (IsPriceActionCryptoSymbol() && sl > 0 && tp > 0)
+       {
+          string riskKey = "InvistaPA_R_" + IntegerToString((long)ticket);
+          string partialKey = "InvistaPA_TP1_" + IntegerToString((long)ticket);
+          double initialRisk = GlobalVariableCheck(riskKey) ? GlobalVariableGet(riskKey) : 0.0;
+          if (initialRisk <= 0.0 && MathAbs(openPrice - sl) > _Point * 2.0)
+          {
+             initialRisk = MathAbs(openPrice - sl);
+             GlobalVariableSet(riskKey, initialRisk);
+          }
+          if (initialRisk > 0.0)
+          {
+             double favorableMove = (posType == "BUY") ? curPrice - openPrice : openPrice - curPrice;
+             if (favorableMove >= initialRisk)
+             {
+                bool needsBreakeven = (posType == "BUY" && sl < openPrice) ||
+                                      (posType == "SELL" && sl > openPrice);
+                if (needsBreakeven)
+                {
+                   double breakevenSL = NormalizeDouble(openPrice, _Digits);
+                   if (trade.PositionModify(ticket, breakevenSL, tp))
+                   {
+                      sl = breakevenSL;
+                      Print("🛡️ Price Action: stop movido para breakeven em +1R. Ticket=", ticket);
+                   }
+                   else
+                      Print("⛔ Price Action: falha ao mover stop para breakeven; ticket=", ticket, " retcode=", trade.ResultRetcode());
+                }
+             }
+             if (favorableMove >= initialRisk * 1.5 && !GlobalVariableCheck(partialKey) && ((posType == "BUY" && sl >= openPrice) || (posType == "SELL" && sl <= openPrice)))
+             {
+                double volume = posInfo.Volume();
+                double volumeStep = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_STEP);
+                double minVolume = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_MIN);
+                int volumeDigits = (int)SymbolInfoInteger(g_symbol, SYMBOL_VOLUME_DIGITS);
+                double partialVolume = (volumeStep > 0) ? MathFloor((volume * 0.5) / volumeStep) * volumeStep : 0.0;
+                partialVolume = NormalizeDouble(partialVolume, volumeDigits);
+                if (partialVolume >= minVolume && volume - partialVolume >= minVolume)
+                {
+                   if (ClosePriceActionPartial(ticket, partialVolume, posType))
+                   {
+                      GlobalVariableSet(partialKey, 1.0);
+                      Print("🎯 Price Action: parcial de 50% realizada em +1,5R. Ticket=", ticket);
+                      continue;
+                   }
+                   Print("⛔ Price Action: parcial falhou; ticket=", ticket, " retcode=", trade.ResultRetcode());
+                }
+                else
+                {
+                   GlobalVariableSet(partialKey, -1.0);
+                   Print("ℹ️ Price Action: lote mínimo do broker impede parcial de 50%; posição segue protegida pelo SL/TP.");
+                }
+             }
+          }
+       }
 
-      string posJson = "{";
+// Autonomous Price Action mode uses only deterministic local protection and fixed SL/TP.
+      if (IsPriceActionCryptoSymbol() && !PriceActionUseAIReview)
+         continue;
+
+            string posJson = "{";
       posJson += "\"ticket\":"        + IntegerToString(ticket)             + ",";
       posJson += "\"symbol\":\""      + g_symbol                           + "\",";
       posJson += "\"type\":\""        + posType                             + "\",";

@@ -23,4 +23,22 @@ assert.equal(
   null,
 );
 
+assert.equal(
+  getMt5ProductionBlock("ea-token", { NODE_ENV: "production", MT5_PRODUCTION_TRADING_ENABLED: "false" }, "demo"),
+  null,
+  "A confirmed DEMO account must be usable for operational validation without enabling REAL trading",
+);
+assert.equal(
+  getMt5ProductionBlock("ea-token", { NODE_ENV: "production", MT5_DEMO_TRADING_ENABLED: "false" }, "demo")?.code,
+  "MT5_DEMO_TRADING_DISABLED",
+);
+assert.equal(
+  getMt5ProductionBlock("ea-token", { NODE_ENV: "production", MT5_PRODUCTION_TRADING_ENABLED: "false" }, "real")?.code,
+  "MT5_PRODUCTION_TRADING_DISABLED",
+);
+assert.equal(
+  getMt5ProductionBlock("ea-token", { NODE_ENV: "production", MT5_PRODUCTION_TRADING_ENABLED: "true" }, "contest")?.code,
+  "MT5_ACCOUNT_MODE_BLOCKED",
+);
+
 console.log("✅ Política de sinais de produção MT5 validada.");
