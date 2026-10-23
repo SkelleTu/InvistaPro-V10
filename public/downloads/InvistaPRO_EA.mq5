@@ -1088,7 +1088,7 @@ void MonitorOpenPositions()
                       Print("⛔ Price Action: falha ao mover stop para breakeven; ticket=", ticket, " retcode=", trade.ResultRetcode());
                 }
              }
-             if (favorableMove >= initialRisk * 1.5 && !GlobalVariableCheck(partialKey))
+             if (favorableMove >= initialRisk * 1.5 && !GlobalVariableCheck(partialKey) && ((posType == "BUY" && sl >= openPrice) || (posType == "SELL" && sl <= openPrice)))
              {
                 double volume = posInfo.Volume();
                 double volumeStep = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_STEP);
