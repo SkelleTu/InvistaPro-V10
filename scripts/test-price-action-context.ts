@@ -23,7 +23,7 @@ assert.equal(evaluateEconomicNewsWindow([event(now + 10 * 60_000, 'EUR')], now).
 assert.equal(evaluateEconomicNewsWindow([{ country: 'USD', impact: 'High', date: '2026-10-23T12:10:00' }], now).valid, false, 'A high-impact event without timezone must fail closed');
 
 assert.equal(isAllowedBrasiliaTradingSession(new Date('2026-10-23T07:00:00Z')), true, '04:00 Brasilia session start is included');
-assert.equal(isAllowedBrasiliaTradingSession(new Date('2026-10-23T10:30:00Z')), true, '09:30 Brasilia session start is included');
+assert.equal(isAllowedBrasiliaTradingSession(new Date('2026-10-23T12:30:00Z')), true, '09:30 Brasilia session start is included');
 assert.equal(isAllowedBrasiliaTradingSession(new Date('2026-10-23T15:00:00Z')), false, '12:00 Brasilia session end is excluded');
 assert.equal(isAllowedBrasiliaTradingSession(new Date('2026-10-23T17:00:00Z')), true, '14:00 Brasilia session start is included');
 assert.equal(isAllowedBrasiliaTradingSession(new Date('2026-10-23T20:00:00Z')), false, '17:00 Brasilia session end is excluded');
