@@ -30,6 +30,7 @@ const MAX_SPREAD_FRACTION = (() => {
 
 let calendarCache: { events: EconomicCalendarEvent[]; fetchedAt: number } | null = null;
 let calendarFetch: Promise<{ events: EconomicCalendarEvent[]; fetchedAt: number }> | null = null;
+let calendarFailure: { failedAt: number; message: string } | null = null;
 
 function eventTimestamp(event: EconomicCalendarEvent): number | null {
   if (typeof event.timestamp === 'number' && Number.isFinite(event.timestamp)) {
@@ -86,6 +87,9 @@ export function evaluateEconomicNewsWindow(
 
 async function loadCalendar(now = Date.now()): Promise<{ events: EconomicCalendarEvent[]; fetchedAt: number }> {
   if (calendarCache && now - calendarCache.fetchedAt <= CALENDAR_CACHE_TTL_MS) return calendarCache;
+  if (calendarFailure && now - calendarFailure.failedAt < 30_000 && (!calendarCache || now - calendarCache.fetchedAt > CALENDAR_MAX_STALE_MS)) {
+    throw new Error(calendarFailure.message);
+  }
   if (calendarFetch) return calendarFetch;
   calendarFetch = (async () => {
     const response = await fetch(CALENDAR_URL, { signal: AbortSignal.timeout(5000) });
@@ -105,11 +109,16 @@ async function loadCalendar(now = Date.now()): Promise<{ events: EconomicCalenda
     if (!hasCurrentWindow) throw new Error('Calendário econômico não contém eventos da semana atual');
     const cached = { events, fetchedAt: Date.now() };
     calendarCache = cached;
+    calendarFailure = null;
     return cached;
   })();
   try {
     return await calendarFetch;
   } catch (error) {
+    calendarFailure = {
+      failedAt: Date.now(),
+      message: error instanceof Error ? error.message : 'Falha desconhecida no calendário econômico',
+    };
     if (calendarCache && now - calendarCache.fetchedAt <= CALENDAR_MAX_STALE_MS) return calendarCache;
     throw error;
   } finally {
@@ -205,4 +214,5 @@ export function buildTrustedPriceActionContext(input: {
 export function resetEconomicNewsCacheForTests(): void {
   calendarCache = null;
   calendarFetch = null;
+  calendarFailure = null;
 }
