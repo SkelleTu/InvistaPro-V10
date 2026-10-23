@@ -70,6 +70,49 @@ function hasFvg(c: Candle[], side: TradeSide): boolean {
   const n = c.length;
   return side === 'BUY' ? c[n - 1].low > c[n - 3].high : c[n - 1].high < c[n - 3].low;
 }
+function breakOfStructure(c: Candle[], side: TradeSide): boolean {
+  const prior = c.slice(-11, -1);
+  if (prior.length < 8) return false;
+  const last = c[c.length - 1];
+  return side === 'BUY'
+    ? last.close > Math.max(...prior.map(x => x.high))
+    : last.close < Math.min(...prior.map(x => x.low));
+}
+function changeOfCharacter(c: Candle[], side: TradeSide): boolean {
+  if (c.length < 25) return false;
+  const prior = trend(c.slice(0, -10));
+  const recent = trend(c.slice(-10));
+  return side === 'BUY' ? prior === 'bearish' && recent === 'bullish'
+    : prior === 'bullish' && recent === 'bearish';
+}
+function orderBlockZone(c: Candle[], side: TradeSide): { low: number; high: number } | null {
+  if (c.length < 15) return null;
+  const sample = c.slice(-21, -1);
+  const avgRange = average(sample.map(x => x.high - x.low));
+  if (!(avgRange > 0)) return null;
+  const last = c[c.length - 1];
+  for (let i = c.length - 2; i >= Math.max(1, c.length - 12); i--) {
+    const candidate = c[i];
+    const isOpposite = side === 'BUY' ? candidate.close < candidate.open : candidate.close > candidate.open;
+    if (!isOpposite) continue;
+    const impulse = c[i + 1];
+    const impulseBody = Math.abs(impulse.close - impulse.open);
+    const alignedImpulse = side === 'BUY' ? impulse.close > impulse.open : impulse.close < impulse.open;
+    if (!alignedImpulse || impulseBody < avgRange * 1.5) continue;
+    const low = Math.min(candidate.open, candidate.close);
+    const high = Math.max(candidate.open, candidate.close);
+    const tolerance = avgRange * 0.25;
+    if (last.close >= low - tolerance && last.close <= high + tolerance) return { low, high };
+  }
+  return null;
+}
+function nearStructureZone(c: Candle[], side: TradeSide): boolean {
+  const last = c[c.length - 1];
+  const prior = c.slice(-21, -1);
+  if (prior.length < 10 || last.close === 0) return false;
+  const zone = side === 'BUY' ? Math.min(...prior.map(x => x.low)) : Math.max(...prior.map(x => x.high));
+  return Math.abs(last.close - zone) / Math.abs(last.close) <= 0.0025;
+}
 function liquiditySweep(c: Candle[], side: TradeSide): boolean {
   const recent = c.slice(-21, -1);
   const last = c[c.length - 1];
@@ -113,15 +156,23 @@ export function evaluatePriceActionSetup(
   if (side) {
     const fvg = hasFvg(entryFrame, side);
     const sweep = liquiditySweep(entryFrame, side);
+    const bos = breakOfStructure(entryFrame, side);
+    const choch = changeOfCharacter(entryFrame, side);
+    const ob = orderBlockZone(entryFrame, side);
+    const zoneNear = nearStructureZone(entryFrame, side) || ob !== null || sweep;
     const volumes = entryFrame.slice(-21, -1).map(c => c.volume);
-    const volumeOk = entryFrame[entryFrame.length - 1].volume >= average(volumes);
-    features.fvg = fvg; features.liquiditySweep = sweep; features.volumeRatio =
-      average(volumes) > 0 ? entryFrame[entryFrame.length - 1].volume / average(volumes) : null;
+    const volumeOk = average(volumes) > 0 && entryFrame[entryFrame.length - 1].volume >= average(volumes);
+    features.fvg = fvg; features.liquiditySweep = sweep; features.bos = bos; features.choch = choch;
+    features.orderBlockValid = ob !== null; features.zoneNear = zoneNear;
+    features.orderBlockLow = ob?.low ?? null; features.orderBlockHigh = ob?.high ?? null;
+    features.volumeRatio = average(volumes) > 0 ? entryFrame[entryFrame.length - 1].volume / average(volumes) : null;
     checks.volume = volumeOk;
-    // A setup needs at least one additional market-structure confirmation, not a pattern alone.
-    checks.structure_confirmation = fvg || sweep || m15Trend === side.toLowerCase().replace('buy','bullish').replace('sell','bearish');
-    if (!volumeOk) reasons.push('Volume do gatilho abaixo da referência histórica');
-    if (!checks.structure_confirmation) reasons.push('Sem FVG, sweep de liquidez ou alinhamento estrutural M15');
+    checks.structure_confirmation = fvg || sweep || bos || choch || (ob !== null) ||
+      m15Trend === (side === 'BUY' ? 'bullish' : 'bearish');
+    checks.valid_zone = zoneNear;
+    if (!volumeOk) reasons.push('Volume do gatilho abaixo da referência histórica ou sem baseline válido');
+    if (!checks.structure_confirmation) reasons.push('Sem FVG, sweep de liquidez, BOS, CHoCH, Order Block válido ou alinhamento M15');
+    if (!zoneNear) reasons.push('Preço não está próximo de zona estrutural válida de oferta/demanda');
 
     const recent = entryFrame.slice(-21, -1);
     const entry = entryFrame[entryFrame.length - 1].close;
@@ -141,7 +192,7 @@ export function evaluatePriceActionSetup(
     checks.costs = finite(context.estimatedRoundTripCost) && context.estimatedRoundTripCost >= 0;
     if (!checks.costs) reasons.push('Custos totais estimados ausentes ou inválidos');
   } else {
-    checks.volume = false; checks.structure_confirmation = false; checks.risk_reward = false; checks.spread = false; checks.costs = false;
+    checks.volume = false; checks.structure_confirmation = false; checks.valid_zone = false; checks.risk_reward = false; checks.spread = false; checks.costs = false;
   }
   checks.news_clear = context.highImpactNewsBlocked === false;
   if (!checks.news_clear) reasons.push('Janela de notícia de alto impacto bloqueada');
