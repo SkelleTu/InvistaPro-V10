@@ -25,6 +25,7 @@ export function getMt5ProductionBlock(
   apiToken: string | null | undefined,
   env: Mt5ProductionEnvironment = process.env,
   accountType: "demo" | "real" | "contest" = "real",
+  explicitRealAuthorization?: boolean,
 ): Mt5ProductionBlock | null {
   if (env.NODE_ENV !== "production") return null;
 
@@ -58,11 +59,14 @@ export function getMt5ProductionBlock(
     return null;
   }
 
-  if (!isMt5ProductionTradingEnabled(env)) {
+  const realAuthorized = explicitRealAuthorization === undefined
+    ? isMt5ProductionTradingEnabled(env)
+    : explicitRealAuthorization === true;
+  if (!realAuthorized) {
     return {
       status: 503,
       code: "MT5_PRODUCTION_TRADING_DISABLED",
-      reason: "A entrega de sinais para conta REAL permanece bloqueada. A flag MT5_PRODUCTION_TRADING_ENABLED=true é exigida separadamente.",
+      reason: "A entrega de sinais para conta REAL permanece bloqueada até a autorização explícita REAL no dashboard do MetaTrader.",
       executionEnabled: false,
     };
   }
