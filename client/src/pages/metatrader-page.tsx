@@ -51,6 +51,7 @@ interface MT5Status {
 interface MT5Config {
   enabled: boolean;
   accountType?: 'demo' | 'real';
+  realTradingAuthorized?: boolean;
   symbols: string[];
   defaultLotSize: number;
   maxLotSize: number;
@@ -489,14 +490,27 @@ export default function MetaTraderPage() {
             <div className="flex items-center gap-1 rounded-md border p-1" aria-label="Ambiente da conta MT5">
               <span className="px-2 text-xs text-muted-foreground">Conta MT5</span>
               <Button size="sm" variant={(config?.accountType ?? 'demo') === 'demo' ? 'default' : 'outline'}
-                disabled={updateConfigMutation.isPending || (config?.accountType ?? 'demo') === 'demo'}
-                onClick={() => updateConfigMutation.mutate({ accountType: 'demo' } as Partial<MT5Config>) }
+                disabled={updateConfigMutation.isPending || ((config?.accountType ?? 'demo') === 'demo' && config?.realTradingAuthorized !== true)}
+                onClick={() => updateConfigMutation.mutate({ accountType: 'demo', realTradingAuthorized: false } as Partial<MT5Config>)}
                 data-testid="mt5-account-mode-demo">DEMO</Button>
-              <Button size="sm" variant={config?.accountType === 'real' ? 'default' : 'outline'}
-                disabled={updateConfigMutation.isPending || config?.accountType === 'real'}
-                onClick={() => updateConfigMutation.mutate({ accountType: 'real' } as Partial<MT5Config>) }
-                data-testid="mt5-account-mode-real">REAL</Button>
+              <Button size="sm" variant={config?.accountType === 'real' && config?.realTradingAuthorized === true ? 'destructive' : 'outline'}
+                disabled={updateConfigMutation.isPending || (config?.accountType === 'real' && config?.realTradingAuthorized === true)}
+                onClick={() => {
+                  const confirmed = window.confirm(
+                    'AUTORIZAR OPERAÇÕES REAIS?\n\nO Invista Pro poderá enviar sinais para o EA conectado a uma conta REAL no MetaTrader 5. Isso envolve risco de perda financeira. Confirme somente se você pretende operar com dinheiro real.'
+                  );
+                  if (confirmed) updateConfigMutation.mutate({ accountType: 'real', realTradingAuthorized: true } as Partial<MT5Config>);
+                }}
+                data-testid="mt5-account-mode-real">REAL {config?.accountType === 'real' && config?.realTradingAuthorized === true ? 'AUTORIZADO' : ''}</Button>
             </div>
+            <Badge variant={config?.accountType === 'real' && config?.realTradingAuthorized === true ? 'destructive' : 'secondary'}
+              data-testid="mt5-mode-authorization-status">
+              {config?.accountType === 'demo'
+                ? 'MODO DEMO'
+                : config?.realTradingAuthorized === true
+                  ? 'REAL AUTORIZADO'
+                  : 'REAL BLOQUEADO'}
+            </Badge>
             {/* Badge tempo real */}
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground border rounded-full px-2.5 py-1">
               <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-breathe" />

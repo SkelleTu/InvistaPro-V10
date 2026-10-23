@@ -37,6 +37,16 @@ assert.equal(
   "MT5_PRODUCTION_TRADING_DISABLED",
 );
 assert.equal(
+  getMt5ProductionBlock("ea-token", { NODE_ENV: "production", MT5_PRODUCTION_TRADING_ENABLED: "false" }, "real", true),
+  null,
+  "An authenticated dashboard authorization must explicitly permit REAL mode",
+);
+assert.equal(
+  getMt5ProductionBlock("ea-token", { NODE_ENV: "production", MT5_PRODUCTION_TRADING_ENABLED: "true" }, "real", false)?.code,
+  "MT5_PRODUCTION_TRADING_DISABLED",
+  "An explicit dashboard revocation must override a legacy environment flag",
+);
+assert.equal(
   getMt5ProductionBlock("ea-token", { NODE_ENV: "production", MT5_PRODUCTION_TRADING_ENABLED: "true" }, "contest")?.code,
   "MT5_ACCOUNT_MODE_BLOCKED",
 );

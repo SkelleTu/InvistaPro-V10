@@ -171,6 +171,8 @@ export interface MT5TradeResult {
 export interface MT5Config {
   enabled: boolean;
   accountType: 'demo' | 'real';
+  /** Explicit dashboard authorization for REAL account execution. Defaults off. */
+  realTradingAuthorized: boolean;
   accountId: string;
   broker: string;
   server: string;
@@ -236,6 +238,7 @@ export interface MT5Status {
 const DEFAULT_CONFIG: MT5Config = {
   enabled: false,
   accountType: 'demo',
+  realTradingAuthorized: false,
   accountId: '',
   broker: '',
   server: '',
