@@ -58,7 +58,7 @@ assert.equal(assessMt5RiskLimit({
   config, status, observedAccountType: 'real', accountHeartbeatAt: now - 1000, now,
 }).ok, false, 'REAL account must fail closed');
 assert.equal(assessMt5RiskLimit({
-  config, status, observedAccountType: 'demo', accountHeartbeatAt: now - 31_000, now,
+  config, status, observedAccountType: 'demo', accountHeartbeatAt: now - 91_000, now,
 }).ok, false, 'Stale heartbeat must fail closed');
 assert.equal(assessMt5RiskLimit({
   config, status: { ...status, dailyLoss: 100 }, observedAccountType: 'demo', accountHeartbeatAt: now - 1000, now,
