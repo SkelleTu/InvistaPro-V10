@@ -133,12 +133,23 @@ export function evaluatePriceActionSetup(
     checks[`data_${tf}`] = validCandles(frames[tf]);
     if (!checks[`data_${tf}`]) reasons.push(`Dados insuficientes ou inválidos em ${tf}`);
   }
-  const entryFrame = validCandles(frames.M5) ? frames.M5 : frames.M1;
-  checks.entry_data = validCandles(entryFrame);
+  const entryFrame: Candle[] | undefined = validCandles(frames.M5)
+    ? frames.M5
+    : validCandles(frames.M1) ? frames.M1 : undefined;
+  checks.entry_data = entryFrame !== undefined;
   if (!checks.entry_data) reasons.push('Dados insuficientes em M5/M1 para confirmação de entrada');
   if (reasons.length) return { action: 'HOLD', approved: false, reasons, checks, features };
 
-  const h4 = frames.H4!, h1 = frames.H1!, m15 = frames.M15!;
+  const h4 = frames.H4;
+  const h1 = frames.H1;
+  const m15 = frames.M15;
+  if (!validCandles(h4) || !validCandles(h1) || !validCandles(m15) || !validCandles(entryFrame)) {
+    return {
+      action: 'HOLD', approved: false,
+      reasons: ['Dados de timeframe mudaram ou são inválidos durante a validação'],
+      checks: { ...checks, data_integrity: false }, features
+    };
+  }
   const t4 = trend(h4), t1 = trend(h1);
   features.trendH4 = t4; features.trendH1 = t1;
   const aligned = t4 !== 'range' && t4 === t1;
