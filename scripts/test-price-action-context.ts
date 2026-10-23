@@ -36,8 +36,8 @@ const trusted = buildTrustedPriceActionContext({
   newsBlocked: false,
   sessionOpen: true,
 });
-assert.equal(trusted.spread, 0.1);
-assert.equal(trusted.estimatedRoundTripCost, 0.2);
+assert.ok(Math.abs(Number(trusted.spread) - 0.1) < 1e-9, 'Spread calculation must preserve the expected price difference');
+assert.ok(Math.abs(Number(trusted.estimatedRoundTripCost) - 0.2) < 1e-9, 'Round-trip cost must equal twice the observed spread');
 assert.equal(trusted.highImpactNewsBlocked, false);
 assert.equal(trusted.tradingSessionOpen, true);
 assert.equal(buildTrustedPriceActionContext({
