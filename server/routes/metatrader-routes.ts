@@ -149,7 +149,7 @@ router.get('/signal', mt5SignalAccess, (req: Request, res: Response) => {
         timestamp: Date.now(),
       });
     }
-    const productionBlock = getMt5ProductionBlock(config.apiToken, process.env, config.accountType);
+    const productionBlock = getMt5ProductionBlock(config.apiToken, process.env, config.accountType, config.realTradingAuthorized);
     if (productionBlock) {
       return res.status(productionBlock.status).json({ action: 'HOLD', ...productionBlock, timestamp: Date.now() });
     }
@@ -321,7 +321,7 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
       });
     }
 
-    const productionBlock = getMt5ProductionBlock(config.apiToken, process.env, config.accountType);
+    const productionBlock = getMt5ProductionBlock(config.apiToken, process.env, config.accountType, config.realTradingAuthorized);
     if (productionBlock) {
       return res.status(productionBlock.status).json({
         action: 'HOLD',
@@ -1976,6 +1976,13 @@ router.post('/config', mt5DashboardAccess, (req: Request, res: Response) => {
   try {
     const updates = { ...(req.body ?? {}) };
     const currentConfig = metaTraderBridge.getConfig();
+    if (updates.realTradingAuthorized !== undefined && typeof updates.realTradingAuthorized !== 'boolean') {
+      return res.status(400).json({ ok: false, code: 'MT5_INVALID_REAL_AUTHORIZATION', error: 'realTradingAuthorized deve ser booleano.' });
+    }
+    if (updates.accountType === 'demo') updates.realTradingAuthorized = false;
+    if (updates.realTradingAuthorized === true && updates.accountType !== 'real' && currentConfig.accountType !== 'real') {
+      return res.status(400).json({ ok: false, code: 'MT5_REAL_AUTH_REQUIRES_REAL_MODE', error: 'Selecione o modo REAL antes de autorizar execução REAL.' });
+    }
     if (updates.accountType !== undefined && !['demo', 'real'].includes(updates.accountType)) {
       return res.status(400).json({ ok: false, code: 'MT5_INVALID_ACCOUNT_MODE', error: 'accountType deve ser demo ou real.' });
     }
@@ -2007,7 +2014,7 @@ router.post('/signal/generate', mt5DashboardAccess, async (req: Request, res: Re
     if (mt5EnvironmentMismatch()) {
       return res.status(409).json({ action: 'HOLD', executionEnabled: false, code: 'MT5_ACCOUNT_MODE_MISMATCH', expectedAccountType: config.accountType, actualAccountType: lastMt5ObservedAccountType, reason: 'Ambiente MT5 não confirmado ou divergente. Geração de sinais bloqueada.', timestamp: Date.now() });
     }
-    const productionBlock = getMt5ProductionBlock(config.apiToken, process.env, config.accountType);
+    const productionBlock = getMt5ProductionBlock(config.apiToken, process.env, config.accountType, config.realTradingAuthorized);
     if (productionBlock) {
       return res.status(productionBlock.status).json({
         action: 'HOLD',
