@@ -618,8 +618,8 @@ string BuildMultiTimeframeJson()
    string m15 = BuildTimeframeCandlesJson(PERIOD_M15, 80);
    string m5 = BuildTimeframeCandlesJson(PERIOD_M5, 120);
    string m1 = BuildTimeframeCandlesJson(PERIOD_M1, 120);
-   return "{\\"H4\\":" + h4 + ",\\"H1\\":" + h1 + ",\\"M15\\":" + m15 +
-          ",\\"M5\\":" + m5 + ",\\"M1\\":" + m1 + "}";
+   return "{\"H4\":" + h4 + ",\"H1\":" + h1 + ",\"M15\":" + m15 +
+          ",\"M5\":" + m5 + ",\"M1\":" + m1 + "}";
 }
 
 //+------------------------------------------------------------------+
