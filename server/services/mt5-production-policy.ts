@@ -1,6 +1,6 @@
 /**
  * Independent MT5 mode gates: DEMO may be used for operational validation,
- * while REAL requires a separate explicit production enable flag.
+ * while REAL requires a persisted, authenticated dashboard authorization.
  */
 export interface Mt5ProductionBlock {
   status: 503;
