@@ -156,7 +156,7 @@ export function assessMt5RiskLimit(input: {
   const reasons: string[] = [];
   if (!config.enabled) reasons.push('MT5 desativado no servidor');
   if (config.accountType !== 'demo' || input.observedAccountType !== 'demo') reasons.push('A conta MT5 não está confirmada em modo DEMO');
-  if (!input.accountHeartbeatAt || now - input.accountHeartbeatAt > 30_000) reasons.push('Heartbeat real da conta MT5 ausente ou desatualizado');
+  if (!input.accountHeartbeatAt || now - input.accountHeartbeatAt > 90_000) reasons.push('Heartbeat real da conta MT5 ausente ou desatualizado');
   if (!status.lastEquity || !Number.isFinite(status.lastEquity) || status.lastEquity <= 0) reasons.push('Equity real da conta indisponível');
   if (!Number.isFinite(config.riskPercent) || config.riskPercent < 1 || config.riskPercent > 2) reasons.push('Risco por operação fora do intervalo permitido de 1% a 2%');
   if (!Number.isFinite(config.maxDailyLoss) || config.maxDailyLoss <= 0 || status.dailyLoss >= config.maxDailyLoss) reasons.push('Limite diário de perda atingido ou inválido');
