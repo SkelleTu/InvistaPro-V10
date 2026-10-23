@@ -149,7 +149,7 @@ router.get('/signal', mt5SignalAccess, (req: Request, res: Response) => {
         timestamp: Date.now(),
       });
     }
-    const productionBlock = getMt5ProductionBlock(config.apiToken, process.env, config.accountType);
+    const productionBlock = getMt5ProductionBlock(config.apiToken, process.env, config.accountType, config.realTradingAuthorized);
     if (productionBlock) {
       return res.status(productionBlock.status).json({ action: 'HOLD', ...productionBlock, timestamp: Date.now() });
     }
@@ -359,7 +359,7 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
         status: metaTraderBridge.getStatus(),
         observedAccountType: lastMt5ObservedAccountType,
         accountHeartbeatAt: lastMt5EnvironmentHeartbeatAt,
-        realTradingExplicitlyEnabled: String(process.env.MT5_PRODUCTION_TRADING_ENABLED ?? '').trim().toLowerCase() === 'true',
+        realTradingExplicitlyEnabled: config.realTradingAuthorized === true,
       });
       const newsStatus = await getHighImpactNewsStatus();
       const sessionOpen = isAllowedBrasiliaTradingSession();
@@ -1972,12 +1972,25 @@ bool ExtractJsonBool(string json, string key) {
 `;
 }
 
-router.post('/config', mt5DashboardAccess, (req: Request, res: Response) => {
+router.post('/config', mt5DashboardAccess, async (req: Request, res: Response) => {
   try {
     const updates = { ...(req.body ?? {}) };
     const currentConfig = metaTraderBridge.getConfig();
     if (updates.accountType !== undefined && !['demo', 'real'].includes(updates.accountType)) {
       return res.status(400).json({ ok: false, code: 'MT5_INVALID_ACCOUNT_MODE', error: 'accountType deve ser demo ou real.' });
+    }
+    if (updates.realTradingAuthorized !== undefined && typeof updates.realTradingAuthorized !== 'boolean') {
+      return res.status(400).json({ ok: false, code: 'MT5_INVALID_REAL_AUTHORIZATION', error: 'A autorização REAL deve ser booleana.' });
+    }
+    // Returning to DEMO always revokes the REAL authorization.
+    if (updates.accountType === 'demo') updates.realTradingAuthorized = false;
+    // REAL requires a deliberate, authenticated dashboard action in the same request.
+    if (updates.accountType === 'real' && updates.realTradingAuthorized !== true
+      && currentConfig.realTradingAuthorized !== true) {
+      return res.status(400).json({ ok: false, code: 'MT5_REAL_AUTHORIZATION_REQUIRED', error: 'Para selecionar REAL, confirme explicitamente a autorização no dashboard.' });
+    }
+    if (updates.realTradingAuthorized === true && (updates.accountType ?? currentConfig.accountType) !== 'real') {
+      return res.status(400).json({ ok: false, code: 'MT5_REAL_MODE_REQUIRED', error: 'A autorização REAL só pode ser ativada junto com o modo REAL.' });
     }
     let generatedToken = false;
     if (!String(currentConfig.apiToken ?? '').trim() && !String(updates.apiToken ?? '').trim()) {
@@ -1988,13 +2001,18 @@ router.post('/config', mt5DashboardAccess, (req: Request, res: Response) => {
       return res.status(400).json({ ok: false, error: 'O token MT5 precisa ter pelo menos 24 caracteres.' });
     }
     metaTraderBridge.updateConfig(updates);
+    await metaTraderBridge.flushDurableConfig();
     res.json({
       ok: true,
       apiTokenConfigured: true,
       tokenGenerated: generatedToken,
       message: generatedToken
         ? 'Configuração salva e token seguro gerado. Baixe novamente o EA para receber a URL e o token corretos.'
-        : 'Configuração atualizada',
+        : (updates.accountType === 'real' && updates.realTradingAuthorized === true
+          ? 'Modo REAL selecionado e autorização explícita persistida.'
+          : updates.accountType === 'demo'
+            ? 'Modo DEMO selecionado; autorização REAL revogada.'
+            : 'Configuração atualizada'),
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
