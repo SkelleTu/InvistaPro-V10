@@ -15,6 +15,7 @@ export interface Candle {
 }
 export interface MarketContext {
   spread?: number;
+  maxSpread?: number;
   estimatedRoundTripCost?: number;
   highImpactNewsBlocked?: boolean;
   riskLimitOk?: boolean;
@@ -129,21 +130,22 @@ export function evaluatePriceActionSetup(
     const stop = side === 'BUY' ? swingLow : swingHigh;
     const risk = Math.abs(entry - stop);
     const costs = Math.max(0, context.estimatedRoundTripCost ?? 0);
-    const targetDistance = risk * 2 + costs;
+    const targetDistance = risk * 2 + costs * 2;
     const target = side === 'BUY' ? entry + targetDistance : entry - targetDistance;
     const rr = risk > 0 ? Math.abs(target - entry) / (risk + costs) : 0;
     features.entry = entry; features.stop = stop; features.target = target; features.riskReward = rr;
     checks.risk_reward = risk > 0 && rr >= 2;
     if (!checks.risk_reward) reasons.push('Relação risco/retorno inferior a 1:2 após custos estimados');
-    if (finite(context.spread) && context.spread < 0) {
-      checks.spread = false; reasons.push('Spread inválido');
-    } else checks.spread = true;
+    checks.spread = finite(context.spread) && finite(context.maxSpread) && context.spread >= 0 && context.maxSpread > 0 && context.spread <= context.maxSpread;
+    if (!checks.spread) reasons.push('Spread ausente, inválido ou acima do limite configurado');
+    checks.costs = finite(context.estimatedRoundTripCost) && context.estimatedRoundTripCost >= 0;
+    if (!checks.costs) reasons.push('Custos totais estimados ausentes ou inválidos');
   } else {
-    checks.volume = false; checks.structure_confirmation = false; checks.risk_reward = false; checks.spread = false;
+    checks.volume = false; checks.structure_confirmation = false; checks.risk_reward = false; checks.spread = false; checks.costs = false;
   }
-  checks.news_clear = context.highImpactNewsBlocked !== true;
+  checks.news_clear = context.highImpactNewsBlocked === false;
   if (!checks.news_clear) reasons.push('Janela de notícia de alto impacto bloqueada');
-  checks.risk_limit = context.riskLimitOk !== false;
+  checks.risk_limit = context.riskLimitOk === true;
   if (!checks.risk_limit) reasons.push('Limite de risco/circuit breaker bloqueia a operação');
 
   const approved = Object.values(checks).every(Boolean) && side !== null;
