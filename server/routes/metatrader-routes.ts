@@ -21,7 +21,8 @@ import { computeSyntheticGirassol } from '../services/synthetic-girassol';
 import { isAllowedProductionSymbol } from '../services/production-symbol-policy';
 import { getMt5ProductionBlock } from '../services/mt5-production-policy';
 import { consensusCache } from '../services/consensus-cache';
-import { evaluatePriceActionSetup, type Candle, type MarketContext } from '../services/price-action-engine';
+import { evaluatePriceActionSetup, type Candle } from '../services/price-action-engine';
+import { assessMt5RiskLimit, buildTrustedPriceActionContext, getHighImpactNewsStatus, isAllowedBrasiliaTradingSession } from '../services/price-action-context';
 
 
 const router = Router();
@@ -275,7 +276,6 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
       bid,
       candles,
       timeframes,
-      marketContext,
       indicatorSignals,   // { girassol: {...}, fibonacci: {...} }
       indicatorBuffers,   // array bruto de todos os buffers
       indicatorCount,
@@ -322,16 +322,30 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
     let priceActionSetup: ReturnType<typeof evaluatePriceActionSetup> | null = null;
     if (isStrategyCrypto) {
       const frames = timeframes && typeof timeframes === 'object' ? timeframes as Partial<Record<'H4'|'H1'|'M15'|'M5'|'M1', Candle[]>> : {};
-      const submittedContext = marketContext && typeof marketContext === 'object' ? marketContext as Partial<MarketContext> : {};
-      // Trust terminal-reported spread/cost inputs only as observations. News clearance and
-      // risk-limit clearance must be server-derived; never let a client assert either as true.
-      const trustedContext: MarketContext = {
-        spread: submittedContext.spread,
-        maxSpread: submittedContext.maxSpread,
-        estimatedRoundTripCost: submittedContext.estimatedRoundTripCost,
-        highImpactNewsBlocked: undefined,
-        riskLimitOk: false
-      };
+      // All execution gates are derived on the server. The EA cannot self-assert news clearance,
+      // account risk clearance, or a permitted trading session.
+      const riskLimit = assessMt5RiskLimit({
+        config,
+        status: metaTraderBridge.getStatus(),
+        observedAccountType: lastMt5ObservedAccountType,
+        accountHeartbeatAt: lastMt5EnvironmentHeartbeatAt,
+      });
+      const newsStatus = await getHighImpactNewsStatus();
+      const sessionOpen = isAllowedBrasiliaTradingSession();
+      const entryFrameForContext = Array.isArray(frames.M5) && frames.M5.length
+        ? frames.M5
+        : Array.isArray(frames.M1) ? frames.M1 : [];
+      const entryPriceForContext = entryFrameForContext.length
+        ? entryFrameForContext[entryFrameForContext.length - 1].close
+        : undefined;
+      const trustedContext = buildTrustedPriceActionContext({
+        bid,
+        ask,
+        entryPrice: entryPriceForContext,
+        riskLimitOk: riskLimit.ok,
+        newsBlocked: newsStatus.blocked || !newsStatus.valid,
+        sessionOpen,
+      });
       priceActionSetup = evaluatePriceActionSetup(frames, trustedContext);
       if (!priceActionSetup.approved) {
         return res.json({
@@ -343,6 +357,11 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
           rejectionReasons: priceActionSetup.reasons,
           checks: priceActionSetup.checks,
           features: priceActionSetup.features,
+          safetyContext: {
+            riskLimit: riskLimit.reasons,
+            news: newsStatus.reason,
+            tradingSessionOpen: sessionOpen,
+          },
           timestamp: Date.now()
         });
       }
