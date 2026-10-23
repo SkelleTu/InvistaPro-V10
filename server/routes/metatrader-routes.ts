@@ -276,6 +276,7 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
       bid,
       candles,
       timeframes,
+      priceActionUseAIReview,
       indicatorSignals,   // { girassol: {...}, fibonacci: {...} }
       indicatorBuffers,   // array bruto de todos os buffers
       indicatorCount,
@@ -375,6 +376,31 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
             tradingSessionOpen: sessionOpen,
           },
           timestamp: Date.now()
+        });
+      }
+
+      // Optional strategy-only mode for controlled comparison. The deterministic setup and all
+      // server safety gates remain mandatory; only the second-stage AI review is skipped.
+      if (priceActionUseAIReview === false) {
+        const timestamp = Date.now();
+        return res.json({
+          id: 'pa-' + randomBytes(8).toString('hex'),
+          symbol: sym,
+          action: priceActionSetup.action,
+          lotSize: config.defaultLotSize,
+          stopLoss: priceActionSetup.stopLoss,
+          takeProfit: priceActionSetup.takeProfit,
+          stopLossPips: 0,
+          takeProfitPips: 0,
+          entryPrice: priceActionSetup.entry,
+          confidence: 100,
+          aiSources: [],
+          indicators: {},
+          timestamp,
+          expiresAt: timestamp + Math.max(10, config.signalTimeoutSeconds) * 1000,
+          reason: 'Modo autônomo: entrada aprovada pela estratégia determinística; risco, notícias, spread e sessão foram validados no servidor.',
+          strategyMode: 'AUTONOMOUS_PRICE_ACTION',
+          executionEnabled: true,
         });
       }
     }
