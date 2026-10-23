@@ -21,6 +21,7 @@ import { computeSyntheticGirassol } from '../services/synthetic-girassol';
 import { isAllowedProductionSymbol } from '../services/production-symbol-policy';
 import { getMt5ProductionBlock } from '../services/mt5-production-policy';
 import { consensusCache } from '../services/consensus-cache';
+import { evaluatePriceActionSetup, type Candle, type MarketContext } from '../services/price-action-engine';
 
 
 const router = Router();
@@ -273,6 +274,8 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
       ask,
       bid,
       candles,
+      timeframes,
+      marketContext,
       indicatorSignals,   // { girassol: {...}, fibonacci: {...} }
       indicatorBuffers,   // array bruto de todos os buffers
       indicatorCount,
@@ -312,6 +315,28 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
     }
 
     const sym = symbol as string;
+    // Crypto strategy symbols must pass the deterministic multi-timeframe gate first.
+    // Legacy indicator/AI logic is not allowed to create a bypass around this gate.
+    const normalizedStrategySymbol = sym.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const isStrategyCrypto = ['BTCUSDT','ETHUSDT','SOLUSDT','BTCUSD','ETHUSD','SOLUSD'].includes(normalizedStrategySymbol);
+    let priceActionSetup: ReturnType<typeof evaluatePriceActionSetup> | null = null;
+    if (isStrategyCrypto) {
+      const frames = timeframes && typeof timeframes === 'object' ? timeframes as Partial<Record<'H4'|'H1'|'M15'|'M5'|'M1', Candle[]>> : {};
+      priceActionSetup = evaluatePriceActionSetup(frames, (marketContext && typeof marketContext === 'object' ? marketContext : {}) as MarketContext);
+      if (!priceActionSetup.approved) {
+        return res.json({
+          action: 'HOLD',
+          confidence: 0,
+          code: 'PRICE_ACTION_GATE_REJECTED',
+          reason: 'A estratégia determinística não aprovou a entrada. A IA não pode criar sinal sem setup válido.',
+          strategyAction: priceActionSetup.action,
+          rejectionReasons: priceActionSetup.reasons,
+          checks: priceActionSetup.checks,
+          features: priceActionSetup.features,
+          timestamp: Date.now()
+        });
+      }
+    }
 
     // Atualiza dados de mercado no bridge
     if (Array.isArray(candles) && candles.length > 0) {
@@ -931,6 +956,28 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
     // Adicionar contexto do ativo ao log
     if (derivProfile) {
       indicatorNotes.push(`📊 ${derivProfile.family} (${derivProfile.volClass}) — ${derivProfile.trendType} | RSI thr: ${derivProfile.rsiOversold}/${derivProfile.rsiOverbought}`);
+    }
+
+    // Enforce strategy -> AI sequence: the AI may reject, never reverse or invent a setup.
+    if (priceActionSetup) {
+      if (!baseSignal || finalAction !== priceActionSetup.action || finalConfidence < 70) {
+        return res.json({
+          action: 'HOLD',
+          confidence: 0,
+          code: 'PRICE_ACTION_AI_REVIEW_REJECTED',
+          reason: 'O sinal da estratégia não foi aprovado pela análise de IA na mesma direção ou não atingiu a confiança mínima.',
+          strategyAction: priceActionSetup.action,
+          aiAction: finalAction,
+          aiConfidence: finalConfidence,
+          rejectionReasons: priceActionSetup.reasons,
+          timestamp: Date.now()
+        });
+      }
+      // Strategy-owned structural SL/TP cannot be loosened by AI/indicator refinements.
+      refinedSL = priceActionSetup.stopLoss!;
+      refinedTP = priceActionSetup.takeProfit!;
+      baseSignal.entryPrice = priceActionSetup.entry;
+      indicatorNotes.push('Price Action multi-timeframe validado; SL/TP mantidos nos níveis estruturais da estratégia.');
     }
 
     // Monta resposta final
