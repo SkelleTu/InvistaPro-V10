@@ -39,6 +39,23 @@ const validCandles = (v: unknown): v is Candle[] => Array.isArray(v) && v.length
     c.low <= Math.min(c.open, c.close) && c.high >= c.low && c.volume >= 0 &&
     (i === 0 || c.time > v[i - 1].time));
 
+const TIMEFRAME_SECONDS: Record<Timeframe, number> = {
+  H4: 4 * 60 * 60,
+  H1: 60 * 60,
+  M15: 15 * 60,
+  M5: 5 * 60,
+  M1: 60,
+};
+
+/** Reject unfinished, future-dated, or stale latest bars; Candle.time is MT5 Unix seconds (or epoch ms). */
+function validClosedCandles(v: unknown, timeframe: Timeframe, now = Date.now()): v is Candle[] {
+  if (!validCandles(v)) return false;
+  const last = v[v.length - 1];
+  const lastOpenMs = last.time > 10_000_000_000 ? last.time : last.time * 1000;
+  const expectedCloseMs = lastOpenMs + TIMEFRAME_SECONDS[timeframe] * 1000;
+  return expectedCloseMs <= now && now - expectedCloseMs <= TIMEFRAME_SECONDS[timeframe] * 1000;
+}
+
 type MarketTrend = 'bullish' | 'bearish' | 'range';
 type PivotKind = 'high' | 'low';
 interface Pivot { index: number; price: number }
@@ -199,11 +216,11 @@ export function evaluatePriceActionSetup(
   const features: PriceActionSetup['features'] = {};
   const required: Timeframe[] = ['H4', 'H1', 'M15'];
   for (const tf of required) {
-    checks[`data_${tf}`] = validCandles(frames[tf]);
+    checks[`data_${tf}`] = validClosedCandles(frames[tf], tf);
     if (!checks[`data_${tf}`]) reasons.push(`Dados insuficientes, desordenados ou inválidos em ${tf}`);
   }
-  const validM5 = validCandles(frames.M5) ? frames.M5 : undefined;
-  const validM1 = validCandles(frames.M1) ? frames.M1 : undefined;
+  const validM5 = validClosedCandles(frames.M5, 'M5') ? frames.M5 : undefined;
+  const validM1 = validClosedCandles(frames.M1, 'M1') ? frames.M1 : undefined;
   const entryOptions: Candle[][] = [validM5, validM1].filter((frame): frame is Candle[] => frame !== undefined);
   let entryCandles: Candle[] | undefined = entryOptions[0];
   checks.entry_data = entryOptions.length > 0;
