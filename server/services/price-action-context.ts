@@ -223,6 +223,7 @@ export function assessMt5RiskLimit(input: {
   accountHeartbeatAt: number;
   realTradingExplicitlyEnabled?: boolean;
   maxDailyTrades?: number;
+  openPositions?: Array<{ openTime?: number }>;
   now?: number;
 }): { ok: boolean; reasons: string[] } {
   const now = input.now ?? Date.now();
@@ -283,8 +284,9 @@ export function assessMt5RiskLimit(input: {
   const dailyCap = [3, 4, 5].includes(requestedDailyCap) ? requestedDailyCap : 5;
   const recentTradesToday = recentTrades
     .filter(trade => Number.isFinite(trade.openTime) && brasiliaDate(trade.openTime) === today).length;
-  const livePositions = Number.isFinite(status.openPositions) && status.openPositions > 0 ? status.openPositions : 0;
-  if (recentTradesToday + livePositions >= dailyCap) {
+  const openPositionsToday = (input.openPositions ?? [])
+    .filter(position => Number.isFinite(position.openTime) && brasiliaDate(position.openTime!) === today).length;
+  if (recentTradesToday + openPositionsToday >= dailyCap) {
     reasons.push('Limite diário configurado de ' + dailyCap + ' operações atingido');
   }
   if (!Number.isFinite(config.maxOpenPositions) || config.maxOpenPositions < 1
