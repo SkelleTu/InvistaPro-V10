@@ -1491,6 +1491,11 @@ bool SendHeartbeat()
    {
       ulong positionTicket = PositionGetTicket(positionIndex);
       if (positionTicket == 0 || !PositionSelectByTicket(positionTicket)) continue;
+      long positionIdentifier = PositionGetInteger(POSITION_IDENTIFIER);
+      // Only map positions owned by this EA for close-event accounting. All account
+      // tickets are still reported below, so unmanaged positions keep the entry gate closed.
+      if (positionIdentifier > 0 && PositionGetInteger(POSITION_MAGIC) == MagicNumber)
+         GlobalVariableSet("InvistaPA_IDMAP_" + StringFormat("%I64d", positionIdentifier), (double)positionTicket);
       if (openPos > 0) openPositionTicketsJson += ",";
       openPositionTicketsJson += "\"" + StringFormat("%I64u", positionTicket) + "\"";
       openPos++;
@@ -1563,11 +1568,12 @@ void ReportClosedPositionFromDeal(ulong transactionDeal)
    if (entryKind != DEAL_ENTRY_OUT && entryKind != DEAL_ENTRY_OUT_BY && entryKind != DEAL_ENTRY_INOUT)
       return;
 
-   long dealMagic = HistoryDealGetInteger(transactionDeal, DEAL_MAGIC);
-   if (dealMagic != MagicNumber) return;
-
    long positionIdentifier = HistoryDealGetInteger(transactionDeal, DEAL_POSITION_ID);
    if (positionIdentifier <= 0) return;
+   // The tracked position mapping, not the closing deal's magic number, is the
+   // authority: SL/TP/manual closing deals may report a different deal magic.
+   string identifierKey = "InvistaPA_IDMAP_" + StringFormat("%I64d", positionIdentifier);
+   if (!GlobalVariableCheck(identifierKey)) return;
 
    // A partial close must not remove the still-open position from the server.
    for (int i = PositionsTotal() - 1; i >= 0; i--)
@@ -1577,8 +1583,6 @@ void ReportClosedPositionFromDeal(ulong transactionDeal)
       if (PositionGetInteger(POSITION_IDENTIFIER) == positionIdentifier) return;
    }
 
-   string identifierKey = "InvistaPA_IDMAP_" + StringFormat("%I64d", positionIdentifier);
-   if (!GlobalVariableCheck(identifierKey)) return; // Never invent a server ticket.
    ulong serverTicket = (ulong)GlobalVariableGet(identifierKey);
    if (serverTicket == 0) return;
 
