@@ -899,7 +899,7 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
     //    Scalp opera em janelas de minutos; o macro do dia inteiro é contexto, não veto.
     //  • Swing / Posição: notícias podem BLOQUEAR operações na direção contrária
     //    quando o sentimento macro BR é forte (≥60%). Horizonte mais longo = maior peso macro.
-    if (finalAction !== 'HOLD') {
+    if (finalAction !== 'HOLD' && !priceActionSetup) {
       try {
         const brazilSentiment = await brazilNewsService.getBrazilMarketSentiment();
         const { aiInfluence, direction, strength, topHeadline, newsCount } = brazilSentiment;
