@@ -2185,7 +2185,7 @@ class MetaTraderBridge extends EventEmitter {
       connected,
       systemHealth: health,
       activeSignal: this.getLatestActiveSignal(),
-      recentTrades: this.recentTrades.slice(-20),
+      recentTrades: this.recentTrades.slice(0, 20),
       openPositions: this.openPositions.size,
       cachedSymbols: this.getCachedSymbols(),
       lastBalance: this.currentBalance || undefined,
