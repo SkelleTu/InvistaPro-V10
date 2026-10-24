@@ -399,8 +399,7 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
         });
       }
 
-      if (Array.isArray(candles) && candles.length > 0) metaTraderBridge.addMarketData(sym, candles);
-
+      // Do not feed the same crypto request into the legacy generator; it could create a competing signal.
       const useM5ForReview = isValidPriceActionCandles(frames.M5);
       const reviewTimeframe: 'M5' | 'M1' = useM5ForReview ? 'M5' : 'M1';
       const reviewFrame = useM5ForReview ? frames.M5 : frames.M1;
@@ -448,9 +447,23 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
         direction: aiReview.direction,
         confidence: aiReview.confidence,
       });
+      // The closed trigger candle creates a stable id. Repeated polls within the
+      // same opportunity must not mint new IDs and reopen the same trade.
+      const signalBar = entryFrameForContext[entryFrameForContext.length - 1];
+      const stableSignalId = 'pa-' + normalizedStrategySymbol + '-' + priceActionSetup.action + '-' + Math.floor(signalBar.time);
+      const alreadyExecuted = metaTraderBridge.getOpenPositions().some(position => position.signalId === stableSignalId)
+        || metaTraderBridge.getRecentTrades().some(trade => trade.signalId === stableSignalId);
+      if (alreadyExecuted) {
+        return res.json({
+          action: 'HOLD', confidence: 0, executionEnabled: false,
+          code: 'PRICE_ACTION_SIGNAL_ALREADY_EXECUTED',
+          reason: 'Esta oportunidade, identificada pela vela de gatilho fechada, já foi executada ou permanece aberta.',
+          strategyAction: priceActionSetup.action, signalId: stableSignalId, timestamp: Date.now(),
+        });
+      }
       const timestamp = Date.now();
       return res.json({
-        id: 'pa-' + randomBytes(8).toString('hex'),
+        id: stableSignalId,
         symbol: sym,
         action: priceActionSetup.action,
         lotSize: config.defaultLotSize,
