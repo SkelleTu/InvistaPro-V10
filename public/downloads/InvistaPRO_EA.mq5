@@ -41,7 +41,7 @@ input int      MaxReconnectTries= 5;           // Tentativas máximas de reconex
 input int      IndicatorBars    = 5;           // Quantas barras recentes dos indicadores ler
 input int      CandleCount      = 200;         // Candles para enviar à IA (histórico)
 input double   PriceActionRiskPercent = 1.0; // Risco por trade para Price Action (1% a 2%)
-input bool     PriceActionUseAIReview = true; // true = estratégia + IA; false = estratégia autônoma com os mesmos gates
+input bool     PriceActionUseAIReview = true; // legado/diagnóstico; não pode acrescentar critérios à estratégia
 
 //--- Controle de Autonomia da IA
 input ENUM_AI_CONTROL_MODE AIControlMode = AI_FULL; // Modo de Controle da IA
@@ -140,7 +140,7 @@ int OnInit()
    string modeLabel = "";
    if (AIControlMode == AI_MANUAL)
       modeLabel = "MANUAL";
-   else if (AIControlMode == AI_PARTIAL)
+   else if (AIControlMode == AI_PARTIAL && !isStrategyCrypto)
       modeLabel = "PARCIAL";
    else
       modeLabel = "TOTAL (IA controla 100%)";
@@ -880,8 +880,11 @@ void FetchAndProcessSignal()
    string reason        = ExtractJsonString(resp, "reason");
    string girassolBias  = ExtractJsonString(resp, "girassolBias");
 
+   // Strategy symbols always keep the strategy-owned entry, structural SL/TP and risk lot.
+   // AIControlMode remains available for non-strategy instruments only.
+   bool isStrategyCrypto = IsPriceActionCryptoSymbol();
    // ── Aplicação do Modo de Controle da IA ──────────────────────────────
-   if (AIControlMode == AI_MANUAL)
+   if (AIControlMode == AI_MANUAL && !isStrategyCrypto)
    {
       Print("ℹ️ Modo MANUAL: usando parâmetros do usuário");
       lotSize    = ManualLotSize;
@@ -986,7 +989,7 @@ void FetchAndProcessSignal()
    }
 
    Print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    bool isPriceActionCrypto = IsPriceActionCryptoSymbol();
+    bool isPriceActionCrypto = isStrategyCrypto;
     if (isPriceActionCrypto)
     {
        double entry = (action == "BUY") ? ask : bid;
