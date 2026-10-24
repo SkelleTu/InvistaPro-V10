@@ -399,69 +399,55 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
         });
       }
 
-      // The strategy document requires a live AI review bound to the deterministic candidate.
-      // Disabling review, missing data, stale responses, or directional disagreement must HOLD.
-      if (priceActionUseAIReview !== true) {
-        return res.json({
-          action: 'HOLD',
-          confidence: 0,
-          executionEnabled: false,
-          code: 'PRICE_ACTION_AI_REVIEW_REQUIRED',
-          reason: 'A revisão IA obrigatória está desativada; nenhuma entrada foi autorizada.',
-          strategyAction: priceActionSetup.action,
-          timestamp: Date.now(),
-        });
-      }
-
       if (Array.isArray(candles) && candles.length > 0) metaTraderBridge.addMarketData(sym, candles);
 
       const useM5ForReview = isValidPriceActionCandles(frames.M5);
       const reviewTimeframe: 'M5' | 'M1' = useM5ForReview ? 'M5' : 'M1';
       const reviewFrame = useM5ForReview ? frames.M5 : frames.M1;
-      if (!Array.isArray(reviewFrame) || reviewFrame.length < 30) {
+      let aiReview: Awaited<ReturnType<typeof huggingFaceAI.reviewPriceActionCandidate>> = {
+        approved: false, direction: 'HOLD', confidence: 0, sources: [],
+        reason: 'Revisão IA não executada; a decisão operacional continuará restrita aos critérios explícitos da estratégia.',
+      };
+
+      if (priceActionUseAIReview === true && isValidPriceActionCandles(reviewFrame)) {
+        const reviewTicks = reviewFrame.map(candle => ({
+          symbol: sym,
+          quote: candle.close,
+          epoch: Math.floor(candle.time > 100_000_000_000 ? candle.time / 1000 : candle.time),
+        }));
+        aiReview = await huggingFaceAI.reviewPriceActionCandidate(
+          reviewTicks, sym, priceActionSetup.action, reviewTimeframe
+        );
+      } else {
+        aiReview = {
+          approved: false, direction: 'HOLD', confidence: 0, sources: [],
+          reason: priceActionUseAIReview === true
+            ? 'Revisão IA indisponível: candles de entrada ausentes ou inválidos.'
+            : 'Revisão IA desativada. Nenhum limiar de consenso ou indicador legado substituirá os critérios da estratégia.',
+        };
+      }
+
+      // The deterministic checklist is the entry authority. AI consensus/confidence and
+      // legacy indicators are diagnostic only: they must not add undocumented vetoes.
+      // For REAL, an unavailable AI service is an essential-component failure and fails closed;
+      // a numerical consensus threshold or AI disagreement is never used as a new entry rule.
+      if (config.accountType === 'real' && aiReview.sources.length === 0) {
         return res.json({
-          action: 'HOLD',
-          confidence: 0,
-          executionEnabled: false,
-          code: 'PRICE_ACTION_AI_REVIEW_DATA_INVALID',
-          reason: 'Candles de entrada ausentes ou insuficientes para a revisão IA.',
+          action: 'HOLD', confidence: 0, executionEnabled: false,
+          code: 'PRICE_ACTION_AI_UNAVAILABLE',
+          reason: 'Conta REAL bloqueada: o serviço de revisão IA essencial não respondeu com evidência válida.',
           strategyAction: priceActionSetup.action,
+          aiAction: aiReview.direction,
+          aiSources: [],
           timestamp: Date.now(),
         });
       }
-      const reviewTicks = reviewFrame.map(candle => ({
-        symbol: sym,
-        quote: candle.close,
-        epoch: Math.floor(candle.time > 100_000_000_000 ? candle.time / 1000 : candle.time),
-      }));
-      const aiReview = await huggingFaceAI.reviewPriceActionCandidate(
-        reviewTicks, sym, priceActionSetup.action, reviewTimeframe
-      );
+
       const reviewValidation = validateAIEntryReview(priceActionSetup, {
         decision: aiReview.approved ? 'approve' : 'reject',
         direction: aiReview.direction,
         confidence: aiReview.confidence,
       });
-
-      if (!aiReview.approved || !reviewValidation.approved) {
-        return res.json({
-          action: 'HOLD',
-          confidence: 0,
-          executionEnabled: false,
-          code: 'PRICE_ACTION_AI_REVIEW_REJECTED',
-          reason: aiReview.reason || reviewValidation.reason,
-          strategyAction: priceActionSetup.action,
-          aiAction: aiReview.direction,
-          aiConfidence: aiReview.confidence,
-          aiSources: aiReview.sources,
-          rejectionReasons: priceActionSetup.reasons,
-          checks: priceActionSetup.checks,
-          timestamp: Date.now(),
-        });
-      }
-
-      // Once both layers agree, return the strategy's own entry/SL/TP unchanged.
-      // The legacy Girassol/Fibonacci/indicator confidence gates below must not veto this candidate.
       const timestamp = Date.now();
       return res.json({
         id: 'pa-' + randomBytes(8).toString('hex'),
@@ -473,641 +459,23 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
         stopLossPips: 0,
         takeProfitPips: 0,
         entryPrice: priceActionSetup.entry,
-        confidence: aiReview.confidence,
+        confidence: aiReview.sources.length > 0 ? aiReview.confidence : 0,
         aiSources: aiReview.sources,
         aiReview: {
-          approved: true,
+          performed: aiReview.sources.length > 0,
+          consensusApproved: aiReview.approved,
           direction: aiReview.direction,
-          confidence: aiReview.confidence,
+          confidence: aiReview.sources.length > 0 ? aiReview.confidence : null,
+          validation: reviewValidation.approved ? 'aligned' : 'diagnostic_only',
           reason: aiReview.reason,
         },
         indicators: {},
         timestamp,
         expiresAt: timestamp + Math.max(10, config.signalTimeoutSeconds) * 1000,
-        reason: aiReview.reason,
-        strategyMode: 'PRICE_ACTION_AI_REVIEWED',
+        reason: 'Setup aprovado pelos critérios objetivos da estratégia. Revisão IA (diagnóstica): ' + aiReview.reason,
+        strategyMode: 'AUTHORITATIVE_PRICE_ACTION',
         executionEnabled: true,
       });
-    }
-
-    // Atualiza dados de mercado no bridge
-    if (Array.isArray(candles) && candles.length > 0) {
-      metaTraderBridge.addMarketData(sym, candles);
-    }
-
-    // ── Analisa sinais do Girassol (v7.0 — 3 níveis = o semáforo) ────────
-    // O Girassol É o semáforo: seus 3 níveis representam 3 graus de sinal:
-    // Nível 1: girassol_extremo      — LowSymbol(azul/compra) + HighSymbol(vermelho/venda)
-    // Nível 2: bolinha_media_pivot   — topos e fundos de pivot (mesmo indicador)
-    // Nível 3: bolinha_pequena_micro — micro-estruturas de mercado (mesmo indicador)
-    const girassol = indicatorSignals?.girassol;
-    const fibonacci = indicatorSignals?.fibonacci;
-
-    let girassolBias: 'BUY' | 'SELL' | 'NEUTRAL' = 'NEUTRAL';
-    let girassolDesc = 'Girassol não detectado no gráfico';
-    let fibDesc      = 'Fibonacci não detectado no gráfico';
-    let fibNearestLevel: number | null = null;
-
-    // Diagnóstico dos buffers brutos do Girassol para exibir no painel
-    let girassolRawBufferDiag: { buffer: number; bar: number; value: number }[] = [];
-
-    // Metadados dos 3 níveis detectados (para enriquecer resposta à IA)
-    let girassolLevelSummary: {
-      level_id: number;
-      level_name: string;
-      recent_buy: any;
-      recent_sell: any;
-      active: boolean;
-    }[] = [];
-
-    if (girassol?.detected) {
-      const invertBuffers = metaTraderBridge.getConfig().invertGirassolBuffers;
-
-      // ── Leitura nova (v7.0): usa estrutura levels[] com buy_signals/sell_signals por nível
-      const levels = Array.isArray(girassol.levels) ? girassol.levels : [];
-
-      // ── Compatibilidade retroativa (v6.0 e anteriores): usa signals.buy_signals/sell_signals
-      let legacyBuySigs  = girassol.signals?.buy_signals  || [];
-      let legacySellSigs = girassol.signals?.sell_signals || [];
-      const legacyExitSigs = girassol.signals?.exit_signals || [];
-
-      // Se temos a estrutura de 3 níveis (v7.0), extraímos por nível
-      if (levels.length > 0) {
-        const levelPriority = ['girassol_extremo', 'bolinha_media_pivot', 'bolinha_pequena_micro'];
-
-        for (const lv of levels) {
-          let buySigs  = (lv.buy_signals  || []) as any[];
-          let sellSigs = (lv.sell_signals || []) as any[];
-
-          if (invertBuffers) {
-            [buySigs, sellSigs] = [sellSigs, buySigs];
-          }
-
-          const recentBuy  = buySigs.find((s: any)  => s.bar <= 5 && s.value !== 0);
-          const recentSell = sellSigs.find((s: any) => s.bar <= 5 && s.value !== 0);
-
-          girassolLevelSummary.push({
-            level_id:    lv.level_id,
-            level_name:  lv.level_name,
-            recent_buy:  recentBuy  || null,
-            recent_sell: recentSell || null,
-            active:      !!(recentBuy || recentSell)
-          });
-
-          // Diagnóstico: adiciona entradas de barra <= 4
-          [...buySigs, ...sellSigs]
-            .filter((s: any) => s.bar <= 4 && s.value !== 0)
-            .forEach((s: any) => girassolRawBufferDiag.push({ buffer: lv.level_id * 2, bar: s.bar, value: s.value }));
-
-          // ── Registrar bolinha_media_pivot para detecção de duplo topo/fundo ──
-          if (lv.level_name === 'bolinha_media_pivot') {
-            const entryPrice = ask || bid || 0;
-            if (recentBuy && !recentSell && entryPrice > 0) {
-              const pivotPrice = recentBuy.value > 0 ? recentBuy.value : entryPrice;
-              const isNew = metaTraderBridge.recordBolinhaMedia(sym, pivotPrice, 'BUY');
-              if (isNew) console.log(`[MT5-Indicators] 🔵 ${sym}: bolinha_media BUY registrada @ ${pivotPrice.toFixed(5)} (barra ${recentBuy.bar})`);
-            } else if (recentSell && !recentBuy && entryPrice > 0) {
-              const pivotPrice = recentSell.value > 0 ? recentSell.value : entryPrice;
-              const isNew = metaTraderBridge.recordBolinhaMedia(sym, pivotPrice, 'SELL');
-              if (isNew) console.log(`[MT5-Indicators] 🔵 ${sym}: bolinha_media SELL registrada @ ${pivotPrice.toFixed(5)} (barra ${recentSell.bar})`);
-            }
-          }
-        }
-
-        // Determina viés por PRIORIDADE: Girassol extremo > Bolinha média > Bolinha pequena
-        let decisiveLevel: typeof girassolLevelSummary[0] | undefined;
-        for (const ln of levelPriority) {
-          const lv = girassolLevelSummary.find(l => l.level_name === ln);
-          if (lv && lv.active) { decisiveLevel = lv; break; }
-        }
-
-        if (decisiveLevel) {
-          const { recent_buy, recent_sell, level_name } = decisiveLevel;
-          const friendlyName = level_name === 'girassol_extremo'      ? '🌻 Girassol extremo'
-                             : level_name === 'bolinha_media_pivot'    ? '🔵 Bolinha média (pivot)'
-                             :                                            '⚪ Bolinha pequena (micro)';
-
-          if (recent_buy && !recent_sell) {
-            girassolBias = 'BUY';
-            girassolDesc = `${friendlyName}: COMPRA (LowSymbol/azul) na barra ${recent_buy.bar} @ ${recent_buy.value}`;
-          } else if (recent_sell && !recent_buy) {
-            girassolBias = 'SELL';
-            girassolDesc = `${friendlyName}: VENDA (HighSymbol/vermelho) na barra ${recent_sell.bar} @ ${recent_sell.value}`;
-          } else if (recent_buy && recent_sell) {
-            // Girassol aparece em extremos — é exatamente o sinal direcional.
-            // Quando ambos estão presentes, o MAIS RECENTE (barra menor) vence,
-            // pois representa a nova extremidade do gráfico formada agora.
-            if (recent_buy.bar <= recent_sell.bar) {
-              girassolBias = 'BUY';
-              girassolDesc = `${friendlyName}: COMPRA (mais recente: barra ${recent_buy.bar}) prevalece sobre sinal anterior de venda (barra ${recent_sell.bar})`;
-            } else {
-              girassolBias = 'SELL';
-              girassolDesc = `${friendlyName}: VENDA (mais recente: barra ${recent_sell.bar}) prevalece sobre sinal anterior de compra (barra ${recent_buy.bar})`;
-            }
-          }
-        } else {
-          girassolBias = 'NEUTRAL';
-          girassolDesc = `Girassol ativo (${girassol.name}) — sem sinal novo nos 3 níveis nas últimas 5 barras`;
-        }
-
-        // Conta sinais ativos por nível para informar a IA
-        const activeLevels = girassolLevelSummary.filter(l => l.active).length;
-        if (activeLevels > 1) {
-          girassolDesc += ` | Confluência: ${activeLevels}/3 níveis ativos`;
-        }
-
-      } else {
-        // ── Compatibilidade v6.0: usa formato antigo se não há levels
-        if (invertBuffers) {
-          [legacyBuySigs, legacySellSigs] = [legacySellSigs, legacyBuySigs];
-          console.log(`[MT5-Indicators] 🔄 Buffers do Girassol INVERTIDOS (modo legado)`);
-        }
-
-        [...legacyBuySigs, ...legacySellSigs, ...legacyExitSigs]
-          .filter((s: any) => s.bar <= 4 && s.value !== 0)
-          .forEach((s: any) => girassolRawBufferDiag.push({ buffer: s.buffer, bar: s.bar, value: s.value }));
-
-        const recentBuy  = legacyBuySigs.find((s: any)  => s.bar <= 5 && s.value !== 0);
-        const recentSell = legacySellSigs.find((s: any) => s.bar <= 5 && s.value !== 0);
-        const recentExit = legacyExitSigs.find((s: any) => s.bar <= 5 && s.value !== 0);
-
-        if (recentExit) {
-          girassolBias = 'NEUTRAL';
-          girassolDesc = `Girassol: sinal de SAÍDA na barra ${recentExit.bar} (buffer ${recentExit.buffer})`;
-        } else if (recentBuy && !recentSell) {
-          girassolBias = 'BUY';
-          girassolDesc = `Girassol: COMPRA na barra ${recentBuy.bar} (valor ${recentBuy.value})`;
-        } else if (recentSell && !recentBuy) {
-          girassolBias = 'SELL';
-          girassolDesc = `Girassol: VENDA na barra ${recentSell.bar} (valor ${recentSell.value})`;
-        } else if (recentBuy && recentSell) {
-          girassolBias = 'NEUTRAL';
-          girassolDesc = `Girassol: sinais conflitantes — aguardando confirmação`;
-        } else {
-          girassolBias = 'NEUTRAL';
-          girassolDesc = `Girassol ativo (${girassol.name}) — sem sinal novo nas últimas 5 barras`;
-        }
-      }
-
-      console.log(`[MT5-Indicators] 🌻 ${girassolDesc}`);
-    }
-
-    if (fibonacci?.detected && Array.isArray(fibonacci.levels) && fibonacci.levels.length > 0) {
-      const currentPrice = ask || bid || 0;
-      const levels = fibonacci.levels as Array<{ level: string; price: number; buffer: number }>;
-
-      if (currentPrice > 0) {
-        // Encontra o nível de Fibonacci mais próximo do preço atual
-        let minDist = Infinity;
-        let nearest = levels[0];
-        for (const lv of levels) {
-          const dist = Math.abs(lv.price - currentPrice);
-          if (dist < minDist) { minDist = dist; nearest = lv; }
-        }
-        fibNearestLevel = nearest.price;
-        const pct = ((minDist / currentPrice) * 100).toFixed(3);
-        fibDesc = `Fibonacci (${fibonacci.name}): ${levels.length} níveis | Mais próximo: ${nearest.level} @ ${nearest.price.toFixed(5)} (${pct}% de distância)`;
-      } else {
-        fibDesc = `Fibonacci (${fibonacci.name}): ${levels.length} níveis detectados`;
-      }
-
-      console.log(`[MT5-Indicators] 📐 ${fibDesc}`);
-    }
-
-    // ── Consulta sinal pendente da IA ────────────────────────────────────
-    const baseSignal = metaTraderBridge.getPendingSignal(sym);
-
-    // ── Perfil do ativo sintético Deriv ──────────────────────────────────
-    const derivProfile = metaTraderBridge.getDerivSyntheticProfile(sym);
-    const assetContext = metaTraderBridge.getAssetAIContext(sym);
-    if (derivProfile) {
-      console.log(`[MT5-Indicators] 📊 Ativo: ${derivProfile.family} | ${derivProfile.volClass} | ${derivProfile.trendType}`);
-    }
-
-    // ── Extração de níveis de suporte/resistência dos buffers brutos ──────
-    let girassolSupportLevel: number | undefined;
-    let girassolResistanceLevel: number | undefined;
-
-    if (girassol?.detected && Array.isArray(girassol.support_resistance_levels)) {
-      const srLevels = girassol.support_resistance_levels as Array<{ type: string; price: number }>;
-      const supportEntry = srLevels.find(l => l.type === 'support' || l.type === 'S');
-      const resistEntry  = srLevels.find(l => l.type === 'resistance' || l.type === 'R');
-      if (supportEntry && supportEntry.price > 0) girassolSupportLevel = supportEntry.price;
-      if (resistEntry  && resistEntry.price  > 0) girassolResistanceLevel = resistEntry.price;
-    }
-
-    // Tentar extrair também de buffer bruto
-    const rawBuffers = Array.isArray(indicatorBuffers)
-      ? (indicatorBuffers as Array<{ name?: string; buffer?: number; value?: number; bar?: number; index?: number }>)
-          .filter(b => b.bar === 0 || b.index === 0)
-          .map(b => ({ name: b.name ?? '', value: b.value ?? b.buffer ?? 0, bar: b.bar ?? 0 }))
-      : [];
-
-    if (!girassolSupportLevel) {
-      const supBuf = rawBuffers.find(b => b.name?.toLowerCase().includes('support') || b.name?.toLowerCase().includes('suporte'));
-      if (supBuf && supBuf.value > 0) girassolSupportLevel = supBuf.value;
-    }
-    if (!girassolResistanceLevel) {
-      const resBuf = rawBuffers.find(b => b.name?.toLowerCase().includes('resistance') || b.name?.toLowerCase().includes('resistencia'));
-      if (resBuf && resBuf.value > 0) girassolResistanceLevel = resBuf.value;
-    }
-
-    // ── GATILHO PRIMÁRIO: Girassol com peso máximo + confirmação Fibonacci ─
-    //
-    // Hierarquia de decisão:
-    //  1. Girassol com sinal claro (BUY/SELL) → gatilho de entrada (peso primário)
-    //     Confluência dos 3 níveis amplifica a confiança:
-    //       1 nível ativo  → +25% boost
-    //       2 níveis ativos → +40% boost
-    //       3 níveis ativos → +60% boost (sinal de máxima força)
-    //  2. Fibonacci próximo → +10-20% adicional por confluência de zona
-    //     Chave (38.2%, 50%, 61.8%) em distância < 0.1%: +20%
-    //     Qualquer nível em distância < 0.5%: +10%
-    //  3. Girassol NEUTRO (instalado mas sem sinal) → HOLD obrigatório
-    //     (IA não opera sem o gatilho do Girassol quando o indicador está presente)
-    //  4. Girassol CONTRADIZ a IA → HOLD obrigatório
-    //  5. Girassol NÃO detectado → fallback para IA + Técnica (threshold 70%)
-
-    let finalAction: string = baseSignal?.action || 'HOLD';
-    let finalConfidence: number = baseSignal?.confidence || 0;
-    let finalReason: string = baseSignal?.reason || 'Aguardando sinal';
-    const indicatorNotes: string[] = [];
-
-    // Quantos dos 3 níveis do Girassol estão ativos e na mesma direção
-    const activeLevels = girassolLevelSummary.filter(l => l.active).length;
-    const activeBuyLevels  = girassolLevelSummary.filter(l => l.active && l.recent_buy  && !l.recent_sell).length;
-    const activeSellLevels = girassolLevelSummary.filter(l => l.active && l.recent_sell && !l.recent_buy).length;
-    const girassolConfluence = girassolBias === 'BUY' ? activeBuyLevels : girassolBias === 'SELL' ? activeSellLevels : 0;
-
-    // Registrar estado do Girassol no bridge para uso no próximo generateSignal
-    if (girassol?.detected) {
-      metaTraderBridge.setGirassolBias(sym, girassolBias, girassolConfluence);
-    }
-
-    // ── GATE: exigir Duplo Topo / Duplo Fundo na bolinha_media para entrada ────
-    // Entradas só são aprovadas quando o nível médio do Girassol (bolinha_media_pivot)
-    // confirma dois pivôs consecutivos na mesma direção e em preços similares.
-    // Isso elimina entradas prematuras baseadas em sinal único (sem estrutura confirmada).
-    let doublePatternDetected = false;
-    let doublePatternNote = '';
-
-    if (girassol?.detected && girassolBias !== 'NEUTRAL' && finalAction !== 'HOLD') {
-      const dp = metaTraderBridge.checkBolinhaMediaDoublePattern(sym, girassolBias as 'BUY' | 'SELL');
-      doublePatternDetected = dp.detected;
-
-      if (dp.detected) {
-        const patternLabel = dp.patternType === 'double_top' ? 'DUPLO TOPO' : 'DUPLO FUNDO';
-        const ageMin = Math.round(dp.ageMs / 60_000);
-        doublePatternNote = `🌻 ${patternLabel} confirmado @ ${dp.pivotPrice.toFixed(5)} (${ageMin}min entre pivôs) — entrada autorizada`;
-        console.log(`[MT5-Indicators] 🌻 ${sym}: ${patternLabel} bolinha_media confirmado — entrada liberada`);
-      } else {
-        // Ainda não há duplo padrão — bloquear e aguardar o segundo pivô
-        const biasLabel = girassolBias === 'SELL' ? 'SELL (aguardando duplo topo)' : 'BUY (aguardando duplo fundo)';
-        doublePatternNote = `⏳ bolinha_media ${biasLabel} — 1º pivô registrado, aguardando confirmação do 2º`;
-        console.log(`[MT5-Indicators] ⏳ ${sym}: bolinha_media ${girassolBias} — aguardando 2º pivô para duplo padrão`);
-        finalAction     = 'HOLD';
-        finalConfidence = 0;
-        finalReason     = `Aguardando duplo padrão: bolinha_media ${girassolBias} registrou 1º pivô — entrada somente quando 2º pivô em nível similar confirmar`;
-      }
-    }
-
-    // ── Calcular bônus do Fibonacci ──────────────────────────────────────
-    let fibBonus = 0;
-    let fibBonusNote = '';
-    if (girassolBias !== 'NEUTRAL' && fibonacci?.detected && fibNearestLevel !== null) {
-      const currentPrice = ask || bid || 0;
-      if (currentPrice > 0) {
-        const distPct = Math.abs(fibNearestLevel - currentPrice) / currentPrice * 100;
-        const fibLevels = (fibonacci.levels || []) as Array<{ level: string; price: number }>;
-        const nearestFib = fibLevels.reduce((best: any, lv: any) => {
-          const d = Math.abs(lv.price - currentPrice);
-          return (!best || d < Math.abs(best.price - currentPrice)) ? lv : best;
-        }, null as any);
-        const isKeyLevel = nearestFib && ['38.2%', '50%', '61.8%'].includes(nearestFib.level);
-        if (distPct < 0.1) {
-          fibBonus = isKeyLevel ? 0.20 : 0.10;
-          fibBonusNote = `📐 Fibonacci ${isKeyLevel ? 'CHAVE (' + nearestFib.level + ')' : 'próximo'} @ ${fibNearestLevel.toFixed(5)} (Δ${distPct.toFixed(3)}%) → confluência com Girassol +${(fibBonus * 100).toFixed(0)}%`;
-        } else if (distPct < 0.5) {
-          fibBonus = isKeyLevel ? 0.10 : 0.05;
-          fibBonusNote = `📐 Fibonacci ${isKeyLevel ? nearestFib.level : ''} @ ${fibNearestLevel.toFixed(5)} (Δ${distPct.toFixed(3)}%) → zona próxima +${(fibBonus * 100).toFixed(0)}%`;
-        }
-      }
-    }
-
-    // ── VALIDAÇÃO FIBONACCI: bloquear contra S/R E confirmar timing de entrada ─
-    //
-    // O Fibonacci automático tem DUPLA FUNÇÃO no sistema:
-    //  A) BLOQUEIO: impede operações contra zonas de suporte/resistência
-    //     • Preço em SUPORTE Fibonacci → SELL bloqueado
-    //     • Preço em RESISTÊNCIA Fibonacci → BUY bloqueado
-    //  B) CONFIRMAÇÃO DE TIMING: quando o Girassol dispara, o Fibonacci diz
-    //     se o MOMENTO é ideal (preço no nível certo) ou prematuro (meio do range)
-    //     • Girassol BUY + preço em suporte Fibonacci → GATILHO IDEAL ✅
-    //     • Girassol SELL + preço em resistência Fibonacci → GATILHO IDEAL ✅
-    //     • Girassol ativo mas preço longe de qualquer nível → timing prematuro ⏳
-    let fibTimingStatus: 'confirmed' | 'premature' | 'no_data' = 'no_data';
-    let fibTimingLevelName  = '';
-    let fibTimingLevelPrice = 0;
-    let fibTimingDistPct    = 0;
-
-    if (fibonacci?.detected && Array.isArray(fibonacci.levels) && fibonacci.levels.length > 0) {
-      const currentPrice = ask || bid || 0;
-      if (currentPrice > 0) {
-        const fibLevels = (fibonacci.levels as Array<{ level: string; price: number }>).filter(l => l.price > 0);
-        const fib0   = fibLevels.find(l => l.level === '0.0%'   || l.level === '0%');
-        const fib100 = fibLevels.find(l => l.level === '100.0%' || l.level === '100%');
-
-        const getSRType = (levelName: string, topToBottom: boolean): 'support' | 'resistance' | null => {
-          if (topToBottom) {
-            if (['0.0%', '0%', '23.6%', '38.2%'].includes(levelName)) return 'resistance';
-            if (['61.8%', '78.6%', '100.0%', '100%'].includes(levelName)) return 'support';
-          } else {
-            if (['0.0%', '0%', '23.6%', '38.2%'].includes(levelName)) return 'support';
-            if (['61.8%', '78.6%', '100.0%', '100%'].includes(levelName)) return 'resistance';
-          }
-          return null;
-        };
-
-        if (fib0 && fib100) {
-          const fibDrawnTopToBottom = fib0.price > fib100.price;
-          const keyFibNames = ['0.0%', '0%', '23.6%', '38.2%', '50%', '50.0%', '61.8%', '78.6%', '100.0%', '100%'];
-          let foundNearLevel = false;
-
-          for (const lv of fibLevels) {
-            if (!keyFibNames.includes(lv.level)) continue;
-            const distPct = Math.abs(lv.price - currentPrice) / currentPrice * 100;
-            if (distPct >= 0.5) continue; // fora da zona de influência
-            const srType = getSRType(lv.level, fibDrawnTopToBottom);
-            if (!srType) continue;
-
-            foundNearLevel = true;
-
-            // ── A) BLOQUEIO: trade contra a zona ────────────────────────────
-            if (finalAction !== 'HOLD') {
-              if (srType === 'support' && finalAction === 'SELL') {
-                indicatorNotes.push(`🛑 Fibonacci BLOQUEOU VENDA: preço em SUPORTE ${lv.level} @ ${lv.price.toFixed(5)} (Δ${distPct.toFixed(3)}%) — operar contra suporte é de alto risco`);
-                console.log(`[MT5-Indicators] 🛑 ${sym}: SELL BLOQUEADO pelo Fibonacci — suporte ${lv.level}`);
-                finalAction = 'HOLD'; finalConfidence = 0;
-                finalReason = `Fibonacci bloqueia SELL: preço em suporte ${lv.level} @ ${lv.price.toFixed(5)} — aguardar rompimento`;
-                break;
-              } else if (srType === 'resistance' && finalAction === 'BUY') {
-                indicatorNotes.push(`🛑 Fibonacci BLOQUEOU COMPRA: preço em RESISTÊNCIA ${lv.level} @ ${lv.price.toFixed(5)} (Δ${distPct.toFixed(3)}%) — operar contra resistência é de alto risco`);
-                console.log(`[MT5-Indicators] 🛑 ${sym}: BUY BLOQUEADO pelo Fibonacci — resistência ${lv.level}`);
-                finalAction = 'HOLD'; finalConfidence = 0;
-                finalReason = `Fibonacci bloqueia BUY: preço em resistência ${lv.level} @ ${lv.price.toFixed(5)} — aguardar rompimento`;
-                break;
-              }
-            }
-
-            // ── B) CONFIRMAÇÃO DE TIMING: trade alinhado com a zona ──────────
-            // Se chegou aqui, trade NÃO foi bloqueado → zona confirma o timing
-            if (finalAction !== 'HOLD') {
-              const matchesBuy  = srType === 'support'    && finalAction === 'BUY';
-              const matchesSell = srType === 'resistance' && finalAction === 'SELL';
-              if (matchesBuy || matchesSell) {
-                fibTimingStatus     = 'confirmed';
-                fibTimingLevelName  = lv.level;
-                fibTimingLevelPrice = lv.price;
-                fibTimingDistPct    = distPct;
-                console.log(`[MT5-Indicators] ✅ ${sym}: Fibonacci CONFIRMA timing ${finalAction} — ${srType} ${lv.level} @ ${lv.price.toFixed(5)} (Δ${distPct.toFixed(3)}%)`);
-              }
-            }
-            break;
-          }
-
-          // Fibonacci detectado mas preço longe de qualquer nível chave → timing prematuro
-          if (!foundNearLevel && finalAction !== 'HOLD') {
-            fibTimingStatus = 'premature';
-          }
-        }
-      }
-    }
-
-    if (girassol?.detected && girassolBias !== 'NEUTRAL') {
-      // ── CASO 1: Girassol com sinal claro ────────────────────────────────
-      if (girassolBias === finalAction) {
-        // ── Boost escalonado por Girassol + confirmação de timing do Fibonacci ──
-        //
-        // Hierarquia de boost:
-        //  MÁXIMO (Girassol 3/3 + Fibonacci confirma timing) → +80% confiança
-        //  ÓTIMO  (Girassol 2-3/3 + Fibonacci confirma)      → +65% confiança
-        //  BOM    (Girassol 1-2/3 + Fibonacci confirma)      → +45% confiança
-        //  NORMAL (Girassol 3/3, sem Fibonacci)              → +60% (padrão)
-        //  REDUZIDO (Fibonacci detectado mas timing prematuro) → +15% máx (aguardar)
-        //  MÍNIMO (Girassol 1/3, sem Fibonacci)              → +25%
-        let baseBoost: number;
-        let confluenceNote: string;
-
-        if (fibTimingStatus === 'confirmed') {
-          // GATILHO IDEAL: Girassol + Fibonacci no nível certo → máxima certeza
-          baseBoost = girassolConfluence >= 3 ? 1.80   // 3/3 + Fibonacci: +80%
-                    : girassolConfluence >= 2 ? 1.65   // 2/3 + Fibonacci: +65%
-                    : 1.45;                            // 1/3 + Fibonacci: +45%
-          confluenceNote = `🎯 GATILHO CONFIRMADO: Girassol (${girassolConfluence}/3 níveis) + Fibonacci ${fibTimingLevelName} @ ${fibTimingLevelPrice.toFixed(5)} (Δ${fibTimingDistPct.toFixed(3)}%) → ENTRADA IDEAL`;
-          finalReason = `GATILHO CONFLUENTE: ${finalReason} | ${girassolDesc} | Fibonacci confirma timing`;
-        } else if (fibTimingStatus === 'premature') {
-          // Fibonacci detectado mas preço não está no nível certo → timing prematuro
-          // Reduz o boost: Girassol disparou mas o momento ainda não chegou
-          baseBoost = girassolConfluence >= 3 ? 1.15   // 3/3 mas timing prematuro: +15%
-                    : girassolConfluence >= 2 ? 1.10   // 2/3 mas timing prematuro: +10%
-                    : 0.90;                            // 1/3 e timing prematuro: -10% (aguardar)
-          confluenceNote = `⏳ Girassol ATIVO (${girassolConfluence}/3 níveis ${finalAction}) mas Fibonacci indica timing PREMATURO — preço não está em zona S/R chave. Aguardar confluência.`;
-          finalReason = `${finalReason} | ${girassolDesc} | ⏳ Fibonacci: aguardar zona`;
-        } else {
-          // Fibonacci não detectado → boost padrão do Girassol
-          baseBoost = girassolConfluence >= 3 ? 1.60   // 3/3 níveis: +60%
-                    : girassolConfluence >= 2 ? 1.40   // 2/3 níveis: +40%
-                    : 1.25;                            // 1/3 nível:  +25%
-          confluenceNote = `✅ Girassol CONFIRMA ${finalAction} (${girassolConfluence}/3 níveis) → +${((baseBoost - 1) * 100).toFixed(0)}% confiança`;
-          finalReason = `${finalReason} | ${girassolDesc}`;
-        }
-
-        finalConfidence = Math.min(100, finalConfidence * baseBoost);
-        indicatorNotes.push(confluenceNote);
-
-        // Bônus adicional do Fibonacci por proximidade (quando timing confirmado, bônus maior)
-        if (fibBonus > 0 && fibTimingStatus !== 'premature') {
-          const adjustedFibBonus = fibTimingStatus === 'confirmed' ? fibBonus * 1.5 : fibBonus;
-          finalConfidence = Math.min(100, finalConfidence * (1 + adjustedFibBonus));
-          indicatorNotes.push(fibBonusNote);
-        }
-
-        // Se boost ficou menor que 1 (timing prematuro + 1 nível), bloquear
-        if (baseBoost < 1.0 && fibTimingStatus === 'premature') {
-          finalAction     = 'HOLD';
-          finalConfidence = 0;
-          finalReason     = `Timing prematuro: Girassol ${girassolBias} (${girassolConfluence}/3) ativo mas Fibonacci indica preço fora de zona chave — aguardar nível`;
-        }
-      } else if (finalAction === 'HOLD') {
-        // IA ainda sem sinal mas Girassol disparou: nenhuma acão adicional aqui.
-        // O bridge vai gerar sinal com threshold reduzido no próximo ciclo.
-        const fibHint = fibTimingStatus === 'confirmed' ? ` | 📐 Fibonacci confirma zona — pronto para gatilho` : fibTimingStatus === 'premature' ? ` | ⏳ Fibonacci: aguardar zona` : '';
-        indicatorNotes.push(`🌻 Girassol ATIVO (${girassolConfluence}/3 níveis ${girassolBias}) — aguardando confirmação da IA (threshold reduzido para próximo ciclo)${fibHint}`);
-      } else {
-        // Girassol CONTRADIZ o sinal da IA → bloquear SEMPRE
-        indicatorNotes.push(`🚫 Girassol CONTRADIZ IA: ${finalAction}→${girassolBias} (${girassolConfluence}/3 níveis) — operação bloqueada`);
-        console.log(`[MT5-Indicators] 🚫 Sinal ${finalAction} BLOQUEADO pelo Girassol (${girassolBias}, ${girassolConfluence} níveis) | ${sym}`);
-        finalAction     = 'HOLD';
-        finalConfidence = 0;
-        finalReason     = `Bloqueado: Girassol ${girassolBias} contradiz IA ${baseSignal?.action || '?'} — ${girassolDesc}`;
-      }
-    } else if (girassol?.detected && girassolBias === 'NEUTRAL') {
-      // ── CASO 2: Girassol instalado mas NEUTRO → HOLD obrigatório ────────
-      // Quando o Girassol está presente no gráfico, ele É o gatilho.
-      // Sem sinal do Girassol = sem entrada, independentemente do consenso da IA.
-      indicatorNotes.push(`⏸️ Girassol NEUTRO — ${girassolDesc}`);
-      console.log(`[MT5-Indicators] ⏸️ ${sym}: Girassol detectado mas sem sinal direcional (NEUTRO) — IA aguarda gatilho`);
-      finalAction     = 'HOLD';
-      finalConfidence = 0;
-      finalReason     = `Aguardando gatilho: Girassol ativo mas sem sinal nos 3 níveis — ${girassolDesc}`;
-    } else if (!girassol?.detected) {
-      // ── CASO 3: Girassol não instalado no gráfico → fallback ────────────
-      // Sem o indicador instalado, a IA opera com threshold normal (70%).
-      const requireGirassol = metaTraderBridge.getConfig().requireGirassolConfirmation;
-      if (requireGirassol && finalAction !== 'HOLD') {
-        indicatorNotes.push(`⚠️ Girassol NÃO DETECTADO — operação bloqueada (modo Girassol Obrigatório ativo)`);
-        console.log(`[MT5-Indicators] ⚠️ ${sym}: Girassol obrigatório mas não encontrado no gráfico`);
-        finalAction     = 'HOLD';
-        finalConfidence = 0;
-        finalReason     = `Bloqueado: Girassol não detectado no gráfico MT5 — instalar o indicador para ativar o sistema`;
-      } else {
-        indicatorNotes.push(`ℹ️ Girassol não detectado no gráfico — IA operando em modo fallback (threshold 70%). Instale o Girassol para ativar o gatilho primário.`);
-      }
-    }
-
-    // ── Log do Fibonacci (integração de entrada já aplicada acima) ──────
-    if (fibonacci?.detected) {
-      indicatorNotes.push(fibDesc);
-    }
-
-    // ── Sentimento de Mercado Brasileiro (noticiário em tempo real) ───────
-    // REGRA POR MODALIDADE:
-    //  • Day Trade / Scalp: notícias são CONTEXTO — apenas ajustam confiança (±30%).
-    //    Nunca bloqueiam a entrada. Girassol + Fibonacci + IA são os gatilhos primários.
-    //    Scalp opera em janelas de minutos; o macro do dia inteiro é contexto, não veto.
-    //  • Swing / Posição: notícias podem BLOQUEAR operações na direção contrária
-    //    quando o sentimento macro BR é forte (≥60%). Horizonte mais longo = maior peso macro.
-    if (finalAction !== 'HOLD') {
-      try {
-        const brazilSentiment = await brazilNewsService.getBrazilMarketSentiment();
-        const { aiInfluence, direction, strength, topHeadline, newsCount } = brazilSentiment;
-
-        const bridgeConfig     = metaTraderBridge.getConfig();
-        const tradingTimeframe = bridgeConfig.tradingTimeframe ?? 'day_trade';
-        const tradingStyle     = bridgeConfig.tradingStyle     ?? 'scalp';
-        const isScalpMode      = tradingTimeframe === 'day_trade' && tradingStyle === 'scalp';
-
-        if (isScalpMode) {
-          // SCALP: noticiário é contexto, nunca veto — Girassol + Fibonacci + IA prioridade máxima
-          if (Math.abs(aiInfluence.confidenceModifier) > 0.02) {
-            finalConfidence = Math.max(0, Math.min(100, finalConfidence * (1 + aiInfluence.confidenceModifier)));
-            const modStr = aiInfluence.confidenceModifier > 0
-              ? `+${(aiInfluence.confidenceModifier * 100).toFixed(0)}%`
-              : `${(aiInfluence.confidenceModifier * 100).toFixed(0)}%`;
-            indicatorNotes.push(`🇧🇷 [SCALP] Noticiário BR ${direction.toUpperCase()} (${strength}% força, ${newsCount} notícias) → confiança ${modStr} | Girassol é o gatilho primário — sem veto macro | "${topHeadline.substring(0, 45)}..."`);
-          } else {
-            indicatorNotes.push(`🇧🇷 [SCALP] Noticiário BR ${direction.toUpperCase()} (${newsCount} notícias) — contexto diário, sem impacto no scalp`);
-          }
-          if (aiInfluence.blocksBuy && finalAction === 'BUY') {
-            console.log(`[MT5-Indicators] 🇧🇷 [SCALP] ${sym}: notícia BR BEARISH ${strength}% — registrado como contexto, Girassol permite entrada`);
-          } else if (aiInfluence.blocksSell && finalAction === 'SELL') {
-            console.log(`[MT5-Indicators] 🇧🇷 [SCALP] ${sym}: notícia BR BULLISH ${strength}% — registrado como contexto, Girassol permite entrada`);
-          }
-        } else {
-          // SWING / POSIÇÃO: bloqueio por sentimento macro BR extremo
-          if (aiInfluence.blocksBuy && finalAction === 'BUY') {
-            indicatorNotes.push(`🇧🇷 Noticiário BR BEARISH (${strength}%) bloqueia COMPRA — risco macroeconômico elevado`);
-            console.log(`[MT5-Indicators] 🇧🇷 ${sym}: BUY BLOQUEADO por sentimento BR BEARISH (${strength}%)`);
-            finalAction     = 'HOLD';
-            finalConfidence = 0;
-            finalReason     = `${aiInfluence.reason} | "${topHeadline.substring(0, 60)}..."`;
-          } else if (aiInfluence.blocksSell && finalAction === 'SELL') {
-            indicatorNotes.push(`🇧🇷 Noticiário BR BULLISH (${strength}%) bloqueia VENDA — ambiente de mercado positivo`);
-            console.log(`[MT5-Indicators] 🇧🇷 ${sym}: SELL BLOQUEADO por sentimento BR BULLISH (${strength}%)`);
-            finalAction     = 'HOLD';
-            finalConfidence = 0;
-            finalReason     = `${aiInfluence.reason} | "${topHeadline.substring(0, 60)}..."`;
-          } else if (Math.abs(aiInfluence.confidenceModifier) > 0.02) {
-            finalConfidence = Math.max(0, Math.min(100, finalConfidence * (1 + aiInfluence.confidenceModifier)));
-            const modStr = aiInfluence.confidenceModifier > 0
-              ? `+${(aiInfluence.confidenceModifier * 100).toFixed(0)}%`
-              : `${(aiInfluence.confidenceModifier * 100).toFixed(0)}%`;
-            indicatorNotes.push(`🇧🇷 Noticiário BR ${direction.toUpperCase()} (${strength}% força, ${newsCount} notícias) → confiança ${modStr} | "${topHeadline.substring(0, 50)}..."`);
-          } else {
-            indicatorNotes.push(`🇧🇷 Noticiário BR NEUTRO (${newsCount} notícias analisadas) — sem impacto direcional`);
-          }
-        }
-      } catch (brazilErr) {
-        // Não bloquear trade por falha no serviço de notícias
-        indicatorNotes.push(`🇧🇷 Noticiário BR: serviço temporariamente indisponível`);
-      }
-    }
-
-    // ── Recalcular SL/TP usando indicadores reais do EA ──────────────────
-    let refinedSL   = baseSignal?.stopLoss    ?? 0;
-    let refinedTP   = baseSignal?.takeProfit  ?? 0;
-    let refinedSLPips = baseSignal?.stopLossPips   ?? 0;
-    let refinedTPPips = baseSignal?.takeProfitPips  ?? 0;
-    let slTpSource  = 'signal_original';
-
-    if (baseSignal && finalAction !== 'HOLD' && (finalAction === 'BUY' || finalAction === 'SELL')) {
-      const currentPrice = ask || bid || baseSignal.entryPrice || 0;
-
-      if (currentPrice > 0) {
-        const atr = metaTraderBridge.getSymbolATR(sym) || currentPrice * 0.002;
-
-        const fibLevels = fibonacci?.detected && Array.isArray(fibonacci.levels)
-          ? (fibonacci.levels as Array<{ level: string; price: number }>).filter(l => l.price > 0)
-          : undefined;
-
-        const sltp = metaTraderBridge.calcIndicatorDrivenSLTP({
-          symbol:                sym,
-          action:                finalAction as 'BUY' | 'SELL',
-          entryPrice:            currentPrice,
-          atr,
-          girassolSupportLevel,
-          girassolResistanceLevel,
-          fibonacciLevels:       fibLevels,
-          indicatorBuffers:      rawBuffers,
-        });
-
-        refinedSL     = sltp.stopLoss;
-        refinedTP     = sltp.takeProfit;
-        refinedSLPips = sltp.slPips;
-        refinedTPPips = sltp.tpPips;
-        slTpSource    = sltp.source;
-
-        indicatorNotes.push(`📍 SL/TP recalculado via indicadores reais (${sltp.source}): SL=${sltp.stopLoss.toFixed(5)} TP=${sltp.takeProfit.toFixed(5)}`);
-        console.log(`[MT5-Indicators] 📍 ${sym} SL/TP: ${sltp.source} | SL=${sltp.stopLoss.toFixed(5)} (${sltp.slPips}pip) | TP=${sltp.takeProfit.toFixed(5)} (${sltp.tpPips}pip)`);
-
-        // ── TP por microestrutura (45% do swing range + âncora Fibonacci) ──────
-        // Só aplica quando o duplo padrão da bolinha_media foi confirmado,
-        // garantindo que a entrada é de qualidade e o alvo respeita a estrutura.
-        if (doublePatternDetected) {
-          const microCandles = metaTraderBridge.getMarketData(sym);
-          if (microCandles.length >= 10) {
-            const microTP = metaTraderBridge.calcMicrostructureTP(
-              microCandles,
-              finalAction as 'BUY' | 'SELL',
-              currentPrice,
-              fibLevels
-            );
-            if (microTP > 0) {
-              const pipUnit = sym.includes('JPY') ? 0.01 : 0.00001;
-              refinedTP     = microTP;
-              refinedTPPips = Math.round(Math.abs(microTP - currentPrice) / pipUnit);
-              slTpSource    = sltp.source + '+microstructure_tp';
-              indicatorNotes.push(`🎯 TP microestrutura (duplo padrão confirmado): 45% swing range${fibLevels && fibLevels.length > 0 ? ' + âncora Fibonacci' : ''} → ${microTP.toFixed(5)} (${refinedTPPips}pip)`);
-              console.log(`[MT5-Indicators] 🎯 ${sym}: TP microestrutura=${microTP.toFixed(5)} (${refinedTPPips}pip) | candles=${microCandles.length}`);
-            }
-          }
-        }
-      }
-    }
-
-    // Adicionar contexto do ativo ao log
-    if (derivProfile) {
-      indicatorNotes.push(`📊 ${derivProfile.family} (${derivProfile.volClass}) — ${derivProfile.trendType} | RSI thr: ${derivProfile.rsiOversold}/${derivProfile.rsiOverbought}`);
     }
 
     // Monta resposta final
