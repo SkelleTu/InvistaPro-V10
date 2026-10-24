@@ -305,6 +305,9 @@ export function assessMt5RiskLimit(input: {
     } else if (status.reportedOpenPositions !== status.openPositions) {
       reasons.push(`Divergência entre posições do EA (${status.reportedOpenPositions}) e estado interno (${status.openPositions}); entradas bloqueadas`);
     }
+    if (status.positionsReconciled !== true) {
+      reasons.push('Os tickets de posição do broker e do servidor não foram reconciliados exatamente após o último heartbeat');
+    }
     const tradesStartedToday = closedTradesToday + Math.max(0, Math.floor(status.reportedOpenPositions ?? 0));
     if (tradesStartedToday >= maxDailyTrades) {
       reasons.push(`Limite configurado de ${maxDailyTrades} operações diárias atingido`);
