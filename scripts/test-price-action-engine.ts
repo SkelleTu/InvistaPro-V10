@@ -12,6 +12,8 @@ assert.ok(missing.reasons.length>0);
 const setup = evaluatePriceActionSetup({H4:candles(40,100,1),H1:candles(40,100,0.5),M15:candles(40,100,0.2),M5:candles(40,100,0.1)});
 assert.equal(setup.approved,false,'No confirmed trigger must never be approved');
 assert.equal(validateAIEntryReview(setup,{decision:'BUY',direction:'BUY',confidence:0.99}).approved,false,'AI cannot invent an entry');
+const strategyApproved = { action: 'BUY' as const, approved: true, reasons: [], checks: {}, features: {} };
+assert.equal(validateAIEntryReview(strategyApproved,{decision:'reject',direction:'SELL',confidence:0.01}).approved,true,'AI opinion/confidence cannot add an undocumented veto to an already-valid strategy setup');
 assert.equal(validateAIStopAdjustment('BUY',95,94,100),false,'BUY stop may not widen risk');
 assert.equal(validateAIStopAdjustment('BUY',95,97,100),true,'BUY stop may tighten protection');
 assert.equal(validateAIStopAdjustment('SELL',105,106,100),false,'SELL stop may not widen risk');
