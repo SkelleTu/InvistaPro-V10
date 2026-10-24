@@ -42,7 +42,7 @@ input int      IndicatorBars    = 5;           // Quantas barras recentes dos in
 input int      CandleCount      = 200;         // Candles para enviar à IA (histórico)
 input double   PriceActionRiskPercent = 1.0; // Risco por trade para Price Action (padrão 1%, máximo 2%)
 input double   PriceActionExtraRoundTripCostPerLot = 0.0; // Comissão + slippage estimados por lote em moeda da conta; 0 bloqueia Price Action
-input bool     PriceActionUseAIReview = true; // true = revisão IA diagnóstica; REAL continua bloqueado sem serviço essencial
+input bool     PriceActionUseAIReview = true; // Revisão IA obrigatória para BUY/SELL; false bloqueia novas entradas Price Action
 
 //--- Controle de Autonomia da IA
 input ENUM_AI_CONTROL_MODE AIControlMode = AI_FULL; // Modo de Controle da IA
@@ -842,6 +842,13 @@ void FetchAndProcessSignal()
    }
 
    // ── Fallback 2: GET simples de sinal ─────────────────────────────────
+   // Never use the generic legacy signal endpoint for Price Action crypto,
+   // because it lacks the strategy's full multi-timeframe/AI checklist.
+   if ((res == 404 || res == -1) && IsPriceActionCryptoSymbol())
+   {
+      Print("⛔ Price Action bloqueado: endpoint principal e alias indisponíveis; sem fallback genérico que possa contornar a estratégia.");
+      return;
+   }
    if (res == 404 || res == -1)
    {
       url = g_serverUrl + "/api/metatrader/signal?symbol=" + g_symbol;
