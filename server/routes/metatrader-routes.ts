@@ -141,7 +141,8 @@ router.get('/signal', mt5SignalAccess, (req: Request, res: Response) => {
     const symbolStr = (symbol as string) || '';
     const resolvedSymbol = symbolStr || config.symbols[0] || 'EURUSD';
     const normalizedStrategySymbol = resolvedSymbol.toUpperCase().replace(/[^A-Z0-9]/g, '');
-    if (['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BTCUSD', 'ETHUSD', 'SOLUSD'].includes(normalizedStrategySymbol)) {
+    if (['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BTCUSD', 'ETHUSD', 'SOLUSD']
+      .some(prefix => normalizedStrategySymbol.startsWith(prefix))) {
       return res.json({
         action: 'HOLD',
         confidence: 0,
