@@ -2605,7 +2605,7 @@ class MetaTraderBridge extends EventEmitter {
     }
 
     const suppliedTickets = Array.isArray(accountData.openPositionTickets) &&
-      accountData.openPositionTickets.every(ticket => typeof ticket === 'string' && /^\\d+$/.test(ticket))
+      accountData.openPositionTickets.every(ticket => typeof ticket === 'string' && /^\d+$/.test(ticket))
       ? Array.from(new Set(accountData.openPositionTickets))
       : null;
     if (suppliedTickets !== null) {
