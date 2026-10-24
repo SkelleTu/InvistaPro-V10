@@ -49,8 +49,9 @@ export interface PriceActionSetup {
 const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
 const validCandles = (v: unknown): v is Candle[] => Array.isArray(v) && v.length >= 30 &&
   v.every((c, i) => c && finite(c.time) && finite(c.open) && finite(c.high) && finite(c.low) &&
-    finite(c.close) && finite(c.volume) && c.high >= Math.max(c.open, c.close) &&
-    c.low <= Math.min(c.open, c.close) && c.high >= c.low && c.volume >= 0 &&
+    finite(c.close) && finite(c.volume) && c.open > 0 && c.close > 0 && c.high > 0 && c.low > 0 &&
+    c.high >= Math.max(c.open, c.close) && c.low <= Math.min(c.open, c.close) &&
+    c.high >= c.low && c.volume >= 0 &&
     (i === 0 || c.time > v[i - 1].time));
 
 const TIMEFRAME_SECONDS: Record<Timeframe, number> = {
@@ -127,7 +128,7 @@ function repeatedStructureZones(c: Candle[], kind: PivotKind, price: number, tim
     const cluster = clusters.find(items => Math.abs(average(items.map(item => item.price)) - point.price) <= tolerance);
     if (cluster) cluster.push(point); else clusters.push([point]);
   }
-  const mapped: PriceZone[] = clusters.filter(items => items.length >= 2).map(items => {
+  const mapped: PriceZone[] = clusters.filter(items => items.length >= 2).map((items): PriceZone => {
     const low = Math.min(...items.map(item => item.price)) - tolerance;
     const high = Math.max(...items.map(item => item.price)) + tolerance;
     const originIndex = Math.min(...items.map(item => item.index));
@@ -341,8 +342,13 @@ export function evaluatePriceActionSetup(
   const directionalMode = (t4 === 'bullish' || t4 === 'bearish') && t4 === t1;
   const rangeMode = t4 === 'range' && t1 === 'range';
   checks.trend_alignment = directionalMode || rangeMode;
-  features.marketMode = rangeMode ? 'range' : directionalMode ? t4 : 'conflict';
-  if (!checks.trend_alignment) reasons.push('Tendências H4/H1 em conflito; operação bloqueada');
+  features.marketMode = rangeMode ? 'range' : directionalMode ? t4 :
+    (t4 === 'unknown' || t1 === 'unknown') ? 'unknown' : 'conflict';
+  if (!checks.trend_alignment) reasons.push(
+    t4 === 'unknown' || t1 === 'unknown'
+      ? 'Estrutura de H4/H1 insuficiente para confirmar tendência ou range'
+      : 'Tendências H4/H1 em conflito; operação bloqueada',
+  );
 
   checks.m15_alignment = rangeMode
     ? true
@@ -530,6 +536,7 @@ export function evaluatePriceActionSetup(
     features.stop = finite(stop) ? stop : null;
     features.target = finite(target) ? target : null;
     features.riskReward = rr;
+    features.estimatedRoundTripCost = costs;
     features.stopBuffer = stopBuffer;
     features.structuralStopPivot = structuralPivot?.price ?? null;
     features.nearestBarrierDistance = barrierDistance;
@@ -566,7 +573,10 @@ export function evaluatePriceActionSetup(
       { candles: h4, timeframe: 'H4' },
       { candles: h1, timeframe: 'H1' },
       { candles: m15, timeframe: 'M15' },
-      { candles: diagnosticEntryCandles, timeframe: diagnosticEntryTimeframe },
+      ...entryOptions.map(candles => ({
+        candles,
+        timeframe: candles === validM5 ? 'M5' as const : 'M1' as const,
+      })),
     ];
     for (const frame of diagnosticFrames) {
       zones.push(
