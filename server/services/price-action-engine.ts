@@ -39,6 +39,10 @@ const validCandles = (v: unknown): v is Candle[] => Array.isArray(v) && v.length
     c.low <= Math.min(c.open, c.close) && c.high >= c.low && c.volume >= 0 &&
     (i === 0 || c.time > v[i - 1].time));
 
+export function isValidPriceActionCandles(v: unknown): v is Candle[] {
+  return validCandles(v);
+}
+
 type MarketTrend = 'bullish' | 'bearish' | 'range';
 type PivotKind = 'high' | 'low';
 interface Pivot { index: number; price: number }
