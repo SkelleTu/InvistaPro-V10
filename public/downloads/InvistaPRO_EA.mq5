@@ -1094,9 +1094,10 @@ void FetchAndProcessSignal()
    }
 
    ulong confirmedPositionTicket = 0;
-   // CTrade returning true only means the request passed its local checks.
-   // A Price Action entry is accepted only after a real fill and a broker-side protective SL/TP are verified.
-   if (success && isPriceActionCrypto)
+   long confirmedPositionIdentifier = 0;
+   // CTrade's boolean result is not proof of execution. Every market entry must
+   // be matched to the exact broker deal and a real, protected position.
+   if (success)
    {
       uint fillCode = trade.ResultRetcode();
       double fillPrice = trade.ResultPrice();
@@ -1105,7 +1106,7 @@ void FetchAndProcessSignal()
                     fillPrice > 0.0 && fillVolume > 0.0;
       if (!filled)
       {
-         Print("⛔ Price Action: envio não foi confirmado como execução. Retcode=", fillCode,
+         Print("⛔ Ordem recusada como execução não confirmada. Retcode=", fillCode,
                " preço=", DoubleToString(fillPrice, _Digits),
                " volume=", DoubleToString(fillVolume, 8));
          success = false;
@@ -1114,19 +1115,21 @@ void FetchAndProcessSignal()
       {
          bool positionFound = false;
          bool protectionValid = false;
-         long confirmedPositionIdentifier = 0;
          long executedPositionIdentifier = 0;
          ulong executedDealTicket = trade.ResultDeal();
          if (executedDealTicket > 0 && HistoryDealSelect(executedDealTicket))
             executedPositionIdentifier = HistoryDealGetInteger(executedDealTicket, DEAL_POSITION_ID);
+
          for (int positionIndex = PositionsTotal() - 1; positionIndex >= 0; positionIndex--)
          {
             ulong candidateTicket = PositionGetTicket(positionIndex);
             if (candidateTicket == 0 || !PositionSelectByTicket(candidateTicket)) continue;
             if (PositionGetString(POSITION_SYMBOL) != g_symbol) continue;
             if ((long)PositionGetInteger(POSITION_MAGIC) != MagicNumber) continue;
-            if (executedPositionIdentifier <= 0 || PositionGetInteger(POSITION_IDENTIFIER) != executedPositionIdentifier) continue;
+            if (executedPositionIdentifier <= 0 ||
+                PositionGetInteger(POSITION_IDENTIFIER) != executedPositionIdentifier) continue;
             if ((datetime)PositionGetInteger(POSITION_TIME) < tradeRequestTime) continue;
+
             long brokerType = PositionGetInteger(POSITION_TYPE);
             if ((action == "BUY" && brokerType != POSITION_TYPE_BUY) ||
                 (action == "SELL" && brokerType != POSITION_TYPE_SELL)) continue;
@@ -1142,7 +1145,7 @@ void FetchAndProcessSignal()
                                 : (brokerSL > brokerEntry && brokerTP < brokerEntry));
             if (!protectionValid)
             {
-               Print("🚨 Price Action CRÍTICO: posição executada sem SL/TP protetivos válidos. Ticket=", candidateTicket,
+               Print("🚨 CRÍTICO: posição executada sem SL/TP protetivos válidos. Ticket=", candidateTicket,
                      ". Tentando fechamento de emergência.");
                bool emergencyClose = trade.PositionClose(candidateTicket);
                if (!emergencyClose || trade.ResultRetcode() != TRADE_RETCODE_DONE)
@@ -1154,7 +1157,7 @@ void FetchAndProcessSignal()
 
          if (!positionFound)
          {
-            Print("🚨 Price Action CRÍTICO: broker retornou execução, mas a posição não pôde ser reconciliada. Entradas seguintes devem ser bloqueadas até revisão.");
+            Print("🚨 CRÍTICO: broker confirmou execução, mas a posição não pôde ser reconciliada ao deal. Entradas seguintes devem ser bloqueadas até revisão.");
             success = false;
          }
          else if (!protectionValid)
@@ -1163,7 +1166,8 @@ void FetchAndProcessSignal()
          }
          else
          {
-            GlobalVariableSet("InvistaPA_SL0_" + IntegerToString((long)confirmedPositionTicket), stopLoss);
+            if (isPriceActionCrypto)
+               GlobalVariableSet("InvistaPA_SL0_" + IntegerToString((long)confirmedPositionTicket), stopLoss);
             if (confirmedPositionIdentifier > 0)
                GlobalVariableSet("InvistaPA_IDMAP_" + StringFormat("%I64d", confirmedPositionIdentifier), (double)confirmedPositionTicket);
             string signalFile = "InvistaPA_SIGNAL_" + StringFormat("%I64u", confirmedPositionTicket) + ".txt";
