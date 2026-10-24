@@ -1,6 +1,6 @@
 /**
- * Deterministic Price Action gate for the layered Invista Pro strategy.
- * No AI may create an entry; AI can only approve/reject a valid strategy setup.
+ * Deterministic Price Action gate implementing the written strategy as the normative rule set.
+ * AI confidence/consensus is diagnostic and cannot add entry criteria or override risk controls.
  */
 export type TradeSide = 'BUY' | 'SELL';
 export type Timeframe = 'H4' | 'H1' | 'M15' | 'M5' | 'M1';
@@ -261,7 +261,8 @@ export function evaluatePriceActionSetup(
     const bos = breakOfStructure(m15, side) || breakOfStructure(entryCandles, side);
     const choch = changeOfCharacter(m15, side) || changeOfCharacter(entryCandles, side);
     const ob = orderBlockZone(m15, side) ?? orderBlockZone(entryCandles, side);
-    const zoneNear = supportResistance !== null || fvgZone !== null || ob !== null || sweep;
+    const rangeEdgeQualified = rangeMode && side !== null;
+    const zoneNear = rangeEdgeQualified || supportResistance !== null || fvgZone !== null || ob !== null || sweep;
 
     const volumes = entryCandles.slice(-21, -1).map(c => c.volume);
     const volumeBaseline = average(volumes);
@@ -278,6 +279,7 @@ export function evaluatePriceActionSetup(
     features.orderBlockHigh = ob?.high ?? null;
     features.supportResistanceZone = supportResistance !== null;
     features.supportResistanceTouches = supportResistance?.touches ?? 0;
+    features.rangeEdgeQualified = rangeEdgeQualified;
     features.zoneNear = zoneNear;
     features.volumeBaseline = volumeBaseline;
     features.volumeRatio = volumeBaseline > 0 ? triggerVolume / volumeBaseline : null;
@@ -297,9 +299,10 @@ export function evaluatePriceActionSetup(
     const stopBuffer = Math.max(averageCandleRange * 0.1, entry * 0.00005);
     const stop = side === 'BUY' ? swingLow - stopBuffer : swingHigh + stopBuffer;
     const risk = Math.abs(entry - stop);
-    const costs = context.estimatedRoundTripCost;
-    const costsValid = finite(costs) && costs >= 0;
-    const targetDistance = risk * 2 + (costsValid ? costs * 3 : 0);
+    const costsCandidate = context.estimatedRoundTripCost;
+    const costsValid = finite(costsCandidate) && costsCandidate >= 0;
+    const costs = costsValid ? costsCandidate as number : 0;
+    const targetDistance = risk * 2 + costs * 3;
     const target = side === 'BUY' ? entry + targetDistance : entry - targetDistance;
     const rr = risk > 0 && costsValid ? (Math.abs(target - entry) - costs) / (risk + costs) : 0;
     const barrierDistance = nearestBarrierDistance([h4, h1, m15], side, entry);
