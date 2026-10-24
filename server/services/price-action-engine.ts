@@ -309,8 +309,39 @@ export function evaluatePriceActionSetup(
     if (!checks[`data_${timeframe}`]) reasons.push(`Dados insuficientes ou inválidos em ${timeframe}`);
   }
 
-  const entryTimeframe: 'M5' | 'M1' | null = validCandles(frames.M5) ? 'M5'
-    : validCandles(frames.M1) ? 'M1' : null;
+  const validM5 = validCandles(frames.M5);
+  const validM1 = validCandles(frames.M1);
+  let entryTimeframe: 'M5' | 'M1' | null = validM5 ? 'M5' : validM1 ? 'M1' : null;
+
+  // M5 is preferred, but M1 must remain a real alternative when only M1 confirms
+  // the H4/H1 direction or the correctly triggered edge of a validated range.
+  if (validM5 && validM1 && validCandles(frames.H4) && validCandles(frames.H1) && validCandles(frames.M15)) {
+    const selectionH4 = trend(frames.H4);
+    const selectionH1 = trend(frames.H1);
+    const selectionM15 = frames.M15;
+    const selectionM15Trend = trend(selectionM15);
+    const selectionRange = detectRangeBounds(selectionM15);
+    const directional = (selectionH4 === 'bullish' || selectionH4 === 'bearish') && selectionH4 === selectionH1;
+    const ranged = selectionH4 === 'range' && selectionH1 === 'range' &&
+      selectionM15Trend === 'range' && selectionRange !== null;
+    const candidates: Array<{ timeframe: 'M5' | 'M1'; candles: Candle[] }> = [
+      { timeframe: 'M5', candles: frames.M5! },
+      { timeframe: 'M1', candles: frames.M1! },
+    ];
+    const matching = candidates.find(candidate => {
+      const candidateSide = trigger(candidate.candles);
+      const candidatePrice = candidate.candles[candidate.candles.length - 1].close;
+      if (directional) return candidateSide === (selectionH4 === 'bullish' ? 'BUY' : 'SELL');
+      if (ranged && selectionRange) {
+        const edgeTolerance = Math.max(averageRange(selectionM15) * 0.75, Math.abs(candidatePrice) * 0.0005);
+        return (candidateSide === 'BUY' && candidatePrice <= selectionRange.low + edgeTolerance) ||
+          (candidateSide === 'SELL' && candidatePrice >= selectionRange.high - edgeTolerance);
+      }
+      return false;
+    });
+    if (matching) entryTimeframe = matching.timeframe;
+  }
+
   const entryFrame = entryTimeframe ? frames[entryTimeframe] : undefined;
   checks.entry_data = entryFrame !== undefined;
   if (!checks.entry_data) reasons.push('Dados insuficientes em M5/M1 para confirmação de entrada');
