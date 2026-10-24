@@ -343,6 +343,7 @@ export function evaluatePriceActionSetup(
   }
 
   const entryFrame = entryTimeframe ? frames[entryTimeframe] : undefined;
+  features.entryTimeframe = entryTimeframe ?? 'unknown';
   checks.entry_data = entryFrame !== undefined;
   if (!checks.entry_data) reasons.push('Dados insuficientes em M5/M1 para confirmação de entrada');
 
