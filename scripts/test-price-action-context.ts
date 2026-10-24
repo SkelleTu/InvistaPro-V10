@@ -35,9 +35,19 @@ const trusted = buildTrustedPriceActionContext({
   riskLimitOk: true,
   newsBlocked: false,
   sessionOpen: true,
+  estimatedExtraRoundTripCostRate: 0,
 });
 assert.ok(Math.abs(Number(trusted.spread) - 0.1) < 1e-9, 'Spread calculation must preserve the expected price difference');
-assert.ok(Math.abs(Number(trusted.estimatedRoundTripCost) - 0.2) < 1e-9, 'Round-trip cost must equal twice the observed spread');
+assert.ok(Math.abs(Number(trusted.estimatedRoundTripCost) - 0.2) < 1e-9, 'Round-trip cost must include twice the observed spread when extra costs are explicitly configured as zero');
+const costWithFees = buildTrustedPriceActionContext({
+  bid: 100, ask: 100.1, entryPrice: 100.05, riskLimitOk: true, newsBlocked: false, sessionOpen: true,
+  estimatedExtraRoundTripCostRate: 0.001,
+});
+assert.ok(Math.abs(Number(costWithFees.estimatedRoundTripCost) - 0.30005) < 1e-9, 'Round-trip cost must add the configured commission/slippage rate to spread costs');
+const missingCostEstimate = buildTrustedPriceActionContext({
+  bid: 100, ask: 100.1, entryPrice: 100.05, riskLimitOk: true, newsBlocked: false, sessionOpen: true,
+});
+assert.equal(missingCostEstimate.estimatedRoundTripCost, undefined, 'Missing fee/slippage configuration must not be assumed zero');
 assert.equal(trusted.highImpactNewsBlocked, false);
 assert.equal(trusted.tradingSessionOpen, true);
 assert.equal(buildTrustedPriceActionContext({
