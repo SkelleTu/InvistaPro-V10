@@ -608,7 +608,8 @@ string BuildCandlesJson(MqlRates &rates[], int count)
 string BuildTimeframeCandlesJson(ENUM_TIMEFRAMES timeframe, int count)
 {
    MqlRates rates[];
-   int copied = CopyRates(g_symbol, timeframe, 0, count, rates);
+   // Price Action never evaluates an unfinished/live candle.
+   int copied = CopyRates(g_symbol, timeframe, 1, count, rates);
    if (copied < 30) return "[]";
    return BuildCandlesJson(rates, copied);
 }
