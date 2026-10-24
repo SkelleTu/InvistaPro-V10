@@ -277,7 +277,6 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
       candles,
       timeframes,
       accountType: requestAccountType,
-      priceActionUseAIReview,
       indicatorSignals,   // { girassol: {...}, fibonacci: {...} }
       indicatorBuffers,   // array bruto de todos os buffers
       indicatorCount,
@@ -397,31 +396,9 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
         });
       }
 
-      // Optional strategy-only mode for controlled comparison. The deterministic setup and all
-      // server safety gates remain mandatory; only the second-stage AI review is skipped.
-      if (priceActionUseAIReview === false) {
-        if (Array.isArray(candles) && candles.length > 0) metaTraderBridge.addMarketData(sym, candles);
-        const timestamp = Date.now();
-        return res.json({
-          id: 'pa-' + randomBytes(8).toString('hex'),
-          symbol: sym,
-          action: priceActionSetup.action,
-          lotSize: config.defaultLotSize,
-          stopLoss: priceActionSetup.stopLoss,
-          takeProfit: priceActionSetup.takeProfit,
-          stopLossPips: 0,
-          takeProfitPips: 0,
-          entryPrice: priceActionSetup.entry,
-          confidence: 100,
-          aiSources: [],
-          indicators: {},
-          timestamp,
-          expiresAt: timestamp + Math.max(10, config.signalTimeoutSeconds) * 1000,
-          reason: 'Modo autônomo: entrada aprovada pela estratégia determinística; risco, notícias, spread e sessão foram validados no servidor.',
-          strategyMode: 'AUTONOMOUS_PRICE_ACTION',
-          executionEnabled: true,
-        });
-      }
+      // Continue collecting AI/indicator diagnostics, but the approved deterministic
+      // setup remains the execution authority at the final response.
+
     }
 
     // Atualiza dados de mercado no bridge
@@ -1044,26 +1021,39 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
       indicatorNotes.push(`📊 ${derivProfile.family} (${derivProfile.volClass}) — ${derivProfile.trendType} | RSI thr: ${derivProfile.rsiOversold}/${derivProfile.rsiOverbought}`);
     }
 
-    // Enforce strategy -> AI sequence: the AI may reject, never reverse or invent a setup.
-    if (priceActionSetup) {
-      if (!baseSignal || finalAction !== priceActionSetup.action || finalConfidence < 70) {
-        return res.json({
-          action: 'HOLD',
-          confidence: 0,
-          code: 'PRICE_ACTION_AI_REVIEW_REJECTED',
-          reason: 'O sinal da estratégia não foi aprovado pela análise de IA na mesma direção ou não atingiu a confiança mínima.',
-          strategyAction: priceActionSetup.action,
-          aiAction: finalAction,
-          aiConfidence: finalConfidence,
-          rejectionReasons: priceActionSetup.reasons,
-          timestamp: Date.now()
-        });
-      }
-      // Strategy-owned structural SL/TP cannot be loosened by AI/indicator refinements.
-      refinedSL = priceActionSetup.stopLoss!;
-      refinedTP = priceActionSetup.takeProfit!;
-      baseSignal.entryPrice = priceActionSetup.entry;
-      indicatorNotes.push('Price Action multi-timeframe validado; SL/TP mantidos nos níveis estruturais da estratégia.');
+    // The supplied strategy document is the normative rule set. AI/indicator analysis above
+    // remains diagnostic: consensus, a 70% confidence threshold, Girassol double-pattern and
+    // Fibonacci timing cannot append entry criteria once all documented strategy gates pass.
+    if (priceActionSetup?.approved) {
+      const timestamp = Date.now();
+      return res.json({
+        id: 'pa-' + randomBytes(8).toString('hex'),
+        symbol: sym,
+        action: priceActionSetup.action,
+        lotSize: config.defaultLotSize,
+        stopLoss: priceActionSetup.stopLoss,
+        takeProfit: priceActionSetup.takeProfit,
+        stopLossPips: 0,
+        takeProfitPips: 0,
+        entryPrice: priceActionSetup.entry,
+        confidence: 100,
+        aiSources: baseSignal?.aiSources ?? [],
+        indicators: {},
+        timestamp,
+        expiresAt: timestamp + Math.max(10, config.signalTimeoutSeconds) * 1000,
+        reason: 'Setup aprovado pelos critérios determinísticos e controles de segurança da estratégia. Consenso/confiança da IA e filtros legados não acrescentam vetos.',
+        strategyMode: 'AUTHORITATIVE_PRICE_ACTION',
+        strategyCompliance: 100,
+        aiDiagnostics: {
+          action: finalAction,
+          confidence: finalConfidence,
+          reason: finalReason,
+          girassolBias,
+          girassolConfluence,
+          indicatorNotes,
+        },
+        executionEnabled: true,
+      });
     }
 
     // Monta resposta final
