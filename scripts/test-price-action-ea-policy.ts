@@ -2,12 +2,17 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const ea = readFileSync(new URL('../public/downloads/InvistaPRO_EA.mq5', import.meta.url), 'utf8');
+const routes = readFileSync(new URL('../server/routes/metatrader-routes.ts', import.meta.url), 'utf8');
 
 assert.ok(ea.includes('PriceActionRiskPercent = 1.0'), 'EA must expose the bounded Price Action risk setting');
 assert.ok(ea.includes('PriceActionUseAIReview = true'), 'EA must expose AI-reviewed and autonomous strategy modes');
 assert.ok(ea.includes('priceActionUseAIReview'), 'EA must transmit the selected Price Action mode to the server');
 assert.ok(ea.includes('requestAccountType'), 'EA must transmit its actual terminal account mode on each signal request');
 assert.ok(ea.includes('if (IsPriceActionCryptoSymbol())'), 'All crypto Price Action positions must use deterministic management without an AI exit veto');
+assert.ok(ea.includes('AIControlMode == AI_MANUAL && !isStrategyCrypto'), 'Manual mode must not replace the documented crypto strategy stops/targets');
+assert.ok(ea.includes('AIControlMode == AI_PARTIAL && !isStrategyCrypto'), 'Partial mode must not replace the documented crypto strategy stops/targets');
+assert.ok(routes.includes("strategyMode: 'AUTHORITATIVE_PRICE_ACTION'"), 'A valid strategy setup must determine the crypto entry');
+assert.ok(!routes.includes('PRICE_ACTION_AI_REVIEW_REJECTED'), 'A fixed AI confidence/consensus gate must not veto a valid strategy setup');
 assert.ok(ea.includes('CopyRates(g_symbol, timeframe, 1, count, rates)'), 'Strategy candles must exclude the unfinished bar');
 assert.ok(ea.includes('CalculatePriceActionRiskLot'), 'EA must size Price Action orders from equity and structural stop');
 assert.ok(ea.includes('riskDistance / entry > 0.015'), 'EA must reject stops wider than 1.5%');
