@@ -296,18 +296,19 @@ export function evaluatePriceActionSetup(
     : 'Sem gatilho M5/M1 confirmado na direção alinhada de H4/H1');
 
   if (side) {
+    const selectedEntryCandles = entryCandles!;
     const supportResistance = repeatedStructureZone(m15, side === 'BUY' ? 'low' : 'high', entry);
-    const fvgZone = fairValueGapZone(m15, side, entry) ?? fairValueGapZone(entryCandles, side, entry);
-    const sweep = liquiditySweep(m15, side) || liquiditySweep(entryCandles, side);
-    const bos = breakOfStructure(m15, side) || breakOfStructure(entryCandles, side);
-    const choch = changeOfCharacter(m15, side) || changeOfCharacter(entryCandles, side);
-    const ob = orderBlockZone(m15, side) ?? orderBlockZone(entryCandles, side);
+    const fvgZone = fairValueGapZone(m15, side, entry) ?? fairValueGapZone(selectedEntryCandles, side, entry);
+    const sweep = liquiditySweep(m15, side) || liquiditySweep(selectedEntryCandles, side);
+    const bos = breakOfStructure(m15, side) || breakOfStructure(selectedEntryCandles, side);
+    const choch = changeOfCharacter(m15, side) || changeOfCharacter(selectedEntryCandles, side);
+    const ob = orderBlockZone(m15, side) ?? orderBlockZone(selectedEntryCandles, side);
     const rangeEdgeQualified = rangeMode && side !== null;
     const zoneNear = rangeEdgeQualified || supportResistance !== null || fvgZone !== null || ob !== null || sweep;
 
-    const volumes = entryCandles.slice(-21, -1).map(c => c.volume);
+    const volumes = selectedEntryCandles.slice(-21, -1).map(c => c.volume);
     const volumeBaseline = average(volumes);
-    const triggerVolume = entryCandles[entryCandles.length - 1].volume;
+    const triggerVolume = selectedEntryCandles[selectedEntryCandles.length - 1].volume;
     const volumeOk = volumeBaseline > 0 && triggerVolume > volumeBaseline;
     features.fvg = fvgZone !== null;
     features.fvgLow = fvgZone?.low ?? null;
@@ -333,7 +334,7 @@ export function evaluatePriceActionSetup(
     if (!checks.structure_confirmation) reasons.push('Sem FVG válido, varredura de liquidez, BOS, CHoCH ou Order Block');
     if (!zoneNear) reasons.push('Preço fora de zona válida de suporte/resistência, FVG, Order Block ou liquidez');
 
-    const recent = entryCandles.slice(-21, -1);
+    const recent = selectedEntryCandles.slice(-21, -1);
     const swingLow = Math.min(...recent.map(c => c.low));
     const swingHigh = Math.max(...recent.map(c => c.high));
     const averageCandleRange = average(recent.map(c => c.high - c.low));
