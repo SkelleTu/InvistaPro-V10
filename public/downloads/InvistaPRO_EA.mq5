@@ -715,6 +715,21 @@ bool IsPriceActionCryptoSymbol()
            StringFind(normalized, "SOLUSD") == 0);
 }
 
+// Derive volume precision from the broker-supported volume step.
+int VolumeDigitsFromStep()
+{
+   double step = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_STEP);
+   if (step <= 0.0) return 2;
+
+   int digits = 0;
+   while (digits < 8 && MathAbs(step - MathRound(step)) > 0.0000001)
+   {
+      step *= 10.0;
+      digits++;
+   }
+   return digits;
+}
+
 double CalculatePriceActionRiskLot(double entryPrice, double stopLoss)
 {
    if (entryPrice <= 0 || stopLoss <= 0 || PriceActionRiskPercent < 1.0 || PriceActionRiskPercent > 2.0)
@@ -735,7 +750,7 @@ double CalculatePriceActionRiskLot(double entryPrice, double stopLoss)
    double volume = MathFloor(rawVolume / volumeStep) * volumeStep;
    if (volume < minVolume) return 0.0;
    if (volume > maxVolume) volume = maxVolume;
-   int volumeDigits = (int)SymbolInfoInteger(g_symbol, SYMBOL_VOLUME_DIGITS);
+   int volumeDigits = VolumeDigitsFromStep();
    return NormalizeDouble(volume, volumeDigits);
 }
 
@@ -1142,7 +1157,7 @@ void MonitorOpenPositions()
                 double volume = posInfo.Volume();
                 double volumeStep = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_STEP);
                 double minVolume = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_MIN);
-                int volumeDigits = (int)SymbolInfoInteger(g_symbol, SYMBOL_VOLUME_DIGITS);
+                int volumeDigits = VolumeDigitsFromStep();
                 double partialVolume = (volumeStep > 0) ? MathFloor((volume * 0.5) / volumeStep) * volumeStep : 0.0;
                 partialVolume = NormalizeDouble(partialVolume, volumeDigits);
                 if (partialVolume >= minVolume && volume - partialVolume >= minVolume)
