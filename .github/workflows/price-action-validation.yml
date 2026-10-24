@@ -1,0 +1,33 @@
+name: Price Action validation
+
+on:
+  push:
+    branches:
+      - fix/price-action-compliance-20261024
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Type-check server and client
+        run: npm run check
+      - name: Run automated policy tests
+        run: npm test
+      - name: Build production bundle
+        run: npm run build
