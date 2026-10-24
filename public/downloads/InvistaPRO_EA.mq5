@@ -1092,6 +1092,73 @@ void FetchAndProcessSignal()
       }
    }
 
+   ulong confirmedPositionTicket = 0;
+   // CTrade returning true only means the request passed its local checks.
+   // A Price Action entry is accepted only after a real fill and a broker-side protective SL/TP are verified.
+   if (success && isPriceActionCrypto)
+   {
+      uint fillCode = trade.ResultRetcode();
+      double fillPrice = trade.ResultPrice();
+      double fillVolume = trade.ResultVolume();
+      bool filled = (fillCode == TRADE_RETCODE_DONE || fillCode == TRADE_RETCODE_DONE_PARTIAL) &&
+                    fillPrice > 0.0 && fillVolume > 0.0;
+      if (!filled)
+      {
+         Print("⛔ Price Action: envio não foi confirmado como execução. Retcode=", fillCode,
+               " preço=", DoubleToString(fillPrice, _Digits),
+               " volume=", DoubleToString(fillVolume, 8));
+         success = false;
+      }
+      else
+      {
+         bool positionFound = false;
+         bool protectionValid = false;
+         for (int positionIndex = PositionsTotal() - 1; positionIndex >= 0; positionIndex--)
+         {
+            ulong candidateTicket = PositionGetTicket(positionIndex);
+            if (candidateTicket == 0 || !PositionSelectByTicket(candidateTicket)) continue;
+            if (PositionGetString(POSITION_SYMBOL) != g_symbol) continue;
+            if ((long)PositionGetInteger(POSITION_MAGIC) != MagicNumber) continue;
+            long brokerType = PositionGetInteger(POSITION_TYPE);
+            if ((action == "BUY" && brokerType != POSITION_TYPE_BUY) ||
+                (action == "SELL" && brokerType != POSITION_TYPE_SELL)) continue;
+
+            positionFound = true;
+            confirmedPositionTicket = candidateTicket;
+            double brokerSL = PositionGetDouble(POSITION_SL);
+            double brokerTP = PositionGetDouble(POSITION_TP);
+            double brokerEntry = PositionGetDouble(POSITION_PRICE_OPEN);
+            protectionValid = brokerSL > 0.0 && brokerTP > 0.0 && brokerEntry > 0.0 &&
+               (action == "BUY" ? (brokerSL < brokerEntry && brokerTP > brokerEntry)
+                                : (brokerSL > brokerEntry && brokerTP < brokerEntry));
+            if (!protectionValid)
+            {
+               Print("🚨 Price Action CRÍTICO: posição executada sem SL/TP protetivos válidos. Ticket=", candidateTicket,
+                     ". Tentando fechamento de emergência.");
+               bool emergencyClose = trade.PositionClose(candidateTicket);
+               if (!emergencyClose || trade.ResultRetcode() != TRADE_RETCODE_DONE)
+                  Print("🚨 FALHA NO FECHAMENTO DE EMERGÊNCIA. Verifique imediatamente o ticket ", candidateTicket,
+                        " | retcode=", trade.ResultRetcode());
+            }
+            break;
+         }
+
+         if (!positionFound)
+         {
+            Print("🚨 Price Action CRÍTICO: broker retornou execução, mas a posição não pôde ser reconciliada. Entradas seguintes devem ser bloqueadas até revisão.");
+            success = false;
+         }
+         else if (!protectionValid)
+         {
+            success = false;
+         }
+         else
+         {
+            GlobalVariableSet("InvistaPA_SL0_" + IntegerToString((long)confirmedPositionTicket), stopLoss);
+         }
+      }
+   }
+
    if (success)
    {
       double executedVolume = trade.ResultVolume();
@@ -1101,14 +1168,18 @@ void FetchAndProcessSignal()
                " executado=", DoubleToString(executedVolume, 8));
          lotSize = executedVolume;
       }
-      Print("✅ Ordem executada: ", action, " | Ticket: ", trade.ResultOrder(),
+      Print("✅ Ordem confirmada: ", action, " | Ticket/posição: ",
+            (confirmedPositionTicket > 0 ? confirmedPositionTicket : trade.ResultOrder()),
             " | Volume confirmado: ", DoubleToString(lotSize, 8),
+            " | Preço de execução: ", DoubleToString(trade.ResultPrice(), _Digits),
             " | SL: ", NormalizeDouble(stopLoss, _Digits),
             " | TP: ", NormalizeDouble(takeProfit, _Digits));
-      ConfirmTradeOpen(signalId, (int)trade.ResultOrder(), action, lotSize, stopLoss, takeProfit);
+      ConfirmTradeOpen(signalId,
+         (int)(confirmedPositionTicket > 0 ? confirmedPositionTicket : trade.ResultOrder()),
+         action, lotSize, stopLoss, takeProfit);
    }
    else
-      Print("❌ Falha definitiva: ", trade.ResultRetcode(), " / ", GetLastError());
+      Print("❌ Falha definitiva ou execução não reconciliada: ", trade.ResultRetcode(), " / ", GetLastError());
 }
 
 //+------------------------------------------------------------------+
@@ -1196,9 +1267,111 @@ void MonitorOpenPositions()
           }
        }
 
-// With AI review disabled, the server blocks new entries; existing positions retain local SL/TP protection.
-      if (IsPriceActionCryptoSymbol() && !PriceActionUseAIReview)
+// Strategy position management is deterministic. Do not let the legacy AI monitor
+// close this position using rules that are not part of the Price Action document.
+      if (IsPriceActionCryptoSymbol())
+      {
+         string initialStopKey = "InvistaPA_SL0_" + IntegerToString((long)ticket);
+         double originalStructuralStop = GlobalVariableCheck(initialStopKey)
+            ? GlobalVariableGet(initialStopKey) : 0.0;
+         if (originalStructuralStop <= 0.0 && sl > 0.0)
+         {
+            originalStructuralStop = sl;
+            GlobalVariableSet(initialStopKey, originalStructuralStop);
+         }
+
+         MqlRates trailRates[];
+         int trailCopied = CopyRates(g_symbol, PERIOD_M5, 1, 60, trailRates);
+         if (trailCopied >= 7)
+         {
+            double lastClosedM5 = trailRates[trailCopied - 1].close;
+            bool structureInvalidated = originalStructuralStop > 0.0 &&
+               (posType == "BUY" ? lastClosedM5 < originalStructuralStop
+                                 : lastClosedM5 > originalStructuralStop);
+            if (structureInvalidated)
+            {
+               Print("⚠️ Price Action: fechamento M5 confirmou invalidação da estrutura original. Encerrando posição ", ticket);
+               if (!trade.PositionClose(ticket) || trade.ResultRetcode() != TRADE_RETCODE_DONE)
+                  Print("🚨 Falha ao encerrar após invalidação estrutural. Ticket=", ticket,
+                        " retcode=", trade.ResultRetcode());
+               continue;
+            }
+
+            string partialKeyForTrail = "InvistaPA_TP1_" + IntegerToString((long)ticket);
+            bool partialWasExecuted = GlobalVariableCheck(partialKeyForTrail) &&
+                                      GlobalVariableGet(partialKeyForTrail) > 0.0;
+            if (partialWasExecuted && sl > 0.0)
+            {
+               double rangeSum = 0.0;
+               int rangeCount = 0;
+               int rangeStart = MathMax(0, trailCopied - 21);
+               for (int ri = rangeStart; ri < trailCopied - 1; ri++)
+               {
+                  double candleRange = trailRates[ri].high - trailRates[ri].low;
+                  if (candleRange > 0.0)
+                  {
+                     rangeSum += candleRange;
+                     rangeCount++;
+                  }
+               }
+               double avgM5Range = rangeCount > 0 ? rangeSum / rangeCount : 0.0;
+               double tickSize = SymbolInfoDouble(g_symbol, SYMBOL_TRADE_TICK_SIZE);
+               double point = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
+               double trailBuffer = MathMax(avgM5Range * 0.1, tickSize);
+               long stopsLevel = SymbolInfoInteger(g_symbol, SYMBOL_TRADE_STOPS_LEVEL);
+               long freezeLevel = SymbolInfoInteger(g_symbol, SYMBOL_TRADE_FREEZE_LEVEL);
+               double minStopDistance = MathMax((double)MathMax(stopsLevel, freezeLevel) * point, tickSize);
+               double currentBid = SymbolInfoDouble(g_symbol, SYMBOL_BID);
+               double currentAsk = SymbolInfoDouble(g_symbol, SYMBOL_ASK);
+               double proposedStop = 0.0;
+
+               // Find the most recent confirmed M5 higher-low (BUY) / lower-high (SELL).
+               for (int pivotIndex = trailCopied - 3; pivotIndex >= 2; pivotIndex--)
+               {
+                  bool isSwing = true;
+                  double pivotPrice = (posType == "BUY") ? trailRates[pivotIndex].low : trailRates[pivotIndex].high;
+                  for (int wingIndex = pivotIndex - 2; wingIndex <= pivotIndex + 2; wingIndex++)
+                  {
+                     if (wingIndex == pivotIndex) continue;
+                     if (posType == "BUY" && trailRates[wingIndex].low <= pivotPrice) isSwing = false;
+                     if (posType == "SELL" && trailRates[wingIndex].high >= pivotPrice) isSwing = false;
+                  }
+                  if (!isSwing) continue;
+
+                  double candidateStop = (posType == "BUY")
+                     ? NormalizeDouble(pivotPrice - trailBuffer, _Digits)
+                     : NormalizeDouble(pivotPrice + trailBuffer, _Digits);
+                  bool tightens = (posType == "BUY")
+                     ? candidateStop > sl + point * 0.5
+                     : candidateStop < sl - point * 0.5;
+                  bool brokerDistanceOk = (posType == "BUY")
+                     ? candidateStop < currentBid - minStopDistance
+                     : candidateStop > currentAsk + minStopDistance;
+                  if (tightens && brokerDistanceOk)
+                  {
+                     proposedStop = candidateStop;
+                     break;
+                  }
+               }
+
+               if (proposedStop > 0.0)
+               {
+                  if (trade.PositionModify(ticket, proposedStop, tp))
+                  {
+                     sl = proposedStop;
+                     Print("🛡️ Price Action: trailing estrutural M5 apertou o stop para ",
+                           DoubleToString(proposedStop, _Digits), " | Ticket=", ticket);
+                  }
+                  else
+                     Print("⛔ Price Action: trailing estrutural recusado pelo broker; ticket=", ticket,
+                           " retcode=", trade.ResultRetcode());
+               }
+            }
+         }
+         // Every Price Action position stays on deterministic SL/TP, breakeven,
+         // structural invalidation and trailing. No undocumented legacy AI exit filter.
          continue;
+      }
 
             string posJson = "{";
       posJson += "\"ticket\":"        + IntegerToString(ticket)             + ",";
