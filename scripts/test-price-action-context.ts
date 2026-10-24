@@ -79,6 +79,28 @@ assert.equal(assessMt5RiskLimit({
   config, status: { ...status, dailyLosses: 3 }, observedAccountType: 'demo', accountHeartbeatAt: now - 1000, now,
 }).ok, false, 'Three losing trades must block the rest of the day');
 assert.equal(assessMt5RiskLimit({
+  config,
+  status: {
+    ...status,
+    recentTrades: Array.from({ length: 5 }, (_, i) => ({
+      ticket: i + 1, openTime: now - (i + 1) * 1000, closeTime: now - (i + 1) * 500, profit: 0,
+    })),
+  } as unknown as MT5Status,
+  observedAccountType: 'demo', accountHeartbeatAt: now - 1000, now,
+}).ok, false, 'Five trades opened today must hit the default daily frequency cap');
+assert.equal(assessMt5RiskLimit({
+  config,
+  status: {
+    ...status,
+    openPositions: 1,
+    reportedOpenPositions: 1,
+    reportedOpenPositionTickets: ['1'],
+    positionsReconciled: true,
+    openPositionTimes: [now - 26 * 60 * 60 * 1000],
+  } as unknown as MT5Status,
+  observedAccountType: 'demo', accountHeartbeatAt: now - 1000, now,
+}).ok, true, 'An old overnight position must not count as a new trade today');
+assert.equal(assessMt5RiskLimit({
   config, status: { ...status, consecutiveLosses: 2 }, observedAccountType: 'demo', accountHeartbeatAt: now - 1000, now,
 }).ok, false, 'Two consecutive losses without a verifiable close time must fail closed');
 assert.equal(assessMt5RiskLimit({
