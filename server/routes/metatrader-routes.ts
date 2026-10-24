@@ -21,7 +21,7 @@ import { computeSyntheticGirassol } from '../services/synthetic-girassol';
 import { isAllowedProductionSymbol } from '../services/production-symbol-policy';
 import { getMt5ProductionBlock } from '../services/mt5-production-policy';
 import { consensusCache } from '../services/consensus-cache';
-import { evaluatePriceActionSetup, validateAIEntryReview, type Candle } from '../services/price-action-engine';
+import { evaluatePriceActionSetup, isValidPriceActionCandles, validateAIEntryReview, type Candle } from '../services/price-action-engine';
 import { huggingFaceAI } from '../services/huggingface-ai';
 import { assessMt5RiskLimit, buildTrustedPriceActionContext, getHighImpactNewsStatus, isAllowedBrasiliaTradingSession } from '../services/price-action-context';
 
@@ -364,9 +364,9 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
       });
       const newsStatus = await getHighImpactNewsStatus();
       const sessionOpen = isAllowedBrasiliaTradingSession();
-      const entryFrameForContext = Array.isArray(frames.M5) && frames.M5.length
+      const entryFrameForContext = isValidPriceActionCandles(frames.M5)
         ? frames.M5
-        : Array.isArray(frames.M1) ? frames.M1 : [];
+        : isValidPriceActionCandles(frames.M1) ? frames.M1 : [];
       const entryPriceForContext = entryFrameForContext.length
         ? entryFrameForContext[entryFrameForContext.length - 1].close
         : undefined;
@@ -414,7 +414,7 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
 
       if (Array.isArray(candles) && candles.length > 0) metaTraderBridge.addMarketData(sym, candles);
 
-      const useM5ForReview = Array.isArray(frames.M5) && frames.M5.length >= 30;
+      const useM5ForReview = isValidPriceActionCandles(frames.M5);
       const reviewTimeframe: 'M5' | 'M1' = useM5ForReview ? 'M5' : 'M1';
       const reviewFrame = useM5ForReview ? frames.M5 : frames.M1;
       if (!Array.isArray(reviewFrame) || reviewFrame.length < 30) {
