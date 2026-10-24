@@ -368,7 +368,7 @@ export class HuggingFaceAIService {
         const direction = String(parsed?.direction ?? '').trim().toUpperCase();
         const confidence = Number(parsed?.confidence);
         if (!decision || !['BUY', 'SELL', 'HOLD'].includes(direction) ||
-          !Number.isFinite(confidence) || confidence <= 0 || confidence > 100) {
+          !Number.isFinite(confidence) || confidence < 0 || confidence > 100) {
           console.warn(`[PRICE ACTION AI REVIEW] ${model.name} retornou campos inválidos para ${symbol}; tentando fallback técnico.`);
           continue;
         }
