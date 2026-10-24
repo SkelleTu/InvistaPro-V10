@@ -254,15 +254,23 @@ function repeatedStructureZone(c: Candle[], kind: PivotKind, price: number): Pri
     const levelPrices = items.map(item => item.price);
     const low = Math.min(...levelPrices) - tolerance;
     const high = Math.max(...levelPrices) + tolerance;
+    const identifiedAt = Math.max(...items.map(item => item.time));
+    const invalidatedAfterIdentification = c.some(bar =>
+      bar.time > identifiedAt &&
+      (kind === 'low' ? bar.close < low : bar.close > high)
+    );
     return {
       low,
       high,
       touches: items.length,
-      identifiedAt: Math.max(...items.map(item => item.time)),
+      identifiedAt,
       invalidationPrice: kind === 'low' ? low : high,
+      invalidated: invalidatedAfterIdentification,
     };
   });
-  const near = valid.filter(zone => price >= zone.low - tolerance && price <= zone.high + tolerance);
+  const near = valid.filter(zone =>
+    !zone.invalidated && price >= zone.low - tolerance && price <= zone.high + tolerance
+  );
   return near.sort((a, b) =>
     Math.abs(price - (a.low + a.high) / 2) - Math.abs(price - (b.low + b.high) / 2)
   )[0] ?? null;
@@ -502,25 +510,34 @@ export function evaluatePriceActionSetup(
     features.supportResistanceTouches = structureZone?.zone?.touches ?? 0;
     features.supportResistanceTimeframe = structureZone?.timeframe ?? null;
     features.supportResistanceIdentifiedAt = structureZone?.zone?.identifiedAt ?? null;
-    const auditZone: { type: string; timeframe: Timeframe; zone: PriceZone } | null = structureZone
-      ? { type: side === 'BUY' ? 'support_demand' : 'resistance_supply', timeframe: structureZone.timeframe, zone: structureZone.zone }
-      : fvgZone
-        ? { type: 'fair_value_gap', timeframe: fvgZone.timeframe, zone: fvgZone.zone }
-        : obZone
-          ? { type: 'order_block', timeframe: obZone.timeframe, zone: obZone.zone }
-          : validRangeEdge && m15Range
-            ? {
-              type: side === 'BUY' ? 'range_demand' : 'range_supply',
-              timeframe: 'M15',
-              zone: {
-                low: side === 'BUY' ? m15Range.low : m15Range.high - rangeEdgeTolerance,
-                high: side === 'BUY' ? m15Range.low + rangeEdgeTolerance : m15Range.high,
-                touches: side === 'BUY' ? m15Range.lowTouches : m15Range.highTouches,
-                identifiedAt: m15[m15.length - 1].time,
-                invalidationPrice: side === 'BUY' ? m15Range.low : m15Range.high,
-              },
-            }
-            : null;
+    let auditZone: { type: string; timeframe: Timeframe; zone: PriceZone } | null = null;
+    if (structureZone?.zone) {
+      auditZone = {
+        type: side === 'BUY' ? 'support_demand' : 'resistance_supply',
+        timeframe: structureZone.timeframe,
+        zone: structureZone.zone,
+      };
+    } else if (fvgZone?.zone) {
+      auditZone = { type: 'fair_value_gap', timeframe: fvgZone.timeframe, zone: fvgZone.zone };
+    } else if (obZone?.zone) {
+      auditZone = {
+        type: 'order_block',
+        timeframe: obZone.timeframe,
+        zone: { ...obZone.zone, touches: 1 },
+      };
+    } else if (validRangeEdge && m15Range) {
+      auditZone = {
+        type: side === 'BUY' ? 'range_demand' : 'range_supply',
+        timeframe: 'M15',
+        zone: {
+          low: side === 'BUY' ? m15Range.low : m15Range.high - rangeEdgeTolerance,
+          high: side === 'BUY' ? m15Range.low + rangeEdgeTolerance : m15Range.high,
+          touches: side === 'BUY' ? m15Range.lowTouches : m15Range.highTouches,
+          identifiedAt: m15[m15.length - 1].time,
+          invalidationPrice: side === 'BUY' ? m15Range.low : m15Range.high,
+        },
+      };
+    }
     features.zoneType = auditZone?.type ?? null;
     features.zoneLow = auditZone?.zone.low ?? null;
     features.zoneHigh = auditZone?.zone.high ?? null;
