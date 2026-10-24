@@ -293,95 +293,236 @@ export function evaluatePriceActionSetup(
   const checks: Record<string, boolean> = {};
   const features: PriceActionSetup['features'] = {};
   const required: Timeframe[] = ['H4', 'H1', 'M15'];
-  for (const tf of required) {
-    checks[`data_${tf}`] = validCandles(frames[tf]);
-    if (!checks[`data_${tf}`]) reasons.push(`Dados insuficientes ou inválidos em ${tf}`);
+
+  for (const timeframe of required) {
+    checks[`data_${timeframe}`] = validCandles(frames[timeframe]);
+    if (!checks[`data_${timeframe}`]) reasons.push(`Dados insuficientes ou inválidos em ${timeframe}`);
   }
-  const entryFrame: Candle[] | undefined = validCandles(frames.M5)
-    ? frames.M5
-    : validCandles(frames.M1) ? frames.M1 : undefined;
+
+  const entryTimeframe: 'M5' | 'M1' | null = validCandles(frames.M5) ? 'M5'
+    : validCandles(frames.M1) ? 'M1' : null;
+  const entryFrame = entryTimeframe ? frames[entryTimeframe] : undefined;
   checks.entry_data = entryFrame !== undefined;
   if (!checks.entry_data) reasons.push('Dados insuficientes em M5/M1 para confirmação de entrada');
-  if (reasons.length) return { action: 'HOLD', approved: false, reasons, checks, features };
 
-  const h4 = frames.H4;
-  const h1 = frames.H1;
-  const m15 = frames.M15;
-  if (!validCandles(h4) || !validCandles(h1) || !validCandles(m15) || !validCandles(entryFrame)) {
-    return {
-      action: 'HOLD', approved: false,
-      reasons: ['Dados de timeframe mudaram ou são inválidos durante a validação'],
-      checks: { ...checks, data_integrity: false }, features
-    };
+  if (reasons.length > 0) {
+    return { action: 'HOLD', approved: false, reasons, checks, features };
   }
-  const t4 = trend(h4), t1 = trend(h1);
-  features.trendH4 = t4; features.trendH1 = t1;
-  const aligned = t4 !== 'range' && t4 === t1;
-  checks.trend_alignment = aligned;
-  if (!aligned) reasons.push('Tendência H4/H1 desalinhada ou indefinida');
 
+  const h4 = frames.H4!;
+  const h1 = frames.H1!;
+  const m15 = frames.M15!;
+  const entry = entryFrame![entryFrame!.length - 1].close;
+  const t4 = trend(h4);
+  const t1 = trend(h1);
   const m15Trend = trend(m15);
-  const entrySide = trigger(entryFrame);
-  const side: TradeSide | null = aligned && entrySide &&
-    entrySide === (t4 === 'bullish' ? 'BUY' : 'SELL') ? entrySide : null;
-  checks.entry_trigger = side !== null;
-  if (!side) reasons.push('Sem gatilho M5/M1 confirmado na direção H4/H1 alinhada');
-  features.trendM15 = m15Trend;
-  features.trigger = entrySide;
+  const m15Range = detectRangeBounds(m15);
 
+  features.trendH4 = t4;
+  features.trendH1 = t1;
+  features.trendM15 = m15Trend;
+  features.marketMode = t4 === t1 && (t4 === 'bullish' || t4 === 'bearish')
+    ? t4 : t4 === 'range' && t1 === 'range' ? 'range' : 'conflict';
+
+  const directionalMode = (t4 === 'bullish' || t4 === 'bearish') && t4 === t1;
+  const rangeMode = t4 === 'range' && t1 === 'range';
+  const m15DirectionalAlignment = directionalMode &&
+    (m15Trend === t4 || (m15Trend === 'range' && m15Range !== null));
+  const m15RangeAlignment = rangeMode && m15Trend === 'range' && m15Range !== null;
+  checks.trend_alignment = directionalMode || rangeMode;
+  checks.m15_alignment = m15DirectionalAlignment || m15RangeAlignment;
+  if (!checks.trend_alignment) {
+    reasons.push('H4/H1 sem tendência alinhada ou sem range objetivamente confirmado; operação bloqueada');
+  }
+  if (!checks.m15_alignment) {
+    reasons.push('Estrutura de 15M não confirma a direção principal nem um range validado');
+  }
+
+  const entrySide = trigger(entryFrame!);
+  features.trigger = entrySide;
+  let side: TradeSide | null = null;
+  let atRangeExtreme = false;
+  let rangeEdgeTolerance = 0;
+
+  if (directionalMode && m15DirectionalAlignment && entrySide) {
+    const expectedSide: TradeSide = t4 === 'bullish' ? 'BUY' : 'SELL';
+    if (entrySide === expectedSide) side = entrySide;
+  } else if (rangeMode && m15RangeAlignment && m15Range && entrySide) {
+    rangeEdgeTolerance = Math.max(averageRange(m15) * 0.75, Math.abs(entry) * 0.0005);
+    const nearLowerEdge = entry <= m15Range.low + rangeEdgeTolerance;
+    const nearUpperEdge = entry >= m15Range.high - rangeEdgeTolerance;
+    if (entrySide === 'BUY' && nearLowerEdge) {
+      side = 'BUY';
+      atRangeExtreme = true;
+    } else if (entrySide === 'SELL' && nearUpperEdge) {
+      side = 'SELL';
+      atRangeExtreme = true;
+    }
+    features.rangeLow = m15Range.low;
+    features.rangeHigh = m15Range.high;
+    features.rangeLowTouches = m15Range.lowTouches;
+    features.rangeHighTouches = m15Range.highTouches;
+    features.rangeEdgeTolerance = rangeEdgeTolerance;
+  }
+  checks.entry_trigger = side !== null;
+  checks.range_extreme = !rangeMode || atRangeExtreme;
+  if (!side) {
+    reasons.push(rangeMode
+      ? 'Sem gatilho confirmado em um extremo do range de 15M; meio da faixa não autoriza entrada'
+      : 'Sem gatilho M5/M1 confirmado na direção H4/H1');
+  }
+
+  // Diagnostics use only closed candles. A support/resistance zone is a region
+  // with repeated reactions; a gap only qualifies after price returns to it.
   if (side) {
-    // M15 defines the operating zone; M5/M1 supplies the final trigger and microstructure.
-    const entryPrice = entryFrame[entryFrame.length - 1].close;
-    const fvg = hasFvg(m15, side) || hasFvg(entryFrame, side);
-    const sweep = liquiditySweep(m15, side) || liquiditySweep(entryFrame, side);
-    const bos = breakOfStructure(m15, side) || breakOfStructure(entryFrame, side);
-    const choch = changeOfCharacter(m15, side) || changeOfCharacter(entryFrame, side);
-    const ob = orderBlockZone(m15, side) ?? orderBlockZone(entryFrame, side);
-    const zoneNear = nearStructureZone(m15, side, entryPrice) || nearStructureZone(entryFrame, side, entryPrice) || ob !== null || sweep;
-    const volumes = entryFrame.slice(-21, -1).map(c => c.volume);
-    const volumeBaseline = average(volumes);
-    const triggerVolume = entryFrame[entryFrame.length - 1].volume;
+    const structureFrames: Array<{ timeframe: Timeframe; candles: Candle[] }> = [
+      { timeframe: 'H4', candles: h4 },
+      { timeframe: 'H1', candles: h1 },
+      { timeframe: 'M15', candles: m15 },
+      { timeframe: entryTimeframe!, candles: entryFrame! },
+    ];
+    const structureKind: PivotKind = side === 'BUY' ? 'low' : 'high';
+    const structureZone = structureFrames
+      .map(frame => ({
+        timeframe: frame.timeframe,
+        candles: frame.candles,
+        zone: repeatedStructureZone(frame.candles, structureKind, entry),
+      }))
+      .filter(item => item.zone !== null)
+      .sort((a, b) =>
+        Math.abs(entry - (a.zone!.low + a.zone!.high) / 2) -
+        Math.abs(entry - (b.zone!.low + b.zone!.high) / 2)
+      )[0] ?? null;
+
+    const fvgZone = structureFrames
+      .map(frame => ({
+        timeframe: frame.timeframe,
+        candles: frame.candles,
+        zone: findFairValueGapZone(frame.candles, side!, entry),
+      }))
+      .filter(item => item.zone !== null)
+      .sort((a, b) =>
+        Math.abs(entry - (a.zone!.low + a.zone!.high) / 2) -
+        Math.abs(entry - (b.zone!.low + b.zone!.high) / 2)
+      )[0] ?? null;
+
+    const obZone = structureFrames
+      .map(frame => ({
+        timeframe: frame.timeframe,
+        candles: frame.candles,
+        zone: orderBlockZone(frame.candles, side!, entry),
+      }))
+      .filter(item => item.zone !== null)
+      .sort((a, b) =>
+        Math.abs(entry - (a.zone!.low + a.zone!.high) / 2) -
+        Math.abs(entry - (b.zone!.low + b.zone!.high) / 2)
+      )[0] ?? null;
+
+    const sweep = liquiditySweep(m15, side) || liquiditySweep(entryFrame!, side);
+    const bos = breakOfStructure(m15, side) || breakOfStructure(entryFrame!, side);
+    const choch = changeOfCharacter(m15, side) || changeOfCharacter(entryFrame!, side);
+    const validRangeEdge = rangeMode && atRangeExtreme && m15Range !== null;
+    const zoneNear = structureZone !== null || fvgZone !== null || obZone !== null || validRangeEdge;
+    const volumeHistory = entryFrame!.slice(-21, -1).map(candle => candle.volume);
+    const volumeBaseline = average(volumeHistory);
+    const triggerVolume = entryFrame![entryFrame!.length - 1].volume;
     const volumeOk = volumeBaseline > 0 && triggerVolume > volumeBaseline;
-    features.fvg = fvg; features.liquiditySweep = sweep; features.bos = bos; features.choch = choch;
-    features.orderBlockValid = ob !== null; features.zoneNear = zoneNear;
-    features.orderBlockLow = ob?.low ?? null; features.orderBlockHigh = ob?.high ?? null;
+
+    features.fvg = fvgZone !== null;
+    features.fvgLow = fvgZone?.zone?.low ?? null;
+    features.fvgHigh = fvgZone?.zone?.high ?? null;
+    features.fvgTimeframe = fvgZone?.timeframe ?? null;
+    features.liquiditySweep = sweep;
+    features.bos = bos;
+    features.choch = choch;
+    features.orderBlockValid = obZone !== null;
+    features.orderBlockLow = obZone?.zone?.low ?? null;
+    features.orderBlockHigh = obZone?.zone?.high ?? null;
+    features.orderBlockTimeframe = obZone?.timeframe ?? null;
+    features.supportResistanceZone = structureZone !== null;
+    features.supportResistanceLow = structureZone?.zone?.low ?? null;
+    features.supportResistanceHigh = structureZone?.zone?.high ?? null;
+    features.supportResistanceTouches = structureZone?.zone?.touches ?? 0;
+    features.supportResistanceTimeframe = structureZone?.timeframe ?? null;
+    features.zoneNear = zoneNear;
     features.volumeBaseline = volumeBaseline;
+    features.triggerVolume = triggerVolume;
     features.volumeRatio = volumeBaseline > 0 ? triggerVolume / volumeBaseline : null;
     checks.volume = volumeOk;
-    // Trend alignment is not itself structural confirmation.
-    checks.structure_confirmation = fvg || sweep || bos || choch || ob !== null;
+    // BOS/CHoCH/sweep/FVG/OB are recorded as evidence. None is a stand-alone
+    // mandatory pattern if another valid structure zone and trigger exist.
+    checks.structure_confirmation = checks.m15_alignment && zoneNear;
     checks.valid_zone = zoneNear;
     if (!volumeOk) reasons.push('Volume do gatilho não supera a média das 20 velas fechadas anteriores');
-    if (!checks.structure_confirmation) reasons.push('Sem FVG, sweep de liquidez, BOS, CHoCH ou Order Block válido');
-    if (!zoneNear) reasons.push('Preço não está próximo de zona estrutural válida de oferta/demanda');
+    if (!checks.structure_confirmation) reasons.push('Estrutura de 15M e zona operacional válida não foram confirmadas');
+    if (!zoneNear) reasons.push('Preço não está em ou próximo de uma zona estrutural válida; sweep isolado não basta');
 
-    const recent = entryFrame.slice(-21, -1);
-    const entry = entryFrame[entryFrame.length - 1].close;
-    const swingLow = Math.min(...recent.map(c => c.low));
-    const swingHigh = Math.max(...recent.map(c => c.high));
-    const averageRange = average(recent.map(c => c.high - c.low));
-    const stopBuffer = Math.max(averageRange * 0.1, entry * 0.00005);
-    const stop = side === 'BUY' ? swingLow - stopBuffer : swingHigh + stopBuffer;
+    const entryPivots = pivots(entryFrame!, side === 'BUY' ? 'low' : 'high').slice(-1);
+    const structuralPivot = entryPivots[0];
+    const averageEntryRange = averageRange(entryFrame!);
+    const stopBuffer = Math.max(averageEntryRange * 0.1, entry * 0.00005);
+    const stop = structuralPivot
+      ? side === 'BUY' ? structuralPivot.price - stopBuffer : structuralPivot.price + stopBuffer
+      : Number.NaN;
     const risk = Math.abs(entry - stop);
-    const costs = Math.max(0, context.estimatedRoundTripCost ?? 0);
-    const targetDistance = risk * 2 + costs * 3;
+    const costsValid = finite(context.estimatedRoundTripCost) && context.estimatedRoundTripCost >= 0;
+    const costs = costsValid ? context.estimatedRoundTripCost! : 0;
+
+    // The plan includes 50% realization at +1.5R and the remainder at final TP.
+    // The weighted realized reward must still achieve at least 2:1 after costs.
+    const targetDistance = risk > 0
+      ? Math.max(risk * 3, risk * 2.5 + costs * 6)
+      : Number.NaN;
     const target = side === 'BUY' ? entry + targetDistance : entry - targetDistance;
-    const rr = risk > 0 ? (Math.abs(target - entry) - costs) / (risk + costs) : 0;
-    features.entry = entry; features.stop = stop; features.target = target; features.riskReward = rr;
+    const plannedReward = risk * 0.75 + targetDistance * 0.5 - costs;
+    const plannedRisk = risk + costs;
+    const planRR = plannedRisk > 0 ? plannedReward / plannedRisk : 0;
+
+    features.entry = entry;
+    features.stop = finite(stop) ? stop : null;
+    features.target = finite(target) ? target : null;
+    features.riskReward = finite(planRR) ? planRR : null;
     features.stopBuffer = stopBuffer;
-    checks.stop_direction = entry > 0 && (side === 'BUY' ? stop < entry : stop > entry);
+    features.initialRiskDistance = finite(risk) ? risk : null;
+    features.finalTargetR = finite(risk) && risk > 0 ? targetDistance / risk : null;
+    features.partialTargetR = 1.5;
+    features.partialClosePercent = 50;
+    checks.structural_stop = structuralPivot !== undefined && finite(stop) && stop > 0 && risk > 0;
+    if (!checks.structural_stop) reasons.push('Não há pivô confirmado suficiente para definir stop estrutural válido');
+    checks.stop_direction = finite(stop) && entry > 0 && (side === 'BUY' ? stop < entry : stop > entry);
     if (!checks.stop_direction) reasons.push('Stop estrutural está no lado incorreto da entrada');
-    checks.risk_reward = risk > 0 && rr >= 2;
-    if (!checks.risk_reward) reasons.push('Relação risco/retorno inferior a 1:2 após custos estimados');
+    checks.risk_reward = finite(planRR) && planRR >= 2;
+    if (!checks.risk_reward) reasons.push('Plano completo de parcial + alvo final não alcança 1:2 após custos');
+
     checks.stop_distance_limit = entry > 0 && risk > 0 && risk / entry <= 0.015;
-    if (!checks.stop_distance_limit) reasons.push('Stop estrutural excede o limite máximo de 1,5% do preço; não será comprimido artificialmente.');
-    checks.spread = finite(context.spread) && finite(context.maxSpread) && context.spread >= 0 && context.maxSpread > 0 && context.spread <= context.maxSpread;
+    if (!checks.stop_distance_limit) reasons.push('Stop estrutural excede 1,5% do preço; não será comprimido artificialmente');
+
+    checks.spread = finite(context.spread) && finite(context.maxSpread) &&
+      context.spread >= 0 && context.maxSpread > 0 && context.spread <= context.maxSpread;
     if (!checks.spread) reasons.push('Spread ausente, inválido ou acima do limite configurado');
-    checks.costs = finite(context.estimatedRoundTripCost) && context.estimatedRoundTripCost >= 0;
+    checks.costs = costsValid;
     if (!checks.costs) reasons.push('Custos totais estimados ausentes ou inválidos');
+
+    const barrier = nearestBarrier(structureFrames, side, entry);
+    features.nextBarrierLevel = barrier?.level ?? null;
+    features.nextBarrierDistance = barrier?.distance ?? null;
+    features.nextBarrierTimeframe = barrier?.timeframe ?? null;
+    features.takeProfitDistance = finite(targetDistance) ? targetDistance : null;
+    checks.space = barrier !== null && finite(targetDistance) && barrier.distance > targetDistance + costs;
+    if (!checks.space) reasons.push('Espaço até a próxima barreira estrutural é insuficiente ou não verificável');
   } else {
-    checks.volume = false; checks.structure_confirmation = false; checks.valid_zone = false; checks.risk_reward = false; checks.spread = false; checks.costs = false;
+    checks.volume = false;
+    checks.structure_confirmation = false;
+    checks.valid_zone = false;
+    checks.structural_stop = false;
+    checks.stop_direction = false;
+    checks.risk_reward = false;
+    checks.stop_distance_limit = false;
+    checks.spread = false;
+    checks.costs = false;
+    checks.space = false;
   }
+
   checks.news_clear = context.highImpactNewsBlocked === false;
   if (!checks.news_clear) reasons.push('Janela de notícia de alto impacto bloqueada ou não validada');
   checks.risk_limit = context.riskLimitOk === true;
@@ -392,9 +533,15 @@ export function evaluatePriceActionSetup(
   const approved = Object.values(checks).every(Boolean) && side !== null;
   if (!approved) return { action: 'HOLD', approved: false, reasons, checks, features };
   return {
-    action: side!, approved: true, reasons: ['Setup validado pelos gates determinísticos'],
-    checks, entry: Number(features.entry), stopLoss: Number(features.stop),
-    takeProfit: Number(features.target), riskReward: Number(features.riskReward), features,
+    action: side!,
+    approved: true,
+    reasons: ['Setup validado pelos gates determinísticos da estratégia'],
+    checks,
+    entry: Number(features.entry),
+    stopLoss: Number(features.stop),
+    takeProfit: Number(features.target),
+    riskReward: Number(features.riskReward),
+    features,
   };
 }
 
