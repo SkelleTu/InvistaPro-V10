@@ -33,16 +33,22 @@ const trusted = buildTrustedPriceActionContext({
   bid: 100,
   ask: 100.1,
   entryPrice: 100.05,
+  extraRoundTripCostPrice: 0.05,
   riskLimitOk: true,
   newsBlocked: false,
   sessionOpen: true,
 });
 assert.ok(Math.abs(Number(trusted.spread) - 0.1) < 1e-9, 'Spread calculation must preserve the expected price difference');
-assert.ok(Math.abs(Number(trusted.estimatedRoundTripCost) - 0.2) < 1e-9, 'Round-trip cost must equal twice the observed spread');
+assert.ok(Math.abs(Number(trusted.estimatedRoundTripCost) - 0.25) < 1e-9, 'Round-trip cost must include twice the observed spread plus the configured commission/slippage estimate');
+const costsMissing = buildTrustedPriceActionContext({
+  bid: 100, ask: 100.1, entryPrice: 100.05, extraRoundTripCostPrice: 0,
+  riskLimitOk: true, newsBlocked: false, sessionOpen: true,
+});
+assert.equal(costsMissing.estimatedRoundTripCost, undefined, 'Missing broker cost estimate must fail closed rather than be replaced by zero');
 assert.equal(trusted.highImpactNewsBlocked, false);
 assert.equal(trusted.tradingSessionOpen, true);
 assert.equal(buildTrustedPriceActionContext({
-  bid: 0, ask: 0, entryPrice: 100, riskLimitOk: true, newsBlocked: false, sessionOpen: true,
+  bid: 0, ask: 0, entryPrice: 100, extraRoundTripCostPrice: 0.05, riskLimitOk: true, newsBlocked: false, sessionOpen: true,
 }).spread, undefined, 'Invalid terminal prices must not produce a trusted spread');
 
 const config = {
