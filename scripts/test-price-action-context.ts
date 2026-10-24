@@ -58,6 +58,8 @@ const status = {
   consecutiveLosses: 0,
   openPositions: 0,
   reportedOpenPositions: 0,
+  reportedOpenPositionTickets: [],
+  positionsReconciled: true,
   recentTrades: [],
   circuitBreakerActive: false,
 } as unknown as MT5Status;
@@ -82,6 +84,9 @@ assert.equal(assessMt5RiskLimit({
 assert.equal(assessMt5RiskLimit({
   config, status: { ...status, reportedOpenPositions: 1 }, observedAccountType: 'demo', accountHeartbeatAt: now - 1000, now,
 }).ok, false, 'Broker/internal position mismatch must block new entries');
+assert.equal(assessMt5RiskLimit({
+  config, status: { ...status, positionsReconciled: false }, observedAccountType: 'demo', accountHeartbeatAt: now - 1000, now,
+}).ok, false, 'Matching position counts without exact reconciled tickets must still block entries');
 
 const realConfig = { ...config, accountType: 'real' } as MT5Config;
 assert.equal(assessMt5RiskLimit({
