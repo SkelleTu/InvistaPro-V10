@@ -335,29 +335,40 @@ export function evaluatePriceActionSetup(
     if (!zoneNear) reasons.push('Preço fora de zona válida de suporte/resistência, FVG, Order Block ou liquidez');
 
     const recent = selectedEntryCandles.slice(-21, -1);
-    const swingLow = Math.min(...recent.map(c => c.low));
-    const swingHigh = Math.max(...recent.map(c => c.high));
     const averageCandleRange = average(recent.map(c => c.high - c.low));
     const stopBuffer = Math.max(averageCandleRange * 0.1, entry * 0.00005);
-    const stop = side === 'BUY' ? swingLow - stopBuffer : swingHigh + stopBuffer;
-    const risk = Math.abs(entry - stop);
+    const structuralPivots = pivots(selectedEntryCandles, side === 'BUY' ? 'low' : 'high')
+      .filter(pivot => pivot.index >= Math.max(2, selectedEntryCandles.length - 25) &&
+        pivot.index <= selectedEntryCandles.length - 3)
+      .sort((a, b) => b.index - a.index);
+    const structuralPivot = structuralPivots.find(pivot =>
+      side === 'BUY' ? pivot.price < entry : pivot.price > entry);
+    const stop = structuralPivot
+      ? (side === 'BUY' ? structuralPivot.price - stopBuffer : structuralPivot.price + stopBuffer)
+      : Number.NaN;
+    const risk = finite(stop) ? Math.abs(entry - stop) : 0;
     const costsCandidate = context.estimatedRoundTripCost;
     const costsValid = finite(costsCandidate) && costsCandidate >= 0;
     const costs = costsValid ? costsCandidate as number : 0;
     const targetDistance = risk * 2 + costs * 3;
-    const target = side === 'BUY' ? entry + targetDistance : entry - targetDistance;
+    const target = risk > 0 ? (side === 'BUY' ? entry + targetDistance : entry - targetDistance) : Number.NaN;
     const rr = risk > 0 && costsValid ? (Math.abs(target - entry) - costs) / (risk + costs) : 0;
     const barrierDistance = nearestBarrierDistance([h4, h1, m15], side, entry);
 
     features.entry = entry;
-    features.stop = stop;
-    features.target = target;
+    features.stop = finite(stop) ? stop : null;
+    features.target = finite(target) ? target : null;
     features.riskReward = rr;
     features.stopBuffer = stopBuffer;
+    features.structuralStopPivot = structuralPivot?.price ?? null;
     features.nearestBarrierDistance = barrierDistance;
 
-    checks.stop_direction = entry > 0 && (side === 'BUY' ? stop < entry : stop > entry);
-    if (!checks.stop_direction) reasons.push('Stop estrutural está no lado incorreto da entrada');
+    checks.structural_stop = structuralPivot !== undefined && finite(stop);
+    if (!checks.structural_stop) reasons.push('Não existe pivô estrutural confirmado para posicionar o stop sem improvisação');
+
+    checks.stop_direction = checks.structural_stop && entry > 0 &&
+      (side === 'BUY' ? stop < entry : stop > entry);
+    if (!checks.stop_direction) reasons.push('Stop estrutural ausente ou no lado incorreto da entrada');
 
     checks.risk_reward = risk > 0 && rr >= 2;
     if (!checks.risk_reward) reasons.push('Relação risco/retorno inferior a 1:2 após custos estimados');
