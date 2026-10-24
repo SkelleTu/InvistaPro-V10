@@ -572,10 +572,10 @@ export function evaluatePriceActionSetup(
 
     // The plan includes 50% realization at +1.5R and the remainder at final TP.
     // The weighted realized reward must still achieve at least 2:1 after costs.
-    // Exact minimum that makes 50% at 1.5R plus 50% at final TP
-    // deliver 2:1 net of the modeled round-trip cost. Do not impose an extra 3R target.
+    // Preserve the strategy's illustrated final target at 3R and raise it if
+    // necessary to keep the complete partial-plus-final plan at >= 2:1 after costs.
     const targetDistance = risk > 0
-      ? risk * 2.5 + costs * 6
+      ? Math.max(risk * 3, risk * 2.5 + costs * 6)
       : Number.NaN;
     const target = side === 'BUY' ? entry + targetDistance : entry - targetDistance;
     const plannedReward = risk * 0.75 + targetDistance * 0.5 - costs;
