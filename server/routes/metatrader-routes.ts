@@ -1037,7 +1037,7 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
         stopLossPips: 0,
         takeProfitPips: 0,
         entryPrice: priceActionSetup.entry,
-        confidence: 100,
+        confidence: baseSignal?.confidence ?? 0,
         aiSources: baseSignal?.aiSources ?? [],
         indicators: {},
         timestamp,
