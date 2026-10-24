@@ -1041,6 +1041,7 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
         lotSize: config.defaultLotSize,
         stopLoss: priceActionSetup.stopLoss,
         takeProfit: priceActionSetup.takeProfit,
+        estimatedRoundTripCost: priceActionSetup.features.estimatedRoundTripCost,
         stopLossPips: 0,
         takeProfitPips: 0,
         entryPrice: priceActionSetup.entry,
