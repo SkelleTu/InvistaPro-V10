@@ -21,7 +21,8 @@ import { computeSyntheticGirassol } from '../services/synthetic-girassol';
 import { isAllowedProductionSymbol } from '../services/production-symbol-policy';
 import { getMt5ProductionBlock } from '../services/mt5-production-policy';
 import { consensusCache } from '../services/consensus-cache';
-import { evaluatePriceActionSetup, type Candle } from '../services/price-action-engine';
+import { evaluatePriceActionSetup, validateAIEntryReview, type Candle } from '../services/price-action-engine';
+import { huggingFaceAI } from '../services/huggingface-ai';
 import { assessMt5RiskLimit, buildTrustedPriceActionContext, getHighImpactNewsStatus, isAllowedBrasiliaTradingSession } from '../services/price-action-context';
 
 
@@ -397,31 +398,95 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
         });
       }
 
-      // Optional strategy-only mode for controlled comparison. The deterministic setup and all
-      // server safety gates remain mandatory; only the second-stage AI review is skipped.
-      if (priceActionUseAIReview === false) {
-        if (Array.isArray(candles) && candles.length > 0) metaTraderBridge.addMarketData(sym, candles);
-        const timestamp = Date.now();
+      // The strategy document requires a live AI review bound to the deterministic candidate.
+      // Disabling review, missing data, stale responses, or directional disagreement must HOLD.
+      if (priceActionUseAIReview !== true) {
         return res.json({
-          id: 'pa-' + randomBytes(8).toString('hex'),
-          symbol: sym,
-          action: priceActionSetup.action,
-          lotSize: config.defaultLotSize,
-          stopLoss: priceActionSetup.stopLoss,
-          takeProfit: priceActionSetup.takeProfit,
-          stopLossPips: 0,
-          takeProfitPips: 0,
-          entryPrice: priceActionSetup.entry,
-          confidence: 100,
-          aiSources: [],
-          indicators: {},
-          timestamp,
-          expiresAt: timestamp + Math.max(10, config.signalTimeoutSeconds) * 1000,
-          reason: 'Modo autônomo: entrada aprovada pela estratégia determinística; risco, notícias, spread e sessão foram validados no servidor.',
-          strategyMode: 'AUTONOMOUS_PRICE_ACTION',
-          executionEnabled: true,
+          action: 'HOLD',
+          confidence: 0,
+          executionEnabled: false,
+          code: 'PRICE_ACTION_AI_REVIEW_REQUIRED',
+          reason: 'A revisão IA obrigatória está desativada; nenhuma entrada foi autorizada.',
+          strategyAction: priceActionSetup.action,
+          timestamp: Date.now(),
         });
       }
+
+      if (Array.isArray(candles) && candles.length > 0) metaTraderBridge.addMarketData(sym, candles);
+
+      const useM5ForReview = Array.isArray(frames.M5) && frames.M5.length >= 30;
+      const reviewTimeframe: 'M5' | 'M1' = useM5ForReview ? 'M5' : 'M1';
+      const reviewFrame = useM5ForReview ? frames.M5 : frames.M1;
+      if (!Array.isArray(reviewFrame) || reviewFrame.length < 30) {
+        return res.json({
+          action: 'HOLD',
+          confidence: 0,
+          executionEnabled: false,
+          code: 'PRICE_ACTION_AI_REVIEW_DATA_INVALID',
+          reason: 'Candles de entrada ausentes ou insuficientes para a revisão IA.',
+          strategyAction: priceActionSetup.action,
+          timestamp: Date.now(),
+        });
+      }
+      const reviewTicks = reviewFrame.map(candle => ({
+        symbol: sym,
+        quote: candle.close,
+        epoch: Math.floor(candle.time > 100_000_000_000 ? candle.time / 1000 : candle.time),
+      }));
+      const aiReview = await huggingFaceAI.reviewPriceActionCandidate(
+        reviewTicks, sym, priceActionSetup.action, reviewTimeframe
+      );
+      const reviewValidation = validateAIEntryReview(priceActionSetup, {
+        decision: aiReview.approved ? 'approve' : 'reject',
+        direction: aiReview.direction,
+        confidence: aiReview.confidence,
+      });
+
+      if (!aiReview.approved || !reviewValidation.approved) {
+        return res.json({
+          action: 'HOLD',
+          confidence: 0,
+          executionEnabled: false,
+          code: 'PRICE_ACTION_AI_REVIEW_REJECTED',
+          reason: aiReview.reason || reviewValidation.reason,
+          strategyAction: priceActionSetup.action,
+          aiAction: aiReview.direction,
+          aiConfidence: aiReview.confidence,
+          aiSources: aiReview.sources,
+          rejectionReasons: priceActionSetup.reasons,
+          checks: priceActionSetup.checks,
+          timestamp: Date.now(),
+        });
+      }
+
+      // Once both layers agree, return the strategy's own entry/SL/TP unchanged.
+      // The legacy Girassol/Fibonacci/indicator confidence gates below must not veto this candidate.
+      const timestamp = Date.now();
+      return res.json({
+        id: 'pa-' + randomBytes(8).toString('hex'),
+        symbol: sym,
+        action: priceActionSetup.action,
+        lotSize: config.defaultLotSize,
+        stopLoss: priceActionSetup.stopLoss,
+        takeProfit: priceActionSetup.takeProfit,
+        stopLossPips: 0,
+        takeProfitPips: 0,
+        entryPrice: priceActionSetup.entry,
+        confidence: aiReview.confidence,
+        aiSources: aiReview.sources,
+        aiReview: {
+          approved: true,
+          direction: aiReview.direction,
+          confidence: aiReview.confidence,
+          reason: aiReview.reason,
+        },
+        indicators: {},
+        timestamp,
+        expiresAt: timestamp + Math.max(10, config.signalTimeoutSeconds) * 1000,
+        reason: aiReview.reason,
+        strategyMode: 'PRICE_ACTION_AI_REVIEWED',
+        executionEnabled: true,
+      });
     }
 
     // Atualiza dados de mercado no bridge
@@ -1042,28 +1107,6 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
     // Adicionar contexto do ativo ao log
     if (derivProfile) {
       indicatorNotes.push(`📊 ${derivProfile.family} (${derivProfile.volClass}) — ${derivProfile.trendType} | RSI thr: ${derivProfile.rsiOversold}/${derivProfile.rsiOverbought}`);
-    }
-
-    // Enforce strategy -> AI sequence: the AI may reject, never reverse or invent a setup.
-    if (priceActionSetup) {
-      if (!baseSignal || finalAction !== priceActionSetup.action || finalConfidence < 70) {
-        return res.json({
-          action: 'HOLD',
-          confidence: 0,
-          code: 'PRICE_ACTION_AI_REVIEW_REJECTED',
-          reason: 'O sinal da estratégia não foi aprovado pela análise de IA na mesma direção ou não atingiu a confiança mínima.',
-          strategyAction: priceActionSetup.action,
-          aiAction: finalAction,
-          aiConfidence: finalConfidence,
-          rejectionReasons: priceActionSetup.reasons,
-          timestamp: Date.now()
-        });
-      }
-      // Strategy-owned structural SL/TP cannot be loosened by AI/indicator refinements.
-      refinedSL = priceActionSetup.stopLoss!;
-      refinedTP = priceActionSetup.takeProfit!;
-      baseSignal.entryPrice = priceActionSetup.entry;
-      indicatorNotes.push('Price Action multi-timeframe validado; SL/TP mantidos nos níveis estruturais da estratégia.');
     }
 
     // Monta resposta final
