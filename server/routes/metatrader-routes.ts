@@ -407,50 +407,54 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
         });
       }
       const reviewFrame = reviewFrameCandidate;
-      let aiReview: Awaited<ReturnType<typeof huggingFaceAI.reviewPriceActionCandidate>> = {
-        approved: false, direction: 'HOLD', confidence: 0, sources: [],
-        reason: 'Revisão IA não executada; a decisão operacional continuará restrita aos critérios explícitos da estratégia.',
-      };
-
-      if (priceActionUseAIReview === true && isValidPriceActionCandles(reviewFrame)) {
-        const reviewTicks = reviewFrame.map(candle => ({
-          symbol: sym,
-          quote: candle.close,
-          epoch: Math.floor(candle.time > 100_000_000_000 ? candle.time / 1000 : candle.time),
-        }));
-        aiReview = await huggingFaceAI.reviewPriceActionCandidate(
-          reviewTicks, sym, priceActionSetup.action as 'BUY' | 'SELL', reviewTimeframe
-        );
-      } else {
-        aiReview = {
-          approved: false, direction: 'HOLD', confidence: 0, sources: [],
-          reason: priceActionUseAIReview === true
-            ? 'Revisão IA indisponível: candles de entrada ausentes ou inválidos.'
-            : 'Revisão IA desativada. Nenhum limiar de consenso ou indicador legado substituirá os critérios da estratégia.',
-        };
-      }
-
-      // The deterministic checklist is the entry authority. AI consensus/confidence and
-      // legacy indicators are diagnostic only: they must not add undocumented vetoes.
-      // For REAL, an unavailable AI service is an essential-component failure and fails closed;
-      // a numerical consensus threshold or AI disagreement is never used as a new entry rule.
-      if (config.accountType === 'real' && aiReview.sources.length === 0) {
+      if (priceActionUseAIReview !== true) {
         return res.json({
           action: 'HOLD', confidence: 0, executionEnabled: false,
-          code: 'PRICE_ACTION_AI_UNAVAILABLE',
-          reason: 'Conta REAL bloqueada: o serviço de revisão IA essencial não respondeu com evidência válida.',
+          code: 'PRICE_ACTION_AI_REVIEW_REQUIRED',
+          reason: 'A revisão IA prevista na estratégia está desativada. Nenhuma entrada foi autorizada.',
           strategyAction: priceActionSetup.action,
-          aiAction: aiReview.direction,
-          aiSources: [],
           timestamp: Date.now(),
         });
       }
 
+      const reviewTicks = reviewFrame.map(candle => ({
+        symbol: sym,
+        quote: candle.close,
+        epoch: Math.floor(candle.time > 100_000_000_000 ? candle.time / 1000 : candle.time),
+      }));
+      const candidateDirection = priceActionSetup.action as 'BUY' | 'SELL';
+      const aiReview = await huggingFaceAI.reviewPriceActionCandidate(
+        reviewTicks,
+        sym,
+        candidateDirection,
+        reviewTimeframe,
+        priceActionSetup.checks,
+        priceActionSetup.features,
+      );
       const reviewValidation = validateAIEntryReview(priceActionSetup, {
         decision: aiReview.approved ? 'approve' : 'reject',
         direction: aiReview.direction,
         confidence: aiReview.confidence,
       });
+
+      // AI must review the documented checklist. No undocumented numeric confidence
+      // floor or majority quorum is applied; an explicit reject/HOLD/direction mismatch
+      // remains a strategy rejection, while one valid explicit approval is sufficient.
+      if (!aiReview.approved || !reviewValidation.approved) {
+        return res.json({
+          action: 'HOLD', confidence: 0, executionEnabled: false,
+          code: 'PRICE_ACTION_AI_REVIEW_REJECTED',
+          reason: aiReview.reason || reviewValidation.reason,
+          strategyAction: candidateDirection,
+          aiAction: aiReview.direction,
+          aiConfidence: aiReview.confidence,
+          aiSources: aiReview.sources,
+          strategyChecks: priceActionSetup.checks,
+          strategyFeatures: priceActionSetup.features,
+          rejectionReasons: priceActionSetup.reasons,
+          timestamp: Date.now(),
+        });
+      }
       // The closed trigger candle creates a stable id. Repeated polls within the
       // same opportunity must not mint new IDs and reopen the same trade.
       const signalBar = reviewFrame[reviewFrame.length - 1];
@@ -476,20 +480,23 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
         stopLossPips: 0,
         takeProfitPips: 0,
         entryPrice: priceActionSetup.entry,
-        confidence: aiReview.sources.length > 0 ? aiReview.confidence : 0,
+        confidence: aiReview.confidence,
         aiSources: aiReview.sources,
         aiReview: {
-          performed: aiReview.sources.length > 0,
-          consensusApproved: aiReview.approved,
+          performed: true,
+          approved: true,
           direction: aiReview.direction,
-          confidence: aiReview.sources.length > 0 ? aiReview.confidence : null,
-          validation: reviewValidation.approved ? 'aligned' : 'diagnostic_only',
+          confidence: aiReview.confidence,
+          validation: 'aligned',
           reason: aiReview.reason,
         },
+        strategyChecks: priceActionSetup.checks,
+        strategyFeatures: priceActionSetup.features,
+        strategyRiskReward: priceActionSetup.riskReward,
         indicators: {},
         timestamp,
         expiresAt: timestamp + Math.max(10, config.signalTimeoutSeconds) * 1000,
-        reason: 'Setup aprovado pelos critérios objetivos da estratégia. Revisão IA (diagnóstica): ' + aiReview.reason,
+        reason: 'Setup aprovado pelos critérios objetivos e pela revisão IA obrigatória da estratégia. ' + aiReview.reason,
         strategyMode: 'AUTHORITATIVE_PRICE_ACTION',
         executionEnabled: true,
       });
