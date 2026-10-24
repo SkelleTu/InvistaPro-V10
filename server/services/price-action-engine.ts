@@ -519,8 +519,8 @@ export function evaluatePriceActionSetup(
     checks.stop_distance_limit = entry > 0 && risk > 0 && risk / entry <= 0.015;
     if (!checks.stop_distance_limit) reasons.push('Stop estrutural excede 1,5%; o stop não será comprimido artificialmente');
 
-    checks.space = barrierDistance === null || barrierDistance > targetDistance;
-    if (!checks.space) reasons.push('A próxima barreira estrutural não deixa espaço suficiente para o alvo planejado');
+    checks.space = barrierDistance !== null && barrierDistance > targetDistance;
+    if (!checks.space) reasons.push('Não foi comprovado espaço estrutural suficiente até a próxima barreira para o alvo planejado');
 
     checks.spread = finite(context.spread) && finite(context.maxSpread) && context.spread >= 0 &&
       context.maxSpread > 0 && context.spread <= context.maxSpread;
