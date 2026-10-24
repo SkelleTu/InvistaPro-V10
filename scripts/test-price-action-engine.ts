@@ -14,6 +14,7 @@ assert.equal(missing.approved,false);
 assert.ok(missing.reasons.length>0);
 const setup = evaluatePriceActionSetup({H4:candles(40,100,1),H1:candles(40,100,0.5),M15:candles(40,100,0.2),M5:candles(40,100,0.1)});
 assert.equal(setup.approved,false,'No confirmed trigger must never be approved');
+assert.equal(setup.checks.trend_alignment,false,'Insufficient confirmed swing points must not count as aligned H4/H1 trend');
 assert.equal(validateAIEntryReview(setup,{decision:'BUY',direction:'BUY',confidence:0.99}).approved,false,'AI cannot invent an entry');
 const reviewableSetup = {...setup, action:'BUY' as const, approved:true};
 assert.equal(validateAIEntryReview(reviewableSetup,{decision:'approve',direction:'BUY',confidence:35}).approved,true,'AI confidence is informational; no undocumented 70% floor');
