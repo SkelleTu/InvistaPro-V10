@@ -275,6 +275,8 @@ export class HuggingFaceAIService {
     symbol: string,
     candidateDirection: 'BUY' | 'SELL',
     timeframe: 'M5' | 'M1',
+    strategyChecks: Record<string, boolean>,
+    strategyFeatures: unknown,
   ): Promise<{ approved: boolean; direction: 'BUY' | 'SELL' | 'HOLD'; confidence: number; sources: string[]; reason: string }> {
     const reject = (
       reason: string,
@@ -299,33 +301,42 @@ export class HuggingFaceAIService {
     if (latestTimestamp > now + 30_000 || now - latestTimestamp > maxAgeMs) {
       return reject('Revisão IA bloqueada: candles de entrada desatualizados ou com horário inválido.');
     }
+    const failedChecks = Object.entries(strategyChecks).filter(([, passed]) => passed !== true).map(([name]) => name);
+    if (failedChecks.length > 0) {
+      return reject('Revisão IA bloqueada: critérios obrigatórios não passaram: ' + failedChecks.join(', ') + '.');
+    }
 
     const recent = tickData.slice(-40);
     const priceSeries = recent.map(tick => Number(tick.quote)).join(', ');
     const technicalContext = this.buildCompactDNA(tickData, symbol);
     const prompt = [
       `Ativo: ${symbol}; timeframe de entrada: ${timeframe}.`,
-      `Candidato único já criado pela estratégia determinística: ${candidateDirection}.`,
-      'O servidor já aprovou os gates determinísticos de H4/H1, gatilho M5/M1, volume, estrutura, stop, risco-retorno após custos, spread, notícia, sessão e risco da conta.',
-      `Contexto quantitativo: ${technicalContext}`,
-      `Fechamentos cronológicos recentes: ${priceSeries}`,
-      'Sua tarefa é APENAS revisar este candidato. Não crie um novo sinal, não troque a direção, não altere entrada/stop/alvo e não acrescente um limite numérico mínimo de confiança.',
-      'Aprove somente se os dados fornecidos sustentarem a direção do candidato. Caso contrário, rejeite ou use HOLD. Considere a direção contrária como divergência, nunca como uma nova ordem.',
-      'Responda apenas JSON: {"decision":"approve|reject","direction":"BUY|SELL|HOLD","confidence":0-100,"reason":"justificativa curta baseada apenas nos dados"}.',
-    ].join('\n');
+      `Candidato único criado pelo motor determinístico: ${candidateDirection}.`,
+      'Checklist obrigatório calculado pelo servidor (todas as chaves precisam ser true): ' + JSON.stringify(strategyChecks),
+      'Estrutura/zona/entrada/stop/alvo/volume/barreira e métricas calculadas: ' + JSON.stringify(strategyFeatures),
+      `Contexto quantitativo adicional: ${technicalContext}`,
+      `Fechamentos cronológicos recentes de velas fechadas: ${priceSeries}`,
+      'Você está revisando o candidato e o checklist, não criando uma estratégia nova.',
+      'Aprove somente se os dados sustentarem a direção do candidato e nenhum critério obrigatório estiver falhando. Não invente thresholds, não aplique percentual mínimo de confiança, não crie uma segunda operação, não inverta nem altere a direção e não altere entrada, stop ou alvo.',
+      'Se houver evidência insuficiente, contradição real nos dados, critério obrigatório ausente/falso ou direção divergente, rejeite ou use HOLD.',
+      'Responda apenas JSON: {"decision":"approve|reject","direction":"BUY|SELL|HOLD","confidence":0-100,"reason":"justificativa curta vinculada aos dados fornecidos"}.',
+    ].join('\\n');
 
-    const responses = await Promise.allSettled(this.activeModels.map(async model => {
+    // One valid AI reviewer evaluates the documented checklist. Try the next model
+    // only when the prior provider fails technically or returns invalid JSON. A valid
+    // rejection is a decision, not a reason to shop for a more permissive model.
+    for (const model of this.activeModels) {
       try {
         const response = await axios.post(
           `${this.baseURL}/v1/chat/completions`,
           {
             model: model.id,
             messages: [
-              { role: 'system', content: 'Você é um revisor quantitativo prudente. Revise o candidato existente sem inventar operações. Não prometa lucro; responda somente JSON válido.' },
+              { role: 'system', content: 'Você é um revisor quantitativo rigoroso. Responda somente JSON válido, avalie os critérios fornecidos e não invente filtros ou operações.' },
               { role: 'user', content: prompt },
             ],
             temperature: 0.1,
-            max_tokens: 180,
+            max_tokens: 220,
             stream: false,
           },
           {
@@ -339,63 +350,53 @@ export class HuggingFaceAIService {
         const content = String(response.data?.choices?.[0]?.message?.content ?? '').trim();
         const jsonStart = content.indexOf('{');
         const jsonEnd = content.lastIndexOf('}');
-        if (jsonStart < 0 || jsonEnd <= jsonStart) return null;
-        const parsed = JSON.parse(content.slice(jsonStart, jsonEnd + 1));
+        if (jsonStart < 0 || jsonEnd <= jsonStart) {
+          console.warn(`[PRICE ACTION AI REVIEW] ${model.name} retornou JSON inválido para ${symbol}; tentando fallback técnico.`);
+          continue;
+        }
+
+        let parsed: any;
+        try {
+          parsed = JSON.parse(content.slice(jsonStart, jsonEnd + 1));
+        } catch {
+          console.warn(`[PRICE ACTION AI REVIEW] ${model.name} retornou JSON inválido para ${symbol}; tentando fallback técnico.`);
+          continue;
+        }
         const rawDecision = String(parsed?.decision ?? '').trim().toLowerCase();
         const decision = rawDecision === 'approve' || rawDecision === 'approved' ? 'approve'
           : rawDecision === 'reject' ? 'reject' : null;
         const direction = String(parsed?.direction ?? '').trim().toUpperCase();
         const confidence = Number(parsed?.confidence);
         if (!decision || !['BUY', 'SELL', 'HOLD'].includes(direction) ||
-          !Number.isFinite(confidence) || confidence <= 0 || confidence > 100) return null;
+          !Number.isFinite(confidence) || confidence <= 0 || confidence > 100) {
+          console.warn(`[PRICE ACTION AI REVIEW] ${model.name} retornou campos inválidos para ${symbol}; tentando fallback técnico.`);
+          continue;
+        }
+
+        const source = [model.name];
+        const reason = String(parsed?.reason ?? parsed?.reasoning ?? 'Sem justificativa fornecida.').slice(0, 500);
+        if (decision !== 'approve' || direction !== candidateDirection) {
+          const reviewedDirection = direction as 'BUY' | 'SELL' | 'HOLD';
+          return reject(
+            `Revisão IA rejeitou/divergiu do candidato ${candidateDirection}: decisão=${decision}, direção=${reviewedDirection}. ${reason}`,
+            reviewedDirection,
+            confidence,
+            source,
+          );
+        }
+
         return {
-          decision,
-          direction: direction as 'BUY' | 'SELL' | 'HOLD',
+          approved: true,
+          direction: candidateDirection,
           confidence,
-          source: model.name,
-          reason: String(parsed?.reason ?? parsed?.reasoning ?? 'Sem justificativa fornecida.').slice(0, 500),
+          sources: source,
+          reason: `Revisão IA aprovou o candidato ${candidateDirection} com base no checklist da estratégia; confiança informativa ${confidence}%. ${reason}`.trim(),
         };
       } catch (error) {
         console.warn(`[PRICE ACTION AI REVIEW] ${model.name} indisponível para ${symbol}: ${error instanceof Error ? error.message : 'erro desconhecido'}`);
-        return null;
       }
-    }));
-
-    const validReviews = responses
-      .filter(item => item.status === 'fulfilled')
-      .map(item => item.status === 'fulfilled' ? item.value : null)
-      .filter((item): item is { decision: 'approve' | 'reject'; direction: 'BUY' | 'SELL' | 'HOLD'; confidence: number; source: string; reason: string } => item !== null);
-
-    if (validReviews.length === 0) {
-      return reject('Nenhum modelo externo respondeu com uma revisão válida dentro do tempo limite; entrada bloqueada.');
     }
-
-    const approvals = validReviews.filter(review =>
-      review.decision === 'approve' && review.direction === candidateDirection
-    );
-    const oppositeDirection: 'BUY' | 'SELL' = candidateDirection === 'BUY' ? 'SELL' : 'BUY';
-    const oppositeVotes = validReviews.filter(review => review.direction === oppositeDirection).length;
-    const approvalShare = approvals.length / validReviews.length;
-    const avgApprovalConfidence = approvals.length > 0
-      ? approvals.reduce((sum, review) => sum + review.confidence, 0) / approvals.length
-      : 0;
-    const confidence = Math.round(approvalShare * 60 + avgApprovalConfidence * 0.4);
-    const sources = validReviews.map(review => review.source);
-
-    if (approvals.length <= validReviews.length / 2) {
-      const direction = oppositeVotes > validReviews.length / 2 ? oppositeDirection : 'HOLD';
-      const reason = `Revisão IA não formou maioria favorável ao candidato (${approvals.length}/${validReviews.length} aprovações). ${validReviews.find(review => review.decision === 'reject')?.reason ?? ''}`.trim();
-      return reject(reason, direction, confidence, sources);
-    }
-
-    const reasons = approvals.map(review => review.reason).filter(Boolean).slice(0, 2).join(' | ');
-    return {
-      approved: true,
-      direction: candidateDirection,
-      confidence,
-      sources,
-      reason: `Consenso dos revisores externos aprovou o candidato ${candidateDirection} (${approvals.length}/${validReviews.length}); confiança informativa ${confidence}%. ${reasons}`.trim(),
-    };
+    return reject('Nenhum modelo externo respondeu com uma revisão válida dentro do tempo limite; entrada bloqueada.');
   }
 
   async analyzeMarketData(tickData: DerivTickData[], symbol: string, userId?: string, externalContext?: ExternalMarketContext): Promise<AIConsensus> {
