@@ -43,10 +43,11 @@ export function isValidPriceActionCandles(v: unknown): v is Candle[] {
   return validCandles(v);
 }
 
-type MarketTrend = 'bullish' | 'bearish' | 'range';
+type MarketTrend = 'bullish' | 'bearish' | 'range' | 'unknown';
 type PivotKind = 'high' | 'low';
 interface Pivot { index: number; price: number }
 interface PriceZone { low: number; high: number; touches: number }
+interface RangeBounds { low: number; high: number; lowTouches: number; highTouches: number }
 
 /** Swing points are used only after two candles have closed on their right. */
 function pivots(c: Candle[], kind: PivotKind, wing = 2): Pivot[] {
@@ -67,16 +68,62 @@ function pivots(c: Candle[], kind: PivotKind, wing = 2): Pivot[] {
   return result;
 }
 
+function detectRangeBounds(c: Candle[]): RangeBounds | null {
+  const sample = c.slice(-60);
+  if (sample.length < 30) return null;
+  const recentClose = sample[sample.length - 1].close;
+  const rangeUnit = averageRange(sample);
+  if (!(rangeUnit > 0) || !(recentClose > 0)) return null;
+  const tolerance = Math.max(rangeUnit * 0.65, recentClose * 0.0003);
+
+  const cluster = (kind: PivotKind): PriceZone[] => {
+    const levels = pivots(sample.slice(0, -1), kind).slice(-10);
+    const buckets: number[][] = [];
+    for (const pivot of levels) {
+      const group = buckets.find(items => Math.abs(average(items) - pivot.price) <= tolerance);
+      if (group) group.push(pivot.price);
+      else buckets.push([pivot.price]);
+    }
+    return buckets.filter(items => items.length >= 2).map(items => ({
+      low: Math.min(...items) - tolerance,
+      high: Math.max(...items) + tolerance,
+      touches: items.length,
+    }));
+  };
+
+  const highZones = cluster('high').sort((a, b) => b.high - a.high);
+  const lowZones = cluster('low').sort((a, b) => a.low - b.low);
+  if (!highZones.length || !lowZones.length) return null;
+
+  const upper = highZones[0];
+  const lower = lowZones[0];
+  const width = upper.high - lower.low;
+  // A genuine range has repeated reactions at both edges, meaningful width,
+  // and a latest closed price that has not already broken out of the range.
+  if (upper.high <= lower.low || width < rangeUnit * 4) return null;
+  if (recentClose < lower.low - tolerance || recentClose > upper.high + tolerance) return null;
+
+  return {
+    low: lower.low,
+    high: upper.high,
+    lowTouches: lower.touches,
+    highTouches: upper.touches,
+  };
+}
+
 function trend(c: Candle[]): MarketTrend {
   const sample = c.slice(-60);
   const highs = pivots(sample, 'high');
   const lows = pivots(sample, 'low');
-  if (highs.length < 2 || lows.length < 2) return 'range';
+  // Missing confirmed pivots mean unknown structure, never an inferred range.
+  if (highs.length < 2 || lows.length < 2) return 'unknown';
+
   const [oldHigh, lastHigh] = highs.slice(-2);
   const [oldLow, lastLow] = lows.slice(-2);
-  if (lastHigh.price > oldHigh.price && lastLow.price > oldLow.price) return 'bullish';
-  if (lastHigh.price < oldHigh.price && lastLow.price < oldLow.price) return 'bearish';
-  return 'range';
+  const tolerance = Math.max(averageRange(sample) * 0.1, Math.abs(sample[sample.length - 1].close) * 0.00005);
+  if (lastHigh.price > oldHigh.price + tolerance && lastLow.price > oldLow.price + tolerance) return 'bullish';
+  if (lastHigh.price < oldHigh.price - tolerance && lastLow.price < oldLow.price - tolerance) return 'bearish';
+  return detectRangeBounds(sample) ? 'range' : 'unknown';
 }
 function average(values: number[]): number {
   return values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
@@ -102,9 +149,43 @@ function trigger(c: Candle[]): TradeSide | null {
   if ((bearEngulf || bearPin || insideBar) && confirmation.close < pattern.low) return 'SELL';
   return null;
 }
-function hasFvg(c: Candle[], side: TradeSide): boolean {
-  const n = c.length;
-  return side === 'BUY' ? c[n - 1].low > c[n - 3].high : c[n - 1].high < c[n - 3].low;
+function findFairValueGapZone(c: Candle[], side: TradeSide, currentPrice: number): PriceZone | null {
+  const sample = c.slice(-60);
+  if (sample.length < 3 || !finite(currentPrice) || currentPrice <= 0) return null;
+  const baseline = averageRange(sample);
+  if (!(baseline > 0)) return null;
+  const tolerance = Math.max(baseline * 0.15, currentPrice * 0.00005);
+
+  for (let i = sample.length - 1; i >= 2; i--) {
+    const first = sample[i - 2];
+    const impulse = sample[i - 1];
+    const third = sample[i];
+    const impulseBody = Math.abs(impulse.close - impulse.open);
+    if (impulseBody < baseline * 0.5) continue;
+
+    const low = side === 'BUY' ? first.high : third.high;
+    const high = side === 'BUY' ? third.low : first.low;
+    const isGap = side === 'BUY'
+      ? third.low > first.high && impulse.close > impulse.open
+      : third.high < first.low && impulse.close < impulse.open;
+    if (!isGap || high <= low) continue;
+
+    // A later close beyond the far side invalidates the gap. The latest price
+    // must actually return to the zone; a fresh, unmitigated gap is not a zone touch.
+    let invalidated = false;
+    for (let j = i + 1; j < sample.length; j++) {
+      if ((side === 'BUY' && sample[j].close < low) ||
+          (side === 'SELL' && sample[j].close > high)) {
+        invalidated = true;
+        break;
+      }
+    }
+    const returnedToZone = currentPrice >= low - tolerance && currentPrice <= high + tolerance;
+    if (!invalidated && returnedToZone) {
+      return { low, high, touches: 1 };
+    }
+  }
+  return null;
 }
 function breakOfStructure(c: Candle[], side: TradeSide): boolean {
   const prior = c.slice(-11, -1);
@@ -121,24 +202,32 @@ function changeOfCharacter(c: Candle[], side: TradeSide): boolean {
   return side === 'BUY' ? prior === 'bearish' && recent === 'bullish'
     : prior === 'bullish' && recent === 'bearish';
 }
-function orderBlockZone(c: Candle[], side: TradeSide): { low: number; high: number } | null {
-  if (c.length < 15) return null;
-  const sample = c.slice(-21, -1);
-  const avgRange = average(sample.map(x => x.high - x.low));
-  if (!(avgRange > 0)) return null;
-  const last = c[c.length - 1];
-  for (let i = c.length - 2; i >= Math.max(1, c.length - 12); i--) {
+function orderBlockZone(c: Candle[], side: TradeSide, currentPrice = c[c.length - 1]?.close): { low: number; high: number; identifiedAt: number; invalidationPrice: number } | null {
+  if (c.length < 15 || !finite(currentPrice) || currentPrice <= 0) return null;
+  const baseline = averageRange(c);
+  if (!(baseline > 0)) return null;
+  for (let i = c.length - 3; i >= Math.max(1, c.length - 30); i--) {
     const candidate = c[i];
-    const isOpposite = side === 'BUY' ? candidate.close < candidate.open : candidate.close > candidate.open;
-    if (!isOpposite) continue;
     const impulse = c[i + 1];
+    const isOpposite = side === 'BUY' ? candidate.close < candidate.open : candidate.close > candidate.open;
     const impulseBody = Math.abs(impulse.close - impulse.open);
     const alignedImpulse = side === 'BUY' ? impulse.close > impulse.open : impulse.close < impulse.open;
-    if (!alignedImpulse || impulseBody < avgRange * 1.5) continue;
+    if (!isOpposite || !alignedImpulse || impulseBody < baseline * 1.5) continue;
     const low = Math.min(candidate.open, candidate.close);
     const high = Math.max(candidate.open, candidate.close);
-    const tolerance = avgRange * 0.25;
-    if (last.close >= low - tolerance && last.close <= high + tolerance) return { low, high };
+    const tolerance = baseline * 0.25;
+    const invalidated = side === 'BUY'
+      ? c.slice(i + 2).some(bar => bar.close < candidate.low)
+      : c.slice(i + 2).some(bar => bar.close > candidate.high);
+    const priceInZone = currentPrice >= low - tolerance && currentPrice <= high + tolerance;
+    if (!invalidated && priceInZone) {
+      return {
+        low,
+        high,
+        identifiedAt: candidate.time,
+        invalidationPrice: side === 'BUY' ? candidate.low : candidate.high,
+      };
+    }
   }
   return null;
 }
@@ -149,7 +238,7 @@ function averageRange(c: Candle[]): number {
 /** A valid supply/demand region needs at least two confirmed reactions. */
 function repeatedStructureZone(c: Candle[], kind: PivotKind, price: number): PriceZone | null {
   if (!finite(price) || price <= 0) return null;
-  const tolerance = Math.max(averageRange(c) * 0.25, Math.abs(price) * 0.00005);
+  const tolerance = Math.max(averageRange(c) * 0.35, Math.abs(price) * 0.00005);
   const levels = pivots(c.slice(0, -1), kind).map(p => p.price);
   const clusters: number[][] = [];
   for (const level of levels) {
@@ -170,6 +259,23 @@ function repeatedStructureZone(c: Candle[], kind: PivotKind, price: number): Pri
 
 function nearStructureZone(c: Candle[], side: TradeSide, price = c[c.length - 1]?.close): boolean {
   return repeatedStructureZone(c, side === 'BUY' ? 'low' : 'high', price) !== null;
+}
+
+function nearestBarrier(
+  frames: Array<{ timeframe: Timeframe; candles: Candle[] }>,
+  side: TradeSide,
+  entry: number,
+): { level: number; distance: number; timeframe: Timeframe } | null {
+  const candidates = frames.flatMap(frame =>
+    pivots(frame.candles, side === 'BUY' ? 'high' : 'low')
+      .map(pivot => ({ level: pivot.price, timeframe: frame.timeframe }))
+      .filter(item => side === 'BUY' ? item.level > entry : item.level < entry)
+  );
+  if (!candidates.length) return null;
+  const selected = candidates.sort((a, b) =>
+    side === 'BUY' ? a.level - b.level : b.level - a.level
+  )[0];
+  return { ...selected, distance: Math.abs(selected.level - entry) };
 }
 function liquiditySweep(c: Candle[], side: TradeSide): boolean {
   const recent = c.slice(-21, -1);
