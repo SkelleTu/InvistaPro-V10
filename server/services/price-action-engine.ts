@@ -331,11 +331,20 @@ export function evaluatePriceActionSetup(
     const matching = candidates.find(candidate => {
       const candidateSide = trigger(candidate.candles);
       const candidatePrice = candidate.candles[candidate.candles.length - 1].close;
-      if (directional) return candidateSide === (selectionH4 === 'bullish' ? 'BUY' : 'SELL');
-      if (ranged && selectionRange) {
+      if (directional && selectionM15Trend !== 'range') {
+        return candidateSide === (selectionH4 === 'bullish' ? 'BUY' : 'SELL');
+      }
+      if ((ranged || (directional && selectionM15Trend === 'range')) && selectionRange) {
         const edgeTolerance = Math.max(averageRange(selectionM15) * 0.75, Math.abs(candidatePrice) * 0.0005);
-        return (candidateSide === 'BUY' && candidatePrice <= selectionRange.low + edgeTolerance) ||
-          (candidateSide === 'SELL' && candidatePrice >= selectionRange.high - edgeTolerance);
+        const nearLowerEdge = candidatePrice <= selectionRange.low + edgeTolerance;
+        const nearUpperEdge = candidatePrice >= selectionRange.high - edgeTolerance;
+        if (directional) {
+          return selectionH4 === 'bullish'
+            ? candidateSide === 'BUY' && nearLowerEdge
+            : candidateSide === 'SELL' && nearUpperEdge;
+        }
+        return (candidateSide === 'BUY' && nearLowerEdge) ||
+          (candidateSide === 'SELL' && nearUpperEdge);
       }
       return false;
     });
@@ -368,9 +377,8 @@ export function evaluatePriceActionSetup(
 
   const directionalMode = (t4 === 'bullish' || t4 === 'bearish') && t4 === t1;
   const rangeMode = t4 === 'range' && t1 === 'range';
-  const m15DirectionalAlignment = directionalMode &&
-    (m15Trend === t4 || (m15Trend === 'range' && m15Range !== null));
-  const m15RangeAlignment = rangeMode && m15Trend === 'range' && m15Range !== null;
+  const m15DirectionalAlignment = directionalMode && m15Trend === t4;
+  const m15RangeAlignment = (directionalMode || rangeMode) && m15Trend === 'range' && m15Range !== null;
   checks.trend_alignment = directionalMode || rangeMode;
   checks.m15_alignment = m15DirectionalAlignment || m15RangeAlignment;
   if (!checks.trend_alignment) {
@@ -389,14 +397,16 @@ export function evaluatePriceActionSetup(
   if (directionalMode && m15DirectionalAlignment && entrySide) {
     const expectedSide: TradeSide = t4 === 'bullish' ? 'BUY' : 'SELL';
     if (entrySide === expectedSide) side = entrySide;
-  } else if (rangeMode && m15RangeAlignment && m15Range && entrySide) {
+  } else if (m15RangeAlignment && m15Range && entrySide) {
     rangeEdgeTolerance = Math.max(averageRange(m15) * 0.75, Math.abs(entry) * 0.0005);
     const nearLowerEdge = entry <= m15Range.low + rangeEdgeTolerance;
     const nearUpperEdge = entry >= m15Range.high - rangeEdgeTolerance;
-    if (entrySide === 'BUY' && nearLowerEdge) {
+    const allowedBuy = !directionalMode || t4 === 'bullish';
+    const allowedSell = !directionalMode || t4 === 'bearish';
+    if (entrySide === 'BUY' && nearLowerEdge && allowedBuy) {
       side = 'BUY';
       atRangeExtreme = true;
-    } else if (entrySide === 'SELL' && nearUpperEdge) {
+    } else if (entrySide === 'SELL' && nearUpperEdge && allowedSell) {
       side = 'SELL';
       atRangeExtreme = true;
     }
@@ -407,7 +417,7 @@ export function evaluatePriceActionSetup(
     features.rangeEdgeTolerance = rangeEdgeTolerance;
   }
   checks.entry_trigger = side !== null;
-  checks.range_extreme = !rangeMode || atRangeExtreme;
+  checks.range_extreme = !(rangeMode || m15RangeAlignment) || atRangeExtreme;
   if (!side) {
     reasons.push(rangeMode
       ? 'Sem gatilho confirmado em um extremo do range de 15M; meio da faixa não autoriza entrada'
@@ -463,7 +473,7 @@ export function evaluatePriceActionSetup(
     const sweep = liquiditySweep(m15, side) || liquiditySweep(entryFrame!, side);
     const bos = breakOfStructure(m15, side) || breakOfStructure(entryFrame!, side);
     const choch = changeOfCharacter(m15, side) || changeOfCharacter(entryFrame!, side);
-    const validRangeEdge = rangeMode && atRangeExtreme && m15Range !== null;
+    const validRangeEdge = m15RangeAlignment && atRangeExtreme && m15Range !== null;
     const zoneNear = structureZone !== null || fvgZone !== null || obZone !== null || validRangeEdge;
     const volumeHistory = entryFrame!.slice(-21, -1).map(candle => candle.volume);
     const volumeBaseline = average(volumeHistory);
