@@ -322,89 +322,95 @@ export class HuggingFaceAIService {
       'Responda apenas JSON: {"decision":"approve|reject","direction":"BUY|SELL|HOLD","confidence":0-100,"reason":"justificativa curta vinculada aos dados fornecidos"}.',
     ].join('\n');
 
-    // Query the configured reviewers in parallel to keep latency bounded. Promise.allSettled
-    // preserves configured order: the first technically valid response is authoritative.
-    // A valid rejection is final; only transport/format failures allow fallback to another model.
-    const responses = await Promise.allSettled(this.activeModels.map(async model => {
-      try {
-        const response = await axios.post(
-          `${this.baseURL}/v1/chat/completions`,
-          {
-            model: model.id,
-            messages: [
-              { role: 'system', content: 'Você é um revisor quantitativo rigoroso. Responda somente JSON válido, avalie os critérios fornecidos e não invente filtros ou operações.' },
-              { role: 'user', content: prompt },
-            ],
-            temperature: 0.1,
-            max_tokens: 220,
-            stream: false,
-          },
-          {
-            headers: {
-              Authorization: `Bearer ${this.apiKey}`,
-              'Content-Type': 'application/json',
-            },
-            timeout: 4_500,
-          },
-        );
-        const content = String(response.data?.choices?.[0]?.message?.content ?? '').trim();
-        const jsonStart = content.indexOf('{');
-        const jsonEnd = content.lastIndexOf('}');
-        if (jsonStart < 0 || jsonEnd <= jsonStart) return null;
-
-        let parsed: any;
+    // Query reviewers in parallel, but accept only the first technically valid response.
+    // A valid rejection is final. Transport/format errors allow fallback; numeric confidence
+    // and multi-model quorum thresholds are intentionally not used as extra entry criteria.
+    const controllers = this.activeModels.map(() => new AbortController());
+    try {
+      const review = await Promise.any(this.activeModels.map(async (model, modelIndex) => {
         try {
-          parsed = JSON.parse(content.slice(jsonStart, jsonEnd + 1));
-        } catch {
-          return null;
+          const response = await axios.post(
+            `${this.baseURL}/v1/chat/completions`,
+            {
+              model: model.id,
+              messages: [
+                { role: 'system', content: 'Você é um revisor quantitativo rigoroso. Responda somente JSON válido, avalie os critérios fornecidos e não invente filtros ou operações.' },
+                { role: 'user', content: prompt },
+              ],
+              temperature: 0.1,
+              max_tokens: 220,
+              stream: false,
+            },
+            {
+              headers: {
+                Authorization: `Bearer ${this.apiKey}`,
+                'Content-Type': 'application/json',
+              },
+              timeout: 4_500,
+              signal: controllers[modelIndex].signal,
+            },
+          );
+          const content = String(response.data?.choices?.[0]?.message?.content ?? '').trim();
+          const jsonStart = content.indexOf('{');
+          const jsonEnd = content.lastIndexOf('}');
+          if (jsonStart < 0 || jsonEnd <= jsonStart) {
+            throw new Error('Resposta de revisão não contém JSON válido');
+          }
+
+          let parsed: any;
+          try {
+            parsed = JSON.parse(content.slice(jsonStart, jsonEnd + 1));
+          } catch {
+            throw new Error('JSON de revisão inválido');
+          }
+          const rawDecision = String(parsed?.decision ?? '').trim().toLowerCase();
+          const decision = rawDecision === 'approve' || rawDecision === 'approved' ? 'approve'
+            : rawDecision === 'reject' ? 'reject' : null;
+          const direction = String(parsed?.direction ?? '').trim().toUpperCase();
+          const confidence = Number(parsed?.confidence);
+          if (!decision || !['BUY', 'SELL', 'HOLD'].includes(direction) ||
+            !Number.isFinite(confidence) || confidence < 0 || confidence > 100) {
+            throw new Error('Campos da resposta de revisão inválidos');
+          }
+
+          return {
+            decision,
+            direction: direction as 'BUY' | 'SELL' | 'HOLD',
+            confidence,
+            source: model.name,
+            modelIndex,
+            reason: String(parsed?.reason ?? parsed?.reasoning ?? 'Sem justificativa fornecida.').slice(0, 500),
+          };
+        } catch (error) {
+          console.warn(`[PRICE ACTION AI REVIEW] ${model.name} falhou para ${symbol}: ${error instanceof Error ? error.message : 'erro desconhecido'}`);
+          throw error;
         }
-        const rawDecision = String(parsed?.decision ?? '').trim().toLowerCase();
-        const decision = rawDecision === 'approve' || rawDecision === 'approved' ? 'approve'
-          : rawDecision === 'reject' ? 'reject' : null;
-        const direction = String(parsed?.direction ?? '').trim().toUpperCase();
-        const confidence = Number(parsed?.confidence);
-        if (!decision || !['BUY', 'SELL', 'HOLD'].includes(direction) ||
-          !Number.isFinite(confidence) || confidence < 0 || confidence > 100) return null;
+      }));
 
-        return {
-          decision,
-          direction: direction as 'BUY' | 'SELL' | 'HOLD',
-          confidence,
-          source: model.name,
-          reason: String(parsed?.reason ?? parsed?.reasoning ?? 'Sem justificativa fornecida.').slice(0, 500),
-        };
-      } catch (error) {
-        console.warn(`[PRICE ACTION AI REVIEW] ${model.name} indisponível para ${symbol}: ${error instanceof Error ? error.message : 'erro desconhecido'}`);
-        return null;
+      // Cancel slower redundant calls as soon as one valid reviewer resolves.
+      controllers.forEach(controller => controller.abort());
+
+      const source = [review.source];
+      if (review.decision !== 'approve' || review.direction !== candidateDirection) {
+        return reject(
+          `Revisão IA rejeitou/divergiu do candidato ${candidateDirection}: decisão=${review.decision}, direção=${review.direction}. ${review.reason}`,
+          review.direction,
+          review.confidence,
+          source,
+        );
       }
-    }));
 
-    const validReviews = responses
-      .filter(item => item.status === 'fulfilled')
-      .map(item => item.status === 'fulfilled' ? item.value : null)
-      .filter((item): item is { decision: 'approve' | 'reject'; direction: 'BUY' | 'SELL' | 'HOLD'; confidence: number; source: string; reason: string } => item !== null);
-    const review = validReviews[0];
-    if (!review) {
+      return {
+        approved: true,
+        direction: candidateDirection,
+        confidence: review.confidence,
+        sources: source,
+        reason: `Revisão IA aprovou o candidato ${candidateDirection} com base no checklist da estratégia; confiança informativa ${review.confidence}%. ${review.reason}`.trim(),
+      };
+    } catch {
+      controllers.forEach(controller => controller.abort());
       return reject('Nenhum modelo externo respondeu com uma revisão válida dentro do tempo limite; entrada bloqueada.');
     }
-
-    const source = [review.source];
-    if (review.decision !== 'approve' || review.direction !== candidateDirection) {
-      return reject(
-        `Revisão IA rejeitou/divergiu do candidato ${candidateDirection}: decisão=${review.decision}, direção=${review.direction}. ${review.reason}`,
-        review.direction,
-        review.confidence,
-        source,
-      );
-    }
-
-    return {
-      approved: true,
-      direction: candidateDirection,
-      confidence: review.confidence,
-      sources: source,
-      reason: `Revisão IA aprovou o candidato ${candidateDirection} com base no checklist da estratégia; confiança informativa ${review.confidence}%. ${review.reason}`.trim(),
-    };
   }
 
   async analyzeMarketData(tickData: DerivTickData[], symbol: string, userId?: string, externalContext?: ExternalMarketContext): Promise<AIConsensus> {
