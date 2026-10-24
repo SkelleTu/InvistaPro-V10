@@ -257,8 +257,6 @@ export function assessMt5RiskLimit(input: {
   // This avoids mixing UTC/server-local counters with the strategy's operational day.
   const realizedDailyLoss = tradesClosedToday.reduce((sum, trade) =>
     sum + (Number.isFinite(trade.profit) ? Math.max(0, -trade.profit) : 0), 0);
-  const realizedDailyProfit = tradesClosedToday.reduce((sum, trade) =>
-    sum + (Number.isFinite(trade.profit) ? Math.max(0, trade.profit) : 0), 0);
   const unrealizedDrawdown = Number.isFinite(status.lastBalance) && Number.isFinite(status.lastEquity)
     ? Math.max(0, Number(status.lastBalance) - Number(status.lastEquity))
     : Number.POSITIVE_INFINITY;
