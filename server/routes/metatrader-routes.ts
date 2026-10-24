@@ -412,7 +412,17 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
 
       // Do not feed the same crypto request into the legacy generator; it could create a competing signal.
       const reviewTimeframe: 'M5' | 'M1' = priceActionSetup.features.entryTimeframe === 'M1' ? 'M1' : 'M5';
-      const reviewFrame = reviewTimeframe === 'M5' ? frames.M5 : frames.M1;
+      const reviewFrameCandidate = reviewTimeframe === 'M5' ? frames.M5 : frames.M1;
+      if (!isValidPriceActionCandles(reviewFrameCandidate)) {
+        return res.json({
+          action: 'HOLD', confidence: 0, executionEnabled: false,
+          code: 'PRICE_ACTION_INTERNAL_TIMEFRAME_MISMATCH',
+          reason: 'O timeframe aprovado pelo motor determinístico não está disponível para a rota de execução.',
+          strategyAction: priceActionSetup.action,
+          timestamp: Date.now(),
+        });
+      }
+      const reviewFrame = reviewFrameCandidate;
       let aiReview: Awaited<ReturnType<typeof huggingFaceAI.reviewPriceActionCandidate>> = {
         approved: false, direction: 'HOLD', confidence: 0, sources: [],
         reason: 'Revisão IA não executada; a decisão operacional continuará restrita aos critérios explícitos da estratégia.',
