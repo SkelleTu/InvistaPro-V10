@@ -442,6 +442,8 @@ export function evaluatePriceActionSetup(
     features.fvgLow = fvgZone?.zone?.low ?? null;
     features.fvgHigh = fvgZone?.zone?.high ?? null;
     features.fvgTimeframe = fvgZone?.timeframe ?? null;
+    features.fvgIdentifiedAt = fvgZone?.zone?.identifiedAt ?? null;
+    features.fvgInvalidationPrice = fvgZone?.zone?.invalidationPrice ?? null;
     features.liquiditySweep = sweep;
     features.bos = bos;
     features.choch = choch;
@@ -449,11 +451,41 @@ export function evaluatePriceActionSetup(
     features.orderBlockLow = obZone?.zone?.low ?? null;
     features.orderBlockHigh = obZone?.zone?.high ?? null;
     features.orderBlockTimeframe = obZone?.timeframe ?? null;
+    features.orderBlockIdentifiedAt = obZone?.zone?.identifiedAt ?? null;
+    features.orderBlockInvalidationPrice = obZone?.zone?.invalidationPrice ?? null;
     features.supportResistanceZone = structureZone !== null;
     features.supportResistanceLow = structureZone?.zone?.low ?? null;
     features.supportResistanceHigh = structureZone?.zone?.high ?? null;
     features.supportResistanceTouches = structureZone?.zone?.touches ?? 0;
     features.supportResistanceTimeframe = structureZone?.timeframe ?? null;
+    features.supportResistanceIdentifiedAt = structureZone?.zone?.identifiedAt ?? null;
+    const auditZone = structureZone
+      ? { type: side === 'BUY' ? 'support_demand' : 'resistance_supply', timeframe: structureZone.timeframe, zone: structureZone.zone }
+      : fvgZone
+        ? { type: 'fair_value_gap', timeframe: fvgZone.timeframe, zone: fvgZone.zone }
+        : obZone
+          ? { type: 'order_block', timeframe: obZone.timeframe, zone: obZone.zone }
+          : validRangeEdge && m15Range
+            ? {
+              type: side === 'BUY' ? 'range_demand' : 'range_supply',
+              timeframe: 'M15',
+              zone: {
+                low: side === 'BUY' ? m15Range.low : m15Range.high - rangeEdgeTolerance,
+                high: side === 'BUY' ? m15Range.low + rangeEdgeTolerance : m15Range.high,
+                touches: side === 'BUY' ? m15Range.lowTouches : m15Range.highTouches,
+                identifiedAt: m15[m15.length - 1].time,
+                invalidationPrice: side === 'BUY' ? m15Range.low : m15Range.high,
+              },
+            }
+            : null;
+    features.zoneType = auditZone?.type ?? null;
+    features.zoneLow = auditZone?.zone.low ?? null;
+    features.zoneHigh = auditZone?.zone.high ?? null;
+    features.zoneTimeframe = auditZone?.timeframe ?? null;
+    features.zoneTouches = auditZone?.zone.touches ?? 0;
+    features.zoneIdentifiedAt = auditZone?.zone.identifiedAt ?? null;
+    features.zoneInvalidationPrice = auditZone?.zone.invalidationPrice ?? null;
+    features.zoneState = auditZone ? 'valid' : 'missing';
     features.zoneNear = zoneNear;
     features.volumeBaseline = volumeBaseline;
     features.triggerVolume = triggerVolume;
