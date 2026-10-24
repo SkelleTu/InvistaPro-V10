@@ -1114,6 +1114,7 @@ void FetchAndProcessSignal()
       {
          bool positionFound = false;
          bool protectionValid = false;
+         long confirmedPositionIdentifier = 0;
          long executedPositionIdentifier = 0;
          ulong executedDealTicket = trade.ResultDeal();
          if (executedDealTicket > 0 && HistoryDealSelect(executedDealTicket))
@@ -1132,6 +1133,7 @@ void FetchAndProcessSignal()
 
             positionFound = true;
             confirmedPositionTicket = candidateTicket;
+            confirmedPositionIdentifier = PositionGetInteger(POSITION_IDENTIFIER);
             double brokerSL = PositionGetDouble(POSITION_SL);
             double brokerTP = PositionGetDouble(POSITION_TP);
             double brokerEntry = PositionGetDouble(POSITION_PRICE_OPEN);
@@ -1162,6 +1164,15 @@ void FetchAndProcessSignal()
          else
          {
             GlobalVariableSet("InvistaPA_SL0_" + IntegerToString((long)confirmedPositionTicket), stopLoss);
+            if (confirmedPositionIdentifier > 0)
+               GlobalVariableSet("InvistaPA_IDMAP_" + StringFormat("%I64d", confirmedPositionIdentifier), (double)confirmedPositionTicket);
+            string signalFile = "InvistaPA_SIGNAL_" + StringFormat("%I64u", confirmedPositionTicket) + ".txt";
+            int signalHandle = FileOpen(signalFile, FILE_WRITE | FILE_TXT | FILE_COMMON);
+            if (signalHandle != INVALID_HANDLE)
+            {
+               FileWriteString(signalHandle, signalId);
+               FileClose(signalHandle);
+            }
          }
       }
    }
@@ -1541,6 +1552,186 @@ void ConfirmTradeOpen(string signalId, int ticket, string type, double lots, dou
    StringToCharArray(body, postData, 0, StringLen(body));
    string responseHeaders;
    WebRequest("POST", url, headers, 5000, postData, result, responseHeaders);
+}
+
+
+void ReportClosedPositionFromDeal(ulong transactionDeal)
+{
+   if (transactionDeal == 0 || !HistoryDealSelect(transactionDeal)) return;
+
+   long entryKind = HistoryDealGetInteger(transactionDeal, DEAL_ENTRY);
+   if (entryKind != DEAL_ENTRY_OUT && entryKind != DEAL_ENTRY_OUT_BY && entryKind != DEAL_ENTRY_INOUT)
+      return;
+
+   long dealMagic = HistoryDealGetInteger(transactionDeal, DEAL_MAGIC);
+   if (dealMagic != MagicNumber) return;
+
+   long positionIdentifier = HistoryDealGetInteger(transactionDeal, DEAL_POSITION_ID);
+   if (positionIdentifier <= 0) return;
+
+   // A partial close must not remove the still-open position from the server.
+   for (int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      ulong currentTicket = PositionGetTicket(i);
+      if (currentTicket == 0 || !PositionSelectByTicket(currentTicket)) continue;
+      if (PositionGetInteger(POSITION_IDENTIFIER) == positionIdentifier) return;
+   }
+
+   string identifierKey = "InvistaPA_IDMAP_" + StringFormat("%I64d", positionIdentifier);
+   if (!GlobalVariableCheck(identifierKey)) return; // Never invent a server ticket.
+   ulong serverTicket = (ulong)GlobalVariableGet(identifierKey);
+   if (serverTicket == 0) return;
+
+   string closeReportedKey = "InvistaPA_CLOSE_SENT_" + StringFormat("%I64d", positionIdentifier);
+   if (GlobalVariableCheck(closeReportedKey)) return;
+
+   if (!HistorySelectByPosition(positionIdentifier)) return;
+   int totalDeals = HistoryDealsTotal();
+   if (totalDeals <= 0) return;
+
+   double netProfit = 0.0;
+   double entryVolume = 0.0;
+   double weightedOpenPrice = 0.0;
+   double exitVolume = 0.0;
+   double weightedClosePrice = 0.0;
+   long openTime = 0;
+   long closeTime = 0;
+   long positionType = -1;
+   long latestCloseReason = DEAL_REASON_CLIENT;
+   string recordedSignalId = "";
+   string symbol = "";
+
+   for (int i = 0; i < totalDeals; i++)
+   {
+      ulong deal = HistoryDealGetTicket(i);
+      if (deal == 0) continue;
+      if (HistoryDealGetInteger(deal, DEAL_POSITION_ID) != positionIdentifier) continue;
+
+      long dealEntry = HistoryDealGetInteger(deal, DEAL_ENTRY);
+      long dealTime = HistoryDealGetInteger(deal, DEAL_TIME);
+      double dealVolume = HistoryDealGetDouble(deal, DEAL_VOLUME);
+      double dealPrice = HistoryDealGetDouble(deal, DEAL_PRICE);
+      long dealType = HistoryDealGetInteger(deal, DEAL_TYPE);
+
+      netProfit += HistoryDealGetDouble(deal, DEAL_PROFIT);
+      netProfit += HistoryDealGetDouble(deal, DEAL_COMMISSION);
+      netProfit += HistoryDealGetDouble(deal, DEAL_SWAP);
+      netProfit += HistoryDealGetDouble(deal, DEAL_FEE);
+
+      if (symbol == "") symbol = HistoryDealGetString(deal, DEAL_SYMBOL);
+
+      if (dealEntry == DEAL_ENTRY_IN || dealEntry == DEAL_ENTRY_INOUT)
+      {
+         if (dealVolume > 0.0 && dealPrice > 0.0)
+         {
+            entryVolume += dealVolume;
+            weightedOpenPrice += dealPrice * dealVolume;
+         }
+         if (openTime == 0 || dealTime < openTime) openTime = dealTime;
+         if (positionType < 0 && (dealType == DEAL_TYPE_BUY || dealType == DEAL_TYPE_SELL))
+            positionType = dealType;
+         if (recordedSignalId == "")
+         {
+            string comment = HistoryDealGetString(deal, DEAL_COMMENT);
+            int prefix = StringFind(comment, "InvistaPRO_");
+            if (prefix >= 0) recordedSignalId = StringSubstr(comment, prefix + StringLen("InvistaPRO_"));
+         }
+      }
+
+      if (dealEntry == DEAL_ENTRY_OUT || dealEntry == DEAL_ENTRY_OUT_BY || dealEntry == DEAL_ENTRY_INOUT)
+      {
+         if (dealVolume > 0.0 && dealPrice > 0.0)
+         {
+            exitVolume += dealVolume;
+            weightedClosePrice += dealPrice * dealVolume;
+         }
+         if (dealTime >= closeTime)
+         {
+            closeTime = dealTime;
+            latestCloseReason = HistoryDealGetInteger(deal, DEAL_REASON);
+         }
+      }
+   }
+
+   if (entryVolume <= 0.0 || exitVolume <= 0.0 || weightedOpenPrice <= 0.0 || weightedClosePrice <= 0.0 ||
+       openTime <= 0 || closeTime <= 0 || symbol == "" ||
+       (positionType != DEAL_TYPE_BUY && positionType != DEAL_TYPE_SELL))
+      return;
+
+   double averageOpen = weightedOpenPrice / entryVolume;
+   double averageClose = weightedClosePrice / exitVolume;
+   double point = SymbolInfoDouble(symbol, SYMBOL_POINT);
+   double signedPips = point > 0.0
+      ? ((positionType == DEAL_TYPE_BUY) ? averageClose - averageOpen : averageOpen - averageClose) / point
+      : 0.0;
+
+   string signalFile = "InvistaPA_SIGNAL_" + StringFormat("%I64u", serverTicket) + ".txt";
+   if (FileIsExist(signalFile, FILE_COMMON))
+   {
+      int signalHandle = FileOpen(signalFile, FILE_READ | FILE_TXT | FILE_COMMON);
+      if (signalHandle != INVALID_HANDLE)
+      {
+         string storedSignalId = FileReadString(signalHandle);
+         FileClose(signalHandle);
+         if (storedSignalId != "") recordedSignalId = storedSignalId;
+      }
+   }
+
+   string closeReason = "MANUAL";
+   if (latestCloseReason == DEAL_REASON_TP) closeReason = "TP";
+   else if (latestCloseReason == DEAL_REASON_SL) closeReason = "SL";
+
+   string body = "{";
+   body += "\"ticket\":" + StringFormat("%I64u", serverTicket) + ",";
+   body += "\"signalId\":\"" + recordedSignalId + "\",";
+   body += "\"symbol\":\"" + symbol + "\",";
+   body += "\"type\":\"" + string(positionType == DEAL_TYPE_BUY ? "BUY" : "SELL") + "\",";
+   body += "\"lots\":" + DoubleToString(entryVolume, 8) + ",";
+   body += "\"openPrice\":" + DoubleToString(averageOpen, (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS)) + ",";
+   body += "\"closePrice\":" + DoubleToString(averageClose, (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS)) + ",";
+   body += "\"profit\":" + DoubleToString(netProfit, 8) + ",";
+   body += "\"pips\":" + DoubleToString(signedPips, 2) + ",";
+   body += "\"openTime\":" + IntegerToString((int)openTime) + ",";
+   body += "\"closeTime\":" + IntegerToString((int)closeTime) + ",";
+   body += "\"closeReason\":\"" + closeReason + "\"";
+   if (g_apiToken != "") body += ",\"token\":\"" + g_apiToken + "\"";
+   body += "}";
+
+   char postData[], responseData[];
+   StringToCharArray(body, postData, 0, StringLen(body));
+   string responseHeaders;
+   int responseCode = WebRequest(
+      "POST", g_serverUrl + "/api/metatrader/trade/close",
+      "Content-Type: application/json\r\n", 5000, postData, responseData, responseHeaders
+   );
+   if (responseCode == 200)
+   {
+      GlobalVariableSet(closeReportedKey, (double)TimeCurrent());
+      GlobalVariableDel(identifierKey);
+      FileDelete(signalFile, FILE_COMMON);
+      Print("📊 Fechamento de posição reconciliado. Ticket=", serverTicket,
+            " | P&L líquido com comissão/swap/taxas=", DoubleToString(netProfit, 2),
+            " | motivo=", closeReason);
+   }
+   else
+   {
+      Print("🚨 Falha ao reportar fechamento ao servidor. Ticket=", serverTicket,
+            " | HTTP=", responseCode, ". A reconciliação seguirá bloqueando novas entradas.");
+   }
+}
+
+void OnTradeTransaction(
+   const MqlTradeTransaction& trans,
+   const MqlTradeRequest& request,
+   const MqlTradeResult& result
+)
+{
+   if (trans.type != TRADE_TRANSACTION_DEAL_ADD || trans.deal == 0) return;
+   if (!HistoryDealSelect(trans.deal)) return;
+   long entryKind = HistoryDealGetInteger(trans.deal, DEAL_ENTRY);
+   if (entryKind != DEAL_ENTRY_OUT && entryKind != DEAL_ENTRY_OUT_BY && entryKind != DEAL_ENTRY_INOUT)
+      return;
+   ReportClosedPositionFromDeal(trans.deal);
 }
 
 //+------------------------------------------------------------------+
