@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 
 const ea = readFileSync(new URL('../public/downloads/InvistaPRO_EA.mq5', import.meta.url), 'utf8');
 const routes = readFileSync(new URL('../server/routes/metatrader-routes.ts', import.meta.url), 'utf8');
+const bridge = readFileSync(new URL('../server/services/metatrader-bridge.ts', import.meta.url), 'utf8');
 
 assert.ok(ea.includes('PriceActionRiskPercent = 1.0'), 'EA must expose the bounded Price Action risk setting');
 assert.ok(ea.includes('PriceActionUseAIReview = true'), 'EA must expose AI-reviewed and autonomous strategy modes');
@@ -15,6 +16,9 @@ assert.ok(routes.includes("strategyMode: 'AUTHORITATIVE_PRICE_ACTION'"), 'A vali
 assert.ok(!routes.includes('PRICE_ACTION_AI_REVIEW_REJECTED'), 'A fixed AI confidence/consensus gate must not veto a valid strategy setup');
 assert.ok(ea.includes('CopyRates(g_symbol, timeframe, 1, count, rates)'), 'Strategy candles must exclude the unfinished bar');
 assert.ok(ea.includes('CalculatePriceActionRiskLot'), 'EA must size Price Action orders from equity and structural stop');
+assert.ok(ea.includes('OrderCalcMargin(orderType, g_symbol, volume, entryPrice, requiredMargin)'), 'EA must validate broker-required margin before opening');
+assert.ok(ea.includes('FindPriceActionStructuralStop(posType, curPrice)'), 'EA must trail stops from confirmed M5 swings after +1.5R');
+assert.ok(bridge.includes('recentTrades: this.recentTrades.slice(0, 20)'), 'Risk controls must receive newest trades for daily limits/cooldown');
 assert.ok(ea.includes('riskDistance / entry > 0.015'), 'EA must reject stops wider than 1.5%');
 assert.ok(ea.includes('rewardDistance / riskDistance < 2.0'), 'EA must enforce minimum executable R:R of 1:2');
 assert.ok(ea.includes('breakeven em +1R'), 'EA must manage deterministic breakeven at +1R');
