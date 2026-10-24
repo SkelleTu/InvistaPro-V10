@@ -40,8 +40,9 @@ input bool     AutoReconnect    = true;        // Reconexão automática de URL
 input int      MaxReconnectTries= 5;           // Tentativas máximas de reconexão
 input int      IndicatorBars    = 5;           // Quantas barras recentes dos indicadores ler
 input int      CandleCount      = 200;         // Candles para enviar à IA (histórico)
-input double   PriceActionRiskPercent = 1.0; // Risco por trade para Price Action (1% a 2%)
-input bool     PriceActionUseAIReview = true; // Revisão IA obrigatória; false mantém entradas bloqueadas
+input double   PriceActionRiskPercent = 1.0; // Risco por trade para Price Action (padrão 1%, máximo 2%)
+input double   PriceActionExtraRoundTripCostPerLot = 0.0; // Comissão + slippage estimados por lote em moeda da conta; 0 bloqueia Price Action
+input bool     PriceActionUseAIReview = true; // true = revisão IA diagnóstica; REAL continua bloqueado sem serviço essencial
 
 //--- Controle de Autonomia da IA
 input ENUM_AI_CONTROL_MODE AIControlMode = AI_FULL; // Modo de Controle da IA
@@ -733,7 +734,9 @@ int VolumeDigitsFromStep()
 
 double CalculatePriceActionRiskLot(double entryPrice, double stopLoss)
 {
-   if (entryPrice <= 0 || stopLoss <= 0 || PriceActionRiskPercent < 1.0 || PriceActionRiskPercent > 2.0)
+   if (entryPrice <= 0 || stopLoss <= 0 ||
+       PriceActionRiskPercent < 1.0 || PriceActionRiskPercent > 2.0 ||
+       !MathIsValidNumber(PriceActionExtraRoundTripCostPerLot) || PriceActionExtraRoundTripCostPerLot <= 0.0)
       return 0.0;
    double tickSize = SymbolInfoDouble(g_symbol, SYMBOL_TRADE_TICK_SIZE);
    double tickValue = SymbolInfoDouble(g_symbol, SYMBOL_TRADE_TICK_VALUE_LOSS);
@@ -744,7 +747,8 @@ double CalculatePriceActionRiskLot(double entryPrice, double stopLoss)
    double distance = MathAbs(entryPrice - stopLoss);
    if (tickSize <= 0 || tickValue <= 0 || volumeStep <= 0 || minVolume <= 0 || maxVolume <= 0 || distance <= 0)
       return 0.0;
-   double lossPerLot = (distance / tickSize) * tickValue;
+   // Size against stop loss plus configured round-trip commission/slippage estimate.
+   double lossPerLot = (distance / tickSize) * tickValue + PriceActionExtraRoundTripCostPerLot;
    double riskCash = AccountInfoDouble(ACCOUNT_EQUITY) * PriceActionRiskPercent / 100.0;
    if (lossPerLot <= 0 || riskCash <= 0) return 0.0;
    double rawVolume = riskCash / lossPerLot;
@@ -1002,9 +1006,21 @@ void FetchAndProcessSignal()
        }
        double riskDistance = (action == "BUY") ? entry - stopLoss : stopLoss - entry;
        double rewardDistance = (action == "BUY") ? takeProfit - entry : entry - takeProfit;
-       if (riskDistance <= 0 || rewardDistance <= 0 || riskDistance / entry > 0.015 || rewardDistance / riskDistance < 2.0)
+       double tickSizeCost = SymbolInfoDouble(g_symbol, SYMBOL_TRADE_TICK_SIZE);
+       double tickValueCost = SymbolInfoDouble(g_symbol, SYMBOL_TRADE_TICK_VALUE_LOSS);
+       if (tickValueCost <= 0) tickValueCost = SymbolInfoDouble(g_symbol, SYMBOL_TRADE_TICK_VALUE);
+       double spreadCostPrice = MathMax(0.0, ask - bid) * 2.0;
+       double commissionCostPrice = (tickSizeCost > 0 && tickValueCost > 0)
+          ? PriceActionExtraRoundTripCostPerLot / (tickValueCost / tickSizeCost)
+          : 1e100;
+       double totalRoundTripCostPrice = spreadCostPrice + commissionCostPrice;
+       double planRewardAfterCosts = riskDistance * 0.75 + rewardDistance * 0.5 - totalRoundTripCostPrice;
+       double planRiskAfterCosts = riskDistance + totalRoundTripCostPrice;
+       double planRiskReward = planRiskAfterCosts > 0 ? planRewardAfterCosts / planRiskAfterCosts : 0.0;
+       if (riskDistance <= 0 || rewardDistance <= 0 || riskDistance / entry > 0.015 ||
+           PriceActionExtraRoundTripCostPerLot <= 0.0 || planRiskReward < 2.0)
        {
-          Print("⛔ Price Action recusado: stop inválido, stop acima de 1,5% ou R:R abaixo de 1:2 no preço executável.");
+          Print("⛔ Price Action recusado: custo total não configurado, stop >1,5% ou plano parcial + alvo final abaixo de 1:2 após custos.");
           return;
        }
        lotSize = CalculatePriceActionRiskLot(entry, stopLoss);
