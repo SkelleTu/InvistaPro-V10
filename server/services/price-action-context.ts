@@ -267,11 +267,9 @@ export function assessMt5RiskLimit(input: {
       !Number.isFinite(unrealizedDrawdown) || effectiveDailyLoss >= config.maxDailyLoss) {
     reasons.push('Limite diário de perda atingido, inválido ou incluindo drawdown aberto');
   }
-  if (!Number.isFinite(config.maxDailyProfit) || config.maxDailyProfit <= 0 ||
-      realizedDailyProfit >= config.maxDailyProfit) {
-    reasons.push('Meta/limite diário de lucro atingido ou inválido');
-  }
-  if (status.circuitBreakerActive) reasons.push('Circuit breaker ativo');
+  // The source document defines the entry-loss limit and the two-loss/one-hour
+  // cooldown. A legacy profit target or the old 15-minute breaker must not add
+  // a separate Price Action veto.
   if (dailyLossCount >= 3) {
     reasons.push('Limite de três operações perdedoras no dia atingido');
   }
