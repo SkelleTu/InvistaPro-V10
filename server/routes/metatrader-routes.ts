@@ -89,7 +89,7 @@ function mt5SignalAccess(req: any, res: any, next: any) {
 
 router.post('/heartbeat', mt5EaTokenAccess, (req: Request, res: Response) => {
   try {
-    const { accountId, broker, balance, equity, freeMargin, openPositions, platform, token, accountType } = req.body;
+    const { accountId, broker, balance, equity, freeMargin, openPositions, openPositionTickets, platform, token, accountType } = req.body;
     if (!accountId) return res.status(400).json({ error: 'accountId obrigatório' });
     if (!['demo', 'real', 'contest'].includes(accountType)) {
       lastMt5ObservedAccountType = null;
@@ -102,7 +102,18 @@ router.post('/heartbeat', mt5EaTokenAccess, (req: Request, res: Response) => {
     if (accountType !== config.accountType) {
       return res.status(409).json({ ok: false, code: 'MT5_ACCOUNT_MODE_MISMATCH', expectedAccountType: config.accountType, actualAccountType: accountType, error: 'A conta conectada não corresponde ao ambiente selecionado no painel. Sinais bloqueados.' });
     }
-    metaTraderBridge.recordHeartbeat({ accountId, broker: broker || 'Unknown', balance, equity, freeMargin, openPositionsCount: typeof openPositions === 'number' ? openPositions : undefined });
+    const validatedPositionTickets = Array.isArray(openPositionTickets) &&
+      openPositionTickets.every((ticket: unknown) =>
+        (typeof ticket === 'string' && /^\\d+$/.test(ticket)) ||
+        (typeof ticket === 'number' && Number.isSafeInteger(ticket) && ticket >= 0)
+      )
+      ? openPositionTickets.map((ticket: string | number) => String(ticket))
+      : undefined;
+    metaTraderBridge.recordHeartbeat({
+      accountId, broker: broker || 'Unknown', balance, equity, freeMargin,
+      openPositionsCount: typeof openPositions === 'number' ? openPositions : undefined,
+      openPositionTickets: validatedPositionTickets,
+    });
     const updatedConfig = metaTraderBridge.getConfig();
     console.log(`[MT5Bridge] 💚 Heartbeat: ${broker || 'Unknown'} | Conta: ${accountId} | Saldo: $${balance} | Posições abertas EA: ${openPositions ?? '?'} | Habilitado: ${updatedConfig.enabled}`);
     res.json({
