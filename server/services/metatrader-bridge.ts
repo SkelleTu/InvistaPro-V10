@@ -214,6 +214,8 @@ export interface MT5Status {
   totalSignalsGenerated: number;
   totalTradesExecuted: number;
   openPositions: number;
+  /** Open position count reported directly by the latest MT5 EA heartbeat. */
+  reportedOpenPositions?: number;
   dailyProfit: number;
   dailyLoss: number;
   dailyWins: number;
@@ -2560,6 +2562,9 @@ class MetaTraderBridge extends EventEmitter {
     // Salvar saldo em tempo real — usado pela memória de contexto de posições
     if (accountData.balance > 0) this.currentBalance = accountData.balance;
     if (accountData.equity > 0) this.currentEquity = accountData.equity;
+    if (typeof accountData.openPositionsCount === 'number' && Number.isInteger(accountData.openPositionsCount) && accountData.openPositionsCount >= 0) {
+      this.status.reportedOpenPositions = accountData.openPositionsCount;
+    }
     if (!this.config.enabled) {
       this.config.enabled = true;
       this.startSignalGeneration();
