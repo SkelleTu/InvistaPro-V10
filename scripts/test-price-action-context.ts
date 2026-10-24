@@ -22,26 +22,33 @@ assert.equal(evaluateEconomicNewsWindow([event(now + 2 * 60 * 60_000)], now).blo
 assert.equal(evaluateEconomicNewsWindow([event(now + 10 * 60_000, 'EUR')], now).blocked, true, 'Any high-impact macro event inside the window must block');
 assert.equal(evaluateEconomicNewsWindow([{ country: 'USD', impact: 'High', date: '2026-10-23T12:10:00' }], now).valid, false, 'A high-impact event without timezone must fail closed');
 
-assert.equal(isAllowedBrasiliaTradingSession(new Date('2026-10-23T07:00:00Z')), true, '04:00 Brasilia session start is included');
-assert.equal(isAllowedBrasiliaTradingSession(new Date('2026-10-23T12:30:00Z')), true, '09:30 Brasilia session start is included');
-assert.equal(isAllowedBrasiliaTradingSession(new Date('2026-10-23T15:00:00Z')), false, '12:00 Brasilia session end is excluded');
-assert.equal(isAllowedBrasiliaTradingSession(new Date('2026-10-23T17:00:00Z')), true, '14:00 Brasilia session start is included');
-assert.equal(isAllowedBrasiliaTradingSession(new Date('2026-10-23T20:00:00Z')), false, '17:00 Brasilia session end is excluded');
+assert.equal(isAllowedBrasiliaTradingSession(new Date('2026-10-23T07:00:00Z')), true, '08:00 London local time is included during British summer time');
+assert.equal(isAllowedBrasiliaTradingSession(new Date('2026-10-23T13:30:00Z')), true, '09:30 New York local time is included during US daylight time');
+assert.equal(isAllowedBrasiliaTradingSession(new Date('2026-10-23T16:00:00Z')), false, 'All market sessions are closed after the New York window');
+assert.equal(isAllowedBrasiliaTradingSession(new Date('2026-10-23T17:00:00Z')), true, '14:00 Brasilia afternoon session start is included');
+assert.equal(isAllowedBrasiliaTradingSession(new Date('2026-10-23T20:00:00Z')), false, '17:00 Brasilia afternoon session end is excluded');
+assert.equal(isAllowedBrasiliaTradingSession(new Date('2026-12-01T08:00:00Z')), true, 'London local open remains correct after the UK daylight-saving transition');
 
 const trusted = buildTrustedPriceActionContext({
   bid: 100,
   ask: 100.1,
   entryPrice: 100.05,
+  extraRoundTripCostPrice: 0.05,
   riskLimitOk: true,
   newsBlocked: false,
   sessionOpen: true,
 });
 assert.ok(Math.abs(Number(trusted.spread) - 0.1) < 1e-9, 'Spread calculation must preserve the expected price difference');
-assert.ok(Math.abs(Number(trusted.estimatedRoundTripCost) - 0.2) < 1e-9, 'Round-trip cost must equal twice the observed spread');
+assert.ok(Math.abs(Number(trusted.estimatedRoundTripCost) - 0.25) < 1e-9, 'Round-trip cost must include twice the observed spread plus the configured commission/slippage estimate');
+const costsMissing = buildTrustedPriceActionContext({
+  bid: 100, ask: 100.1, entryPrice: 100.05, extraRoundTripCostPrice: 0,
+  riskLimitOk: true, newsBlocked: false, sessionOpen: true,
+});
+assert.equal(costsMissing.estimatedRoundTripCost, undefined, 'Missing broker cost estimate must fail closed rather than be replaced by zero');
 assert.equal(trusted.highImpactNewsBlocked, false);
 assert.equal(trusted.tradingSessionOpen, true);
 assert.equal(buildTrustedPriceActionContext({
-  bid: 0, ask: 0, entryPrice: 100, riskLimitOk: true, newsBlocked: false, sessionOpen: true,
+  bid: 0, ask: 0, entryPrice: 100, extraRoundTripCostPrice: 0.05, riskLimitOk: true, newsBlocked: false, sessionOpen: true,
 }).spread, undefined, 'Invalid terminal prices must not produce a trusted spread');
 
 const config = {
@@ -49,8 +56,19 @@ const config = {
   maxOpenPositions: 5,
 } as MT5Config;
 const status = {
-  lastBalance: 1000, lastEquity: 1000, dailyLoss: 0, dailyProfit: 0, openPositions: 0, circuitBreakerActive: false,
-} as MT5Status;
+  lastBalance: 1000,
+  lastEquity: 1000,
+  dailyLoss: 0,
+  dailyProfit: 0,
+  dailyLosses: 0,
+  consecutiveLosses: 0,
+  openPositions: 0,
+  reportedOpenPositions: 0,
+  reportedOpenPositionTickets: [],
+  positionsReconciled: true,
+  recentTrades: [],
+  circuitBreakerActive: false,
+} as unknown as MT5Status;
 assert.equal(assessMt5RiskLimit({
   config, status, observedAccountType: 'demo', accountHeartbeatAt: now - 1000, now,
 }).ok, true, 'Fresh confirmed DEMO account within all limits should pass');
@@ -63,6 +81,40 @@ assert.equal(assessMt5RiskLimit({
 assert.equal(assessMt5RiskLimit({
   config, status: { ...status, dailyLoss: 100 }, observedAccountType: 'demo', accountHeartbeatAt: now - 1000, now,
 }).ok, false, 'Daily loss limit must block entries');
+assert.equal(assessMt5RiskLimit({
+  config, status: { ...status, dailyLosses: 3 }, observedAccountType: 'demo', accountHeartbeatAt: now - 1000, now,
+}).ok, false, 'Three losing trades must block the rest of the day');
+assert.equal(assessMt5RiskLimit({
+  config,
+  status: {
+    ...status,
+    recentTrades: Array.from({ length: 5 }, (_, i) => ({
+      ticket: i + 1, openTime: now - (i + 1) * 1000, closeTime: now - (i + 1) * 500, profit: 0,
+    })),
+  } as unknown as MT5Status,
+  observedAccountType: 'demo', accountHeartbeatAt: now - 1000, now,
+}).ok, false, 'Five trades opened today must hit the default daily frequency cap');
+assert.equal(assessMt5RiskLimit({
+  config,
+  status: {
+    ...status,
+    openPositions: 1,
+    reportedOpenPositions: 1,
+    reportedOpenPositionTickets: ['1'],
+    positionsReconciled: true,
+    openPositionTimes: [now - 26 * 60 * 60 * 1000],
+  } as unknown as MT5Status,
+  observedAccountType: 'demo', accountHeartbeatAt: now - 1000, now,
+}).ok, true, 'An old overnight position must not count as a new trade today');
+assert.equal(assessMt5RiskLimit({
+  config, status: { ...status, consecutiveLosses: 2 }, observedAccountType: 'demo', accountHeartbeatAt: now - 1000, now,
+}).ok, false, 'Two consecutive losses without a verifiable close time must fail closed');
+assert.equal(assessMt5RiskLimit({
+  config, status: { ...status, reportedOpenPositions: 1 }, observedAccountType: 'demo', accountHeartbeatAt: now - 1000, now,
+}).ok, false, 'Broker/internal position mismatch must block new entries');
+assert.equal(assessMt5RiskLimit({
+  config, status: { ...status, positionsReconciled: false }, observedAccountType: 'demo', accountHeartbeatAt: now - 1000, now,
+}).ok, false, 'Matching position counts without exact reconciled tickets must still block entries');
 
 const realConfig = { ...config, accountType: 'real' } as MT5Config;
 assert.equal(assessMt5RiskLimit({

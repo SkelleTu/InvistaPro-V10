@@ -111,8 +111,7 @@
     "wouter": "^3.3.5",
     "ws": "^8.22.0",
     "yauzl": "^3.2.0",
-    "zod": "^3.24.2",
-    "zod-validation-error": "^3.4.0",
+    "zod": "^4.6.7",
     "react-day-picker": "^8.10.1"
   },
   "devDependencies": {
@@ -149,6 +148,7 @@
     "postcss-selector-parser": "^7.1.6",
     "whatsapp-web.js": {
       "puppeteer": "^25.8.0"
-    }
+    },
+    "zod": "4.6.7"
   }
 }

@@ -21,7 +21,8 @@ import { computeSyntheticGirassol } from '../services/synthetic-girassol';
 import { isAllowedProductionSymbol } from '../services/production-symbol-policy';
 import { getMt5ProductionBlock } from '../services/mt5-production-policy';
 import { consensusCache } from '../services/consensus-cache';
-import { evaluatePriceActionSetup, type Candle } from '../services/price-action-engine';
+import { evaluatePriceActionSetup, isValidPriceActionCandles, validateAIEntryReview, type Candle } from '../services/price-action-engine';
+import { huggingFaceAI } from '../services/huggingface-ai';
 import { assessMt5RiskLimit, buildTrustedPriceActionContext, getHighImpactNewsStatus, isAllowedBrasiliaTradingSession } from '../services/price-action-context';
 
 
@@ -88,7 +89,7 @@ function mt5SignalAccess(req: any, res: any, next: any) {
 
 router.post('/heartbeat', mt5EaTokenAccess, (req: Request, res: Response) => {
   try {
-    const { accountId, broker, balance, equity, freeMargin, openPositions, platform, token, accountType } = req.body;
+    const { accountId, broker, balance, equity, freeMargin, openPositions, openPositionTickets, platform, token, accountType } = req.body;
     if (!accountId) return res.status(400).json({ error: 'accountId obrigatório' });
     if (!['demo', 'real', 'contest'].includes(accountType)) {
       lastMt5ObservedAccountType = null;
@@ -101,7 +102,18 @@ router.post('/heartbeat', mt5EaTokenAccess, (req: Request, res: Response) => {
     if (accountType !== config.accountType) {
       return res.status(409).json({ ok: false, code: 'MT5_ACCOUNT_MODE_MISMATCH', expectedAccountType: config.accountType, actualAccountType: accountType, error: 'A conta conectada não corresponde ao ambiente selecionado no painel. Sinais bloqueados.' });
     }
-    metaTraderBridge.recordHeartbeat({ accountId, broker: broker || 'Unknown', balance, equity, freeMargin, openPositionsCount: typeof openPositions === 'number' ? openPositions : undefined });
+    const validatedPositionTickets = Array.isArray(openPositionTickets) &&
+      openPositionTickets.every((ticket: unknown) =>
+        (typeof ticket === 'string' && /^\d+$/.test(ticket)) ||
+        (typeof ticket === 'number' && Number.isSafeInteger(ticket) && ticket >= 0)
+      )
+      ? openPositionTickets.map((ticket: string | number) => String(ticket))
+      : undefined;
+    metaTraderBridge.recordHeartbeat({
+      accountId, broker: broker || 'Unknown', balance, equity, freeMargin,
+      openPositionsCount: typeof openPositions === 'number' ? openPositions : undefined,
+      openPositionTickets: validatedPositionTickets,
+    });
     const updatedConfig = metaTraderBridge.getConfig();
     console.log(`[MT5Bridge] 💚 Heartbeat: ${broker || 'Unknown'} | Conta: ${accountId} | Saldo: $${balance} | Posições abertas EA: ${openPositions ?? '?'} | Habilitado: ${updatedConfig.enabled}`);
     res.json({
@@ -124,20 +136,22 @@ router.get('/signal', mt5SignalAccess, (req: Request, res: Response) => {
     if (symbol && mt5EnvironmentMismatch()) {
       return res.status(409).json({ action: 'HOLD', executionEnabled: false, code: 'MT5_ACCOUNT_MODE_MISMATCH', expectedAccountType: config.accountType, actualAccountType: lastMt5ObservedAccountType, reason: 'Ambiente MT5 não confirmado ou divergente. Verifique a conta conectada e mantenha as operações bloqueadas.', timestamp: Date.now() });
     }
-    // Registrar heartbeat apenas quando o EA faz polling (tem parâmetro symbol)
-    // Isso evita que o dashboard (sem symbol) mantenha o heartbeat vivo falsamente
+    // A telemetria só pode ser atualizada pelo endpoint autenticado /heartbeat.
+    // Um polling de sinal não é evidência de saldo, equity ou posições conciliadas.
     const symbolStr = (symbol as string) || '';
-    if (symbolStr) {
-      const accId = (accountId as string) || 'EA_AUTO';
-      metaTraderBridge.recordHeartbeat({
-        accountId: accId,
-        broker: 'MT5',
-        balance: 0,
-        equity: 0,
-        freeMargin: 0
+    const resolvedSymbol = symbolStr || config.symbols[0] || 'EURUSD';
+    const normalizedStrategySymbol = resolvedSymbol.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BTCUSD', 'ETHUSD', 'SOLUSD']
+      .some(prefix => normalizedStrategySymbol.startsWith(prefix))) {
+      return res.json({
+        action: 'HOLD',
+        confidence: 0,
+        executionEnabled: false,
+        code: 'PRICE_ACTION_ENDPOINT_REQUIRED',
+        reason: 'Ativos da estratégia Price Action exigem candles H4/H1/M15/M5-M1, validação de risco e revisão IA no endpoint signal-with-indicators. Sinal genérico não pode contornar a estratégia.',
+        timestamp: Date.now(),
       });
     }
-    const resolvedSymbol = symbolStr || config.symbols[0] || 'EURUSD';
 
     // MT5 orders are placed by the user's logged-in MT5 terminal, not as Deriv contracts.
     if (process.env.NODE_ENV === 'production' && symbolStr && !isAllowedProductionSymbol(symbolStr)) {
@@ -278,6 +292,7 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
       timeframes,
       accountType: requestAccountType,
       priceActionUseAIReview,
+      priceActionExtraCostPrice,
       indicatorSignals,   // { girassol: {...}, fibonacci: {...} }
       indicatorBuffers,   // array bruto de todos os buffers
       indicatorCount,
@@ -331,14 +346,8 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
       });
     }
 
-    // Registrar heartbeat — EA v5.0 usa este endpoint como canal principal
-    metaTraderBridge.recordHeartbeat({
-      accountId: bodyAccountId || 'EA_AUTO',
-      broker: 'MT5',
-      balance: 0,
-      equity: 0,
-      freeMargin: 0
-    });
+    // Não registrar heartbeat neste endpoint: somente /heartbeat envia saldo,
+    // equity e snapshot de tickets reais para a reconciliação de posições.
 
     if (!config.enabled) {
       return res.json({ action: 'HOLD', reason: 'Sistema desabilitado', confidence: 0 });
@@ -363,9 +372,9 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
       });
       const newsStatus = await getHighImpactNewsStatus();
       const sessionOpen = isAllowedBrasiliaTradingSession();
-      const entryFrameForContext = Array.isArray(frames.M5) && frames.M5.length
+      const entryFrameForContext = isValidPriceActionCandles(frames.M5)
         ? frames.M5
-        : Array.isArray(frames.M1) ? frames.M1 : [];
+        : isValidPriceActionCandles(frames.M1) ? frames.M1 : [];
       const entryPriceForContext = entryFrameForContext.length
         ? entryFrameForContext[entryFrameForContext.length - 1].close
         : undefined;
@@ -373,15 +382,17 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
         bid,
         ask,
         entryPrice: entryPriceForContext,
+        extraRoundTripCostPrice: priceActionExtraCostPrice,
         riskLimitOk: riskLimit.ok,
         newsBlocked: newsStatus.blocked || !newsStatus.valid,
         sessionOpen,
       });
       priceActionSetup = evaluatePriceActionSetup(frames, trustedContext);
-      if (!priceActionSetup.approved) {
+      if (!priceActionSetup.approved || priceActionSetup.action === 'HOLD') {
         return res.json({
           action: 'HOLD',
           confidence: 0,
+          executionEnabled: false,
           code: 'PRICE_ACTION_GATE_REJECTED',
           reason: 'A estratégia determinística não aprovou a entrada. A IA não pode criar sinal sem setup válido.',
           strategyAction: priceActionSetup.action,
@@ -397,31 +408,112 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
         });
       }
 
-      // Optional strategy-only mode for controlled comparison. The deterministic setup and all
-      // server safety gates remain mandatory; only the second-stage AI review is skipped.
-      if (priceActionUseAIReview === false) {
-        if (Array.isArray(candles) && candles.length > 0) metaTraderBridge.addMarketData(sym, candles);
-        const timestamp = Date.now();
+      // Do not feed the same crypto request into the legacy generator; it could create a competing signal.
+      const reviewTimeframe: 'M5' | 'M1' = priceActionSetup.features.entryTimeframe === 'M1' ? 'M1' : 'M5';
+      const reviewFrameCandidate = reviewTimeframe === 'M5' ? frames.M5 : frames.M1;
+      if (!isValidPriceActionCandles(reviewFrameCandidate)) {
         return res.json({
-          id: 'pa-' + randomBytes(8).toString('hex'),
-          symbol: sym,
-          action: priceActionSetup.action,
-          lotSize: config.defaultLotSize,
-          stopLoss: priceActionSetup.stopLoss,
-          takeProfit: priceActionSetup.takeProfit,
-          stopLossPips: 0,
-          takeProfitPips: 0,
-          entryPrice: priceActionSetup.entry,
-          confidence: 100,
-          aiSources: [],
-          indicators: {},
-          timestamp,
-          expiresAt: timestamp + Math.max(10, config.signalTimeoutSeconds) * 1000,
-          reason: 'Modo autônomo: entrada aprovada pela estratégia determinística; risco, notícias, spread e sessão foram validados no servidor.',
-          strategyMode: 'AUTONOMOUS_PRICE_ACTION',
-          executionEnabled: true,
+          action: 'HOLD', confidence: 0, executionEnabled: false,
+          code: 'PRICE_ACTION_INTERNAL_TIMEFRAME_MISMATCH',
+          reason: 'O timeframe aprovado pelo motor determinístico não está disponível para a rota de execução.',
+          strategyAction: priceActionSetup.action,
+          timestamp: Date.now(),
         });
       }
+      const reviewFrame = reviewFrameCandidate;
+      if (priceActionUseAIReview !== true) {
+        return res.json({
+          action: 'HOLD', confidence: 0, executionEnabled: false,
+          code: 'PRICE_ACTION_AI_REVIEW_REQUIRED',
+          reason: 'A revisão IA prevista na estratégia está desativada. Nenhuma entrada foi autorizada.',
+          strategyAction: priceActionSetup.action,
+          timestamp: Date.now(),
+        });
+      }
+
+      const reviewTicks = reviewFrame.map(candle => ({
+        symbol: sym,
+        quote: candle.close,
+        epoch: Math.floor(candle.time > 100_000_000_000 ? candle.time / 1000 : candle.time),
+      }));
+      const candidateDirection = priceActionSetup.action as 'BUY' | 'SELL';
+      const aiReview = await huggingFaceAI.reviewPriceActionCandidate(
+        reviewTicks,
+        sym,
+        candidateDirection,
+        reviewTimeframe,
+        priceActionSetup.checks,
+        priceActionSetup.features,
+      );
+      const reviewValidation = validateAIEntryReview(priceActionSetup, {
+        decision: aiReview.approved ? 'approve' : 'reject',
+        direction: aiReview.direction,
+        confidence: aiReview.confidence,
+      });
+
+      // AI must review the documented checklist. No undocumented numeric confidence
+      // floor or majority quorum is applied; an explicit reject/HOLD/direction mismatch
+      // remains a strategy rejection, while one valid explicit approval is sufficient.
+      if (!aiReview.approved || !reviewValidation.approved) {
+        return res.json({
+          action: 'HOLD', confidence: 0, executionEnabled: false,
+          code: 'PRICE_ACTION_AI_REVIEW_REJECTED',
+          reason: aiReview.reason || reviewValidation.reason,
+          strategyAction: candidateDirection,
+          aiAction: aiReview.direction,
+          aiConfidence: aiReview.confidence,
+          aiSources: aiReview.sources,
+          strategyChecks: priceActionSetup.checks,
+          strategyFeatures: priceActionSetup.features,
+          rejectionReasons: priceActionSetup.reasons,
+          timestamp: Date.now(),
+        });
+      }
+      // The closed trigger candle creates a stable id. Repeated polls within the
+      // same opportunity must not mint new IDs and reopen the same trade.
+      const signalBar = reviewFrame[reviewFrame.length - 1];
+      const stableSignalId = 'pa-' + normalizedStrategySymbol + '-' + priceActionSetup.action + '-' + Math.floor(signalBar.time);
+      const alreadyExecuted = metaTraderBridge.getOpenPositions().some(position => position.signalId === stableSignalId)
+        || metaTraderBridge.getRecentTrades().some(trade => trade.signalId === stableSignalId);
+      if (alreadyExecuted) {
+        return res.json({
+          action: 'HOLD', confidence: 0, executionEnabled: false,
+          code: 'PRICE_ACTION_SIGNAL_ALREADY_EXECUTED',
+          reason: 'Esta oportunidade, identificada pela vela de gatilho fechada, já foi executada ou permanece aberta.',
+          strategyAction: priceActionSetup.action, signalId: stableSignalId, timestamp: Date.now(),
+        });
+      }
+      const timestamp = Date.now();
+      return res.json({
+        id: stableSignalId,
+        symbol: sym,
+        action: priceActionSetup.action,
+        lotSize: config.defaultLotSize,
+        stopLoss: priceActionSetup.stopLoss,
+        takeProfit: priceActionSetup.takeProfit,
+        stopLossPips: 0,
+        takeProfitPips: 0,
+        entryPrice: priceActionSetup.entry,
+        confidence: aiReview.confidence,
+        aiSources: aiReview.sources,
+        aiReview: {
+          performed: true,
+          approved: true,
+          direction: aiReview.direction,
+          confidence: aiReview.confidence,
+          validation: 'aligned',
+          reason: aiReview.reason,
+        },
+        strategyChecks: priceActionSetup.checks,
+        strategyFeatures: priceActionSetup.features,
+        strategyRiskReward: priceActionSetup.riskReward,
+        indicators: {},
+        timestamp,
+        expiresAt: timestamp + Math.max(10, config.signalTimeoutSeconds) * 1000,
+        reason: 'Setup aprovado pelos critérios objetivos e pela revisão IA obrigatória da estratégia. ' + aiReview.reason,
+        strategyMode: 'AUTHORITATIVE_PRICE_ACTION',
+        executionEnabled: true,
+      });
     }
 
     // Atualiza dados de mercado no bridge
@@ -1044,27 +1136,6 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
       indicatorNotes.push(`📊 ${derivProfile.family} (${derivProfile.volClass}) — ${derivProfile.trendType} | RSI thr: ${derivProfile.rsiOversold}/${derivProfile.rsiOverbought}`);
     }
 
-    // Enforce strategy -> AI sequence: the AI may reject, never reverse or invent a setup.
-    if (priceActionSetup) {
-      if (!baseSignal || finalAction !== priceActionSetup.action || finalConfidence < 70) {
-        return res.json({
-          action: 'HOLD',
-          confidence: 0,
-          code: 'PRICE_ACTION_AI_REVIEW_REJECTED',
-          reason: 'O sinal da estratégia não foi aprovado pela análise de IA na mesma direção ou não atingiu a confiança mínima.',
-          strategyAction: priceActionSetup.action,
-          aiAction: finalAction,
-          aiConfidence: finalConfidence,
-          rejectionReasons: priceActionSetup.reasons,
-          timestamp: Date.now()
-        });
-      }
-      // Strategy-owned structural SL/TP cannot be loosened by AI/indicator refinements.
-      refinedSL = priceActionSetup.stopLoss!;
-      refinedTP = priceActionSetup.takeProfit!;
-      baseSignal.entryPrice = priceActionSetup.entry;
-      indicatorNotes.push('Price Action multi-timeframe validado; SL/TP mantidos nos níveis estruturais da estratégia.');
-    }
 
     // Monta resposta final
     if (!baseSignal || finalAction === 'HOLD') {
