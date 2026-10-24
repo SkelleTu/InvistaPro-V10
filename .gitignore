@@ -34,6 +34,7 @@ SECRETS-ESSENCIAIS.md
 cookies.txt
 session_cookies.txt
 *.session
+whatsapp-session/session-investpro-bot/
 
 # API Keys and secrets (caso alguém crie arquivos com secrets)
 **/secrets.json
