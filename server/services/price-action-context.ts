@@ -311,6 +311,7 @@ export function buildTrustedPriceActionContext(input: {
   riskLimitOk: boolean;
   newsBlocked: boolean;
   sessionOpen: boolean;
+  estimatedExtraRoundTripCostRate?: number;
 }): MarketContext {
   const bid = typeof input.bid === 'number' ? input.bid : Number.NaN;
   const ask = typeof input.ask === 'number' ? input.ask : Number.NaN;
@@ -320,10 +321,18 @@ export function buildTrustedPriceActionContext(input: {
   const spread = pricesValid ? ask - bid : undefined;
   const mid = pricesValid ? (ask + bid) / 2 : undefined;
   const maxSpread = mid !== undefined ? mid * MAX_SPREAD_FRACTION : undefined;
+  const extraRate = input.estimatedExtraRoundTripCostRate;
+  const extraRateValid = typeof extraRate === 'number' && Number.isFinite(extraRate) &&
+    extraRate >= 0 && extraRate <= 0.01;
+  // Require an explicit estimate for round-trip commissions/slippage/other costs.
+  // Explicit zero is allowed only when the operator has deliberately configured it.
+  const estimatedRoundTripCost = spread !== undefined && mid !== undefined && extraRateValid
+    ? spread * 2 + mid * extraRate
+    : undefined;
   return {
     spread,
     maxSpread,
-    estimatedRoundTripCost: spread !== undefined ? spread * 2 : undefined,
+    estimatedRoundTripCost,
     highImpactNewsBlocked: input.newsBlocked,
     riskLimitOk: input.riskLimitOk,
     tradingSessionOpen: input.sessionOpen,
