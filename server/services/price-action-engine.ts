@@ -203,7 +203,7 @@ function changeOfCharacter(c: Candle[], side: TradeSide): boolean {
   return side === 'BUY' ? prior === 'bearish' && recent === 'bullish'
     : prior === 'bullish' && recent === 'bearish';
 }
-function orderBlockZone(c: Candle[], side: TradeSide, currentPrice = c[c.length - 1]?.close): { low: number; high: number; identifiedAt: number; invalidationPrice: number } | null {
+function orderBlockZone(c: Candle[], side: TradeSide, currentPrice = c[c.length - 1]?.close): { low: number; high: number; touches: number; identifiedAt: number; invalidationPrice: number } | null {
   if (c.length < 15 || !finite(currentPrice) || currentPrice <= 0) return null;
   const baseline = averageRange(c);
   if (!(baseline > 0)) return null;
@@ -225,6 +225,7 @@ function orderBlockZone(c: Candle[], side: TradeSide, currentPrice = c[c.length 
       return {
         low,
         high,
+        touches: 1,
         identifiedAt: candidate.time,
         invalidationPrice: side === 'BUY' ? candidate.low : candidate.high,
       };
@@ -501,7 +502,7 @@ export function evaluatePriceActionSetup(
     features.supportResistanceTouches = structureZone?.zone?.touches ?? 0;
     features.supportResistanceTimeframe = structureZone?.timeframe ?? null;
     features.supportResistanceIdentifiedAt = structureZone?.zone?.identifiedAt ?? null;
-    const auditZone = structureZone
+    const auditZone: { type: string; timeframe: Timeframe; zone: PriceZone } | null = structureZone
       ? { type: side === 'BUY' ? 'support_demand' : 'resistance_supply', timeframe: structureZone.timeframe, zone: structureZone.zone }
       : fvgZone
         ? { type: 'fair_value_gap', timeframe: fvgZone.timeframe, zone: fvgZone.zone }
