@@ -1476,8 +1476,13 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
 //+------------------------------------------------------------------+
 //| Heartbeat                                                         |
 //+------------------------------------------------------------------+
+void RetryPendingClosedPositions();
+
 bool SendHeartbeat()
 {
+   // Retry any final close that failed to reach the server during a previous disconnect.
+   RetryPendingClosedPositions();
+
    double balance   = AccountInfoDouble(ACCOUNT_BALANCE);
    double equity    = AccountInfoDouble(ACCOUNT_EQUITY);
    double margin    = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
@@ -1725,6 +1730,57 @@ void ReportClosedPositionFromDeal(ulong transactionDeal)
    {
       Print("🚨 Falha ao reportar fechamento ao servidor. Ticket=", serverTicket,
             " | HTTP=", responseCode, ". A reconciliação seguirá bloqueando novas entradas.");
+   }
+}
+
+void RetryPendingClosedPositions()
+{
+   string prefix = "InvistaPA_IDMAP_";
+   for (int globalIndex = GlobalVariablesTotal() - 1; globalIndex >= 0; globalIndex--)
+   {
+      string key = GlobalVariableName(globalIndex);
+      if (StringFind(key, prefix) != 0) continue;
+      string identifierText = StringSubstr(key, StringLen(prefix));
+      long positionIdentifier = (long)StringToInteger(identifierText);
+      if (positionIdentifier <= 0) continue;
+
+      string closeReportedKey = "InvistaPA_CLOSE_SENT_" + StringFormat("%I64d", positionIdentifier);
+      if (GlobalVariableCheck(closeReportedKey)) continue;
+
+      bool stillOpen = false;
+      for (int positionIndex = PositionsTotal() - 1; positionIndex >= 0; positionIndex--)
+      {
+         ulong ticket = PositionGetTicket(positionIndex);
+         if (ticket == 0 || !PositionSelectByTicket(ticket)) continue;
+         if (PositionGetInteger(POSITION_IDENTIFIER) == positionIdentifier)
+         {
+            stillOpen = true;
+            break;
+         }
+      }
+      if (stillOpen) continue;
+      if (!HistorySelectByPosition(positionIdentifier)) continue;
+
+      ulong latestCloseDeal = 0;
+      long latestCloseTime = 0;
+      for (int dealIndex = 0; dealIndex < HistoryDealsTotal(); dealIndex++)
+      {
+         ulong deal = HistoryDealGetTicket(dealIndex);
+         if (deal == 0 || HistoryDealGetInteger(deal, DEAL_POSITION_ID) != positionIdentifier) continue;
+         long entryKind = HistoryDealGetInteger(deal, DEAL_ENTRY);
+         if (entryKind != DEAL_ENTRY_OUT && entryKind != DEAL_ENTRY_OUT_BY && entryKind != DEAL_ENTRY_INOUT) continue;
+         long dealTime = HistoryDealGetInteger(deal, DEAL_TIME);
+         if (dealTime >= latestCloseTime)
+         {
+            latestCloseTime = dealTime;
+            latestCloseDeal = deal;
+         }
+      }
+      if (latestCloseDeal > 0)
+      {
+         Print("🔁 Tentando reconciliar fechamento pendente da posição ", positionIdentifier);
+         ReportClosedPositionFromDeal(latestCloseDeal);
+      }
    }
 }
 
