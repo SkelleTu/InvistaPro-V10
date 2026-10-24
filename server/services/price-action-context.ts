@@ -336,6 +336,7 @@ export function buildTrustedPriceActionContext(input: {
   bid: unknown;
   ask: unknown;
   entryPrice: unknown;
+  extraRoundTripCostPrice: unknown;
   riskLimitOk: boolean;
   newsBlocked: boolean;
   sessionOpen: boolean;
@@ -348,10 +349,15 @@ export function buildTrustedPriceActionContext(input: {
   const spread = pricesValid ? ask - bid : undefined;
   const mid = pricesValid ? (ask + bid) / 2 : undefined;
   const maxSpread = mid !== undefined ? mid * MAX_SPREAD_FRACTION : undefined;
+  const extraCost = typeof input.extraRoundTripCostPrice === 'number'
+    ? input.extraRoundTripCostPrice : Number.NaN;
+  const extraCostValid = Number.isFinite(extraCost) && extraCost > 0;
   return {
     spread,
     maxSpread,
-    estimatedRoundTripCost: spread !== undefined ? spread * 2 : undefined,
+    // Include round-trip spread and the broker-configured commission/slippage estimate.
+    // Missing cost data is deliberately not replaced by zero.
+    estimatedRoundTripCost: spread !== undefined && extraCostValid ? spread * 2 + extraCost : undefined,
     highImpactNewsBlocked: input.newsBlocked,
     riskLimitOk: input.riskLimitOk,
     tradingSessionOpen: input.sessionOpen,
