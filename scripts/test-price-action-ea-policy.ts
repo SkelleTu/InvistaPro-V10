@@ -15,6 +15,8 @@ assert.ok(route.includes('diagnostic_only'), 'AI disagreement must remain diagno
 assert.ok(route.includes('const stableSignalId ='), 'Repeated polls for the same closed trigger candle must reuse a stable signal id');
 assert.ok(!route.includes('finalConfidence < 70'), 'The strategy route must not impose an undocumented 70% confidence veto');
 assert.ok(ea.includes('requestAccountType'), 'EA must transmit its actual terminal account mode on each signal request');
+assert.ok(ea.includes('openPositionTickets'), 'EA heartbeat must send exact broker position tickets for reconciliation');
+assert.ok(ea.includes('openPositionTicketsJson'), 'EA must build the actual open-position snapshot rather than reporting only a count');
 assert.ok(ea.includes('if (IsPriceActionCryptoSymbol())'), 'Price Action positions must bypass legacy AI exit filters');
 assert.ok(ea.includes('trailing estrutural M5'), 'The remaining position must receive a confirmed M5 structural trailing stop after the partial');
 assert.ok(ea.includes('TRADE_RETCODE_DONE_PARTIAL'), 'Price Action execution must verify an actual broker fill');
