@@ -308,7 +308,16 @@ export function assessMt5RiskLimit(input: {
     if (status.positionsReconciled !== true) {
       reasons.push('Os tickets de posição do broker e do servidor não foram reconciliados exatamente após o último heartbeat');
     }
-    const tradesStartedToday = closedTradesToday + Math.max(0, Math.floor(status.reportedOpenPositions ?? 0));
+    const openTimes = Array.isArray(status.openPositionTimes) ? status.openPositionTimes : [];
+    if (status.reportedOpenPositions !== undefined &&
+        openTimes.length !== status.reportedOpenPositions) {
+      reasons.push('Horários de abertura das posições não reconciliados; limite diário de operações não pode ser verificado');
+    }
+    const openTradesToday = openTimes.filter(value => {
+      const timestamp = tradeTimestamp(value);
+      return timestamp !== null && localTradingDayKey(timestamp) === todayKey;
+    }).length;
+    const tradesStartedToday = closedTradesToday + openTradesToday;
     if (tradesStartedToday >= maxDailyTrades) {
       reasons.push(`Limite configurado de ${maxDailyTrades} operações diárias atingido`);
     }
