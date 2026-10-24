@@ -755,6 +755,41 @@ double CalculatePriceActionRiskLot(double entryPrice, double stopLoss)
    return NormalizeDouble(volume, volumeDigits);
 }
 
+bool ValidatePriceActionMargin(string action, double volume, double entryPrice)
+{
+   if ((action != "BUY" && action != "SELL") || volume <= 0.0 || entryPrice <= 0.0)
+      return false;
+
+   ENUM_ORDER_TYPE orderType = (action == "BUY") ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+   double requiredMargin = 0.0;
+   if (!OrderCalcMargin(orderType, g_symbol, volume, entryPrice, requiredMargin) || requiredMargin <= 0.0)
+   {
+      Print("⛔ Price Action recusado: não foi possível calcular a margem exigida pelo broker.");
+      return false;
+   }
+
+   double freeMargin = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
+   double equity = AccountInfoDouble(ACCOUNT_EQUITY);
+   double usedMargin = AccountInfoDouble(ACCOUNT_MARGIN);
+   double projectedMargin = usedMargin + requiredMargin;
+   double projectedMarginLevel = (projectedMargin > 0.0) ? equity / projectedMargin * 100.0 : 0.0;
+   double stopOutCall = AccountInfoDouble(ACCOUNT_MARGIN_SO_CALL);
+   double stopOutLevel = AccountInfoDouble(ACCOUNT_MARGIN_SO_SO);
+   double minimumSafeLevel = MathMax(stopOutCall, stopOutLevel);
+
+   if (freeMargin <= 0.0 || requiredMargin > freeMargin ||
+       (projectedMargin > 0.0 && projectedMarginLevel <= minimumSafeLevel))
+   {
+      Print("⛔ Price Action recusado: margem insuficiente/risco de stop-out. Required=",
+            DoubleToString(requiredMargin, 2), " Free=", DoubleToString(freeMargin, 2),
+            " ProjectedLevel=", DoubleToString(projectedMarginLevel, 1), "%",
+            " BrokerStopOut=", DoubleToString(minimumSafeLevel, 1), "%",
+            " Leverage=1:", IntegerToString((int)AccountInfoInteger(ACCOUNT_LEVERAGE)));
+      return false;
+   }
+   return true;
+}
+
 bool ClosePriceActionPartial(ulong ticket, double volume, string positionType)
 {
    long marginMode = AccountInfoInteger(ACCOUNT_MARGIN_MODE);
@@ -1016,6 +1051,8 @@ void FetchAndProcessSignal()
           Print("⛔ Price Action recusado: lote mínimo do broker excede o orçamento de risco ou tick value indisponível.");
           return;
        }
+       if (!ValidatePriceActionMargin(action, lotSize, entry))
+          return;
     }
 
    Print("📡 SINAL v8.0: ", action, " | ", g_symbol, " | Confiança: ", confidence, "%");
@@ -1098,6 +1135,42 @@ void FetchAndProcessSignal()
       Print("❌ Falha definitiva: ", trade.ResultRetcode(), " / ", GetLastError());
 }
 
+// Returns the most recent confirmed M5 swing that can tighten the stop.
+// CopyRates starts at shift 1, and a candidate needs two closed bars on each side.
+double FindPriceActionStructuralStop(string positionType, double currentPrice)
+{
+   MqlRates swingRates[];
+   int copied = CopyRates(g_symbol, PERIOD_M5, 1, 60, swingRates);
+   if (copied < 7 || currentPrice <= 0.0) return 0.0;
+
+   double point = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
+   double stopLevel = (double)SymbolInfoInteger(g_symbol, SYMBOL_TRADE_STOPS_LEVEL) * point;
+   double minDistance = MathMax(stopLevel, point * 2.0);
+   int oldestCandidate = MathMax(2, copied - 30);
+
+   for (int i = copied - 3; i >= oldestCandidate; i--)
+   {
+      bool pivot = true;
+      for (int j = i - 2; j <= i + 2; j++)
+      {
+         if (j == i) continue;
+         if (positionType == "BUY" && swingRates[i].low >= swingRates[j].low) { pivot = false; break; }
+         if (positionType == "SELL" && swingRates[i].high <= swingRates[j].high) { pivot = false; break; }
+      }
+      if (!pivot) continue;
+
+      double candleRange = swingRates[i].high - swingRates[i].low;
+      double buffer = MathMax(candleRange * 0.1, point * 2.0);
+      double candidateStop = (positionType == "BUY")
+         ? NormalizeDouble(swingRates[i].low - buffer, _Digits)
+         : NormalizeDouble(swingRates[i].high + buffer, _Digits);
+
+      if (positionType == "BUY" && candidateStop < currentPrice - minDistance) return candidateStop;
+      if (positionType == "SELL" && candidateStop > currentPrice + minDistance) return candidateStop;
+   }
+   return 0.0;
+}
+
 //+------------------------------------------------------------------+
 //| Monitor de posições abertas                                       |
 //+------------------------------------------------------------------+
@@ -1177,7 +1250,30 @@ void MonitorOpenPositions()
                 else
                 {
                    GlobalVariableSet(partialKey, -1.0);
-                   Print("ℹ️ Price Action: lote mínimo do broker impede parcial de 50%; posição segue protegida pelo SL/TP.");
+                   Print("ℹ️ Price Action: lote mínimo do broker impede parcial de 50%; stop estrutural continuará protegendo a posição.");
+                }
+             }
+
+             if (favorableMove >= initialRisk * 1.5 && GlobalVariableCheck(partialKey))
+             {
+                double candidateStop = FindPriceActionStructuralStop(posType, curPrice);
+                double point = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
+                bool tightensStop = (posType == "BUY")
+                   ? (candidateStop > 0.0 && candidateStop > sl + point && candidateStop < curPrice)
+                   : (candidateStop > 0.0 && candidateStop < sl - point && candidateStop > curPrice);
+                if (tightensStop)
+                {
+                   if (trade.PositionModify(ticket, NormalizeDouble(candidateStop, _Digits), tp))
+                   {
+                      sl = NormalizeDouble(candidateStop, _Digits);
+                      Print("🛡️ Price Action: trailing stop por swing M5 confirmado. Ticket=", ticket,
+                            " NovoSL=", DoubleToString(sl, _Digits));
+                   }
+                   else
+                   {
+                      Print("⛔ Price Action: trailing stop M5 não aceito; o stop anterior permanece ativo. Ticket=",
+                            ticket, " retcode=", trade.ResultRetcode());
+                   }
                 }
              }
           }
