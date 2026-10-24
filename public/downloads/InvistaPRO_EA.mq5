@@ -1468,10 +1468,23 @@ bool SendHeartbeat()
    double margin    = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
    long   accId     = AccountInfoInteger(ACCOUNT_LOGIN);
    string broker    = AccountInfoString(ACCOUNT_COMPANY);
-   int    openPos   = PositionsTotal();
    long   tradeMode = AccountInfoInteger(ACCOUNT_TRADE_MODE);
    string accountType = (tradeMode == ACCOUNT_TRADE_MODE_REAL) ? "real" :
                         (tradeMode == ACCOUNT_TRADE_MODE_DEMO) ? "demo" : "contest";
+
+   // Send exact broker position tickets, not only a count. The server must not
+   // erase its own state merely because the terminal reports zero open positions.
+   string openPositionTicketsJson = "[";
+   int openPos = 0;
+   for (int positionIndex = 0; positionIndex < PositionsTotal(); positionIndex++)
+   {
+      ulong positionTicket = PositionGetTicket(positionIndex);
+      if (positionTicket == 0 || !PositionSelectByTicket(positionTicket)) continue;
+      if (openPos > 0) openPositionTicketsJson += ",";
+      openPositionTicketsJson += "\"" + StringFormat("%I64u", positionTicket) + "\"";
+      openPos++;
+   }
+   openPositionTicketsJson += "]";
 
    string url     = g_serverUrl + "/api/metatrader/heartbeat";
    string headers = "Content-Type: application/json\r\n";
@@ -1482,6 +1495,7 @@ bool SendHeartbeat()
    body += "\"equity\":"       + DoubleToString(equity,  2) + ",";
    body += "\"freeMargin\":"   + DoubleToString(margin,  2) + ",";
    body += "\"openPositions\":" + IntegerToString(openPos)  + ",";
+   body += "\"openPositionTickets\":" + openPositionTicketsJson + ",";
    body += "\"platform\":\"MT5\",";
    body += "\"accountType\":\"" + accountType + "\",";
    body += "\"eaVersion\":\"8.0\"";
