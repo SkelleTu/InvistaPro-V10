@@ -291,6 +291,7 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
       timeframes,
       accountType: requestAccountType,
       priceActionUseAIReview,
+      priceActionExtraCostPrice,
       indicatorSignals,   // { girassol: {...}, fibonacci: {...} }
       indicatorBuffers,   // array bruto de todos os buffers
       indicatorCount,
@@ -380,6 +381,7 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
         bid,
         ask,
         entryPrice: entryPriceForContext,
+        extraRoundTripCostPrice: priceActionExtraCostPrice,
         riskLimitOk: riskLimit.ok,
         newsBlocked: newsStatus.blocked || !newsStatus.valid,
         sessionOpen,
