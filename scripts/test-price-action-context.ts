@@ -90,6 +90,10 @@ assert.equal(assessMt5RiskLimit({
   config, status: { ...status, recentTrades: fiveTradesToday },
   observedAccountType: 'demo', accountHeartbeatAt: now - 1000, maxDailyTrades: 5, now,
 }).ok, false, 'The configured daily operation cap must stop new entries');
+assert.equal(assessMt5RiskLimit({
+  config, status, openPositions: [{ openTime: now - 24 * 60 * 60_000 }],
+  observedAccountType: 'demo', accountHeartbeatAt: now - 1000, maxDailyTrades: 5, now,
+}).ok, true, 'An overnight position must not count as a new trade for today’s entry cap');
 
 const realConfig = { ...config, accountType: 'real' } as MT5Config;
 assert.equal(assessMt5RiskLimit({
