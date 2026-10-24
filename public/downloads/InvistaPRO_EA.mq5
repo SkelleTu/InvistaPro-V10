@@ -1180,8 +1180,9 @@ void MonitorOpenPositions()
           }
        }
 
-// Autonomous Price Action mode uses only deterministic local protection and fixed SL/TP.
-      if (IsPriceActionCryptoSymbol() && !PriceActionUseAIReview)
+// All supported crypto Price Action positions use the deterministic management rules;
+      // AI/indicator monitor cannot introduce additional exits or widen the strategy's risk.
+      if (IsPriceActionCryptoSymbol())
          continue;
 
             string posJson = "{";
