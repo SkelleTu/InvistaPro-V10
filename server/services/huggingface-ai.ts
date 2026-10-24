@@ -320,7 +320,7 @@ export class HuggingFaceAIService {
       'Aprove somente se os dados sustentarem a direção do candidato e nenhum critério obrigatório estiver falhando. Não invente thresholds, não aplique percentual mínimo de confiança, não crie uma segunda operação, não inverta nem altere a direção e não altere entrada, stop ou alvo.',
       'Se houver evidência insuficiente, contradição real nos dados, critério obrigatório ausente/falso ou direção divergente, rejeite ou use HOLD.',
       'Responda apenas JSON: {"decision":"approve|reject","direction":"BUY|SELL|HOLD","confidence":0-100,"reason":"justificativa curta vinculada aos dados fornecidos"}.',
-    ].join('\\n');
+    ].join('\n');
 
     // Query the configured reviewers in parallel to keep latency bounded. Promise.allSettled
     // preserves configured order: the first technically valid response is authoritative.
