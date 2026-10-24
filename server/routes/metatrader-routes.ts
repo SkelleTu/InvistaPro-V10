@@ -140,6 +140,17 @@ router.get('/signal', mt5SignalAccess, (req: Request, res: Response) => {
     // Um polling de sinal não é evidência de saldo, equity ou posições conciliadas.
     const symbolStr = (symbol as string) || '';
     const resolvedSymbol = symbolStr || config.symbols[0] || 'EURUSD';
+    const normalizedStrategySymbol = resolvedSymbol.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BTCUSD', 'ETHUSD', 'SOLUSD'].includes(normalizedStrategySymbol)) {
+      return res.json({
+        action: 'HOLD',
+        confidence: 0,
+        executionEnabled: false,
+        code: 'PRICE_ACTION_ENDPOINT_REQUIRED',
+        reason: 'Ativos da estratégia Price Action exigem candles H4/H1/M15/M5-M1, validação de risco e revisão IA no endpoint signal-with-indicators. Sinal genérico não pode contornar a estratégia.',
+        timestamp: Date.now(),
+      });
+    }
 
     // MT5 orders are placed by the user's logged-in MT5 terminal, not as Deriv contracts.
     if (process.env.NODE_ENV === 'production' && symbolStr && !isAllowedProductionSymbol(symbolStr)) {
