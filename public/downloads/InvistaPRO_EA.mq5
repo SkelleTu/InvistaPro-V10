@@ -732,6 +732,28 @@ int VolumeDigitsFromStep()
    return digits;
 }
 
+double PriceActionExtraCostPriceDistance()
+{
+   if (!MathIsValidNumber(PriceActionExtraRoundTripCostPerLot) ||
+       PriceActionExtraRoundTripCostPerLot <= 0.0)
+      return 0.0;
+
+   double tickSize = SymbolInfoDouble(g_symbol, SYMBOL_TRADE_TICK_SIZE);
+   double tickValue = SymbolInfoDouble(g_symbol, SYMBOL_TRADE_TICK_VALUE_LOSS);
+   if (tickValue <= 0.0) tickValue = SymbolInfoDouble(g_symbol, SYMBOL_TRADE_TICK_VALUE);
+   if (tickSize <= 0.0 || tickValue <= 0.0)
+      return 0.0;
+
+   double moneyPerPriceUnitPerLot = tickValue / tickSize;
+   if (!MathIsValidNumber(moneyPerPriceUnitPerLot) || moneyPerPriceUnitPerLot <= 0.0)
+      return 0.0;
+
+   double priceDistance = PriceActionExtraRoundTripCostPerLot / moneyPerPriceUnitPerLot;
+   if (!MathIsValidNumber(priceDistance) || priceDistance <= 0.0)
+      return 0.0;
+   return priceDistance;
+}
+
 double CalculatePriceActionRiskLot(double entryPrice, double stopLoss)
 {
    if (entryPrice <= 0 || stopLoss <= 0 ||
@@ -821,6 +843,9 @@ void FetchAndProcessSignal()
    body += "\"candles\":"           + candlesJson                   + ",";
    body += "\"timeframes\":"       + BuildMultiTimeframeJson()     + ",";
    body += "\"priceActionUseAIReview\":" + (PriceActionUseAIReview ? "true" : "false") + ",";
+   // Send the configured commission+slippage estimate converted into price units.
+   // A missing/zero estimate is rejected by the server and by local position sizing.
+   body += "\"priceActionExtraCostPrice\":" + DoubleToString(PriceActionExtraCostPriceDistance(), 10) + ",";
    body += "\"indicatorSignals\":"  + structuredSignals             + ",";
    body += "\"indicatorBuffers\":"  + allBuffers                    + ",";
    body += "\"indicatorCount\":"    + IntegerToString(g_indicatorCount) + ",";
