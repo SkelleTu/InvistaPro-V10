@@ -217,6 +217,7 @@ export interface MT5Status {
   /** Open position count reported directly by the latest MT5 EA heartbeat. */
   reportedOpenPositions?: number;
   reportedOpenPositionTickets?: string[];
+  openPositionTimes?: number[];
   positionsReconciled?: boolean;
   dailyProfit: number;
   dailyLoss: number;
@@ -2226,6 +2227,7 @@ class MetaTraderBridge extends EventEmitter {
       activeSignal: this.getLatestActiveSignal(),
       recentTrades: this.recentTrades.slice(0, 20),
       openPositions: this.openPositions.size,
+      openPositionTimes: Array.from(this.openPositions.values()).map(position => position.openTime),
       cachedSymbols: this.getCachedSymbols(),
       lastBalance: this.currentBalance || undefined,
       lastEquity: this.currentEquity || undefined,
