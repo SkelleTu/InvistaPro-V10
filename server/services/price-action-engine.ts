@@ -183,7 +183,7 @@ function fairValueGapZone(c: Candle[], side: TradeSide, price: number, timeframe
         identifiedAt: third.time,
         reactions,
         invalidationPrice: side === 'BUY' ? low : high,
-        state: 'valid',
+        state: reactions > 0 ? 'mitigated' : 'valid',
       };
     }
   }
@@ -267,7 +267,8 @@ function orderBlockZone(c: Candle[], side: TradeSide, timeframe: Timeframe): Pri
       return {
         type: 'order_block', low, high, timeframe, direction: side,
         originIndex: i, originTime: candidate.time, identifiedAt: impulse.time,
-        reactions, invalidationPrice: side === 'BUY' ? low : high, state: 'valid',
+        reactions, invalidationPrice: side === 'BUY' ? low : high,
+        state: reactions > 0 ? 'mitigated' : 'valid',
       };
     }
   }
