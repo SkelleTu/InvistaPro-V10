@@ -1137,6 +1137,15 @@ void FetchAndProcessSignal()
             positionFound = true;
             confirmedPositionTicket = candidateTicket;
             confirmedPositionIdentifier = PositionGetInteger(POSITION_IDENTIFIER);
+            if (confirmedPositionIdentifier > 0)
+               GlobalVariableSet("InvistaPA_IDMAP_" + StringFormat("%I64d", confirmedPositionIdentifier), (double)confirmedPositionTicket);
+            string signalFile = "InvistaPA_SIGNAL_" + StringFormat("%I64u", confirmedPositionTicket) + ".txt";
+            int signalHandle = FileOpen(signalFile, FILE_WRITE | FILE_TXT | FILE_COMMON);
+            if (signalHandle != INVALID_HANDLE)
+            {
+               FileWriteString(signalHandle, signalId);
+               FileClose(signalHandle);
+            }
             double brokerSL = PositionGetDouble(POSITION_SL);
             double brokerTP = PositionGetDouble(POSITION_TP);
             double brokerEntry = PositionGetDouble(POSITION_PRICE_OPEN);
@@ -1168,15 +1177,6 @@ void FetchAndProcessSignal()
          {
             if (isPriceActionCrypto)
                GlobalVariableSet("InvistaPA_SL0_" + IntegerToString((long)confirmedPositionTicket), stopLoss);
-            if (confirmedPositionIdentifier > 0)
-               GlobalVariableSet("InvistaPA_IDMAP_" + StringFormat("%I64d", confirmedPositionIdentifier), (double)confirmedPositionTicket);
-            string signalFile = "InvistaPA_SIGNAL_" + StringFormat("%I64u", confirmedPositionTicket) + ".txt";
-            int signalHandle = FileOpen(signalFile, FILE_WRITE | FILE_TXT | FILE_COMMON);
-            if (signalHandle != INVALID_HANDLE)
-            {
-               FileWriteString(signalHandle, signalId);
-               FileClose(signalHandle);
-            }
          }
       }
    }
