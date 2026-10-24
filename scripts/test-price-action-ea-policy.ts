@@ -13,6 +13,8 @@ assert.ok(ea.includes('if (IsPriceActionCryptoSymbol())'), 'All crypto Price Act
 assert.ok(ea.includes('AIControlMode == AI_MANUAL && !isStrategyCrypto'), 'Manual mode must not replace the documented crypto strategy stops/targets');
 assert.ok(ea.includes('AIControlMode == AI_PARTIAL && !isStrategyCrypto'), 'Partial mode must not replace the documented crypto strategy stops/targets');
 assert.ok(routes.includes("strategyMode: 'AUTHORITATIVE_PRICE_ACTION'"), 'A valid strategy setup must determine the crypto entry');
+assert.ok(routes.includes('estimatedRoundTripCost: priceActionSetup.features.estimatedRoundTripCost'), 'The EA must receive the same transaction-cost estimate used for RR and lot sizing');
+assert.ok(routes.includes('strategyChecksPassed: true'), 'The route should report passed checks without claiming overall platform compliance');
 assert.ok(routes.includes('MT5_PRICE_ACTION_EXTRA_COST_RATE'), 'The strategy must not assume commissions/slippage are zero');
 assert.ok(routes.includes('zones: priceActionSetup.zones ?? []'), 'Rejected setups must expose their zone diagnostics');
 assert.ok(!routes.includes('PRICE_ACTION_AI_REVIEW_REJECTED'), 'A fixed AI confidence/consensus gate must not veto a valid strategy setup');

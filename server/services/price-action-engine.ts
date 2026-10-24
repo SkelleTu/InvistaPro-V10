@@ -567,7 +567,6 @@ export function evaluatePriceActionSetup(
     // A HOLD still needs an auditable market map. Record zones across all supplied
     // timeframes, in both directions, even when the entry trigger has not formed yet.
     const diagnosticEntryCandles = entryCandles!;
-    const diagnosticEntryTimeframe: Timeframe = entryCandles === validM5 ? 'M5' : 'M1';
     const diagnosticPrice = diagnosticEntryCandles[diagnosticEntryCandles.length - 1].close;
     const diagnosticFrames: Array<{ candles: Candle[]; timeframe: Timeframe }> = [
       { candles: h4, timeframe: 'H4' },

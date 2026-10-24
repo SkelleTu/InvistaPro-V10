@@ -1052,7 +1052,7 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
         expiresAt: timestamp + Math.max(10, config.signalTimeoutSeconds) * 1000,
         reason: 'Setup aprovado pelos critérios determinísticos e controles de segurança da estratégia. Consenso/confiança da IA e filtros legados não acrescentam vetos.',
         strategyMode: 'AUTHORITATIVE_PRICE_ACTION',
-        strategyCompliance: 100,
+        strategyChecksPassed: true,
         aiDiagnostics: {
           action: finalAction,
           confidence: finalConfidence,
