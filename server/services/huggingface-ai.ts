@@ -322,10 +322,10 @@ export class HuggingFaceAIService {
       'Responda apenas JSON: {"decision":"approve|reject","direction":"BUY|SELL|HOLD","confidence":0-100,"reason":"justificativa curta vinculada aos dados fornecidos"}.',
     ].join('\\n');
 
-    // One valid AI reviewer evaluates the documented checklist. Try the next model
-    // only when the prior provider fails technically or returns invalid JSON. A valid
-    // rejection is a decision, not a reason to shop for a more permissive model.
-    for (const model of this.activeModels) {
+    // Query the configured reviewers in parallel to keep latency bounded. Promise.allSettled
+    // preserves configured order: the first technically valid response is authoritative.
+    // A valid rejection is final; only transport/format failures allow fallback to another model.
+    const responses = await Promise.allSettled(this.activeModels.map(async model => {
       try {
         const response = await axios.post(
           `${this.baseURL}/v1/chat/completions`,
@@ -350,17 +350,13 @@ export class HuggingFaceAIService {
         const content = String(response.data?.choices?.[0]?.message?.content ?? '').trim();
         const jsonStart = content.indexOf('{');
         const jsonEnd = content.lastIndexOf('}');
-        if (jsonStart < 0 || jsonEnd <= jsonStart) {
-          console.warn(`[PRICE ACTION AI REVIEW] ${model.name} retornou JSON inválido para ${symbol}; tentando fallback técnico.`);
-          continue;
-        }
+        if (jsonStart < 0 || jsonEnd <= jsonStart) return null;
 
         let parsed: any;
         try {
           parsed = JSON.parse(content.slice(jsonStart, jsonEnd + 1));
         } catch {
-          console.warn(`[PRICE ACTION AI REVIEW] ${model.name} retornou JSON inválido para ${symbol}; tentando fallback técnico.`);
-          continue;
+          return null;
         }
         const rawDecision = String(parsed?.decision ?? '').trim().toLowerCase();
         const decision = rawDecision === 'approve' || rawDecision === 'approved' ? 'approve'
@@ -368,35 +364,47 @@ export class HuggingFaceAIService {
         const direction = String(parsed?.direction ?? '').trim().toUpperCase();
         const confidence = Number(parsed?.confidence);
         if (!decision || !['BUY', 'SELL', 'HOLD'].includes(direction) ||
-          !Number.isFinite(confidence) || confidence < 0 || confidence > 100) {
-          console.warn(`[PRICE ACTION AI REVIEW] ${model.name} retornou campos inválidos para ${symbol}; tentando fallback técnico.`);
-          continue;
-        }
-
-        const source = [model.name];
-        const reason = String(parsed?.reason ?? parsed?.reasoning ?? 'Sem justificativa fornecida.').slice(0, 500);
-        if (decision !== 'approve' || direction !== candidateDirection) {
-          const reviewedDirection = direction as 'BUY' | 'SELL' | 'HOLD';
-          return reject(
-            `Revisão IA rejeitou/divergiu do candidato ${candidateDirection}: decisão=${decision}, direção=${reviewedDirection}. ${reason}`,
-            reviewedDirection,
-            confidence,
-            source,
-          );
-        }
+          !Number.isFinite(confidence) || confidence < 0 || confidence > 100) return null;
 
         return {
-          approved: true,
-          direction: candidateDirection,
+          decision,
+          direction: direction as 'BUY' | 'SELL' | 'HOLD',
           confidence,
-          sources: source,
-          reason: `Revisão IA aprovou o candidato ${candidateDirection} com base no checklist da estratégia; confiança informativa ${confidence}%. ${reason}`.trim(),
+          source: model.name,
+          reason: String(parsed?.reason ?? parsed?.reasoning ?? 'Sem justificativa fornecida.').slice(0, 500),
         };
       } catch (error) {
         console.warn(`[PRICE ACTION AI REVIEW] ${model.name} indisponível para ${symbol}: ${error instanceof Error ? error.message : 'erro desconhecido'}`);
+        return null;
       }
+    }));
+
+    const validReviews = responses
+      .filter(item => item.status === 'fulfilled')
+      .map(item => item.status === 'fulfilled' ? item.value : null)
+      .filter((item): item is { decision: 'approve' | 'reject'; direction: 'BUY' | 'SELL' | 'HOLD'; confidence: number; source: string; reason: string } => item !== null);
+    const review = validReviews[0];
+    if (!review) {
+      return reject('Nenhum modelo externo respondeu com uma revisão válida dentro do tempo limite; entrada bloqueada.');
     }
-    return reject('Nenhum modelo externo respondeu com uma revisão válida dentro do tempo limite; entrada bloqueada.');
+
+    const source = [review.source];
+    if (review.decision !== 'approve' || review.direction !== candidateDirection) {
+      return reject(
+        `Revisão IA rejeitou/divergiu do candidato ${candidateDirection}: decisão=${review.decision}, direção=${review.direction}. ${review.reason}`,
+        review.direction,
+        review.confidence,
+        source,
+      );
+    }
+
+    return {
+      approved: true,
+      direction: candidateDirection,
+      confidence: review.confidence,
+      sources: source,
+      reason: `Revisão IA aprovou o candidato ${candidateDirection} com base no checklist da estratégia; confiança informativa ${review.confidence}%. ${review.reason}`.trim(),
+    };
   }
 
   async analyzeMarketData(tickData: DerivTickData[], symbol: string, userId?: string, externalContext?: ExternalMarketContext): Promise<AIConsensus> {
