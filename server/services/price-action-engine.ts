@@ -45,8 +45,8 @@ export function isValidPriceActionCandles(v: unknown): v is Candle[] {
 
 type MarketTrend = 'bullish' | 'bearish' | 'range' | 'unknown';
 type PivotKind = 'high' | 'low';
-interface Pivot { index: number; price: number }
-interface PriceZone { low: number; high: number; touches: number }
+interface Pivot { index: number; price: number; time: number }
+interface PriceZone { low: number; high: number; touches: number; identifiedAt?: number; invalidationPrice?: number }
 interface RangeBounds { low: number; high: number; lowTouches: number; highTouches: number }
 
 /** Swing points are used only after two candles have closed on their right. */
@@ -63,7 +63,7 @@ function pivots(c: Candle[], kind: PivotKind, wing = 2): Pivot[] {
         break;
       }
     }
-    if (isPivot) result.push({ index: i, price });
+    if (isPivot) result.push({ index: i, price, time: c[i].time });
   }
   return result;
 }
@@ -182,23 +182,24 @@ function findFairValueGapZone(c: Candle[], side: TradeSide, currentPrice: number
     }
     const returnedToZone = currentPrice >= low - tolerance && currentPrice <= high + tolerance;
     if (!invalidated && returnedToZone) {
-      return { low, high, touches: 1 };
+      return { low, high, touches: 1, identifiedAt: third.time, invalidationPrice: side === 'BUY' ? low : high };
     }
   }
   return null;
 }
 function breakOfStructure(c: Candle[], side: TradeSide): boolean {
-  const prior = c.slice(-11, -1);
-  if (prior.length < 8) return false;
-  const last = c[c.length - 1];
-  return side === 'BUY'
-    ? last.close > Math.max(...prior.map(x => x.high))
-    : last.close < Math.min(...prior.map(x => x.low));
+  if (c.length < 30) return false;
+  const closedBeforeTrigger = c.slice(0, -1);
+  const swingLevels = pivots(closedBeforeTrigger, side === 'BUY' ? 'high' : 'low').slice(-3);
+  const latest = swingLevels[swingLevels.length - 1];
+  const triggerBar = c[c.length - 1];
+  if (!latest || !finite(triggerBar.close)) return false;
+  return side === 'BUY' ? triggerBar.close > latest.price : triggerBar.close < latest.price;
 }
 function changeOfCharacter(c: Candle[], side: TradeSide): boolean {
-  if (c.length < 25) return false;
-  const prior = trend(c.slice(0, -10));
-  const recent = trend(c.slice(-10));
+  if (c.length < 60) return false;
+  const prior = trend(c.slice(-60, -30));
+  const recent = trend(c.slice(-30));
   return side === 'BUY' ? prior === 'bearish' && recent === 'bullish'
     : prior === 'bullish' && recent === 'bearish';
 }
@@ -239,18 +240,27 @@ function averageRange(c: Candle[]): number {
 function repeatedStructureZone(c: Candle[], kind: PivotKind, price: number): PriceZone | null {
   if (!finite(price) || price <= 0) return null;
   const tolerance = Math.max(averageRange(c) * 0.35, Math.abs(price) * 0.00005);
-  const levels = pivots(c.slice(0, -1), kind).map(p => p.price);
-  const clusters: number[][] = [];
-  for (const level of levels) {
-    const cluster = clusters.find(items => Math.abs(average(items) - level) <= tolerance);
-    if (cluster) cluster.push(level);
-    else clusters.push([level]);
+  const levels = pivots(c.slice(0, -1), kind);
+  const clusters: Pivot[][] = [];
+  for (const pivot of levels) {
+    const cluster = clusters.find(items =>
+      Math.abs(average(items.map(item => item.price)) - pivot.price) <= tolerance
+    );
+    if (cluster) cluster.push(pivot);
+    else clusters.push([pivot]);
   }
-  const valid = clusters.filter(items => items.length >= 2).map(items => ({
-    low: Math.min(...items) - tolerance,
-    high: Math.max(...items) + tolerance,
-    touches: items.length,
-  }));
+  const valid = clusters.filter(items => items.length >= 2).map(items => {
+    const levelPrices = items.map(item => item.price);
+    const low = Math.min(...levelPrices) - tolerance;
+    const high = Math.max(...levelPrices) + tolerance;
+    return {
+      low,
+      high,
+      touches: items.length,
+      identifiedAt: Math.max(...items.map(item => item.time)),
+      invalidationPrice: kind === 'low' ? low : high,
+    };
+  });
   const near = valid.filter(zone => price >= zone.low - tolerance && price <= zone.high + tolerance);
   return near.sort((a, b) =>
     Math.abs(price - (a.low + a.high) / 2) - Math.abs(price - (b.low + b.high) / 2)
