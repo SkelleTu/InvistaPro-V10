@@ -216,6 +216,8 @@ export interface MT5Status {
   openPositions: number;
   /** Open position count reported directly by the latest MT5 EA heartbeat. */
   reportedOpenPositions?: number;
+  reportedOpenPositionTickets?: string[];
+  positionsReconciled?: boolean;
   dailyProfit: number;
   dailyLoss: number;
   dailyWins: number;
@@ -2586,7 +2588,7 @@ class MetaTraderBridge extends EventEmitter {
     return { action, confidence, source: profile ? `technical_${profile.trendType}` : 'technical', fibScore, fibZone: fibZoneDesc, spikeInfo, profileNotes };
   }
 
-  recordHeartbeat(accountData: { accountId: string; broker: string; balance: number; equity: number; freeMargin: number; openPositionsCount?: number }): void {
+  recordHeartbeat(accountData: { accountId: string; broker: string; balance: number; equity: number; freeMargin: number; openPositionsCount?: number; openPositionTickets?: string[] }): void {
     this.status.lastHeartbeat = Date.now();
     // Só sobrescrever accountId/broker se trouxer valor real (não o placeholder automático)
     const isRealId = accountData.accountId && accountData.accountId !== 'EA_AUTO';
@@ -2597,23 +2599,35 @@ class MetaTraderBridge extends EventEmitter {
     // Salvar saldo em tempo real — usado pela memória de contexto de posições
     if (accountData.balance > 0) this.currentBalance = accountData.balance;
     if (accountData.equity > 0) this.currentEquity = accountData.equity;
-    if (typeof accountData.openPositionsCount === 'number' && Number.isInteger(accountData.openPositionsCount) && accountData.openPositionsCount >= 0) {
+    if (typeof accountData.openPositionsCount === 'number' &&
+        Number.isInteger(accountData.openPositionsCount) && accountData.openPositionsCount >= 0) {
       this.status.reportedOpenPositions = accountData.openPositionsCount;
     }
+
+    const suppliedTickets = Array.isArray(accountData.openPositionTickets) &&
+      accountData.openPositionTickets.every(ticket => typeof ticket === 'string' && /^\\d+$/.test(ticket))
+      ? Array.from(new Set(accountData.openPositionTickets))
+      : null;
+    if (suppliedTickets !== null) {
+      const brokerTickets = suppliedTickets.slice().sort();
+      const serverTickets = Array.from(this.openPositions.keys()).map(String).sort();
+      this.status.reportedOpenPositionTickets = brokerTickets;
+      this.status.positionsReconciled = accountData.openPositionsCount === brokerTickets.length &&
+        brokerTickets.length === serverTickets.length &&
+        brokerTickets.every((ticket, index) => ticket === serverTickets[index]);
+      if (!this.status.positionsReconciled) {
+        console.error('[MT5Bridge] 🚨 Divergência de posições entre MT5 e estado interno. Novas entradas bloqueadas até reconciliação.',
+          { brokerCount: brokerTickets.length, serverCount: serverTickets.length });
+      }
+    } else {
+      this.status.reportedOpenPositionTickets = undefined;
+      this.status.positionsReconciled = false;
+    }
+
     if (!this.config.enabled) {
       this.config.enabled = true;
       this.startSignalGeneration();
       console.log(`[MT5Bridge] ✅ Sistema auto-habilitado via heartbeat do EA (${accountData.broker})`);
-    }
-    // Reconciliar posições: se o EA reporta 0 posições abertas mas o servidor tem registros,
-    // limpar posições fantasma que bloqueiam novos sinais (fechadas via SL/TP sem notificação)
-    if (typeof accountData.openPositionsCount === 'number' && accountData.openPositionsCount === 0 && this.openPositions.size > 0) {
-      console.log(`[MT5Bridge] 🧹 Heartbeat: EA reportou 0 posições, mas servidor tem ${this.openPositions.size} — limpando posições fantasma`);
-      for (const [ticket] of Array.from(this.openPositions.entries())) {
-        this.removePositionFromDB(ticket);
-      }
-      this.openPositions.clear();
-      this.status.openPositions = 0;
     }
   }
 
@@ -4574,6 +4588,7 @@ class MetaTraderBridge extends EventEmitter {
   }
 
   confirmTradeOpen(position: MT5Position): void {
+    this.status.positionsReconciled = false;
     this.openPositions.set(position.ticket, position);
     this.status.totalTradesExecuted++;
     if (this.pendingSignals.has(position.signalId)) {
@@ -4595,6 +4610,7 @@ class MetaTraderBridge extends EventEmitter {
   }
 
   confirmTradeClose(result: MT5TradeResult): void {
+    this.status.positionsReconciled = false;
     this.ensureDailyStatsCurrent(Date.now());
     const closeTimeMs = this.normalizeEpochMilliseconds(result.closeTime);
     const closedDuringCurrentBrasiliaDay = this.brasiliaDayKey(closeTimeMs) === this.dailyStatsDateKey;
