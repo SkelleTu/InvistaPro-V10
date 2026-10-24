@@ -244,14 +244,29 @@ export function assessMt5RiskLimit(input: {
   if (!Number.isFinite(config.maxDailyProfit) || config.maxDailyProfit <= 0
     || !Number.isFinite(status.dailyProfit) || status.dailyProfit < 0 || status.dailyProfit >= config.maxDailyProfit) reasons.push('Meta/limite diário de lucro atingido, indisponível ou inválido');
   if (status.circuitBreakerActive) reasons.push('Circuit breaker ativo');
-  if (Number.isFinite(status.dailyLosses) && status.dailyLosses >= 3) {
+  const recentTrades = Array.isArray(status.recentTrades) ? status.recentTrades : [];
+  const brasiliaDate = (timestamp: number) => {
+    const normalizedTimestamp = timestamp < 100_000_000_000 ? timestamp * 1000 : timestamp;
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).formatToParts(new Date(normalizedTimestamp));
+    const year = parts.find(part => part.type === 'year')?.value;
+    const month = parts.find(part => part.type === 'month')?.value;
+    const day = parts.find(part => part.type === 'day')?.value;
+    return year && month && day ? `${year}-${month}-${day}` : 'INVALID_DATE';
+  };
+  const today = brasiliaDate(now);
+  const tradesClosedToday = recentTrades.filter(trade =>
+    Number.isFinite(trade.closeTime) && brasiliaDate(trade.closeTime) === today);
+  const dailyLossCount = tradesClosedToday.filter(trade =>
+    Number.isFinite(trade.profit) && trade.profit < 0).length;
+  if (dailyLossCount >= 3) {
     reasons.push('Limite de três operações perdedoras no dia atingido');
   }
 
   // Stop for one hour after two consecutive losses, based on the recorded closing time.
   const consecutiveLosses = Number(status.consecutiveLosses ?? 0);
   if (consecutiveLosses >= 2) {
-    const recentTrades = Array.isArray(status.recentTrades) ? status.recentTrades : [];
     const lastLoss = recentTrades
       .filter(trade => Number.isFinite(trade.profit) && trade.profit < 0 && Number.isFinite(trade.closeTime))
       .sort((a, b) => b.closeTime - a.closeTime)[0];
@@ -266,19 +281,8 @@ export function assessMt5RiskLimit(input: {
   // The strategy permits a configured cap of 3, 4 or 5 operations per Brasilia day.
   const requestedDailyCap = input.maxDailyTrades ?? 5;
   const dailyCap = [3, 4, 5].includes(requestedDailyCap) ? requestedDailyCap : 5;
-  const brasiliaDate = (timestamp: number) => {
-    const parts = new Intl.DateTimeFormat('en-GB', {
-      timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit',
-    }).formatToParts(new Date(timestamp));
-    const year = parts.find(part => part.type === 'year')?.value;
-    const month = parts.find(part => part.type === 'month')?.value;
-    const day = parts.find(part => part.type === 'day')?.value;
-    return year && month && day ? `${year}-${month}-${day}` : 'INVALID_DATE';
-  };
-  const today = brasiliaDate(now);
-  const recentTradesToday = (Array.isArray(status.recentTrades) ? status.recentTrades : [])
-    .filter(trade => Number.isFinite(trade.openTime) &&
-      brasiliaDate(trade.openTime < 100_000_000_000 ? trade.openTime * 1000 : trade.openTime) === today).length;
+  const recentTradesToday = recentTrades
+    .filter(trade => Number.isFinite(trade.openTime) && brasiliaDate(trade.openTime) === today).length;
   const livePositions = Number.isFinite(status.openPositions) && status.openPositions > 0 ? status.openPositions : 0;
   if (recentTradesToday + livePositions >= dailyCap) {
     reasons.push('Limite diário configurado de ' + dailyCap + ' operações atingido');
