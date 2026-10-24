@@ -283,7 +283,7 @@ export class HuggingFaceAIService {
       sources: string[] = [],
     ) => ({ approved: false, direction, confidence, sources, reason });
 
-    if (!this.isConfigured) {
+    if (!this.isConfigured || !this.apiKey || this.apiKey === 'missing-key') {
       return reject('Revisão IA indisponível: provedor externo não está configurado.');
     }
     if (!Array.isArray(tickData) || tickData.length < 30 || tickData.some((tick, index) =>
@@ -300,76 +300,102 @@ export class HuggingFaceAIService {
       return reject('Revisão IA bloqueada: candles de entrada desatualizados ou com horário inválido.');
     }
 
-    try {
-      const consensus = await this.analyzeMarketData(tickData, symbol);
-      const reviewNow = Date.now();
-      const health = this.getExternalInferenceHealth(symbol);
-      if (!health || reviewNow - health.checkedAt > 60_000 || health.respondingModels < 1) {
-        return reject('Revisão IA sem resposta externa válida e recente; entrada bloqueada.');
-      }
+    const recent = tickData.slice(-40);
+    const priceSeries = recent.map(tick => Number(tick.quote)).join(', ');
+    const technicalContext = this.buildCompactDNA(tickData, symbol);
+    const prompt = [
+      `Ativo: ${symbol}; timeframe de entrada: ${timeframe}.`,
+      `Candidato único já criado pela estratégia determinística: ${candidateDirection}.`,
+      'O servidor já aprovou os gates determinísticos de H4/H1, gatilho M5/M1, volume, estrutura, stop, risco-retorno após custos, spread, notícia, sessão e risco da conta.',
+      `Contexto quantitativo: ${technicalContext}`,
+      `Fechamentos cronológicos recentes: ${priceSeries}`,
+      'Sua tarefa é APENAS revisar este candidato. Não crie um novo sinal, não troque a direção, não altere entrada/stop/alvo e não acrescente um limite numérico mínimo de confiança.',
+      'Aprove somente se os dados fornecidos sustentarem a direção do candidato. Caso contrário, rejeite ou use HOLD. Considere a direção contrária como divergência, nunca como uma nova ordem.',
+      'Responda apenas JSON: {"decision":"approve|reject","direction":"BUY|SELL|HOLD","confidence":0-100,"reason":"justificativa curta baseada apenas nos dados"}.',
+    ].join('\n');
 
-      const validResponses = Array.isArray(consensus.analyses)
-        ? consensus.analyses.filter(analysis => {
-          const responseTime = analysis.timestamp instanceof Date ? analysis.timestamp.getTime() : Number.NaN;
-          return ['up', 'down', 'neutral'].includes(analysis.prediction) &&
-            Number.isFinite(analysis.confidence) && analysis.confidence >= 0 && analysis.confidence <= 100 &&
-            typeof analysis.modelName === 'string' && analysis.modelName.length > 0 &&
-            Number.isFinite(responseTime) && responseTime <= reviewNow + 30_000 &&
-            reviewNow - responseTime <= 120_000;
-        })
-        : [];
-      // The per-request response set and health record must agree. A concurrent
-      // request must never make a stale or unrelated response look valid here.
-      if (validResponses.length === 0 || health.respondingModels !== validResponses.length) {
-        return reject('Respostas externas ausentes, desatualizadas ou inconsistentes; entrada bloqueada.');
-      }
-      const modelAnalyses = validResponses.filter(analysis =>
-        analysis.prediction === 'up' || analysis.prediction === 'down'
-      );
-      if (modelAnalyses.length === 0) {
-        return reject('Consenso externo neutro: nenhum modelo votou em uma direção válida.');
-      }
-
-      const upWeight = modelAnalyses
-        .filter(analysis => analysis.prediction === 'up')
-        .reduce((sum, analysis) => sum + analysis.confidence, 0);
-      const downWeight = modelAnalyses
-        .filter(analysis => analysis.prediction === 'down')
-        .reduce((sum, analysis) => sum + analysis.confidence, 0);
-      if (upWeight === downWeight) {
-        return reject('Consenso externo neutro: votos direcionais empatados.');
-      }
-
-      const direction: 'BUY' | 'SELL' = upWeight > downWeight ? 'BUY' : 'SELL';
-      const totalWeight = upWeight + downWeight;
-      const winnerWeight = Math.max(upWeight, downWeight);
-      const winningModels = modelAnalyses.filter(analysis =>
-        analysis.prediction === (direction === 'BUY' ? 'up' : 'down')
-      );
-      const winningConfidence = winningModels.reduce((sum, analysis) => sum + analysis.confidence, 0) / winningModels.length;
-      const agreement = totalWeight > 0 ? winnerWeight / totalWeight * 100 : 0;
-      const confidence = Math.round(agreement * 0.6 + winningConfidence * 0.4);
-      const sources = modelAnalyses.map(analysis => analysis.modelName);
-
-      if (direction !== candidateDirection) {
-        return reject(
-          `Consenso externo divergente: estratégia=${candidateDirection}, IA=${direction}; entrada bloqueada.`,
-          direction,
-          confidence,
-          sources,
+    const responses = await Promise.allSettled(this.activeModels.map(async model => {
+      try {
+        const response = await axios.post(
+          `${this.baseURL}/v1/chat/completions`,
+          {
+            model: model.id,
+            messages: [
+              { role: 'system', content: 'Você é um revisor quantitativo prudente. Revise o candidato existente sem inventar operações. Não prometa lucro; responda somente JSON válido.' },
+              { role: 'user', content: prompt },
+            ],
+            temperature: 0.1,
+            max_tokens: 180,
+            stream: false,
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${this.apiKey}`,
+              'Content-Type': 'application/json',
+            },
+            timeout: 4_500,
+          },
         );
+        const content = String(response.data?.choices?.[0]?.message?.content ?? '').trim();
+        const jsonStart = content.indexOf('{');
+        const jsonEnd = content.lastIndexOf('}');
+        if (jsonStart < 0 || jsonEnd <= jsonStart) return null;
+        const parsed = JSON.parse(content.slice(jsonStart, jsonEnd + 1));
+        const rawDecision = String(parsed?.decision ?? '').trim().toLowerCase();
+        const decision = rawDecision === 'approve' || rawDecision === 'approved' ? 'approve'
+          : rawDecision === 'reject' ? 'reject' : null;
+        const direction = String(parsed?.direction ?? '').trim().toUpperCase();
+        const confidence = Number(parsed?.confidence);
+        if (!decision || !['BUY', 'SELL', 'HOLD'].includes(direction) ||
+          !Number.isFinite(confidence) || confidence <= 0 || confidence > 100) return null;
+        return {
+          decision,
+          direction: direction as 'BUY' | 'SELL' | 'HOLD',
+          confidence,
+          source: model.name,
+          reason: String(parsed?.reason ?? parsed?.reasoning ?? 'Sem justificativa fornecida.').slice(0, 500),
+        };
+      } catch (error) {
+        console.warn(`[PRICE ACTION AI REVIEW] ${model.name} indisponível para ${symbol}: ${error instanceof Error ? error.message : 'erro desconhecido'}`);
+        return null;
       }
+    }));
 
-      return {
-        approved: true,
-        direction,
-        confidence,
-        sources,
-        reason: `Modelos externos concordaram com o candidato ${candidateDirection}; confiança informativa de ${confidence}% (sem limiar numérico adicional).`,
-      };
-    } catch (error) {
-      return reject(`Falha na revisão IA; entrada bloqueada (${error instanceof Error ? error.message : 'erro desconhecido'}).`);
+    const validReviews = responses
+      .filter(item => item.status === 'fulfilled')
+      .map(item => item.status === 'fulfilled' ? item.value : null)
+      .filter((item): item is { decision: 'approve' | 'reject'; direction: 'BUY' | 'SELL' | 'HOLD'; confidence: number; source: string; reason: string } => item !== null);
+
+    if (validReviews.length === 0) {
+      return reject('Nenhum modelo externo respondeu com uma revisão válida dentro do tempo limite; entrada bloqueada.');
     }
+
+    const approvals = validReviews.filter(review =>
+      review.decision === 'approve' && review.direction === candidateDirection
+    );
+    const oppositeDirection: 'BUY' | 'SELL' = candidateDirection === 'BUY' ? 'SELL' : 'BUY';
+    const oppositeVotes = validReviews.filter(review => review.direction === oppositeDirection).length;
+    const approvalShare = approvals.length / validReviews.length;
+    const avgApprovalConfidence = approvals.length > 0
+      ? approvals.reduce((sum, review) => sum + review.confidence, 0) / approvals.length
+      : 0;
+    const confidence = Math.round(approvalShare * 60 + avgApprovalConfidence * 0.4);
+    const sources = validReviews.map(review => review.source);
+
+    if (approvals.length <= validReviews.length / 2) {
+      const direction = oppositeVotes > validReviews.length / 2 ? oppositeDirection : 'HOLD';
+      const reason = `Revisão IA não formou maioria favorável ao candidato (${approvals.length}/${validReviews.length} aprovações). ${validReviews.find(review => review.decision === 'reject')?.reason ?? ''}`.trim();
+      return reject(reason, direction, confidence, sources);
+    }
+
+    const reasons = approvals.map(review => review.reason).filter(Boolean).slice(0, 2).join(' | ');
+    return {
+      approved: true,
+      direction: candidateDirection,
+      confidence,
+      sources,
+      reason: `Consenso dos revisores externos aprovou o candidato ${candidateDirection} (${approvals.length}/${validReviews.length}); confiança informativa ${confidence}%. ${reasons}`.trim(),
+    };
   }
 
   async analyzeMarketData(tickData: DerivTickData[], symbol: string, userId?: string, externalContext?: ExternalMarketContext): Promise<AIConsensus> {
