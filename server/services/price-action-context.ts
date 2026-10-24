@@ -237,14 +237,6 @@ export function assessMt5RiskLimit(input: {
   if (!input.accountHeartbeatAt || now - input.accountHeartbeatAt > 90_000) reasons.push('Heartbeat real da conta MT5 ausente ou desatualizado');
   if (!status.lastEquity || !Number.isFinite(status.lastEquity) || status.lastEquity <= 0) reasons.push('Equity real da conta indisponível');
   if (!Number.isFinite(config.riskPercent) || config.riskPercent < 1 || config.riskPercent > 2) reasons.push('Risco por operação fora do intervalo permitido de 1% a 2%');
-  const unrealizedDrawdown = status.lastBalance && status.lastEquity
-    ? Math.max(0, status.lastBalance - status.lastEquity)
-    : Number.POSITIVE_INFINITY;
-  const effectiveDailyLoss = Number.isFinite(status.dailyLoss) ? status.dailyLoss + unrealizedDrawdown : Number.POSITIVE_INFINITY;
-  if (!Number.isFinite(config.maxDailyLoss) || config.maxDailyLoss <= 0 || effectiveDailyLoss >= config.maxDailyLoss) reasons.push('Limite diário de perda atingido, inválido ou incluindo drawdown aberto');
-  if (!Number.isFinite(config.maxDailyProfit) || config.maxDailyProfit <= 0
-    || !Number.isFinite(status.dailyProfit) || status.dailyProfit < 0 || status.dailyProfit >= config.maxDailyProfit) reasons.push('Meta/limite diário de lucro atingido, indisponível ou inválido');
-  if (status.circuitBreakerActive) reasons.push('Circuit breaker ativo');
   const recentTrades = Array.isArray(status.recentTrades) ? status.recentTrades : [];
   const brasiliaDate = (timestamp: number) => {
     const normalizedTimestamp = timestamp < 100_000_000_000 ? timestamp * 1000 : timestamp;
@@ -261,6 +253,25 @@ export function assessMt5RiskLimit(input: {
     Number.isFinite(trade.closeTime) && brasiliaDate(trade.closeTime) === today);
   const dailyLossCount = tradesClosedToday.filter(trade =>
     Number.isFinite(trade.profit) && trade.profit < 0).length;
+  // Derive all daily monetary limits from the same Brasilia-day trade ledger.
+  // This avoids mixing UTC/server-local counters with the strategy's operational day.
+  const realizedDailyLoss = tradesClosedToday.reduce((sum, trade) =>
+    sum + (Number.isFinite(trade.profit) ? Math.max(0, -trade.profit) : 0), 0);
+  const realizedDailyProfit = tradesClosedToday.reduce((sum, trade) =>
+    sum + (Number.isFinite(trade.profit) ? Math.max(0, trade.profit) : 0), 0);
+  const unrealizedDrawdown = Number.isFinite(status.lastBalance) && Number.isFinite(status.lastEquity)
+    ? Math.max(0, Number(status.lastBalance) - Number(status.lastEquity))
+    : Number.POSITIVE_INFINITY;
+  const effectiveDailyLoss = realizedDailyLoss + unrealizedDrawdown;
+  if (!Number.isFinite(config.maxDailyLoss) || config.maxDailyLoss <= 0 ||
+      !Number.isFinite(unrealizedDrawdown) || effectiveDailyLoss >= config.maxDailyLoss) {
+    reasons.push('Limite diário de perda atingido, inválido ou incluindo drawdown aberto');
+  }
+  if (!Number.isFinite(config.maxDailyProfit) || config.maxDailyProfit <= 0 ||
+      realizedDailyProfit >= config.maxDailyProfit) {
+    reasons.push('Meta/limite diário de lucro atingido ou inválido');
+  }
+  if (status.circuitBreakerActive) reasons.push('Circuit breaker ativo');
   if (dailyLossCount >= 3) {
     reasons.push('Limite de três operações perdedoras no dia atingido');
   }
