@@ -265,6 +265,101 @@ export class HuggingFaceAIService {
     }
   }
 
+  /**
+   * Reviews an already-approved deterministic Price Action candidate.
+   * This uses only valid, fresh external model responses. It does not apply the
+   * general-purpose consensus threshold or force a directional fallback.
+   */
+  async reviewPriceActionCandidate(
+    tickData: DerivTickData[],
+    symbol: string,
+    candidateDirection: 'BUY' | 'SELL',
+    timeframe: 'M5' | 'M1',
+  ): Promise<{ approved: boolean; direction: 'BUY' | 'SELL' | 'HOLD'; confidence: number; sources: string[]; reason: string }> {
+    const reject = (
+      reason: string,
+      direction: 'BUY' | 'SELL' | 'HOLD' = 'HOLD',
+      confidence = 0,
+      sources: string[] = [],
+    ) => ({ approved: false, direction, confidence, sources, reason });
+
+    if (!this.isConfigured) {
+      return reject('Revisão IA indisponível: provedor externo não está configurado.');
+    }
+    if (!Array.isArray(tickData) || tickData.length < 30 || tickData.some((tick, index) =>
+      !tick || !Number.isFinite(tick.quote) || tick.quote <= 0 ||
+      !Number.isFinite(tick.epoch) || (index > 0 && tick.epoch <= tickData[index - 1].epoch)
+    )) {
+      return reject('Revisão IA bloqueada: dados ausentes, insuficientes ou fora de ordem.');
+    }
+
+    const now = Date.now();
+    const latestTimestamp = tickData[tickData.length - 1].epoch * 1000;
+    const maxAgeMs = timeframe === 'M5' ? 15 * 60_000 : 3 * 60_000;
+    if (latestTimestamp > now + 30_000 || now - latestTimestamp > maxAgeMs) {
+      return reject('Revisão IA bloqueada: candles de entrada desatualizados ou com horário inválido.');
+    }
+
+    try {
+      const consensus = await this.analyzeMarketData(tickData, symbol);
+      const health = this.getExternalInferenceHealth(symbol);
+      if (!health || Date.now() - health.checkedAt > 60_000 || health.respondingModels < 1) {
+        return reject('Revisão IA sem resposta externa válida e recente; entrada bloqueada.');
+      }
+
+      const modelAnalyses = Array.isArray(consensus.analyses)
+        ? consensus.analyses.filter(analysis =>
+          (analysis.prediction === 'up' || analysis.prediction === 'down') &&
+          Number.isFinite(analysis.confidence) && analysis.confidence > 0 && analysis.confidence <= 100 &&
+          typeof analysis.modelName === 'string' && analysis.modelName.length > 0
+        )
+        : [];
+      if (modelAnalyses.length === 0) {
+        return reject('Nenhum modelo externo produziu uma previsão direcional válida.');
+      }
+
+      const upWeight = modelAnalyses
+        .filter(analysis => analysis.prediction === 'up')
+        .reduce((sum, analysis) => sum + analysis.confidence, 0);
+      const downWeight = modelAnalyses
+        .filter(analysis => analysis.prediction === 'down')
+        .reduce((sum, analysis) => sum + analysis.confidence, 0);
+      if (upWeight === downWeight) {
+        return reject('Consenso externo neutro: votos direcionais empatados.');
+      }
+
+      const direction: 'BUY' | 'SELL' = upWeight > downWeight ? 'BUY' : 'SELL';
+      const totalWeight = upWeight + downWeight;
+      const winnerWeight = Math.max(upWeight, downWeight);
+      const winningModels = modelAnalyses.filter(analysis =>
+        analysis.prediction === (direction === 'BUY' ? 'up' : 'down')
+      );
+      const winningConfidence = winningModels.reduce((sum, analysis) => sum + analysis.confidence, 0) / winningModels.length;
+      const agreement = totalWeight > 0 ? winnerWeight / totalWeight * 100 : 0;
+      const confidence = Math.round(agreement * 0.6 + winningConfidence * 0.4);
+      const sources = modelAnalyses.map(analysis => analysis.modelName);
+
+      if (direction !== candidateDirection) {
+        return reject(
+          `Consenso externo divergente: estratégia=${candidateDirection}, IA=${direction}; entrada bloqueada.`,
+          direction,
+          confidence,
+          sources,
+        );
+      }
+
+      return {
+        approved: true,
+        direction,
+        confidence,
+        sources,
+        reason: `Modelos externos concordaram com o candidato ${candidateDirection}; confiança informativa de ${confidence}% (sem limiar numérico adicional).`,
+      };
+    } catch (error) {
+      return reject(`Falha na revisão IA; entrada bloqueada (${error instanceof Error ? error.message : 'erro desconhecido'}).`);
+    }
+  }
+
   async analyzeMarketData(tickData: DerivTickData[], symbol: string, userId?: string, externalContext?: ExternalMarketContext): Promise<AIConsensus> {
     // SHORT-CIRCUIT: Se API não configurada, usar fallback imediatamente
     if (!this.isConfigured) {
