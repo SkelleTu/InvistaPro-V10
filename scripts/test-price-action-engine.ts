@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
-import { evaluatePriceActionSetup, validateAIEntryReview, validateAIStopAdjustment, type Candle } from '../server/services/price-action-engine';
+import { evaluatePriceActionSetup, isValidPriceActionCandles, validateAIEntryReview, validateAIStopAdjustment, type Candle } from '../server/services/price-action-engine';
 
 const candles = (count: number, start: number, step: number): Candle[] => Array.from({length:count},(_,i)=>{
  const open=start+i*step, close=open+step*0.7;
  return {time:i+1,open,close,high:Math.max(open,close)+Math.abs(step)*0.2,low:Math.min(open,close)-Math.abs(step)*0.2,volume:100+i};
 });
+const orderedCandles = candles(35, 100, 0.2);
+assert.equal(isValidPriceActionCandles(orderedCandles), true, 'Closed candles in chronological order are valid');
+assert.equal(isValidPriceActionCandles([...orderedCandles].reverse()), false, 'Out-of-order candles must be rejected');
 const missing = evaluatePriceActionSetup({});
 assert.equal(missing.action,'HOLD');
 assert.equal(missing.approved,false);
