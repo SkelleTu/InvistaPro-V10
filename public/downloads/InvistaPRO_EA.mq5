@@ -1095,8 +1095,8 @@ void FetchAndProcessSignal()
 
    ulong confirmedPositionTicket = 0;
    long confirmedPositionIdentifier = 0;
-   // CTrade's boolean result is not proof of execution. Every market entry must
-   // be matched to the exact broker deal and a real, protected position.
+   // CTrade's boolean result is not proof of execution. Match accepted orders to the
+   // exact broker deal and position; Price Action also requires valid broker-side protection.
    if (success)
    {
       uint fillCode = trade.ResultRetcode();
@@ -1149,10 +1149,11 @@ void FetchAndProcessSignal()
             double brokerSL = PositionGetDouble(POSITION_SL);
             double brokerTP = PositionGetDouble(POSITION_TP);
             double brokerEntry = PositionGetDouble(POSITION_PRICE_OPEN);
-            protectionValid = brokerSL > 0.0 && brokerTP > 0.0 && brokerEntry > 0.0 &&
-               (action == "BUY" ? (brokerSL < brokerEntry && brokerTP > brokerEntry)
-                                : (brokerSL > brokerEntry && brokerTP < brokerEntry));
-            if (!protectionValid)
+            protectionValid = brokerEntry > 0.0 && (!isPriceActionCrypto ||
+               (brokerSL > 0.0 && brokerTP > 0.0 &&
+                (action == "BUY" ? (brokerSL < brokerEntry && brokerTP > brokerEntry)
+                                 : (brokerSL > brokerEntry && brokerTP < brokerEntry))));
+            if (isPriceActionCrypto && !protectionValid)
             {
                Print("🚨 CRÍTICO: posição executada sem SL/TP protetivos válidos. Ticket=", candidateTicket,
                      ". Tentando fechamento de emergência.");
@@ -1196,9 +1197,12 @@ void FetchAndProcessSignal()
             " | Preço de execução: ", DoubleToString(trade.ResultPrice(), _Digits),
             " | SL: ", NormalizeDouble(stopLoss, _Digits),
             " | TP: ", NormalizeDouble(takeProfit, _Digits));
+      double confirmedFillPrice = trade.ResultPrice();
+      if (confirmedFillPrice <= 0.0)
+         confirmedFillPrice = (action == "BUY") ? SymbolInfoDouble(g_symbol, SYMBOL_ASK) : SymbolInfoDouble(g_symbol, SYMBOL_BID);
       ConfirmTradeOpen(signalId,
          (int)(confirmedPositionTicket > 0 ? confirmedPositionTicket : trade.ResultOrder()),
-         action, lotSize, trade.ResultPrice(), stopLoss, takeProfit);
+         action, lotSize, confirmedFillPrice, stopLoss, takeProfit);
    }
    else
       Print("❌ Falha definitiva ou execução não reconciliada: ", trade.ResultRetcode(), " / ", GetLastError());
