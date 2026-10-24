@@ -18,6 +18,7 @@ assert.equal(setup.checks.trend_alignment,false,'Insufficient confirmed swing po
 assert.equal(validateAIEntryReview(setup,{decision:'BUY',direction:'BUY',confidence:0.99}).approved,false,'AI cannot invent an entry');
 const reviewableSetup = {...setup, action:'BUY' as const, approved:true};
 assert.equal(validateAIEntryReview(reviewableSetup,{decision:'approve',direction:'BUY',confidence:35}).approved,true,'AI confidence is informational; no undocumented 70% floor');
+assert.equal(validateAIEntryReview(reviewableSetup,{decision:'approve',direction:'BUY',confidence:0}).approved,true,'No numeric minimum AI confidence may be imposed when the explicit review approves');
 assert.equal(validateAIEntryReview(reviewableSetup,{decision:'approve',direction:'SELL',confidence:95}).approved,false,'AI disagreement must reject the candidate');
 assert.equal(validateAIEntryReview(reviewableSetup,{decision:'approve',direction:'BUY',confidence:95,riskOverride:true}).approved,false,'AI cannot override deterministic risk policy');
 assert.equal(validateAIStopAdjustment('BUY',95,94,100),false,'BUY stop may not widen risk');
