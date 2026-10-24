@@ -311,7 +311,7 @@ export function evaluatePriceActionSetup(
   features.trendH1 = t1;
   features.trendM15 = m15Trend;
 
-  const directionalMode = t4 !== 'range' && t4 === t1;
+  const directionalMode = (t4 === 'bullish' || t4 === 'bearish') && t4 === t1;
   const rangeMode = t4 === 'range' && t1 === 'range';
   checks.trend_alignment = directionalMode || rangeMode;
   features.marketMode = rangeMode ? 'range' : directionalMode ? t4 : 'conflict';
