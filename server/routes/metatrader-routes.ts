@@ -104,7 +104,7 @@ router.post('/heartbeat', mt5EaTokenAccess, (req: Request, res: Response) => {
     }
     const validatedPositionTickets = Array.isArray(openPositionTickets) &&
       openPositionTickets.every((ticket: unknown) =>
-        (typeof ticket === 'string' && /^\\d+$/.test(ticket)) ||
+        (typeof ticket === 'string' && /^\d+$/.test(ticket)) ||
         (typeof ticket === 'number' && Number.isSafeInteger(ticket) && ticket >= 0)
       )
       ? openPositionTickets.map((ticket: string | number) => String(ticket))
