@@ -64,9 +64,15 @@ assert.equal(assessMt5RiskLimit({
   config, status: { ...status, dailyLoss: 100 }, observedAccountType: 'demo', accountHeartbeatAt: now - 1000, now,
 }).ok, false, 'Daily loss limit must block entries');
 
+const threeLossesToday = Array.from({length: 3}, (_, i) => ({
+  ticket: i + 1, signalId: String(i), symbol: 'BTCUSD', type: 'BUY' as const, lots: 0.01,
+  openPrice: 100, closePrice: 99, profit: -1, pips: -1,
+  openTime: now - i * 60_000, closeTime: now - i * 30_000, closeReason: 'SL' as const,
+}));
 assert.equal(assessMt5RiskLimit({
-  config, status: { ...status, dailyLosses: 3 }, observedAccountType: 'demo', accountHeartbeatAt: now - 1000, now,
-}).ok, false, 'Three losing operations in a day must stop new entries');
+  config, status: { ...status, recentTrades: threeLossesToday },
+  observedAccountType: 'demo', accountHeartbeatAt: now - 1000, now,
+}).ok, false, 'Three losing operations on the Brasilia calendar day must stop new entries');
 
 const recentTwoLosses = [
   { ticket: 1, signalId: 'a', symbol: 'BTCUSD', type: 'BUY' as const, lots: 0.01, openPrice: 100, closePrice: 99, profit: -1, pips: -1, openTime: now - 90 * 60_000, closeTime: now - 30 * 60_000, closeReason: 'SL' as const },
