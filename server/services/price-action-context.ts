@@ -144,20 +144,76 @@ export async function getHighImpactNewsStatus(now = Date.now()): Promise<NewsWin
   }
 }
 
+interface TradingSessionWindow {
+  timezone: string;
+  start: string;
+  end: string;
+}
+
+const DEFAULT_TRADING_SESSIONS: TradingSessionWindow[] = [
+  // Use market-local times for London/New York so daylight-saving transitions are automatic.
+  { timezone: 'Europe/London', start: '08:00', end: '11:00' },
+  { timezone: 'America/New_York', start: '09:30', end: '12:00' },
+  // The afternoon window is defined directly in Brasilia time.
+  { timezone: 'America/Sao_Paulo', start: '14:00', end: '17:00' },
+];
+
+function parseClockMinutes(value: unknown): number | null {
+  if (typeof value !== 'string' || !/^([01]\\d|2[0-3]):[0-5]\\d$/.test(value)) return null;
+  const [hour, minute] = value.split(':').map(Number);
+  return hour * 60 + minute;
+}
+
+function configuredTradingSessions(): TradingSessionWindow[] {
+  const raw = process.env.MT5_PRICE_ACTION_SESSIONS?.trim();
+  if (!raw) return DEFAULT_TRADING_SESSIONS;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed) || parsed.length === 0) return [];
+    const windows: TradingSessionWindow[] = [];
+    for (const item of parsed) {
+      if (!item || typeof item.timezone !== 'string') return [];
+      const start = parseClockMinutes(item.start);
+      const end = parseClockMinutes(item.end);
+      if (start === null || end === null || start >= end) return [];
+      // Validate IANA zone names before using configuration.
+      new Intl.DateTimeFormat('en-GB', { timeZone: item.timezone });
+      windows.push({ timezone: item.timezone, start: item.start, end: item.end });
+    }
+    return windows;
+  } catch {
+    // A malformed session configuration fails closed; it never silently widens trading hours.
+    return [];
+  }
+}
+
+function minutesInZone(now: Date, timezone: string): number | null {
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: timezone,
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(now);
+    const hour = Number(parts.find(part => part.type === 'hour')?.value);
+    const minute = Number(parts.find(part => part.type === 'minute')?.value);
+    if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+    return hour * 60 + minute;
+  } catch {
+    return null;
+  }
+}
+
 export function isAllowedBrasiliaTradingSession(now = new Date()): boolean {
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'America/Sao_Paulo',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(now);
-  const hour = Number(parts.find(part => part.type === 'hour')?.value);
-  const minute = Number(parts.find(part => part.type === 'minute')?.value);
-  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return false;
-  const time = hour * 60 + minute;
-  return (time >= 4 * 60 && time < 7 * 60)
-    || (time >= 9 * 60 + 30 && time < 12 * 60)
-    || (time >= 14 * 60 && time < 17 * 60);
+  const sessions = configuredTradingSessions();
+  if (!sessions.length) return false;
+  return sessions.some(session => {
+    const currentMinute = minutesInZone(now, session.timezone);
+    const start = parseClockMinutes(session.start);
+    const end = parseClockMinutes(session.end);
+    return currentMinute !== null && start !== null && end !== null &&
+      currentMinute >= start && currentMinute < end;
+  });
 }
 
 export function assessMt5RiskLimit(input: {
@@ -166,6 +222,7 @@ export function assessMt5RiskLimit(input: {
   observedAccountType: 'demo' | 'real' | 'contest' | null;
   accountHeartbeatAt: number;
   realTradingExplicitlyEnabled?: boolean;
+  maxDailyTrades?: number;
   now?: number;
 }): { ok: boolean; reasons: string[] } {
   const now = input.now ?? Date.now();
@@ -187,6 +244,39 @@ export function assessMt5RiskLimit(input: {
   if (!Number.isFinite(config.maxDailyProfit) || config.maxDailyProfit <= 0
     || !Number.isFinite(status.dailyProfit) || status.dailyProfit < 0 || status.dailyProfit >= config.maxDailyProfit) reasons.push('Meta/limite diário de lucro atingido, indisponível ou inválido');
   if (status.circuitBreakerActive) reasons.push('Circuit breaker ativo');
+  if (Number.isFinite(status.dailyLosses) && status.dailyLosses >= 3) {
+    reasons.push('Limite de três operações perdedoras no dia atingido');
+  }
+
+  // Stop for one hour after two consecutive losses, based on the recorded closing time.
+  const consecutiveLosses = Number(status.consecutiveLosses ?? 0);
+  if (consecutiveLosses >= 2) {
+    const recentTrades = Array.isArray(status.recentTrades) ? status.recentTrades : [];
+    const lastLoss = recentTrades
+      .filter(trade => Number.isFinite(trade.profit) && trade.profit < 0 && Number.isFinite(trade.closeTime))
+      .sort((a, b) => b.closeTime - a.closeTime)[0];
+    const lossClosedAt = lastLoss
+      ? (lastLoss.closeTime < 100_000_000_000 ? lastLoss.closeTime * 1000 : lastLoss.closeTime)
+      : 0;
+    if (!lossClosedAt || now - lossClosedAt < 60 * 60_000) {
+      reasons.push('Duas perdas consecutivas: a pausa obrigatória de uma hora não foi comprovadamente encerrada');
+    }
+  }
+
+  // The strategy permits a configured cap of 3, 4 or 5 operations per Brasilia day.
+  const requestedDailyCap = input.maxDailyTrades ?? 5;
+  const dailyCap = [3, 4, 5].includes(requestedDailyCap) ? requestedDailyCap : 5;
+  const brasiliaDate = (timestamp: number) => new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date(timestamp));
+  const today = brasiliaDate(now);
+  const recentTradesToday = (Array.isArray(status.recentTrades) ? status.recentTrades : [])
+    .filter(trade => Number.isFinite(trade.openTime) &&
+      brasiliaDate(trade.openTime < 100_000_000_000 ? trade.openTime * 1000 : trade.openTime) === today).length;
+  const livePositions = Number.isFinite(status.openPositions) && status.openPositions > 0 ? status.openPositions : 0;
+  if (recentTradesToday + livePositions >= dailyCap) {
+    reasons.push('Limite diário configurado de ' + dailyCap + ' operações atingido');
+  }
   if (!Number.isFinite(config.maxOpenPositions) || config.maxOpenPositions < 1
     || !Number.isFinite(status.openPositions) || status.openPositions < 0
     || status.openPositions >= config.maxOpenPositions) reasons.push('Limite de posições abertas atingido, indisponível ou inválido');
