@@ -62,7 +62,27 @@ assert.equal(assessMt5RiskLimit({
 }).ok, false, 'Stale heartbeat must fail closed');
 assert.equal(assessMt5RiskLimit({
   config, status: { ...status, dailyLoss: 100 }, observedAccountType: 'demo', accountHeartbeatAt: now - 1000, now,
-}).ok, false, 'Daily loss limit must block entries');
+}).ok, true, 'The daily cash-loss gate uses the strategy-day trade ledger, not a stale server-local daily counter');
+
+const oneLargeLossToday = [{
+  ticket: 21, signalId: 'loss-limit', symbol: 'BTCUSD', type: 'BUY' as const, lots: 0.01,
+  openPrice: 100, closePrice: 98, profit: -101, pips: -2,
+  openTime: now - 60 * 60_000, closeTime: now - 30 * 60_000, closeReason: 'SL' as const,
+}];
+assert.equal(assessMt5RiskLimit({
+  config, status: { ...status, recentTrades: oneLargeLossToday },
+  observedAccountType: 'demo', accountHeartbeatAt: now - 1000, now,
+}).ok, false, 'The independent daily money-loss ceiling must block even after one large loss');
+
+const oneLargeWinToday = [{
+  ticket: 22, signalId: 'profit-target', symbol: 'BTCUSD', type: 'BUY' as const, lots: 0.01,
+  openPrice: 100, closePrice: 110, profit: 600, pips: 10,
+  openTime: now - 60 * 60_000, closeTime: now - 30 * 60_000, closeReason: 'TP' as const,
+}];
+assert.equal(assessMt5RiskLimit({
+  config, status: { ...status, recentTrades: oneLargeWinToday, circuitBreakerActive: true },
+  observedAccountType: 'demo', accountHeartbeatAt: now - 1000, now,
+}).ok, true, 'Undocumented profit-target and legacy circuit-breaker gates must not veto a strategy-valid entry');
 
 const threeLossesToday = Array.from({length: 3}, (_, i) => ({
   ticket: i + 1, signalId: String(i), symbol: 'BTCUSD', type: 'BUY' as const, lots: 0.01,
