@@ -202,10 +202,11 @@ export function evaluatePriceActionSetup(
     checks[`data_${tf}`] = validCandles(frames[tf]);
     if (!checks[`data_${tf}`]) reasons.push(`Dados insuficientes, desordenados ou inválidos em ${tf}`);
   }
-  const entryFrame: Candle[] | undefined = validCandles(frames.M5)
-    ? frames.M5
-    : validCandles(frames.M1) ? frames.M1 : undefined;
-  checks.entry_data = entryFrame !== undefined;
+  const validM5 = validCandles(frames.M5) ? frames.M5 : undefined;
+  const validM1 = validCandles(frames.M1) ? frames.M1 : undefined;
+  const entryOptions: Candle[][] = [validM5, validM1].filter((frame): frame is Candle[] => frame !== undefined);
+  let entryCandles: Candle[] | undefined = entryOptions[0];
+  checks.entry_data = entryOptions.length > 0;
   if (!checks.entry_data) reasons.push('Dados insuficientes, desordenados ou inválidos em M5/M1');
   if (reasons.length) return { action: 'HOLD', approved: false, reasons, checks, features };
 
@@ -229,29 +230,52 @@ export function evaluatePriceActionSetup(
     : directionalMode && (m15Trend === 'range' || m15Trend === t4);
   if (!checks.m15_alignment) reasons.push('Estrutura de 15M conflita com a direção principal ou não confirma o range');
 
-  const entrySide = trigger(entryCandles);
-  const entry = entryCandles[entryCandles.length - 1].close;
+  let entrySide = trigger(entryCandles!);
+  let entry = entryCandles![entryCandles!.length - 1].close;
   let side: TradeSide | null = null;
+  const triggerOptions = entryOptions.map(candles => ({
+    candles,
+    side: trigger(candles),
+    entry: candles[candles.length - 1].close,
+  }));
+
   if (directionalMode) {
     const expected: TradeSide = t4 === 'bullish' ? 'BUY' : 'SELL';
-    if (entrySide === expected && checks.m15_alignment) side = entrySide;
-  } else if (rangeMode && entrySide) {
+    const chosen = triggerOptions.find(option => option.side === expected);
+    if (chosen && checks.m15_alignment) {
+      entryCandles = chosen.candles;
+      entrySide = chosen.side;
+      entry = chosen.entry;
+      side = expected;
+    }
+  } else if (rangeMode) {
     // Range trading is only allowed at an extreme, never in the middle of the interval.
     const rangeSample = m15.slice(-40, -1);
     const rangeLow = Math.min(...rangeSample.map(c => c.low));
     const rangeHigh = Math.max(...rangeSample.map(c => c.high));
-    const edgeTolerance = Math.max(averageRange(m15) * 0.75, Math.abs(entry) * 0.0005);
+    const baseTolerance = averageRange(m15) * 0.75;
+    const chosen = triggerOptions.find(option => {
+      if (!option.side) return false;
+      const edgeTolerance = Math.max(baseTolerance, Math.abs(option.entry) * 0.0005);
+      return option.side === 'BUY'
+        ? option.entry <= rangeLow + edgeTolerance
+        : option.entry >= rangeHigh - edgeTolerance;
+    });
     features.rangeLow = rangeLow;
     features.rangeHigh = rangeHigh;
-    features.rangeEdgeTolerance = edgeTolerance;
-    if (entrySide === 'BUY' && entry <= rangeLow + edgeTolerance) side = 'BUY';
-    if (entrySide === 'SELL' && entry >= rangeHigh - edgeTolerance) side = 'SELL';
+    if (chosen) {
+      entryCandles = chosen.candles;
+      entrySide = chosen.side;
+      entry = chosen.entry;
+      side = chosen.side;
+      features.rangeEdgeTolerance = Math.max(baseTolerance, Math.abs(entry) * 0.0005);
+    }
   }
 
   checks.entry_trigger = side !== null;
   features.trigger = entrySide;
   if (!side) reasons.push(rangeMode
-    ? 'Sem gatilho confirmado em um extremo válido do range'
+    ? 'Sem gatilho confirmado em um extremo válido do range em M5 ou M1'
     : 'Sem gatilho M5/M1 confirmado na direção alinhada de H4/H1');
 
   if (side) {
