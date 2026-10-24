@@ -1041,6 +1041,7 @@ void FetchAndProcessSignal()
    Print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
    g_pendingSignalId = signalId;
+   datetime tradeRequestTime = TimeCurrent();
    bool success = false;
 
    if (action == "BUY")
@@ -1113,12 +1114,18 @@ void FetchAndProcessSignal()
       {
          bool positionFound = false;
          bool protectionValid = false;
+         long executedPositionIdentifier = 0;
+         ulong executedDealTicket = trade.ResultDeal();
+         if (executedDealTicket > 0 && HistoryDealSelect(executedDealTicket))
+            executedPositionIdentifier = HistoryDealGetInteger(executedDealTicket, DEAL_POSITION_ID);
          for (int positionIndex = PositionsTotal() - 1; positionIndex >= 0; positionIndex--)
          {
             ulong candidateTicket = PositionGetTicket(positionIndex);
             if (candidateTicket == 0 || !PositionSelectByTicket(candidateTicket)) continue;
             if (PositionGetString(POSITION_SYMBOL) != g_symbol) continue;
             if ((long)PositionGetInteger(POSITION_MAGIC) != MagicNumber) continue;
+            if (executedPositionIdentifier <= 0 || PositionGetInteger(POSITION_IDENTIFIER) != executedPositionIdentifier) continue;
+            if ((datetime)PositionGetInteger(POSITION_TIME) < tradeRequestTime) continue;
             long brokerType = PositionGetInteger(POSITION_TYPE);
             if ((action == "BUY" && brokerType != POSITION_TYPE_BUY) ||
                 (action == "SELL" && brokerType != POSITION_TYPE_SELL)) continue;
@@ -1176,7 +1183,7 @@ void FetchAndProcessSignal()
             " | TP: ", NormalizeDouble(takeProfit, _Digits));
       ConfirmTradeOpen(signalId,
          (int)(confirmedPositionTicket > 0 ? confirmedPositionTicket : trade.ResultOrder()),
-         action, lotSize, stopLoss, takeProfit);
+         action, lotSize, trade.ResultPrice(), stopLoss, takeProfit);
    }
    else
       Print("❌ Falha definitiva ou execução não reconciliada: ", trade.ResultRetcode(), " / ", GetLastError());
@@ -1499,11 +1506,11 @@ bool SendHeartbeat()
 //+------------------------------------------------------------------+
 //| Confirma abertura de trade                                        |
 //+------------------------------------------------------------------+
-void ConfirmTradeOpen(string signalId, int ticket, string type, double lots, double sl, double tp)
+void ConfirmTradeOpen(string signalId, int ticket, string type, double lots, double fillPrice, double sl, double tp)
 {
    string url     = g_serverUrl + "/api/metatrader/trade/open";
    string headers = "Content-Type: application/json\r\n";
-   double openPrice = (type == "BUY") ? SymbolInfoDouble(g_symbol, SYMBOL_ASK) : SymbolInfoDouble(g_symbol, SYMBOL_BID);
+   double openPrice = fillPrice;
    string body = "{";
    body += "\"ticket\":"       + IntegerToString(ticket)          + ",";
    body += "\"symbol\":\""     + g_symbol                        + "\",";
