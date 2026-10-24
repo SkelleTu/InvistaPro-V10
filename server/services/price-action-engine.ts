@@ -118,8 +118,8 @@ function averageRange(c: Candle[]): number {
   return average(c.slice(-21, -1).map(x => x.high - x.low));
 }
 
-/** Group repeated confirmed pivots into auditable support/resistance zones. */
-function repeatedStructureZone(c: Candle[], kind: PivotKind, price: number, timeframe: Timeframe): PriceZone | null {
+/** Group repeated confirmed pivots into auditable support/resistance zones, including invalidated history. */
+function repeatedStructureZones(c: Candle[], kind: PivotKind, price: number, timeframe: Timeframe): PriceZone[] {
   const tolerance = Math.max(averageRange(c) * 0.25, Math.abs(price) * 0.00005);
   const pivotPoints = pivots(c.slice(0, -1), kind);
   const clusters: Pivot[][] = [];
@@ -127,28 +127,28 @@ function repeatedStructureZone(c: Candle[], kind: PivotKind, price: number, time
     const cluster = clusters.find(items => Math.abs(average(items.map(item => item.price)) - point.price) <= tolerance);
     if (cluster) cluster.push(point); else clusters.push([point]);
   }
-  const valid: PriceZone[] = clusters.filter(items => items.length >= 2).map(items => {
+  const mapped: PriceZone[] = clusters.filter(items => items.length >= 2).map(items => {
     const low = Math.min(...items.map(item => item.price)) - tolerance;
     const high = Math.max(...items.map(item => item.price)) + tolerance;
     const originIndex = Math.min(...items.map(item => item.index));
     const latestTouchIndex = Math.max(...items.map(item => item.index));
     const invalidated = c.slice(latestTouchIndex + 1).some(candle =>
       kind === 'low' ? candle.close < low : candle.close > high);
+    const laterReactions = c.slice(latestTouchIndex + 1).filter(candle =>
+      candle.low <= high && candle.high >= low).length;
     return {
       type: kind === 'low' ? 'support' : 'resistance',
       low, high, timeframe,
       originIndex,
       originTime: c[originIndex].time,
       identifiedAt: c[latestTouchIndex].time,
-      reactions: items.length,
+      reactions: items.length + laterReactions,
       invalidationPrice: kind === 'low' ? low : high,
-      state: invalidated ? 'invalidated' : 'valid',
+      state: invalidated ? 'invalidated' : laterReactions > 0 ? 'mitigated' : 'valid',
     };
   });
-  const near = valid.filter(zone => zone.state === 'valid' &&
-    price >= zone.low - tolerance && price <= zone.high + tolerance);
-  return near.sort((a, b) =>
-    Math.abs(price - (a.low + a.high) / 2) - Math.abs(price - (b.low + b.high) / 2))[0] ?? null;
+  return mapped.filter(zone => price >= zone.low - tolerance && price <= zone.high + tolerance)
+    .sort((a, b) => Math.abs(price - (a.low + a.high) / 2) - Math.abs(price - (b.low + b.high) / 2));
 }
 
 /** Detect a three-candle FVG with a meaningful impulse; reject it if later closed candles invalidate it. */
@@ -381,12 +381,12 @@ export function evaluatePriceActionSetup(
       { candles: selectedEntryCandles, timeframe: selectedEntryTimeframe },
     ];
     const supportResistanceZones = srKinds
-      .map(frame => repeatedStructureZone(frame.candles, side === 'BUY' ? 'low' : 'high', entry, frame.timeframe))
-      .filter((zone): zone is PriceZone => zone !== null);
-    const supportResistance = supportResistanceZones.find(zone => zone.timeframe === 'M15') ??
-      supportResistanceZones.find(zone => zone.timeframe === 'H1') ??
-      supportResistanceZones.find(zone => zone.timeframe === 'H4') ??
-      supportResistanceZones[0] ?? null;
+      .flatMap(frame => repeatedStructureZones(frame.candles, side === 'BUY' ? 'low' : 'high', entry, frame.timeframe));
+    const validSupportResistanceZones = supportResistanceZones.filter(zone => zone.state !== 'invalidated');
+    const supportResistance = validSupportResistanceZones.find(zone => zone.timeframe === 'M15') ??
+      validSupportResistanceZones.find(zone => zone.timeframe === 'H1') ??
+      validSupportResistanceZones.find(zone => zone.timeframe === 'H4') ??
+      validSupportResistanceZones[0] ?? null;
 
     const fvgZones = srKinds
       .map(frame => fairValueGapZone(frame.candles, side, entry, frame.timeframe))
@@ -412,7 +412,7 @@ export function evaluatePriceActionSetup(
     const bos = srKinds.some(frame => breakOfStructure(frame.candles, side));
     const choch = srKinds.some(frame => changeOfCharacter(frame.candles, side));
     const rangeEdgeQualified = rangeMode && side !== null;
-    const zoneNear = rangeEdgeQualified || supportResistanceZones.length > 0 ||
+    const zoneNear = rangeEdgeQualified || validSupportResistanceZones.length > 0 ||
       fvgZones.length > 0 || obZones.length > 0 || sweep;
 
     zones.push(...supportResistanceZones, ...fvgZones, ...obZones);
