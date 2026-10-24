@@ -56,7 +56,7 @@ function validClosedCandles(v: unknown, timeframe: Timeframe, now = Date.now()):
   return expectedCloseMs <= now && now - expectedCloseMs <= TIMEFRAME_SECONDS[timeframe] * 1000;
 }
 
-type MarketTrend = 'bullish' | 'bearish' | 'range';
+type MarketTrend = 'bullish' | 'bearish' | 'range' | 'unknown';
 type PivotKind = 'high' | 'low';
 interface Pivot { index: number; price: number }
 interface PriceZone { low: number; high: number; touches: number }
@@ -77,17 +77,23 @@ function pivots(c: Candle[], kind: PivotKind, wing = 2): Pivot[] {
   return result;
 }
 
-/** Trend is classified from confirmed HH/HL or LH/LL structure, not candle-by-candle monotonicity. */
+/** Trend requires confirmed HH/HL or LH/LL. "Unknown" is not silently treated as a range. */
 function trend(c: Candle[]): MarketTrend {
   const sample = c.slice(-60);
   const highs = pivots(sample, 'high');
   const lows = pivots(sample, 'low');
-  if (highs.length < 2 || lows.length < 2) return 'range';
+  if (highs.length < 2 || lows.length < 2) return 'unknown';
   const [oldHigh, lastHigh] = highs.slice(-2);
   const [oldLow, lastLow] = lows.slice(-2);
   if (lastHigh.price > oldHigh.price && lastLow.price > oldLow.price) return 'bullish';
   if (lastHigh.price < oldHigh.price && lastLow.price < oldLow.price) return 'bearish';
-  return 'range';
+
+  // A range requires repeated highs AND lows within a volatility-scaled tolerance.
+  const tolerance = Math.max(averageRange(sample) * 0.75, Math.abs(sample[sample.length - 1].close) * 0.0005);
+  const stableHighs = Math.abs(lastHigh.price - oldHigh.price) <= tolerance;
+  const stableLows = Math.abs(lastLow.price - oldLow.price) <= tolerance;
+  if (stableHighs && stableLows) return 'range';
+  return 'unknown';
 }
 
 function average(values: number[]): number {
@@ -255,7 +261,7 @@ export function evaluatePriceActionSetup(
   if (!checks.trend_alignment) reasons.push('Tendências H4/H1 em conflito; operação bloqueada');
 
   checks.m15_alignment = rangeMode
-    ? m15Trend === 'range'
+    ? true
     : directionalMode && (m15Trend === 'range' || m15Trend === t4);
   if (!checks.m15_alignment) reasons.push('Estrutura de 15M conflita com a direção principal ou não confirma o range');
 
@@ -340,10 +346,9 @@ export function evaluatePriceActionSetup(
 
     checks.volume = volumeOk;
     // A trend alone is not a confirmation pattern; the zone and trigger are independently mandatory.
-    checks.structure_confirmation = fvgZone !== null || sweep || bos || choch || ob !== null;
+    features.structuralEvidence = fvgZone !== null || sweep || bos || choch || ob !== null;
     checks.valid_zone = zoneNear;
     if (!volumeOk) reasons.push('Volume do gatilho não superou a média das 20 velas fechadas anteriores');
-    if (!checks.structure_confirmation) reasons.push('Sem FVG válido, varredura de liquidez, BOS, CHoCH ou Order Block');
     if (!zoneNear) reasons.push('Preço fora de zona válida de suporte/resistência, FVG, Order Block ou liquidez');
 
     const recent = selectedEntryCandles.slice(-21, -1);
@@ -400,7 +405,6 @@ export function evaluatePriceActionSetup(
   } else {
     checks.volume = false;
     checks.structural_stop = false;
-    checks.structure_confirmation = false;
     checks.valid_zone = false;
     checks.risk_reward = false;
     checks.stop_direction = false;
