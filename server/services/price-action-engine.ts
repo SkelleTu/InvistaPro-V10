@@ -178,7 +178,7 @@ function changeOfCharacter(c: Candle[], side: TradeSide): boolean {
   return side === 'BUY' ? prior === 'bearish' && recent === 'bullish'
     : prior === 'bullish' && recent === 'bearish';
 }
-function orderBlockZone(c: Candle[], side: TradeSide): { low: number; high: number } | null {
+function orderBlockZone(c: Candle[], side: TradeSide): { low: number; high: number; originIndex: number; originTime: number } | null {
   if (c.length < 15) return null;
   const sample = c.slice(-21, -1);
   const avgRange = average(sample.map(x => x.high - x.low));
@@ -195,7 +195,19 @@ function orderBlockZone(c: Candle[], side: TradeSide): { low: number; high: numb
     const low = Math.min(candidate.open, candidate.close);
     const high = Math.max(candidate.open, candidate.close);
     const tolerance = avgRange * 0.25;
-    if (last.close >= low - tolerance && last.close <= high + tolerance) return { low, high };
+
+    // An order block is invalid after a closed candle settles beyond its distal boundary.
+    let invalidated = false;
+    for (let k = i + 1; k < c.length; k++) {
+      if ((side === 'BUY' && c[k].close < low) || (side === 'SELL' && c[k].close > high)) {
+        invalidated = true;
+        break;
+      }
+    }
+    if (invalidated) continue;
+    if (last.close >= low - tolerance && last.close <= high + tolerance) {
+      return { low, high, originIndex: i, originTime: candidate.time };
+    }
   }
   return null;
 }
@@ -387,6 +399,7 @@ export function evaluatePriceActionSetup(
     if (!checks.costs) reasons.push('Custos totais estimados ausentes ou inválidos');
   } else {
     checks.volume = false;
+    checks.structural_stop = false;
     checks.structure_confirmation = false;
     checks.valid_zone = false;
     checks.risk_reward = false;
