@@ -1,0 +1,765 @@
+DOCUMENTO TÉCNICO: ESTRATÉGIA DE PRICE ACTION PARA TRADING AUTOMATIZADO COM IA
+
+Objetivo do sistema
+
+Quero desenvolver um sistema capaz de analisar o mercado de criptomoedas, identificar oportunidades de compra e venda, calcular os riscos e executar operações automaticamente, seguindo regras objetivas e verificáveis.
+
+Ativos permitidos na Binance:
+
+- BTC/USDT: Bitcoin.
+- ETH/USDT: Ethereum.
+- SOL/USDT: Solana.
+
+Estilo operacional: Day trade baseado em Price Action, estrutura de mercado, liquidez, zonas de oferta e demanda, Order Blocks, Fair Value Gaps (FVG), volume e confirmação de entrada.
+
+A IA não deve operar apenas porque identificou um padrão gráfico. Ela deve combinar todos os critérios obrigatórios, calcular se a operação compensa financeiramente e permanecer fora do mercado quando não houver uma oportunidade válida.
+
+---
+
+1. COMO O SISTEMA DEVE ANALISAR O MERCADO
+
+A estratégia utiliza quatro timeframes, cada um com uma função específica.
+
+Timeframe| Função
+4H| Identificar a tendência principal e as grandes zonas de interesse.
+1H| Confirmar a tendência e refinar suportes, resistências e zonas relevantes.
+15M| Identificar a estrutura intermediária e verificar se o preço chegou a uma região operacional.
+5M ou 1M| Procurar a confirmação exata para executar a entrada.
+
+A análise deve acontecer de cima para baixo, nunca começando por uma vela isolada no gráfico de 1 minuto.
+
+Exemplo visual: tendência de alta
+
+Imagine que o gráfico de 4 horas apresenta esta estrutura:
+
+PREÇO
+  ↑
+  │                          HH3
+  │                         /   \
+  │               HH2      /     \
+  │              /   \    /       \
+  │      HH1    /     \  /         \
+  │     /   \  /       HL2           ...
+  │    /     HL1
+  │___/_______________________________→ TEMPO
+
+HH significa Higher High, ou topo mais alto.
+
+HL significa Higher Low, ou fundo mais alto.
+
+Quando o mercado forma sucessivamente topos e fundos ascendentes, existe uma estrutura compatível com tendência de alta.
+
+Nesse cenário, a IA deve priorizar compras, procurando entradas em retrações até zonas relevantes.
+
+Exemplo visual: tendência de baixa
+
+PREÇO
+  ↑
+  │
+  │  LH1
+  │     \ 
+  │      \      LH2
+  │       \    /   \
+  │        LL1      \      LH3
+  │                  \    /   \
+  │                   LL2      LL3
+  │_______________________________→ TEMPO
+
+LH significa Lower High, ou topo mais baixo.
+
+LL significa Lower Low, ou fundo mais baixo.
+
+Quando os topos e os fundos descendem, o sistema deve priorizar vendas.
+
+Regra principal: a direção operacional deve respeitar a estrutura de 4H e 1H. Se houver conflito entre esses gráficos, a IA deve aplicar um critério de alinhamento previamente definido ou não operar.
+
+Quando o mercado estiver lateral, a IA deve identificar os limites superior e inferior do intervalo e procurar oportunidades próximas dos extremos, sempre exigindo confirmação. Não deve vender automaticamente em qualquer resistência nem comprar automaticamente em qualquer suporte.
+
+---
+
+2. IDENTIFICAÇÃO DAS ZONAS IMPORTANTES
+
+A IA deve mapear as regiões em que o preço tem maior probabilidade de reagir, sem assumir que uma reação anterior garante uma reação futura.
+
+2.1. Suporte e resistência
+
+Suporte é uma região em que a pressão compradora já conseguiu interromper ou reverter quedas.
+
+Resistência é uma região em que a pressão vendedora já conseguiu interromper ou reverter altas.
+
+Exemplo:
+
+PREÇO
+  ↑
+  │     RESISTÊNCIA
+  │  ───────────────────
+  │       ↗       ↖
+  │      /         \
+  │     /           \
+  │    /             \
+  │  ───────────────────
+  │       SUPORTE
+  │
+  └────────────────────────→ TEMPO
+
+A IA deve identificar os topos e fundos anteriores, agrupar níveis próximos em zonas e verificar quantas vezes o preço reagiu nessas regiões.
+
+Os níveis não devem ser tratados necessariamente como linhas de preço exatas. Uma zona pode ter uma largura determinada pela volatilidade do ativo.
+
+2.2. Liquidez e falsas quebras
+
+A liquidez costuma se concentrar em regiões onde muitos participantes posicionam ordens de stop, como acima de topos conhecidos e abaixo de fundos conhecidos.
+
+Exemplo de uma possível varredura de liquidez acima de uma resistência:
+
+PREÇO
+  ↑
+  │                   X  ← Rompimento momentâneo
+  │                   │
+  │  RESISTÊNCIA ─────┼────────
+  │          /\       │
+  │         /  \______/
+  │        /
+  │_______/______________________→ TEMPO
+
+Se o preço ultrapassar o topo anterior, mas retornar rapidamente para baixo da resistência, poderá haver uma falsa quebra, também chamada de liquidity sweep.
+
+Entretanto, nem todo rompimento seguido de retorno é uma armadilha. A IA precisa verificar o fechamento das velas, a estrutura posterior e a reação do preço.
+
+Uma possível venda após essa situação exige confirmação de baixa. A simples ocorrência da varredura não autoriza uma entrada.
+
+2.3. Fair Value Gap (FVG)
+
+Um FVG é uma região de desequilíbrio identificada em uma sequência de três velas.
+
+Em um FVG de alta, a máxima da primeira vela fica abaixo da mínima da terceira, deixando uma faixa de preço entre elas.
+
+FVG DE ALTA
+
+        ┌────────────┐
+        │  Vela 3    │
+        │            │
+        └────────────┘  ← Mínima da vela 3
+              ↑
+              │ FVG
+              ↓
+        ┌────────────┐  ← Máxima da vela 1
+        │  Vela 1    │
+        └────────────┘
+
+       A vela 2 representa
+       o movimento impulsivo.
+
+A IA deve registrar os limites da região e verificar se o preço retorna a ela.
+
+O FVG não significa que o preço necessariamente voltará para preenchê-lo, nem que seu preenchimento provocará uma reversão.
+
+2.4. Order Block
+
+Um Order Block é uma zona definida por uma metodologia operacional específica, normalmente associada à última vela contrária antes de um deslocamento expressivo do preço.
+
+Exemplo de um possível Order Block de alta:
+
+PREÇO
+  ↑
+  │                       /\
+  │                      /  \
+  │                     /    \
+  │                    /
+  │       IMPULSO     /
+  │                  /
+  │    ┌────────┐   /
+  │    │ OB     │──/
+  │    └────────┘
+  │         ↑
+  │   Possível zona
+  │   de demanda
+  └──────────────────────────→ TEMPO
+
+O sistema precisa definir matematicamente o que caracteriza um deslocamento forte, quais velas delimitam o bloco e quando a zona deixa de ser válida.
+
+Não basta identificar qualquer vela de cor contrária e classificá-la como Order Block.
+
+Importante: suporte, resistência, FVG e Order Block podem se sobrepor. Uma região com múltiplos fatores favoráveis pode receber uma pontuação maior, mas isso não substitui a confirmação da entrada.
+
+---
+
+3. ANÁLISE DO TIMEFRAME DE 15 MINUTOS
+
+Depois de analisar 4H e 1H, a IA deve passar para o gráfico de 15 minutos.
+
+Nesse momento, ela precisa responder:
+
+1. A estrutura de 15M está alinhada com a tendência principal?
+2. O preço está chegando a uma zona previamente identificada?
+3. Houve rompimento de estrutura (BOS)?
+4. Houve mudança de caráter (CHoCH)?
+5. Existe espaço suficiente até a próxima região de interesse?
+6. O preço está em uma zona operacional ou apenas no meio do movimento?
+
+BOS: Break of Structure
+
+É o rompimento de um ponto estrutural relevante.
+
+Em uma tendência de alta, a quebra de um topo anterior pode confirmar continuidade, desde que a estrutura e os critérios de rompimento sejam respeitados.
+
+CHoCH: Change of Character
+
+É uma possível mudança no comportamento da estrutura.
+
+Por exemplo, depois de formar topos e fundos ascendentes, o preço rompe um fundo estrutural relevante. Isso pode sinalizar uma mudança de comportamento, mas não garante que uma tendência de baixa tenha começado.
+
+A IA deve diferenciar uma mudança inicial de caráter de uma reversão efetivamente confirmada.
+
+Regra de bloqueio: se o preço estiver no meio de uma faixa, longe de zonas relevantes e sem uma relação risco/retorno adequada, o sistema não deve operar.
+
+---
+
+4. CONFIRMAÇÃO DE ENTRADA NO GRÁFICO DE 5M OU 1M
+
+Somente depois de identificar contexto, tendência e zona de interesse a IA deve procurar o gatilho de entrada.
+
+Ela deve reconhecer:
+
+- Pin bar: vela com pavio expressivo em relação ao corpo.
+- Engolfo: vela cujo corpo envolve o corpo da vela anterior, conforme uma definição matemática preestabelecida.
+- Inside bar: vela cuja máxima e mínima ficam dentro da faixa da vela anterior.
+- Rejeição: movimento que testa uma região e retorna, demonstrando incapacidade de permanecer além dela.
+- Rompimento microestrutural: quebra de um topo ou fundo relevante no timeframe de entrada.
+- Volume: atividade negociada em relação a uma referência histórica.
+
+Exemplo completo de uma compra
+
+Considere que:
+
+- O 4H está em tendência de alta.
+- O 1H confirma a tendência.
+- O preço retorna a um suporte ou Order Block válido.
+- O gráfico de 15M mostra que o preço chegou à região.
+- No 5M, aparece uma vela de rejeição de alta.
+- O volume da vela supera a média definida pelo sistema.
+- O preço rompe a máxima da vela de confirmação.
+
+A sequência visual seria:
+
+PREÇO
+  ↑
+  │                         ⑤ ENTRADA
+  │                         ↑
+  │                       ┌─┴─┐
+  │                       │   │
+  │              ┌────┐   └───┘
+  │              │    │
+  │              └─┬──┘
+  │                │
+  │                │ ④ Vela de rejeição
+  │                │
+  │  ─────────────────────────────
+  │       ZONA DE SUPORTE
+  │
+  └────────────────────────────────→ TEMPO
+
+A numeração representa a sequência lógica, não a garantia de que todo padrão terá esse formato.
+
+A entrada só deve ser executada depois que o preço romper o nível de gatilho. Se a confirmação não acontecer, não há operação.
+
+Exemplo completo de uma venda
+
+Considere que:
+
+- O 4H está em tendência de baixa.
+- O 1H confirma a tendência.
+- O preço retorna a uma resistência ou Order Block de baixa.
+- O gráfico de 15M confirma que a região é relevante.
+- No 5M, surge uma vela de rejeição de baixa.
+- O volume supera a referência definida.
+- O preço rompe a mínima da vela de confirmação.
+
+PREÇO
+  ↑
+  │  ─────────────────────────────
+  │       ZONA DE RESISTÊNCIA
+  │
+  │                │
+  │                │ ④ Vela de rejeição
+  │              ┌─┴──┐
+  │              │    │
+  │              └────┘
+  │                       ┌────┐
+  │                       │    │
+  │                       └─┬──┘
+  │                         ↓
+  │                    ⑤ ENTRADA
+  └────────────────────────────────→ TEMPO
+
+Novamente, a venda não deve ser executada apenas porque apareceu uma vela de baixa. A quebra do gatilho precisa ocorrer dentro do contexto previamente aprovado.
+
+---
+
+5. CHECKLIST OBRIGATÓRIO ANTES DE CADA OPERAÇÃO
+
+A IA deve validar todos os critérios abaixo antes de enviar uma ordem.
+
+Critério| Condição exigida
+Tendência| Direção compatível com 4H e 1H.
+Zona| Preço dentro ou próximo de uma zona válida.
+Confirmação| Padrão de rejeição ou outra confirmação prevista na estratégia.
+Gatilho| Rompimento do nível de entrada definido.
+Volume| Critério de volume atendido.
+Espaço| Alvo tecnicamente plausível antes da próxima barreira relevante.
+Risco/retorno| Pelo menos 1:2, calculado com custos estimados.
+Notícias| Nenhuma divulgação de alto impacto dentro da janela de bloqueio.
+Risco financeiro| Posição compatível com o limite de risco.
+Execução| Preço, liquidez, spread e condições da corretora aceitáveis.
+
+Se qualquer critério obrigatório falhar, a IA deve rejeitar a operação.
+
+A resposta do sistema deve registrar o motivo do bloqueio, por exemplo:
+
+"OPERAÇÃO REJEITADA: tendência de 4H não alinhada."
+
+"OPERAÇÃO REJEITADA: relação risco/retorno inferior a 1:2."
+
+"OPERAÇÃO REJEITADA: ausência de rompimento do gatilho."
+
+"OPERAÇÃO REJEITADA: janela de notícia de alto impacto."
+
+Essa rastreabilidade é necessária para auditar o comportamento do robô.
+
+---
+
+6. CÁLCULO DA ENTRADA, STOP LOSS E TAKE PROFIT
+
+A IA deve determinar os preços de entrada, stop e alvos antes de abrir a operação.
+
+Exemplo numérico de compra
+
+Considere um exemplo hipotético com BTC/USDT:
+
+Parâmetro| Preço
+Entrada| US$ 100.000
+Stop Loss| US$ 99.500
+Alvo 1| US$ 100.750
+Alvo 2| US$ 101.500
+
+O risco por unidade é:
+
+US$ 100.000 − US$ 99.500 = US$ 500.
+
+A distância do stop equivale a 0,5% do preço de entrada.
+
+O alvo 1 oferece uma relação bruta de risco/retorno de 1:1,5.
+
+O alvo 2 oferece uma relação bruta de risco/retorno de 1:3.
+
+Esses preços são apenas ilustrativos e não representam cotações atuais ou uma recomendação de operação.
+
+Exemplo visual da operação
+
+PREÇO
+
+101.500 ───────────── ALVO 2  (3R)
+             ↑
+             │
+100.750 ───────────── ALVO 1  (1,5R)
+             ↑
+             │
+100.000 ───────────── ENTRADA
+             │
+             │  RISCO = 500
+             ↓
+ 99.500 ───────────── STOP LOSS
+
+           COMPRA
+
+R representa a distância entre a entrada e o stop inicial.
+
+Se o risco por unidade for de US$ 500, um alvo de 2R representa um ganho bruto de US$ 1.000 por unidade, antes de taxas, slippage e outros custos.
+
+Atenção à regra de 1:2
+
+A estratégia exige uma relação mínima de 1:2, mas também prevê uma realização parcial em 1:1,5.
+
+Essas regras precisam ser conciliadas.
+
+A solução é avaliar a relação risco/retorno do plano completo, considerando a saída parcial, o alvo final e os custos. Não se deve considerar uma operação automaticamente válida apenas porque o alvo final oferece 2R se o plano de saídas reduzir significativamente o resultado esperado.
+
+O sistema deve rejeitar operações cujo resultado projetado, segundo o critério definido, não satisfaça o mínimo estabelecido.
+
+Stop Loss
+
+Para compras, o stop normalmente fica abaixo do fundo estrutural ou da zona de invalidação.
+
+Para vendas, fica acima do topo estrutural ou da zona de invalidação.
+
+Pode ser acrescentada uma margem de segurança, definida de maneira objetiva e compatível com a volatilidade.
+
+O limite de 1,5% deve ser tratado como uma restrição adicional, e não como uma regra que obriga a apertar um stop estruturalmente necessário.
+
+Se o stop tecnicamente necessário ultrapassar o limite permitido, a operação deve ser descartada ou recalculada conforme uma regra expressamente autorizada.
+
+---
+
+7. GESTÃO DO CAPITAL E TAMANHO DA POSIÇÃO
+
+A IA deve calcular o tamanho da posição a partir do capital disponível, do risco permitido e da distância até o stop.
+
+A fórmula básica é:
+
+Risco monetário = capital × percentual de risco
+
+Tamanho da posição = risco monetário ÷ distância entre entrada e stop por unidade
+
+Exemplo:
+
+Capital: US$ 10.000.
+
+Risco por operação: 1%.
+
+Risco monetário máximo: US$ 100.
+
+Entrada: US$ 100.000.
+
+Stop: US$ 99.500.
+
+Distância por BTC: US$ 500.
+
+Tamanho teórico da posição:
+
+US$ 100 ÷ US$ 500 = 0,20 BTC.
+
+O valor nocional da posição seria US$ 20.000. Isso mostra por que o sistema também precisa verificar margem, alavancagem e risco de liquidação. A posição só poderá ser aberta se a conta e as regras da estratégia permitirem.
+
+A quantidade final precisa ser reduzida quando necessário para acomodar taxas, slippage e demais custos previsíveis, de modo que a perda potencial permaneça dentro do limite de risco.
+
+Regra recomendada: utilizar 1% como limite padrão de risco por operação, com um teto absoluto previamente definido. A escolha entre 1% e 2% deve ser configurável, e não decidida livremente pela IA a cada entrada.
+
+---
+
+8. GERENCIAMENTO DE UMA OPERAÇÃO ABERTA
+
+Depois da entrada, o sistema precisa administrar a posição sem improvisações.
+
+Fluxo operacional
+
+SINAL CONFIRMADO
+       │
+       ▼
+VALIDAR RISCO E ORDEM
+       │
+       ▼
+EXECUTAR ENTRADA
+       │
+       ▼
+COLOCAR STOP LOSS
+       │
+       ▼
+PREÇO ATINGE +1R?
+       │
+       ├── SIM → Avaliar movimento do stop
+       │         para o ponto de entrada
+       │
+       ▼
+PREÇO ATINGE ALVO 1?
+       │
+       ├── SIM → Realizar 50% da posição
+       │         e ajustar o stop conforme
+       │         a política de gerenciamento
+       │
+       ▼
+PREÇO ATINGE ALVO 2?
+       │
+       ├── SIM → Encerrar posição restante
+       │
+       ▼
+STOP OU INVALIDAÇÃO?
+       │
+       └── SIM → Encerrar conforme as regras
+
+O sistema precisa implementar regras específicas para cada situação.
+
+- No ponto de 1R, o stop pode ser movido para o preço de entrada, desde que a regra esteja configurada e a alteração seja aceita pela corretora.
+- Ao atingir o alvo 1, deve realizar a parcial prevista.
+- Depois da parcial, deve administrar o restante conforme a regra de break-even ou trailing stop.
+- No trailing stop, o stop acompanha fundos ascendentes em compras ou topos descendentes em vendas, sem ser afastado para aumentar o risco.
+- Se a estrutura que justificou a entrada for invalidada, a IA deve aplicar o procedimento de saída definido.
+- A posição deve ser encerrada dentro do horário operacional estipulado, caso essa seja uma exigência do plano.
+
+O sistema também precisa lidar com execuções parciais, ordens rejeitadas, perda de conexão e falhas na atualização dos stops.
+
+Importante: mover o stop para o preço de entrada não garante resultado financeiro zero. Taxas, slippage e diferenças entre o preço solicitado e o preço executado podem produzir uma pequena perda.
+
+---
+
+9. HORÁRIOS DE OPERAÇÃO E NOTÍCIAS
+
+A estratégia prevê três janelas de referência no horário de Brasília:
+
+Janela| Horário de referência
+Abertura de Londres| 04h às 07h
+Abertura de Nova York| 09h30 às 12h
+Sobreposição e período da tarde| 14h às 17h
+
+Esses intervalos precisam ser configuráveis.
+
+Os horários de Londres e Nova York mudam em relação a Brasília durante períodos de horário de verão nos respectivos países. Portanto, o sistema não deve tratar os horários fixos como equivalentes permanentes às aberturas das bolsas.
+
+A implementação deve usar um calendário de sessões com fusos horários e ajustes sazonais, preservando as janelas operacionais desejadas.
+
+Como o mercado de criptomoedas funciona 24 horas por dia, sete dias por semana, o filtro de horário é uma regra da estratégia, não uma limitação de funcionamento da Binance.
+
+Filtro de notícias
+
+A IA deve consultar um calendário econômico confiável e identificar divulgações de alto impacto, especialmente aquelas relacionadas a inflação, emprego, decisões do Federal Reserve e outros eventos relevantes para os mercados.
+
+Regra prevista:
+
+- Bloquear novas entradas 30 minutos antes de uma notícia de alto impacto.
+- Manter o bloqueio até 30 minutos depois da divulgação.
+- Se não houver dados confiáveis sobre o calendário, aplicar uma política de segurança previamente definida.
+- Não abrir novas posições quando a informação sobre a notícia estiver indisponível ou desatualizada.
+
+A gestão das posições já abertas durante esses eventos também precisa ser especificada. Bloquear novas entradas não é a mesma coisa que encerrar uma posição existente.
+
+---
+
+10. LIMITES DIÁRIOS E PROTEÇÃO CONTRA PERDAS
+
+A IA deve implementar controles de risco independentes da lógica de entrada.
+
+1. Interromper novas operações após duas perdas consecutivas e aguardar uma hora antes de reavaliar o mercado.
+2. Interromper as operações do dia após três operações perdedoras.
+3. Limitar a frequência a três a cinco operações diárias, conforme o limite configurado.
+4. Nunca aumentar a posição para recuperar perdas.
+5. Nunca ampliar o stop para afastá-lo de uma perda iminente.
+6. Bloquear novas entradas quando o risco acumulado do dia ultrapassar o limite configurado.
+7. Não abrir novas posições se houver divergência entre a posição real na corretora e o estado interno do sistema.
+8. Manter os controles de risco ativos mesmo quando a IA estiver analisando novos sinais.
+
+É necessário definir como serão contadas as perdas, incluindo operações parciais, taxas e operações encerradas próximas do ponto de entrada.
+
+O limite diário de perda monetária deve ser independente do limite de quantidade de operações. Isso impede que uma sequência de perdas excepcionalmente grandes passe despercebida.
+
+---
+
+11. COMO TRADUZIR A ESTRATÉGIA EM REGRAS DE CÓDIGO
+
+A implementação deve transformar cada conceito visual em uma condição verificável.
+
+11.1. Identificação de tendência
+
+O sistema deve detectar pivôs de preço confirmados e classificar a sequência de topos e fundos.
+
+Exemplo de lógica:
+
+if higher_highs and higher_lows:
+    trend = "BULLISH"
+
+elif lower_highs and lower_lows:
+    trend = "BEARISH"
+
+else:
+    trend = "RANGING"
+
+A identificação de um pivô pode exigir velas posteriores para confirmação. O sistema não pode utilizar informações de velas futuras que ainda não existiam no momento da decisão.
+
+11.2. Identificação de zonas
+
+Cada zona deve conter, no mínimo:
+
+- Tipo de zona.
+- Limite superior e inferior.
+- Timeframe de origem.
+- Momento em que foi identificada.
+- Quantidade de reações confirmadas.
+- Condições de invalidação.
+- Estado atual: válida, mitigada ou invalidada, conforme a definição adotada.
+
+A IA deve evitar criar várias zonas praticamente iguais para a mesma região.
+
+11.3. Detecção de padrões
+
+A definição de cada padrão deve ser matemática.
+
+Por exemplo, uma pin bar pode exigir que o pavio principal seja maior que duas vezes o corpo, mas isso sozinho não é suficiente. Também devem ser definidos a proporção do pavio oposto, a localização do fechamento e a tolerância para corpos muito pequenos.
+
+Um engolfo deve ter regras claras para comparar os corpos das duas velas.
+
+Uma inside bar deve respeitar os limites de máxima e mínima da vela anterior.
+
+11.4. Confirmação de volume
+
+Uma regra inicial possível é:
+
+volume_confirmado = (
+    candle_volume > average_volume_20
+)
+
+O volume deve ser comparado com velas anteriores já fechadas, usando uma metodologia consistente.
+
+A implementação também deve considerar que volumes de exchanges diferentes não são diretamente equivalentes. O volume utilizado precisa corresponder ao mercado e ao par efetivamente negociados.
+
+11.5. Sinal de compra
+
+A compra só será autorizada quando todas as condições necessárias forem verdadeiras:
+
+buy_signal = (
+    higher_timeframe_trend == "BULLISH"
+    and price_in_valid_zone
+    and bullish_rejection_confirmed
+    and volume_confirmed
+    and trigger_high_broken
+    and risk_reward_valid
+    and news_filter_passed
+    and session_filter_passed
+    and risk_limits_passed
+)
+
+11.6. Sinal de venda
+
+sell_signal = (
+    higher_timeframe_trend == "BEARISH"
+    and price_in_valid_zone
+    and bearish_rejection_confirmed
+    and volume_confirmed
+    and trigger_low_broken
+    and risk_reward_valid
+    and news_filter_passed
+    and session_filter_passed
+    and risk_limits_passed
+)
+
+Esses trechos representam a lógica inicial, não um sistema completo pronto para operar dinheiro real. Cada variável precisa ser implementada, testada e validada.
+
+11.7. Cálculo do risco
+
+risk_amount = account_equity * risk_fraction
+
+stop_distance = abs(entry_price - stop_price)
+
+position_size = risk_amount / stop_distance
+
+Na versão real, o cálculo deve considerar as especificações do contrato, a quantidade mínima, o incremento permitido, as taxas, o slippage, a margem disponível e os limites da corretora.
+
+A lógica de compra e venda deve funcionar tanto em modo simulado quanto em modo real, com separação explícita entre os dois ambientes.
+
+---
+
+12. REQUISITOS DE SEGURANÇA PARA OPERAÇÃO AUTOMÁTICA
+
+Antes de habilitar operações reais, o sistema precisa comprovar que consegue:
+
+1. Obter dados reais dos pares autorizados.
+2. Detectar velas incompletas e dados atrasados.
+3. Reconstruir os timeframes corretamente a partir de dados válidos.
+4. Não gerar sinais repetidos para a mesma oportunidade.
+5. Calcular o tamanho da posição e os stops corretamente.
+6. Enviar ordens para o ambiente correto da Binance.
+7. Confirmar se as ordens foram realmente aceitas e executadas.
+8. Registrar cada entrada, saída, taxa e resultado.
+9. Detectar desconexões e impedir novas operações quando os dados estiverem indisponíveis.
+10. Recuperar o estado das posições após uma reinicialização.
+11. Garantir que o stop de proteção seja efetivamente colocado e monitorado.
+12. Bloquear operações reais quando qualquer componente essencial estiver indisponível.
+
+As credenciais da corretora devem ter apenas as permissões necessárias. A IA não deve receber permissão de saque para executar esta estratégia.
+
+O sistema precisa começar com backtests, depois simulação em tempo real e, somente após validação suficiente, considerar a habilitação de operações reais.
+
+---
+
+13. COMO VALIDAR SE A ESTRATÉGIA FUNCIONA
+
+A IA não deve ser considerada pronta apenas porque consegue encontrar padrões no gráfico.
+
+O teste deve verificar:
+
+- Quantidade de operações.
+- Taxa de acerto.
+- Lucro ou prejuízo líquido após custos.
+- Fator de lucro.
+- Drawdown máximo.
+- Expectativa financeira por operação.
+- Relação entre ganhos e perdas.
+- Desempenho separado por BTC, ETH e SOL.
+- Desempenho por timeframe e janela operacional.
+- Quantidade de sinais rejeitados por cada filtro.
+- Diferença entre preços teóricos e execuções reais.
+
+O teste histórico deve evitar look-ahead bias, utilizar custos realistas e incluir períodos de tendência, lateralização, alta volatilidade e baixa volatilidade.
+
+Também é importante realizar testes fora da amostra e simulação em tempo real antes de concluir que a estratégia tem desempenho consistente.
+
+Nenhuma dessas medidas garante rentabilidade futura. O objetivo é descobrir se as regras têm resultados robustos e se o sistema executa fielmente o plano.
+
+---
+
+14. RESUMO DO COMPORTAMENTO ESPERADO
+
+O funcionamento completo deve obedecer à seguinte sequência:
+
+INICIAR
+   │
+   ▼
+VALIDAR DADOS REAIS E CONEXÃO
+   │
+   ▼
+VERIFICAR HORÁRIO E NOTÍCIAS
+   │
+   ▼
+ANALISAR 4H E 1H
+   │
+   ▼
+DEFINIR TENDÊNCIA OU RANGE
+   │
+   ▼
+MAPEAR ZONAS RELEVANTES
+   │
+   ▼
+ANALISAR ESTRUTURA DE 15M
+   │
+   ▼
+AGUARDAR O PREÇO CHEGAR À ZONA
+   │
+   ▼
+ANALISAR CONFIRMAÇÃO EM 5M/1M
+   │
+   ▼
+VALIDAR VOLUME E ROMPIMENTO
+   │
+   ▼
+CALCULAR STOP, ALVO E POSIÇÃO
+   │
+   ▼
+VALIDAR RISCO/RETORNO E LIMITES
+   │
+   ├── FALHOU → NÃO OPERAR
+   │
+   ▼
+EXECUTAR ORDEM E PROTEGER A POSIÇÃO
+   │
+   ▼
+GERENCIAR PARCIAL, STOP E ALVO FINAL
+   │
+   ▼
+REGISTRAR RESULTADO E AUDITAR
+
+15. O QUE PRECISO QUE O DESENVOLVEDOR CONFIRME
+
+Quero que você leia este documento e confirme se entendeu a estratégia inteira e se o programa consegue implementá-la de forma fiel.
+
+Preciso de respostas objetivas para estas perguntas:
+
+1. O sistema já recebe dados reais e atualizados da Binance para BTC/USDT, ETH/USDT e SOL/USDT?
+2. Ele consegue analisar os quatro timeframes sem utilizar dados futuros?
+3. A identificação de tendência, suportes, resistências, liquidez, FVG e Order Blocks já está implementada ou ainda é simulada?
+4. A confirmação de entrada exige todos os critérios obrigatórios?
+5. O stop, o alvo, a relação risco/retorno e o tamanho da posição são calculados antes da ordem?
+6. Os filtros de horário, notícias, perdas consecutivas e limite diário estão realmente funcionando?
+7. O sistema confirma as execuções na Binance e mantém as posições protegidas?
+8. Existe backtest verificável e simulação em tempo real, com custos incluídos?
+9. Quais partes estão prontas, quais estão incompletas e quais ainda precisam ser desenvolvidas?
+
+Não quero uma confirmação genérica de que o sistema funciona. Quero que cada item seja classificado como implementado e testado, implementado mas não validado, incompleto ou inexistente, com evidências verificáveis.
+
+O objetivo final é ter uma IA que tome decisões baseadas em dados reais, regras explícitas e gestão de risco, sem inventar sinais, sem operar quando os critérios não forem atendidos e sem executar operações reais antes de comprovar que a infraestrutura e os mecanismos de proteção estão funcionando.
