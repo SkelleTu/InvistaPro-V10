@@ -1756,7 +1756,7 @@ class MetaTraderBridge extends EventEmitter {
             if (t.profit > 0) {
               this.status.dailyProfit += t.profit;
               this.status.dailyWins++;
-            } else {
+            } else if (t.profit < 0) {
               this.status.dailyLoss += Math.abs(t.profit);
               this.status.dailyLosses++;
             }
@@ -2224,7 +2224,7 @@ class MetaTraderBridge extends EventEmitter {
       connected,
       systemHealth: health,
       activeSignal: this.getLatestActiveSignal(),
-      recentTrades: this.recentTrades.slice(-20),
+      recentTrades: this.recentTrades.slice(0, 20),
       openPositions: this.openPositions.size,
       cachedSymbols: this.getCachedSymbols(),
       lastBalance: this.currentBalance || undefined,
