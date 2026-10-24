@@ -302,20 +302,32 @@ export class HuggingFaceAIService {
 
     try {
       const consensus = await this.analyzeMarketData(tickData, symbol);
+      const reviewNow = Date.now();
       const health = this.getExternalInferenceHealth(symbol);
-      if (!health || Date.now() - health.checkedAt > 60_000 || health.respondingModels < 1) {
+      if (!health || reviewNow - health.checkedAt > 60_000 || health.respondingModels < 1) {
         return reject('Revisão IA sem resposta externa válida e recente; entrada bloqueada.');
       }
 
-      const modelAnalyses = Array.isArray(consensus.analyses)
-        ? consensus.analyses.filter(analysis =>
-          (analysis.prediction === 'up' || analysis.prediction === 'down') &&
-          Number.isFinite(analysis.confidence) && analysis.confidence > 0 && analysis.confidence <= 100 &&
-          typeof analysis.modelName === 'string' && analysis.modelName.length > 0
-        )
+      const validResponses = Array.isArray(consensus.analyses)
+        ? consensus.analyses.filter(analysis => {
+          const responseTime = analysis.timestamp instanceof Date ? analysis.timestamp.getTime() : Number.NaN;
+          return ['up', 'down', 'neutral'].includes(analysis.prediction) &&
+            Number.isFinite(analysis.confidence) && analysis.confidence >= 0 && analysis.confidence <= 100 &&
+            typeof analysis.modelName === 'string' && analysis.modelName.length > 0 &&
+            Number.isFinite(responseTime) && responseTime <= reviewNow + 30_000 &&
+            reviewNow - responseTime <= 120_000;
+        })
         : [];
+      // The per-request response set and health record must agree. A concurrent
+      // request must never make a stale or unrelated response look valid here.
+      if (validResponses.length === 0 || health.respondingModels !== validResponses.length) {
+        return reject('Respostas externas ausentes, desatualizadas ou inconsistentes; entrada bloqueada.');
+      }
+      const modelAnalyses = validResponses.filter(analysis =>
+        analysis.prediction === 'up' || analysis.prediction === 'down'
+      );
       if (modelAnalyses.length === 0) {
-        return reject('Nenhum modelo externo produziu uma previsão direcional válida.');
+        return reject('Consenso externo neutro: nenhum modelo votou em uma direção válida.');
       }
 
       const upWeight = modelAnalyses
