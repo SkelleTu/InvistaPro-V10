@@ -1,0 +1,49 @@
+name: Strategy document compliance audit
+
+on:
+  push:
+    branches:
+      - strategy-document-authoritative
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: strategy-document-compliance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: TypeScript validation
+        run: npm run check
+
+      - name: Strategy and safety regression tests
+        run: npm test
+
+      - name: Production build
+        run: npm run build
+
+      - name: Verify required production artifacts
+        run: |
+          test -s dist/index.js
+          test -s dist/trading-user-worker.js
+          test -s dist/public/index.html
