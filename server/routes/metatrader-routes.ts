@@ -360,6 +360,7 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
         accountHeartbeatAt: lastMt5EnvironmentHeartbeatAt,
         realTradingExplicitlyEnabled: String(process.env.MT5_PRODUCTION_TRADING_ENABLED ?? '').trim().toLowerCase() === 'true',
         maxDailyTrades: Number(process.env.MT5_PRICE_ACTION_MAX_DAILY_TRADES ?? 5),
+        openPositions: metaTraderBridge.getOpenPositions(),
       });
       const newsStatus = await getHighImpactNewsStatus();
       const sessionOpen = isAllowedBrasiliaTradingSession();
