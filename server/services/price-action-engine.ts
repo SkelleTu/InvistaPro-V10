@@ -373,25 +373,51 @@ export function evaluatePriceActionSetup(
   if (side) {
     const selectedEntryCandles = entryCandles!;
     const selectedEntryTimeframe: Timeframe = entryCandles === validM5 ? 'M5' : 'M1';
-    const supportResistance = repeatedStructureZone(m15, side === 'BUY' ? 'low' : 'high', entry, 'M15');
-    const fvgOnM15 = fairValueGapZone(m15, side, entry, 'M15');
-    const fvgZone = fvgOnM15 ?? fairValueGapZone(selectedEntryCandles, side, entry, selectedEntryTimeframe);
-    const sweepOnM15 = liquiditySweep(m15, side);
-    const sweepOnEntry = !sweepOnM15 && liquiditySweep(selectedEntryCandles, side);
-    const sweep = sweepOnM15 || sweepOnEntry;
-    const bos = breakOfStructure(m15, side) || breakOfStructure(selectedEntryCandles, side);
-    const choch = changeOfCharacter(m15, side) || changeOfCharacter(selectedEntryCandles, side);
-    const obOnM15 = orderBlockZone(m15, side, 'M15');
-    const ob = obOnM15 ?? orderBlockZone(selectedEntryCandles, side, selectedEntryTimeframe);
-    const rangeEdgeQualified = rangeMode && side !== null;
-    const zoneNear = rangeEdgeQualified || supportResistance !== null || fvgZone !== null || ob !== null || sweep;
+    // Map every relevant active zone from the four analytical stages, not just M15/M5.
+    const srKinds: Array<{ candles: Candle[]; timeframe: Timeframe }> = [
+      { candles: h4, timeframe: 'H4' },
+      { candles: h1, timeframe: 'H1' },
+      { candles: m15, timeframe: 'M15' },
+      { candles: selectedEntryCandles, timeframe: selectedEntryTimeframe },
+    ];
+    const supportResistanceZones = srKinds
+      .map(frame => repeatedStructureZone(frame.candles, side === 'BUY' ? 'low' : 'high', entry, frame.timeframe))
+      .filter((zone): zone is PriceZone => zone !== null);
+    const supportResistance = supportResistanceZones.find(zone => zone.timeframe === 'M15') ??
+      supportResistanceZones.find(zone => zone.timeframe === 'H1') ??
+      supportResistanceZones.find(zone => zone.timeframe === 'H4') ??
+      supportResistanceZones[0] ?? null;
 
-    if (supportResistance) zones.push(supportResistance);
-    if (fvgZone) zones.push(fvgZone);
-    if (ob) zones.push(ob);
-    if (sweep) {
-      const sweepCandles = sweepOnM15 ? m15 : selectedEntryCandles;
-      const sweepTimeframe: Timeframe = sweepOnM15 ? 'M15' : selectedEntryTimeframe;
+    const fvgZones = srKinds
+      .map(frame => fairValueGapZone(frame.candles, side, entry, frame.timeframe))
+      .filter((zone): zone is PriceZone => zone !== null);
+    const fvgZone = fvgZones.find(zone => zone.timeframe === 'M15') ??
+      fvgZones.find(zone => zone.timeframe === selectedEntryTimeframe) ??
+      fvgZones.find(zone => zone.timeframe === 'H1') ??
+      fvgZones.find(zone => zone.timeframe === 'H4') ?? null;
+
+    const obZones = srKinds
+      .map(frame => orderBlockZone(frame.candles, side, frame.timeframe))
+      .filter((zone): zone is PriceZone => zone !== null);
+    const ob = obZones.find(zone => zone.timeframe === 'M15') ??
+      obZones.find(zone => zone.timeframe === selectedEntryTimeframe) ??
+      obZones.find(zone => zone.timeframe === 'H1') ??
+      obZones.find(zone => zone.timeframe === 'H4') ?? null;
+
+    const sweepFrames = srKinds.map(frame => ({
+      ...frame,
+      detected: liquiditySweep(frame.candles, side),
+    }));
+    const sweep = sweepFrames.some(frame => frame.detected);
+    const bos = srKinds.some(frame => breakOfStructure(frame.candles, side));
+    const choch = srKinds.some(frame => changeOfCharacter(frame.candles, side));
+    const rangeEdgeQualified = rangeMode && side !== null;
+    const zoneNear = rangeEdgeQualified || supportResistanceZones.length > 0 ||
+      fvgZones.length > 0 || obZones.length > 0 || sweep;
+
+    zones.push(...supportResistanceZones, ...fvgZones, ...obZones);
+    for (const sweepFrame of sweepFrames.filter(frame => frame.detected)) {
+      const sweepCandles = sweepFrame.candles;
       const sweepSample = sweepCandles.slice(-21, -1);
       const sweepLevel = side === 'BUY'
         ? Math.min(...sweepSample.map(candle => candle.low))
@@ -405,7 +431,7 @@ export function evaluatePriceActionSetup(
         type: 'liquidity',
         low: sweepLevel - sweepWidth,
         high: sweepLevel + sweepWidth,
-        timeframe: sweepTimeframe,
+        timeframe: sweepFrame.timeframe,
         originTime: sweepOrigin ? sweepCandles[sweepOrigin.index].time : sweepSample[0].time,
         identifiedAt: sweepCandles[sweepCandles.length - 1].time,
         reactions: 1,
