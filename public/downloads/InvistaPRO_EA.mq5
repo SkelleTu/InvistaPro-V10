@@ -41,7 +41,7 @@ input int      MaxReconnectTries= 5;           // Tentativas máximas de reconex
 input int      IndicatorBars    = 5;           // Quantas barras recentes dos indicadores ler
 input int      CandleCount      = 200;         // Candles para enviar à IA (histórico)
 input double   PriceActionRiskPercent = 1.0; // Risco por trade para Price Action (1% a 2%)
-input bool     PriceActionUseAIReview = true; // true = estratégia + IA; false = estratégia autônoma com os mesmos gates
+input bool     PriceActionUseAIReview = true; // Revisão IA obrigatória; false mantém entradas bloqueadas
 
 //--- Controle de Autonomia da IA
 input ENUM_AI_CONTROL_MODE AIControlMode = AI_FULL; // Modo de Controle da IA
@@ -608,7 +608,8 @@ string BuildCandlesJson(MqlRates &rates[], int count)
 string BuildTimeframeCandlesJson(ENUM_TIMEFRAMES timeframe, int count)
 {
    MqlRates rates[];
-   int copied = CopyRates(g_symbol, timeframe, 0, count, rates);
+   // Only closed candles may participate in the deterministic setup or AI review.
+   int copied = CopyRates(g_symbol, timeframe, 1, count, rates);
    if (copied < 30) return "[]";
    return BuildCandlesJson(rates, copied);
 }
