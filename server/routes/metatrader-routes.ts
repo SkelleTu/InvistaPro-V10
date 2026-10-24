@@ -389,6 +389,7 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
           rejectionReasons: priceActionSetup.reasons,
           checks: priceActionSetup.checks,
           features: priceActionSetup.features,
+          zones: priceActionSetup.zones ?? [],
           safetyContext: {
             riskLimit: riskLimit.reasons,
             news: newsStatus.reason,
@@ -1053,7 +1054,9 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
           girassolBias,
           girassolConfluence,
           indicatorNotes,
+          strategyZones: priceActionSetup.zones ?? [],
         },
+        strategyZones: priceActionSetup.zones ?? [],
         executionEnabled: true,
       });
     }
