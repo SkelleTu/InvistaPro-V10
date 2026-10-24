@@ -663,7 +663,7 @@ export function validateAIEntryReview(
   if (direction !== setup.action) return { approved: false, reason: 'Direção da IA diverge do sinal da estratégia' };
   // The strategy document has no numeric AI-confidence floor. Confidence is
   // descriptive; the reviewer must be valid and explicitly agree with the setup.
-  if (!finite(review.confidence) || review.confidence <= 0 || review.confidence > 100) {
+  if (!finite(review.confidence) || review.confidence < 0 || review.confidence > 100) {
     return { approved: false, reason: 'Confiança da revisão IA ausente, inválida ou nula' };
   }
   if (review.riskOverride !== undefined) return { approved: false, reason: 'IA não pode substituir a política determinística de risco' };
