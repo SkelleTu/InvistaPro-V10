@@ -1,0 +1,51 @@
+name: Temporary dependency remediation
+
+on:
+  push:
+    branches:
+      - fix/price-action-compliance-20261024
+
+permissions:
+  contents: write
+
+jobs:
+  remediation:
+    if: "!contains(github.event.head_commit.message, '[dependency-lock-refresh]')"
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Check out feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/price-action-compliance-20261024
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Regenerate lockfile for patched manifest
+        run: npm install --package-lock-only --ignore-scripts
+      - name: Apply compatible security updates
+        run: npm audit fix --ignore-scripts
+      - name: Install exact locked dependency tree
+        run: npm ci
+      - name: Type-check
+        run: npm run check
+      - name: Run policy and regression tests
+        run: npm test
+      - name: Build production bundle
+        run: npm run build
+      - name: Require clean dependency audit
+        run: npm audit --audit-level=high
+      - name: Commit only validated dependency metadata
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          if git diff --cached --quiet; then
+            echo "Dependency manifest and lockfile already synchronized."
+          else
+            git commit -m "chore(security): refresh dependency lockfile [dependency-lock-refresh]"
+            git push origin HEAD:fix/price-action-compliance-20261024
+          fi
