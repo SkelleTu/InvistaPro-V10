@@ -21,6 +21,19 @@ export interface MarketContext {
   riskLimitOk?: boolean;
   tradingSessionOpen?: boolean;
 }
+export interface PriceActionZone {
+  type: 'support' | 'resistance' | 'fvg' | 'order_block' | 'liquidity';
+  low: number;
+  high: number;
+  timeframe: Timeframe;
+  originTime: number;
+  identifiedAt: number;
+  reactions: number;
+  invalidationPrice: number;
+  state: 'valid' | 'mitigated' | 'invalidated';
+  direction?: TradeSide;
+}
+
 export interface PriceActionSetup {
   action: TradeSide | 'HOLD';
   approved: boolean;
@@ -31,6 +44,7 @@ export interface PriceActionSetup {
   takeProfit?: number;
   riskReward?: number;
   features: Record<string, number | string | boolean | null>;
+  zones?: PriceActionZone[];
 }
 const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
 const validCandles = (v: unknown): v is Candle[] => Array.isArray(v) && v.length >= 30 &&
@@ -59,7 +73,7 @@ function validClosedCandles(v: unknown, timeframe: Timeframe, now = Date.now()):
 type MarketTrend = 'bullish' | 'bearish' | 'range' | 'unknown';
 type PivotKind = 'high' | 'low';
 interface Pivot { index: number; price: number }
-interface PriceZone { low: number; high: number; touches: number }
+interface PriceZone extends PriceActionZone { originIndex: number }
 
 /** A pivot becomes usable only after two candles have closed to its right. */
 function pivots(c: Candle[], kind: PivotKind, wing = 2): Pivot[] {
@@ -104,28 +118,43 @@ function averageRange(c: Candle[]): number {
   return average(c.slice(-21, -1).map(x => x.high - x.low));
 }
 
-/** Group nearby confirmed pivots into zones; isolated levels do not count as repeated support/resistance. */
-function repeatedStructureZone(c: Candle[], kind: PivotKind, price: number): PriceZone | null {
+/** Group repeated confirmed pivots into auditable support/resistance zones. */
+function repeatedStructureZone(c: Candle[], kind: PivotKind, price: number, timeframe: Timeframe): PriceZone | null {
   const tolerance = Math.max(averageRange(c) * 0.25, Math.abs(price) * 0.00005);
-  const levels = pivots(c.slice(0, -1), kind).map(p => p.price);
-  const clusters: number[][] = [];
-  for (const level of levels) {
-    const cluster = clusters.find(items => Math.abs(average(items) - level) <= tolerance);
-    if (cluster) cluster.push(level); else clusters.push([level]);
+  const pivotPoints = pivots(c.slice(0, -1), kind);
+  const clusters: Pivot[][] = [];
+  for (const point of pivotPoints) {
+    const cluster = clusters.find(items => Math.abs(average(items.map(item => item.price)) - point.price) <= tolerance);
+    if (cluster) cluster.push(point); else clusters.push([point]);
   }
-  const valid = clusters.filter(items => items.length >= 2).map(items => ({
-    low: Math.min(...items) - tolerance,
-    high: Math.max(...items) + tolerance,
-    touches: items.length,
-  }));
-  const near = valid.filter(zone => price >= zone.low - tolerance && price <= zone.high + tolerance);
+  const valid: PriceZone[] = clusters.filter(items => items.length >= 2).map(items => {
+    const low = Math.min(...items.map(item => item.price)) - tolerance;
+    const high = Math.max(...items.map(item => item.price)) + tolerance;
+    const originIndex = Math.min(...items.map(item => item.index));
+    const latestTouchIndex = Math.max(...items.map(item => item.index));
+    const invalidated = c.slice(latestTouchIndex + 1).some(candle =>
+      kind === 'low' ? candle.close < low : candle.close > high);
+    return {
+      type: kind === 'low' ? 'support' : 'resistance',
+      low, high, timeframe,
+      originIndex,
+      originTime: c[originIndex].time,
+      identifiedAt: c[latestTouchIndex].time,
+      reactions: items.length,
+      invalidationPrice: kind === 'low' ? low : high,
+      state: invalidated ? 'invalidated' : 'valid',
+    };
+  });
+  const near = valid.filter(zone => zone.state === 'valid' &&
+    price >= zone.low - tolerance && price <= zone.high + tolerance);
   return near.sort((a, b) =>
     Math.abs(price - (a.low + a.high) / 2) - Math.abs(price - (b.low + b.high) / 2))[0] ?? null;
 }
 
-/** An FVG is valid only when a three-candle gap exists and price has returned to that zone. */
-function fairValueGapZone(c: Candle[], side: TradeSide, price: number): PriceZone | null {
+/** Detect a three-candle FVG with a meaningful impulse; reject it if later closed candles invalidate it. */
+function fairValueGapZone(c: Candle[], side: TradeSide, price: number, timeframe: Timeframe): PriceZone | null {
   const sample = c.slice(-40);
+  const offset = c.length - sample.length;
   const impulseFloor = averageRange(sample) * 0.5;
   const tolerance = Math.max(averageRange(sample) * 0.2, Math.abs(price) * 0.00005);
   for (let i = sample.length - 1; i >= 2; i--) {
@@ -135,7 +164,28 @@ function fairValueGapZone(c: Candle[], side: TradeSide, price: number): PriceZon
     const high = side === 'BUY' ? third.low : first.low;
     const isGap = side === 'BUY' ? third.low > first.high : third.high < first.low;
     if (!isGap || high <= low) continue;
-    if (price >= low - tolerance && price <= high + tolerance) return { low, high, touches: 1 };
+
+    let invalidated = false;
+    let reactions = 0;
+    for (let k = i + 1; k < sample.length; k++) {
+      if ((side === 'BUY' && sample[k].close < low) || (side === 'SELL' && sample[k].close > high)) {
+        invalidated = true;
+        break;
+      }
+      if (sample[k].low <= high && sample[k].high >= low) reactions++;
+    }
+    if (invalidated) continue;
+    if (price >= low - tolerance && price <= high + tolerance) {
+      return {
+        type: 'fvg', low, high, timeframe, direction: side,
+        originIndex: offset + i - 2,
+        originTime: third.time,
+        identifiedAt: third.time,
+        reactions,
+        invalidationPrice: side === 'BUY' ? low : high,
+        state: 'valid',
+      };
+    }
   }
   return null;
 }
@@ -184,7 +234,7 @@ function changeOfCharacter(c: Candle[], side: TradeSide): boolean {
   return side === 'BUY' ? prior === 'bearish' && recent === 'bullish'
     : prior === 'bullish' && recent === 'bearish';
 }
-function orderBlockZone(c: Candle[], side: TradeSide): { low: number; high: number; originIndex: number; originTime: number } | null {
+function orderBlockZone(c: Candle[], side: TradeSide, timeframe: Timeframe): PriceZone | null {
   if (c.length < 15) return null;
   const sample = c.slice(-21, -1);
   const avgRange = average(sample.map(x => x.high - x.low));
@@ -204,15 +254,21 @@ function orderBlockZone(c: Candle[], side: TradeSide): { low: number; high: numb
 
     // An order block is invalid after a closed candle settles beyond its distal boundary.
     let invalidated = false;
+    let reactions = 0;
     for (let k = i + 1; k < c.length; k++) {
       if ((side === 'BUY' && c[k].close < low) || (side === 'SELL' && c[k].close > high)) {
         invalidated = true;
         break;
       }
+      if (c[k].low <= high && c[k].high >= low) reactions++;
     }
     if (invalidated) continue;
     if (last.close >= low - tolerance && last.close <= high + tolerance) {
-      return { low, high, originIndex: i, originTime: candidate.time };
+      return {
+        type: 'order_block', low, high, timeframe, direction: side,
+        originIndex: i, originTime: candidate.time, identifiedAt: impulse.time,
+        reactions, invalidationPrice: side === 'BUY' ? low : high, state: 'valid',
+      };
     }
   }
   return null;
