@@ -731,7 +731,7 @@ int VolumeDigitsFromStep()
    return digits;
 }
 
-double CalculatePriceActionRiskLot(double entryPrice, double stopLoss)
+double CalculatePriceActionRiskLot(double entryPrice, double stopLoss, double estimatedRoundTripCost)
 {
    if (entryPrice <= 0 || stopLoss <= 0 || PriceActionRiskPercent < 1.0 || PriceActionRiskPercent > 2.0)
       return 0.0;
@@ -742,12 +742,13 @@ double CalculatePriceActionRiskLot(double entryPrice, double stopLoss)
    double minVolume = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_MIN);
    double maxVolume = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_MAX);
    double distance = MathAbs(entryPrice - stopLoss);
-   if (tickSize <= 0 || tickValue <= 0 || volumeStep <= 0 || minVolume <= 0 || maxVolume <= 0 || distance <= 0)
+   if (tickSize <= 0 || tickValue <= 0 || volumeStep <= 0 || minVolume <= 0 || maxVolume <= 0 || distance <= 0 || estimatedRoundTripCost < 0)
       return 0.0;
    double lossPerLot = (distance / tickSize) * tickValue;
+   double costPerLot = (estimatedRoundTripCost / tickSize) * tickValue;
    double riskCash = AccountInfoDouble(ACCOUNT_EQUITY) * PriceActionRiskPercent / 100.0;
    if (lossPerLot <= 0 || riskCash <= 0) return 0.0;
-   double rawVolume = riskCash / lossPerLot;
+   double rawVolume = riskCash / (lossPerLot + costPerLot);
    double volume = MathFloor(rawVolume / volumeStep) * volumeStep;
    if (volume < minVolume) return 0.0;
    if (volume > maxVolume) volume = maxVolume;
@@ -907,6 +908,7 @@ void FetchAndProcessSignal()
    double stopLoss   = ExtractJsonDouble(resp, "stopLoss");
    double takeProfit = ExtractJsonDouble(resp, "takeProfit");
    double confidence = ExtractJsonDouble(resp, "confidence");
+   double estimatedRoundTripCost = ExtractJsonDouble(resp, "estimatedRoundTripCost");
 
    string slTpSource    = ExtractJsonString(resp, "slTpSource");
    string assetFamily   = ExtractJsonString(resp, "assetFamily");
@@ -939,7 +941,7 @@ void FetchAndProcessSignal()
          if (takeProfit > 0) takeProfit = NormalizeDouble(entry - takeProfit, _Digits);
       }
    }
-   else if (AIControlMode == AI_PARTIAL)
+   else if (AIControlMode == AI_PARTIAL && !isStrategyCrypto)
    {
       if (!AI_Entrada)
       {
@@ -1045,7 +1047,7 @@ void FetchAndProcessSignal()
           Print("⛔ Price Action recusado: stop inválido, stop acima de 1,5% ou R:R abaixo de 1:2 no preço executável.");
           return;
        }
-       lotSize = CalculatePriceActionRiskLot(entry, stopLoss);
+       lotSize = CalculatePriceActionRiskLot(entry, stopLoss, estimatedRoundTripCost);
        if (lotSize <= 0)
        {
           Print("⛔ Price Action recusado: lote mínimo do broker excede o orçamento de risco ou tick value indisponível.");
