@@ -1180,7 +1180,7 @@ void MonitorOpenPositions()
           }
        }
 
-// Autonomous Price Action mode uses only deterministic local protection and fixed SL/TP.
+// With AI review disabled, the server blocks new entries; existing positions retain local SL/TP protection.
       if (IsPriceActionCryptoSymbol() && !PriceActionUseAIReview)
          continue;
 
