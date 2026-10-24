@@ -383,6 +383,7 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
         return res.json({
           action: 'HOLD',
           confidence: 0,
+          executionEnabled: false,
           code: 'PRICE_ACTION_GATE_REJECTED',
           reason: 'A estratégia determinística não aprovou a entrada. A IA não pode criar sinal sem setup válido.',
           strategyAction: priceActionSetup.action,
