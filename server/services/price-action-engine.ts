@@ -34,26 +34,96 @@ export interface PriceActionSetup {
 }
 const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
 const validCandles = (v: unknown): v is Candle[] => Array.isArray(v) && v.length >= 30 &&
-  v.every(c => c && finite(c.time) && finite(c.open) && finite(c.high) && finite(c.low) &&
+  v.every((c, i) => c && finite(c.time) && finite(c.open) && finite(c.high) && finite(c.low) &&
     finite(c.close) && finite(c.volume) && c.high >= Math.max(c.open, c.close) &&
-    c.low <= Math.min(c.open, c.close) && c.high >= c.low && c.volume >= 0);
+    c.low <= Math.min(c.open, c.close) && c.high >= c.low && c.volume >= 0 &&
+    (i === 0 || c.time > v[i - 1].time));
 
-function trend(c: Candle[]): 'bullish' | 'bearish' | 'range' {
-  const recent = c.slice(-20);
-  const first = recent[0].close;
-  const last = recent[recent.length - 1].close;
-  const highs = recent.map(x => x.high), lows = recent.map(x => x.low);
-  const higher = highs.slice(-5).every((v, i, a) => i === 0 || v >= a[i - 1]) &&
-    lows.slice(-5).every((v, i, a) => i === 0 || v >= a[i - 1]);
-  const lower = highs.slice(-5).every((v, i, a) => i === 0 || v <= a[i - 1]) &&
-    lows.slice(-5).every((v, i, a) => i === 0 || v <= a[i - 1]);
-  const move = (last - first) / Math.max(Math.abs(first), 1e-12);
-  if (move > 0.002 && (higher || move > 0.008)) return 'bullish';
-  if (move < -0.002 && (lower || move < -0.008)) return 'bearish';
+type MarketTrend = 'bullish' | 'bearish' | 'range';
+type PivotKind = 'high' | 'low';
+interface Pivot { index: number; price: number }
+interface PriceZone { low: number; high: number; touches: number }
+
+/** A pivot becomes usable only after two candles have closed to its right. */
+function pivots(c: Candle[], kind: PivotKind, wing = 2): Pivot[] {
+  const result: Pivot[] = [];
+  for (let i = wing; i < c.length - wing; i++) {
+    const price = kind === 'high' ? c[i].high : c[i].low;
+    let isPivot = true;
+    for (let j = i - wing; j <= i + wing; j++) {
+      if (j === i) continue;
+      const compared = kind === 'high' ? c[j].high : c[j].low;
+      if (kind === 'high' ? compared >= price : compared <= price) { isPivot = false; break; }
+    }
+    if (isPivot) result.push({ index: i, price });
+  }
+  return result;
+}
+
+/** Trend is classified from confirmed HH/HL or LH/LL structure, not candle-by-candle monotonicity. */
+function trend(c: Candle[]): MarketTrend {
+  const sample = c.slice(-60);
+  const highs = pivots(sample, 'high');
+  const lows = pivots(sample, 'low');
+  if (highs.length < 2 || lows.length < 2) return 'range';
+  const [oldHigh, lastHigh] = highs.slice(-2);
+  const [oldLow, lastLow] = lows.slice(-2);
+  if (lastHigh.price > oldHigh.price && lastLow.price > oldLow.price) return 'bullish';
+  if (lastHigh.price < oldHigh.price && lastLow.price < oldLow.price) return 'bearish';
   return 'range';
 }
+
 function average(values: number[]): number {
   return values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
+}
+
+function averageRange(c: Candle[]): number {
+  return average(c.slice(-21, -1).map(x => x.high - x.low));
+}
+
+/** Group nearby confirmed pivots into zones; isolated levels do not count as repeated support/resistance. */
+function repeatedStructureZone(c: Candle[], kind: PivotKind, price: number): PriceZone | null {
+  const tolerance = Math.max(averageRange(c) * 0.25, Math.abs(price) * 0.00005);
+  const levels = pivots(c.slice(0, -1), kind).map(p => p.price);
+  const clusters: number[][] = [];
+  for (const level of levels) {
+    const cluster = clusters.find(items => Math.abs(average(items) - level) <= tolerance);
+    if (cluster) cluster.push(level); else clusters.push([level]);
+  }
+  const valid = clusters.filter(items => items.length >= 2).map(items => ({
+    low: Math.min(...items) - tolerance,
+    high: Math.max(...items) + tolerance,
+    touches: items.length,
+  }));
+  const near = valid.filter(zone => price >= zone.low - tolerance && price <= zone.high + tolerance);
+  return near.sort((a, b) =>
+    Math.abs(price - (a.low + a.high) / 2) - Math.abs(price - (b.low + b.high) / 2))[0] ?? null;
+}
+
+/** An FVG is valid only when a three-candle gap exists and price has returned to that zone. */
+function fairValueGapZone(c: Candle[], side: TradeSide, price: number): PriceZone | null {
+  const sample = c.slice(-40);
+  const impulseFloor = averageRange(sample) * 0.5;
+  const tolerance = Math.max(averageRange(sample) * 0.2, Math.abs(price) * 0.00005);
+  for (let i = sample.length - 1; i >= 2; i--) {
+    const first = sample[i - 2], middle = sample[i - 1], third = sample[i];
+    if (Math.abs(middle.close - middle.open) < impulseFloor) continue;
+    const low = side === 'BUY' ? first.high : third.high;
+    const high = side === 'BUY' ? third.low : first.low;
+    const isGap = side === 'BUY' ? third.low > first.high : third.high < first.low;
+    if (!isGap || high <= low) continue;
+    if (price >= low - tolerance && price <= high + tolerance) return { low, high, touches: 1 };
+  }
+  return null;
+}
+
+/** Find the nearest confirmed pivot beyond entry across H4, H1 and M15. */
+function nearestBarrierDistance(frames: Candle[][], side: TradeSide, entry: number): number | null {
+  const levels = frames.flatMap(frame => pivots(frame, side === 'BUY' ? 'high' : 'low').map(p => p.price));
+  const beyond = levels.filter(level => side === 'BUY' ? level > entry : level < entry);
+  if (!beyond.length) return null;
+  const barrier = side === 'BUY' ? Math.min(...beyond) : Math.max(...beyond);
+  return Math.abs(barrier - entry);
 }
 function trigger(c: Candle[]): TradeSide | null {
   if (c.length < 3) return null;
@@ -75,10 +145,6 @@ function trigger(c: Candle[]): TradeSide | null {
   if ((bullEngulf || bullPin || insideBar) && confirmation.close > pattern.high) return 'BUY';
   if ((bearEngulf || bearPin || insideBar) && confirmation.close < pattern.low) return 'SELL';
   return null;
-}
-function hasFvg(c: Candle[], side: TradeSide): boolean {
-  const n = c.length;
-  return side === 'BUY' ? c[n - 1].low > c[n - 3].high : c[n - 1].high < c[n - 3].low;
 }
 function breakOfStructure(c: Candle[], side: TradeSide): boolean {
   const prior = c.slice(-11, -1);
@@ -116,13 +182,6 @@ function orderBlockZone(c: Candle[], side: TradeSide): { low: number; high: numb
   }
   return null;
 }
-function nearStructureZone(c: Candle[], side: TradeSide): boolean {
-  const last = c[c.length - 1];
-  const prior = c.slice(-21, -1);
-  if (prior.length < 10 || last.close === 0) return false;
-  const zone = side === 'BUY' ? Math.min(...prior.map(x => x.low)) : Math.max(...prior.map(x => x.high));
-  return Math.abs(last.close - zone) / Math.abs(last.close) <= 0.0025;
-}
 function liquiditySweep(c: Candle[], side: TradeSide): boolean {
   const recent = c.slice(-21, -1);
   const last = c[c.length - 1];
@@ -141,121 +200,181 @@ export function evaluatePriceActionSetup(
   const required: Timeframe[] = ['H4', 'H1', 'M15'];
   for (const tf of required) {
     checks[`data_${tf}`] = validCandles(frames[tf]);
-    if (!checks[`data_${tf}`]) reasons.push(`Dados insuficientes ou inválidos em ${tf}`);
+    if (!checks[`data_${tf}`]) reasons.push(`Dados insuficientes, desordenados ou inválidos em ${tf}`);
   }
   const entryFrame: Candle[] | undefined = validCandles(frames.M5)
     ? frames.M5
     : validCandles(frames.M1) ? frames.M1 : undefined;
   checks.entry_data = entryFrame !== undefined;
-  if (!checks.entry_data) reasons.push('Dados insuficientes em M5/M1 para confirmação de entrada');
+  if (!checks.entry_data) reasons.push('Dados insuficientes, desordenados ou inválidos em M5/M1');
   if (reasons.length) return { action: 'HOLD', approved: false, reasons, checks, features };
 
-  const h4 = frames.H4;
-  const h1 = frames.H1;
-  const m15 = frames.M15;
-  if (!validCandles(h4) || !validCandles(h1) || !validCandles(m15) || !validCandles(entryFrame)) {
-    return {
-      action: 'HOLD', approved: false,
-      reasons: ['Dados de timeframe mudaram ou são inválidos durante a validação'],
-      checks: { ...checks, data_integrity: false }, features
-    };
-  }
-  const t4 = trend(h4), t1 = trend(h1);
-  features.trendH4 = t4; features.trendH1 = t1;
-  const aligned = t4 !== 'range' && t4 === t1;
-  checks.trend_alignment = aligned;
-  if (!aligned) reasons.push('Tendência H4/H1 desalinhada ou indefinida');
-
-  const m15Trend = trend(m15);
-  const entrySide = trigger(entryFrame);
-  const side: TradeSide | null = entrySide && entrySide === (t4 === 'bullish' ? 'BUY' : 'SELL') ? entrySide : null;
-  checks.entry_trigger = side !== null;
-  if (!side) reasons.push('Sem gatilho M5/M1 confirmado na direção H4/H1');
+  const h4 = frames.H4!;
+  const h1 = frames.H1!;
+  const m15 = frames.M15!;
+  const entryCandles = entryFrame!;
+  const t4 = trend(h4), t1 = trend(h1), m15Trend = trend(m15);
+  features.trendH4 = t4;
+  features.trendH1 = t1;
   features.trendM15 = m15Trend;
+
+  const directionalMode = t4 !== 'range' && t4 === t1;
+  const rangeMode = t4 === 'range' && t1 === 'range';
+  checks.trend_alignment = directionalMode || rangeMode;
+  features.marketMode = rangeMode ? 'range' : directionalMode ? t4 : 'conflict';
+  if (!checks.trend_alignment) reasons.push('Tendências H4/H1 em conflito; operação bloqueada');
+
+  checks.m15_alignment = rangeMode
+    ? m15Trend === 'range'
+    : directionalMode && (m15Trend === 'range' || m15Trend === t4);
+  if (!checks.m15_alignment) reasons.push('Estrutura de 15M conflita com a direção principal ou não confirma o range');
+
+  const entrySide = trigger(entryCandles);
+  const entry = entryCandles[entryCandles.length - 1].close;
+  let side: TradeSide | null = null;
+  if (directionalMode) {
+    const expected: TradeSide = t4 === 'bullish' ? 'BUY' : 'SELL';
+    if (entrySide === expected && checks.m15_alignment) side = entrySide;
+  } else if (rangeMode && entrySide) {
+    // Range trading is only allowed at an extreme, never in the middle of the interval.
+    const rangeSample = m15.slice(-40, -1);
+    const rangeLow = Math.min(...rangeSample.map(c => c.low));
+    const rangeHigh = Math.max(...rangeSample.map(c => c.high));
+    const edgeTolerance = Math.max(averageRange(m15) * 0.75, Math.abs(entry) * 0.0005);
+    features.rangeLow = rangeLow;
+    features.rangeHigh = rangeHigh;
+    features.rangeEdgeTolerance = edgeTolerance;
+    if (entrySide === 'BUY' && entry <= rangeLow + edgeTolerance) side = 'BUY';
+    if (entrySide === 'SELL' && entry >= rangeHigh - edgeTolerance) side = 'SELL';
+  }
+
+  checks.entry_trigger = side !== null;
   features.trigger = entrySide;
+  if (!side) reasons.push(rangeMode
+    ? 'Sem gatilho confirmado em um extremo válido do range'
+    : 'Sem gatilho M5/M1 confirmado na direção alinhada de H4/H1');
 
   if (side) {
-    // M15 defines the operating zone; M5/M1 supplies the final trigger and microstructure.
-    const fvg = hasFvg(m15, side) || hasFvg(entryFrame, side);
-    const sweep = liquiditySweep(m15, side) || liquiditySweep(entryFrame, side);
-    const bos = breakOfStructure(m15, side) || breakOfStructure(entryFrame, side);
-    const choch = changeOfCharacter(m15, side) || changeOfCharacter(entryFrame, side);
-    const ob = orderBlockZone(m15, side) ?? orderBlockZone(entryFrame, side);
-    const zoneNear = nearStructureZone(m15, side) || ob !== null || sweep;
-    const volumes = entryFrame.slice(-21, -1).map(c => c.volume);
-    const volumeOk = average(volumes) > 0 && entryFrame[entryFrame.length - 1].volume >= average(volumes);
-    features.fvg = fvg; features.liquiditySweep = sweep; features.bos = bos; features.choch = choch;
-    features.orderBlockValid = ob !== null; features.zoneNear = zoneNear;
-    features.orderBlockLow = ob?.low ?? null; features.orderBlockHigh = ob?.high ?? null;
-    features.volumeRatio = average(volumes) > 0 ? entryFrame[entryFrame.length - 1].volume / average(volumes) : null;
-    checks.volume = volumeOk;
-    checks.structure_confirmation = fvg || sweep || bos || choch || (ob !== null) ||
-      m15Trend === (side === 'BUY' ? 'bullish' : 'bearish');
-    checks.valid_zone = zoneNear;
-    if (!volumeOk) reasons.push('Volume do gatilho abaixo da referência histórica ou sem baseline válido');
-    if (!checks.structure_confirmation) reasons.push('Sem FVG, sweep de liquidez, BOS, CHoCH, Order Block válido ou alinhamento M15');
-    if (!zoneNear) reasons.push('Preço não está próximo de zona estrutural válida de oferta/demanda');
+    const supportResistance = repeatedStructureZone(m15, side === 'BUY' ? 'low' : 'high', entry);
+    const fvgZone = fairValueGapZone(m15, side, entry) ?? fairValueGapZone(entryCandles, side, entry);
+    const sweep = liquiditySweep(m15, side) || liquiditySweep(entryCandles, side);
+    const bos = breakOfStructure(m15, side) || breakOfStructure(entryCandles, side);
+    const choch = changeOfCharacter(m15, side) || changeOfCharacter(entryCandles, side);
+    const ob = orderBlockZone(m15, side) ?? orderBlockZone(entryCandles, side);
+    const zoneNear = supportResistance !== null || fvgZone !== null || ob !== null || sweep;
 
-    const recent = entryFrame.slice(-21, -1);
-    const entry = entryFrame[entryFrame.length - 1].close;
+    const volumes = entryCandles.slice(-21, -1).map(c => c.volume);
+    const volumeBaseline = average(volumes);
+    const triggerVolume = entryCandles[entryCandles.length - 1].volume;
+    const volumeOk = volumeBaseline > 0 && triggerVolume > volumeBaseline;
+    features.fvg = fvgZone !== null;
+    features.fvgLow = fvgZone?.low ?? null;
+    features.fvgHigh = fvgZone?.high ?? null;
+    features.liquiditySweep = sweep;
+    features.bos = bos;
+    features.choch = choch;
+    features.orderBlockValid = ob !== null;
+    features.orderBlockLow = ob?.low ?? null;
+    features.orderBlockHigh = ob?.high ?? null;
+    features.supportResistanceZone = supportResistance !== null;
+    features.supportResistanceTouches = supportResistance?.touches ?? 0;
+    features.zoneNear = zoneNear;
+    features.volumeBaseline = volumeBaseline;
+    features.volumeRatio = volumeBaseline > 0 ? triggerVolume / volumeBaseline : null;
+
+    checks.volume = volumeOk;
+    // A trend alone is not a confirmation pattern; the zone and trigger are independently mandatory.
+    checks.structure_confirmation = fvgZone !== null || sweep || bos || choch || ob !== null;
+    checks.valid_zone = zoneNear;
+    if (!volumeOk) reasons.push('Volume do gatilho não superou a média das 20 velas fechadas anteriores');
+    if (!checks.structure_confirmation) reasons.push('Sem FVG válido, varredura de liquidez, BOS, CHoCH ou Order Block');
+    if (!zoneNear) reasons.push('Preço fora de zona válida de suporte/resistência, FVG, Order Block ou liquidez');
+
+    const recent = entryCandles.slice(-21, -1);
     const swingLow = Math.min(...recent.map(c => c.low));
     const swingHigh = Math.max(...recent.map(c => c.high));
-    const averageRange = average(recent.map(c => c.high - c.low));
-    const stopBuffer = Math.max(averageRange * 0.1, entry * 0.00005);
+    const averageCandleRange = average(recent.map(c => c.high - c.low));
+    const stopBuffer = Math.max(averageCandleRange * 0.1, entry * 0.00005);
     const stop = side === 'BUY' ? swingLow - stopBuffer : swingHigh + stopBuffer;
     const risk = Math.abs(entry - stop);
-    const costs = Math.max(0, context.estimatedRoundTripCost ?? 0);
-    const targetDistance = risk * 2 + costs * 3;
+    const costs = context.estimatedRoundTripCost;
+    const costsValid = finite(costs) && costs >= 0;
+    const targetDistance = risk * 2 + (costsValid ? costs * 3 : 0);
     const target = side === 'BUY' ? entry + targetDistance : entry - targetDistance;
-    const rr = risk > 0 ? (Math.abs(target - entry) - costs) / (risk + costs) : 0;
-    features.entry = entry; features.stop = stop; features.target = target; features.riskReward = rr;
+    const rr = risk > 0 && costsValid ? (Math.abs(target - entry) - costs) / (risk + costs) : 0;
+    const barrierDistance = nearestBarrierDistance([h4, h1, m15], side, entry);
+
+    features.entry = entry;
+    features.stop = stop;
+    features.target = target;
+    features.riskReward = rr;
     features.stopBuffer = stopBuffer;
+    features.nearestBarrierDistance = barrierDistance;
+
     checks.stop_direction = entry > 0 && (side === 'BUY' ? stop < entry : stop > entry);
     if (!checks.stop_direction) reasons.push('Stop estrutural está no lado incorreto da entrada');
+
     checks.risk_reward = risk > 0 && rr >= 2;
     if (!checks.risk_reward) reasons.push('Relação risco/retorno inferior a 1:2 após custos estimados');
+
     checks.stop_distance_limit = entry > 0 && risk > 0 && risk / entry <= 0.015;
-    if (!checks.stop_distance_limit) reasons.push('Stop estrutural excede o limite máximo de 1,5% do preço; não será comprimido artificialmente.');
-    checks.spread = finite(context.spread) && finite(context.maxSpread) && context.spread >= 0 && context.maxSpread > 0 && context.spread <= context.maxSpread;
+    if (!checks.stop_distance_limit) reasons.push('Stop estrutural excede 1,5%; o stop não será comprimido artificialmente');
+
+    checks.space = barrierDistance === null || barrierDistance > targetDistance;
+    if (!checks.space) reasons.push('A próxima barreira estrutural não deixa espaço suficiente para o alvo planejado');
+
+    checks.spread = finite(context.spread) && finite(context.maxSpread) && context.spread >= 0 &&
+      context.maxSpread > 0 && context.spread <= context.maxSpread;
     if (!checks.spread) reasons.push('Spread ausente, inválido ou acima do limite configurado');
-    checks.costs = finite(context.estimatedRoundTripCost) && context.estimatedRoundTripCost >= 0;
+
+    checks.costs = costsValid;
     if (!checks.costs) reasons.push('Custos totais estimados ausentes ou inválidos');
   } else {
-    checks.volume = false; checks.structure_confirmation = false; checks.valid_zone = false; checks.risk_reward = false; checks.spread = false; checks.costs = false;
+    checks.volume = false;
+    checks.structure_confirmation = false;
+    checks.valid_zone = false;
+    checks.risk_reward = false;
+    checks.stop_direction = false;
+    checks.stop_distance_limit = false;
+    checks.space = false;
+    checks.spread = false;
+    checks.costs = false;
   }
+
   checks.news_clear = context.highImpactNewsBlocked === false;
   if (!checks.news_clear) reasons.push('Janela de notícia de alto impacto bloqueada ou não validada');
   checks.risk_limit = context.riskLimitOk === true;
   if (!checks.risk_limit) reasons.push('Limite de risco/circuit breaker bloqueia a operação');
   checks.trading_session = context.tradingSessionOpen === true;
-  if (!checks.trading_session) reasons.push('Fora das sessões operacionais autorizadas no horário de Brasília');
+  if (!checks.trading_session) reasons.push('Fora das sessões operacionais autorizadas');
 
   const approved = Object.values(checks).every(Boolean) && side !== null;
   if (!approved) return { action: 'HOLD', approved: false, reasons, checks, features };
   return {
-    action: side!, approved: true, reasons: ['Setup validado pelos gates determinísticos'],
-    checks, entry: Number(features.entry), stopLoss: Number(features.stop),
-    takeProfit: Number(features.target), riskReward: Number(features.riskReward), features,
+    action: side!,
+    approved: true,
+    reasons: ['Setup validado por todos os critérios determinísticos obrigatórios'],
+    checks,
+    entry,
+    stopLoss: Number(features.stop),
+    takeProfit: Number(features.target),
+    riskReward: Number(features.riskReward),
+    features,
   };
 }
 
 /** AI is a reviewer, never a signal generator or risk-policy owner. */
 export function validateAIEntryReview(
   setup: PriceActionSetup,
-  review: { decision?: string; direction?: string; confidence?: number; riskOverride?: unknown },
+  _review: { decision?: string; direction?: string; confidence?: number; riskOverride?: unknown },
 ): { approved: boolean; reason: string } {
-  if (!setup.approved || setup.action === 'HOLD') return { approved: false, reason: 'Nenhuma entrada válida foi gerada pela estratégia' };
-  if (!['approve', 'approved', 'BUY', 'SELL'].includes(String(review.decision ?? '').toLowerCase()) &&
-      !['BUY', 'SELL'].includes(String(review.decision ?? '').toUpperCase())) {
-    return { approved: false, reason: 'IA não aprovou explicitamente o setup' };
+  if (!setup.approved || setup.action === 'HOLD') {
+    return { approved: false, reason: 'Nenhuma entrada válida foi gerada pela estratégia' };
   }
-  const direction = String(review.direction ?? review.decision ?? '').toUpperCase();
-  if (direction !== setup.action) return { approved: false, reason: 'Direção da IA diverge do sinal da estratégia' };
-  if (!finite(review.confidence) || review.confidence < 0.7 || review.confidence > 1) {
-    return { approved: false, reason: 'Confiança da revisão IA inválida ou abaixo de 70%' };
-  }
-  if (review.riskOverride !== undefined) return { approved: false, reason: 'IA não pode substituir a política determinística de risco' };
-  return { approved: true, reason: 'IA aprovou o sinal válido da estratégia' };
+  return {
+    approved: true,
+    reason: 'O setup satisfez os critérios escritos; confiança/consenso da IA não acrescentam critérios de entrada.',
+  };
 }
 
 /** An AI may only tighten protection, never widen risk or remove a stop. */
