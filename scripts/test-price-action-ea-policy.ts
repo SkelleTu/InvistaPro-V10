@@ -5,15 +5,20 @@ const ea = readFileSync(new URL('../public/downloads/InvistaPRO_EA.mq5', import.
 const route = readFileSync(new URL('../server/routes/metatrader-routes.ts', import.meta.url), 'utf8');
 
 assert.ok(ea.includes('PriceActionRiskPercent = 1.0'), 'EA must expose the bounded Price Action risk setting');
-assert.ok(ea.includes('PriceActionUseAIReview = true'), 'EA must expose the optional diagnostic AI review setting');
+assert.ok(ea.includes('PriceActionUseAIReview = true'), 'EA must enable the strategy-mandated AI review by default');
 assert.ok(ea.includes('PriceActionExtraRoundTripCostPerLot = 0.0'), 'EA must require an explicit broker cost estimate before Price Action sizing');
 assert.ok(ea.includes('priceActionUseAIReview'), 'EA must transmit the selected Price Action mode to the server');
 assert.ok(ea.includes('CopyRates(g_symbol, timeframe, 1, count, rates)'), 'EA must transmit closed candles, not the live unfinished candle');
-assert.ok(route.includes('reviewPriceActionCandidate'), 'A live AI review must be available for strategy diagnostics');
-assert.ok(route.includes('validateAIEntryReview'), 'AI review must be evaluated for diagnostics against the deterministic candidate');
-assert.ok(route.includes('diagnostic_only'), 'AI disagreement must remain diagnostic rather than becoming an undocumented entry veto');
+assert.ok(route.includes('reviewPriceActionCandidate'), 'The approved deterministic candidate must receive an AI review');
+assert.ok(route.includes('validateAIEntryReview'), 'The AI decision must be validated against the deterministic candidate');
+assert.ok(route.includes('PRICE_ACTION_AI_REVIEW_REJECTED'), 'An AI rejection or direction mismatch must produce HOLD');
+assert.ok(route.includes('priceActionSetup.checks,\n        priceActionSetup.features'), 'The reviewer must receive the actual deterministic checklist and structure');
+assert.ok(!route.includes('diagnostic_only'), 'AI must not be treated as diagnostic-only when the source requires strategy validation');
 assert.ok(route.includes('const stableSignalId ='), 'Repeated polls for the same closed trigger candle must reuse a stable signal id');
 assert.ok(!route.includes('finalConfidence < 70'), 'The strategy route must not impose an undocumented 70% confidence veto');
+const aiReviewSource = readFileSync(new URL('../server/services/huggingface-ai.ts', import.meta.url), 'utf8');
+assert.ok(!aiReviewSource.includes('approvals.length <= validReviews.length / 2'), 'No undocumented multi-model majority quorum may veto the strategy');
+assert.ok(aiReviewSource.includes('strategyChecks'), 'AI review must consume the server-computed mandatory checklist');
 assert.ok(ea.includes('requestAccountType'), 'EA must transmit its actual terminal account mode on each signal request');
 assert.ok(ea.includes('openPositionTickets'), 'EA heartbeat must send exact broker position tickets for reconciliation');
 assert.ok(ea.includes('openPositionTicketsJson'), 'EA must build the actual open-position snapshot rather than reporting only a count');
