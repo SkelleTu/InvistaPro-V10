@@ -18,6 +18,8 @@ assert.ok(routes.includes('zones: priceActionSetup.zones ?? []'), 'Rejected setu
 assert.ok(!routes.includes('PRICE_ACTION_AI_REVIEW_REJECTED'), 'A fixed AI confidence/consensus gate must not veto a valid strategy setup');
 assert.ok(ea.includes('CopyRates(g_symbol, timeframe, 1, count, rates)'), 'Strategy candles must exclude the unfinished bar');
 assert.ok(ea.includes('CalculatePriceActionRiskLot'), 'EA must size Price Action orders from equity and structural stop');
+assert.ok(ea.includes('riskCash / (lossPerLot + costPerLot)'), 'EA position size must reserve commission/slippage costs as well as stop loss');
+assert.ok(ea.includes('ExtractJsonDouble(resp, "estimatedRoundTripCost")'), 'EA must receive the trusted cost estimate used by the server gate');
 assert.ok(ea.includes('OrderCalcMargin(orderType, g_symbol, volume, entryPrice, requiredMargin)'), 'EA must validate broker-required margin before opening');
 assert.ok(ea.includes('FindPriceActionStructuralStop(posType, curPrice)'), 'EA must trail stops from confirmed M5 swings after +1.5R');
 assert.ok(bridge.includes('recentTrades: this.recentTrades.slice(0, 20)'), 'Risk controls must receive newest trades for daily limits/cooldown');
