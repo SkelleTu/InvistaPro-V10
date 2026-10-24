@@ -288,6 +288,7 @@ export function evaluatePriceActionSetup(
   const reasons: string[] = [];
   const checks: Record<string, boolean> = {};
   const features: PriceActionSetup['features'] = {};
+  const zones: PriceActionZone[] = [];
   const required: Timeframe[] = ['H4', 'H1', 'M15'];
   for (const tf of required) {
     checks[`data_${tf}`] = validClosedCandles(frames[tf], tf);
@@ -299,12 +300,12 @@ export function evaluatePriceActionSetup(
   let entryCandles: Candle[] | undefined = entryOptions[0];
   checks.entry_data = entryOptions.length > 0;
   if (!checks.entry_data) reasons.push('Dados insuficientes, desordenados ou inválidos em M5/M1');
-  if (reasons.length) return { action: 'HOLD', approved: false, reasons, checks, features };
+  if (reasons.length) return { action: 'HOLD', approved: false, reasons, checks, features, zones };
 
   const h4 = frames.H4!;
   const h1 = frames.H1!;
   const m15 = frames.M15!;
-  const entryCandles = entryFrame!;
+  const initialEntryCandles = entryCandles!;
   const t4 = trend(h4), t1 = trend(h1), m15Trend = trend(m15);
   features.trendH4 = t4;
   features.trendH1 = t1;
@@ -321,8 +322,8 @@ export function evaluatePriceActionSetup(
     : directionalMode && (m15Trend === 'range' || m15Trend === t4);
   if (!checks.m15_alignment) reasons.push('Estrutura de 15M conflita com a direção principal ou não confirma o range');
 
-  let entrySide = trigger(entryCandles!);
-  let entry = entryCandles![entryCandles!.length - 1].close;
+  let entrySide = trigger(initialEntryCandles);
+  let entry = initialEntryCandles[initialEntryCandles.length - 1].close;
   let side: TradeSide | null = null;
   const triggerOptions = entryOptions.map(candles => ({
     candles,
@@ -371,14 +372,66 @@ export function evaluatePriceActionSetup(
 
   if (side) {
     const selectedEntryCandles = entryCandles!;
-    const supportResistance = repeatedStructureZone(m15, side === 'BUY' ? 'low' : 'high', entry);
-    const fvgZone = fairValueGapZone(m15, side, entry) ?? fairValueGapZone(selectedEntryCandles, side, entry);
-    const sweep = liquiditySweep(m15, side) || liquiditySweep(selectedEntryCandles, side);
+    const selectedEntryTimeframe: Timeframe = entryCandles === validM5 ? 'M5' : 'M1';
+    const supportResistance = repeatedStructureZone(m15, side === 'BUY' ? 'low' : 'high', entry, 'M15');
+    const fvgOnM15 = fairValueGapZone(m15, side, entry, 'M15');
+    const fvgZone = fvgOnM15 ?? fairValueGapZone(selectedEntryCandles, side, entry, selectedEntryTimeframe);
+    const sweepOnM15 = liquiditySweep(m15, side);
+    const sweepOnEntry = !sweepOnM15 && liquiditySweep(selectedEntryCandles, side);
+    const sweep = sweepOnM15 || sweepOnEntry;
     const bos = breakOfStructure(m15, side) || breakOfStructure(selectedEntryCandles, side);
     const choch = changeOfCharacter(m15, side) || changeOfCharacter(selectedEntryCandles, side);
-    const ob = orderBlockZone(m15, side) ?? orderBlockZone(selectedEntryCandles, side);
+    const obOnM15 = orderBlockZone(m15, side, 'M15');
+    const ob = obOnM15 ?? orderBlockZone(selectedEntryCandles, side, selectedEntryTimeframe);
     const rangeEdgeQualified = rangeMode && side !== null;
     const zoneNear = rangeEdgeQualified || supportResistance !== null || fvgZone !== null || ob !== null || sweep;
+
+    if (supportResistance) zones.push(supportResistance);
+    if (fvgZone) zones.push(fvgZone);
+    if (ob) zones.push(ob);
+    if (sweep) {
+      const sweepCandles = sweepOnM15 ? m15 : selectedEntryCandles;
+      const sweepTimeframe: Timeframe = sweepOnM15 ? 'M15' : selectedEntryTimeframe;
+      const sweepSample = sweepCandles.slice(-21, -1);
+      const sweepLevel = side === 'BUY'
+        ? Math.min(...sweepSample.map(candle => candle.low))
+        : Math.max(...sweepSample.map(candle => candle.high));
+      const sweepWidth = Math.max(averageRange(sweepCandles) * 0.2, Math.abs(sweepLevel) * 0.00005);
+      const sweepPivots = pivots(sweepCandles, side === 'BUY' ? 'low' : 'high')
+        .filter(pivot => Math.abs(pivot.price - sweepLevel) <= sweepWidth)
+        .sort((a, b) => b.index - a.index);
+      const sweepOrigin = sweepPivots[0];
+      zones.push({
+        type: 'liquidity',
+        low: sweepLevel - sweepWidth,
+        high: sweepLevel + sweepWidth,
+        timeframe: sweepTimeframe,
+        originTime: sweepOrigin ? sweepCandles[sweepOrigin.index].time : sweepSample[0].time,
+        identifiedAt: sweepCandles[sweepCandles.length - 1].time,
+        reactions: 1,
+        invalidationPrice: side === 'BUY' ? sweepLevel - sweepWidth : sweepLevel + sweepWidth,
+        state: 'valid',
+        direction: side,
+      });
+    }
+    if (rangeEdgeQualified && finite(features.rangeLow) && finite(features.rangeHigh) && finite(features.rangeEdgeTolerance)) {
+      const rangeEdge = side === 'BUY' ? Number(features.rangeLow) : Number(features.rangeHigh);
+      const edgeTolerance = Number(features.rangeEdgeTolerance);
+      const rangeSample = m15.slice(-40, -1);
+      const reactions = rangeSample.filter(candle => Math.abs((side === 'BUY' ? candle.low : candle.high) - rangeEdge) <= edgeTolerance).length;
+      zones.push({
+        type: side === 'BUY' ? 'support' : 'resistance',
+        low: rangeEdge - edgeTolerance,
+        high: rangeEdge + edgeTolerance,
+        timeframe: 'M15',
+        originTime: rangeSample[0].time,
+        identifiedAt: m15[m15.length - 1].time,
+        reactions,
+        invalidationPrice: side === 'BUY' ? rangeEdge - edgeTolerance : rangeEdge + edgeTolerance,
+        state: 'valid',
+        direction: side,
+      });
+    }
 
     const volumes = selectedEntryCandles.slice(-21, -1).map(c => c.volume);
     const volumeBaseline = average(volumes);
@@ -387,14 +440,31 @@ export function evaluatePriceActionSetup(
     features.fvg = fvgZone !== null;
     features.fvgLow = fvgZone?.low ?? null;
     features.fvgHigh = fvgZone?.high ?? null;
+    features.fvgOriginTime = fvgZone?.originTime ?? null;
+    features.fvgIdentifiedAt = fvgZone?.identifiedAt ?? null;
+    features.fvgTimeframe = fvgZone?.timeframe ?? null;
+    features.fvgInvalidationPrice = fvgZone?.invalidationPrice ?? null;
+    features.fvgState = fvgZone?.state ?? null;
     features.liquiditySweep = sweep;
     features.bos = bos;
     features.choch = choch;
     features.orderBlockValid = ob !== null;
     features.orderBlockLow = ob?.low ?? null;
     features.orderBlockHigh = ob?.high ?? null;
+    features.orderBlockOriginTime = ob?.originTime ?? null;
+    features.orderBlockIdentifiedAt = ob?.identifiedAt ?? null;
+    features.orderBlockTimeframe = ob?.timeframe ?? null;
+    features.orderBlockInvalidationPrice = ob?.invalidationPrice ?? null;
+    features.orderBlockState = ob?.state ?? null;
     features.supportResistanceZone = supportResistance !== null;
-    features.supportResistanceTouches = supportResistance?.touches ?? 0;
+    features.supportResistanceTouches = supportResistance?.reactions ?? 0;
+    features.supportResistanceLow = supportResistance?.low ?? null;
+    features.supportResistanceHigh = supportResistance?.high ?? null;
+    features.supportResistanceOriginTime = supportResistance?.originTime ?? null;
+    features.supportResistanceIdentifiedAt = supportResistance?.identifiedAt ?? null;
+    features.supportResistanceTimeframe = supportResistance?.timeframe ?? null;
+    features.supportResistanceInvalidationPrice = supportResistance?.invalidationPrice ?? null;
+    features.supportResistanceState = supportResistance?.state ?? null;
     features.rangeEdgeQualified = rangeEdgeQualified;
     features.zoneNear = zoneNear;
     features.volumeBaseline = volumeBaseline;
@@ -478,7 +548,7 @@ export function evaluatePriceActionSetup(
   if (!checks.trading_session) reasons.push('Fora das sessões operacionais autorizadas');
 
   const approved = Object.values(checks).every(Boolean) && side !== null;
-  if (!approved) return { action: 'HOLD', approved: false, reasons, checks, features };
+  if (!approved) return { action: 'HOLD', approved: false, reasons, checks, features, zones };
   return {
     action: side!,
     approved: true,
@@ -489,6 +559,7 @@ export function evaluatePriceActionSetup(
     takeProfit: Number(features.target),
     riskReward: Number(features.riskReward),
     features,
+    zones,
   };
 }
 
