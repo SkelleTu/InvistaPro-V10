@@ -12,6 +12,7 @@ assert.ok(ea.includes('CopyRates(g_symbol, timeframe, 1, count, rates)'), 'EA mu
 assert.ok(route.includes('reviewPriceActionCandidate'), 'The approved deterministic candidate must receive an AI review');
 assert.ok(route.includes('validateAIEntryReview'), 'The AI decision must be validated against the deterministic candidate');
 assert.ok(route.includes('PRICE_ACTION_AI_REVIEW_REJECTED'), 'An AI rejection or direction mismatch must produce HOLD');
+assert.ok(route.includes('PRICE_ACTION_ENDPOINT_REQUIRED'), 'Generic signal fallback must never bypass the Price Action checklist');
 assert.ok(route.includes('priceActionSetup.checks,\n        priceActionSetup.features'), 'The reviewer must receive the actual deterministic checklist and structure');
 assert.ok(!route.includes('diagnostic_only'), 'AI must not be treated as diagnostic-only when the source requires strategy validation');
 assert.ok(route.includes('const stableSignalId ='), 'Repeated polls for the same closed trigger candle must reuse a stable signal id');
