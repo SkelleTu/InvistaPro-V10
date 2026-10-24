@@ -411,9 +411,8 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
       }
 
       // Do not feed the same crypto request into the legacy generator; it could create a competing signal.
-      const useM5ForReview = isValidPriceActionCandles(frames.M5);
-      const reviewTimeframe: 'M5' | 'M1' = useM5ForReview ? 'M5' : 'M1';
-      const reviewFrame = useM5ForReview ? frames.M5 : frames.M1;
+      const reviewTimeframe: 'M5' | 'M1' = priceActionSetup.features.entryTimeframe === 'M1' ? 'M1' : 'M5';
+      const reviewFrame = reviewTimeframe === 'M5' ? frames.M5 : frames.M1;
       let aiReview: Awaited<ReturnType<typeof huggingFaceAI.reviewPriceActionCandidate>> = {
         approved: false, direction: 'HOLD', confidence: 0, sources: [],
         reason: 'Revisão IA não executada; a decisão operacional continuará restrita aos critérios explícitos da estratégia.',
@@ -460,7 +459,7 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
       });
       // The closed trigger candle creates a stable id. Repeated polls within the
       // same opportunity must not mint new IDs and reopen the same trade.
-      const signalBar = entryFrameForContext[entryFrameForContext.length - 1];
+      const signalBar = reviewFrame[reviewFrame.length - 1];
       const stableSignalId = 'pa-' + normalizedStrategySymbol + '-' + priceActionSetup.action + '-' + Math.floor(signalBar.time);
       const alreadyExecuted = metaTraderBridge.getOpenPositions().some(position => position.signalId === stableSignalId)
         || metaTraderBridge.getRecentTrades().some(trade => trade.signalId === stableSignalId);
