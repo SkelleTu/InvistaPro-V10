@@ -195,8 +195,10 @@ export function isAllowedBrasiliaTradingSession(now = new Date()): boolean {
   const brasilia = inConfiguredWindow(
     now, 'America/Sao_Paulo', 'MT5_BRASILIA_SESSION_START', 'MT5_BRASILIA_SESSION_END', '14:00', '17:00'
   );
-  // An invalid session configuration is a fail-closed condition.
-  return london === true || newYork === true || brasilia === true;
+  // Any malformed configured market window fails closed rather than silently
+  // allowing a trade through a different, accidentally permissive window.
+  if (london === null || newYork === null || brasilia === null) return false;
+  return london || newYork || brasilia;
 }
 
 function localTradingDayKey(timestamp: number): string | null {
