@@ -136,19 +136,9 @@ router.get('/signal', mt5SignalAccess, (req: Request, res: Response) => {
     if (symbol && mt5EnvironmentMismatch()) {
       return res.status(409).json({ action: 'HOLD', executionEnabled: false, code: 'MT5_ACCOUNT_MODE_MISMATCH', expectedAccountType: config.accountType, actualAccountType: lastMt5ObservedAccountType, reason: 'Ambiente MT5 não confirmado ou divergente. Verifique a conta conectada e mantenha as operações bloqueadas.', timestamp: Date.now() });
     }
-    // Registrar heartbeat apenas quando o EA faz polling (tem parâmetro symbol)
-    // Isso evita que o dashboard (sem symbol) mantenha o heartbeat vivo falsamente
+    // A telemetria só pode ser atualizada pelo endpoint autenticado /heartbeat.
+    // Um polling de sinal não é evidência de saldo, equity ou posições conciliadas.
     const symbolStr = (symbol as string) || '';
-    if (symbolStr) {
-      const accId = (accountId as string) || 'EA_AUTO';
-      metaTraderBridge.recordHeartbeat({
-        accountId: accId,
-        broker: 'MT5',
-        balance: 0,
-        equity: 0,
-        freeMargin: 0
-      });
-    }
     const resolvedSymbol = symbolStr || config.symbols[0] || 'EURUSD';
 
     // MT5 orders are placed by the user's logged-in MT5 terminal, not as Deriv contracts.
@@ -343,14 +333,8 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
       });
     }
 
-    // Registrar heartbeat — EA v5.0 usa este endpoint como canal principal
-    metaTraderBridge.recordHeartbeat({
-      accountId: bodyAccountId || 'EA_AUTO',
-      broker: 'MT5',
-      balance: 0,
-      equity: 0,
-      freeMargin: 0
-    });
+    // Não registrar heartbeat neste endpoint: somente /heartbeat envia saldo,
+    // equity e snapshot de tickets reais para a reconciliação de posições.
 
     if (!config.enabled) {
       return res.json({ action: 'HOLD', reason: 'Sistema desabilitado', confidence: 0 });
