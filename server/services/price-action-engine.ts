@@ -76,19 +76,34 @@ function detectRangeBounds(c: Candle[]): RangeBounds | null {
   if (!(rangeUnit > 0) || !(recentClose > 0)) return null;
   const tolerance = Math.max(rangeUnit * 0.65, recentClose * 0.0003);
 
-  const cluster = (kind: PivotKind): PriceZone[] => {
+  const cluster = (kind: PivotKind): Array<PriceZone & { invalidated: boolean }> => {
     const levels = pivots(sample.slice(0, -1), kind).slice(-10);
-    const buckets: number[][] = [];
+    const buckets: Pivot[][] = [];
     for (const pivot of levels) {
-      const group = buckets.find(items => Math.abs(average(items) - pivot.price) <= tolerance);
-      if (group) group.push(pivot.price);
-      else buckets.push([pivot.price]);
+      const group = buckets.find(items =>
+        Math.abs(average(items.map(item => item.price)) - pivot.price) <= tolerance
+      );
+      if (group) group.push(pivot);
+      else buckets.push([pivot]);
     }
-    return buckets.filter(items => items.length >= 2).map(items => ({
-      low: Math.min(...items) - tolerance,
-      high: Math.max(...items) + tolerance,
-      touches: items.length,
-    }));
+    return buckets.filter(items => items.length >= 2).map(items => {
+      const prices = items.map(item => item.price);
+      const low = Math.min(...prices) - tolerance;
+      const high = Math.max(...prices) + tolerance;
+      const identifiedAt = Math.max(...items.map(item => item.time));
+      const invalidated = sample.some(bar =>
+        bar.time > identifiedAt &&
+        (kind === 'high' ? bar.close > high + tolerance : bar.close < low - tolerance)
+      );
+      return {
+        low,
+        high,
+        touches: items.length,
+        identifiedAt,
+        invalidationPrice: kind === 'high' ? high : low,
+        invalidated,
+      };
+    }).filter(zone => !zone.invalidated);
   };
 
   const highZones = cluster('high').sort((a, b) => b.high - a.high);
