@@ -282,6 +282,32 @@ function liquiditySweep(c: Candle[], side: TradeSide): boolean {
   const priorLow = Math.min(...recent.map(x => x.low));
   return side === 'BUY' ? last.low < priorLow && last.close > priorLow : last.high > priorHigh && last.close < priorHigh;
 }
+
+function liquiditySweepZone(c: Candle[], side: TradeSide, timeframe: Timeframe): PriceActionZone | null {
+  if (!liquiditySweep(c, side)) return null;
+  const sample = c.slice(-21, -1);
+  if (sample.length < 10) return null;
+  const level = side === 'BUY'
+    ? Math.min(...sample.map(candle => candle.low))
+    : Math.max(...sample.map(candle => candle.high));
+  const width = Math.max(averageRange(c) * 0.2, Math.abs(level) * 0.00005);
+  const matches = pivots(c, side === 'BUY' ? 'low' : 'high')
+    .filter(pivot => Math.abs(pivot.price - level) <= width)
+    .sort((a, b) => b.index - a.index);
+  const origin = matches[0];
+  return {
+    type: 'liquidity',
+    low: level - width,
+    high: level + width,
+    timeframe,
+    originTime: origin ? c[origin.index].time : sample[0].time,
+    identifiedAt: c[c.length - 1].time,
+    reactions: 1,
+    invalidationPrice: side === 'BUY' ? level - width : level + width,
+    state: 'valid',
+    direction: side,
+  };
+}
 export function evaluatePriceActionSetup(
   frames: Partial<Record<Timeframe, Candle[]>>,
   context: MarketContext = {},
@@ -405,42 +431,17 @@ export function evaluatePriceActionSetup(
       obZones.find(zone => zone.timeframe === 'H1') ??
       obZones.find(zone => zone.timeframe === 'H4') ?? null;
 
-    const sweepFrames = srKinds.map(frame => ({
-      ...frame,
-      detected: liquiditySweep(frame.candles, side),
-    }));
-    const sweep = sweepFrames.some(frame => frame.detected);
+    const sweepZones = srKinds
+      .map(frame => liquiditySweepZone(frame.candles, side, frame.timeframe))
+      .filter((zone): zone is PriceActionZone => zone !== null);
+    const sweep = sweepZones.length > 0;
     const bos = srKinds.some(frame => breakOfStructure(frame.candles, side));
     const choch = srKinds.some(frame => changeOfCharacter(frame.candles, side));
     const rangeEdgeQualified = rangeMode && side !== null;
     const zoneNear = rangeEdgeQualified || validSupportResistanceZones.length > 0 ||
       fvgZones.length > 0 || obZones.length > 0 || sweep;
 
-    zones.push(...supportResistanceZones, ...fvgZones, ...obZones);
-    for (const sweepFrame of sweepFrames.filter(frame => frame.detected)) {
-      const sweepCandles = sweepFrame.candles;
-      const sweepSample = sweepCandles.slice(-21, -1);
-      const sweepLevel = side === 'BUY'
-        ? Math.min(...sweepSample.map(candle => candle.low))
-        : Math.max(...sweepSample.map(candle => candle.high));
-      const sweepWidth = Math.max(averageRange(sweepCandles) * 0.2, Math.abs(sweepLevel) * 0.00005);
-      const sweepPivots = pivots(sweepCandles, side === 'BUY' ? 'low' : 'high')
-        .filter(pivot => Math.abs(pivot.price - sweepLevel) <= sweepWidth)
-        .sort((a, b) => b.index - a.index);
-      const sweepOrigin = sweepPivots[0];
-      zones.push({
-        type: 'liquidity',
-        low: sweepLevel - sweepWidth,
-        high: sweepLevel + sweepWidth,
-        timeframe: sweepFrame.timeframe,
-        originTime: sweepOrigin ? sweepCandles[sweepOrigin.index].time : sweepSample[0].time,
-        identifiedAt: sweepCandles[sweepCandles.length - 1].time,
-        reactions: 1,
-        invalidationPrice: side === 'BUY' ? sweepLevel - sweepWidth : sweepLevel + sweepWidth,
-        state: 'valid',
-        direction: side,
-      });
-    }
+    zones.push(...supportResistanceZones, ...fvgZones, ...obZones, ...sweepZones);
     if (rangeEdgeQualified && finite(features.rangeLow) && finite(features.rangeHigh) && finite(features.rangeEdgeTolerance)) {
       const rangeEdge = side === 'BUY' ? Number(features.rangeLow) : Number(features.rangeHigh);
       const edgeTolerance = Number(features.rangeEdgeTolerance);
@@ -556,9 +557,36 @@ export function evaluatePriceActionSetup(
     checks.costs = costsValid;
     if (!checks.costs) reasons.push('Custos totais estimados ausentes ou inválidos');
   } else {
+    // A HOLD still needs an auditable market map. Record zones across all supplied
+    // timeframes, in both directions, even when the entry trigger has not formed yet.
+    const diagnosticEntryCandles = entryCandles!;
+    const diagnosticEntryTimeframe: Timeframe = entryCandles === validM5 ? 'M5' : 'M1';
+    const diagnosticPrice = diagnosticEntryCandles[diagnosticEntryCandles.length - 1].close;
+    const diagnosticFrames: Array<{ candles: Candle[]; timeframe: Timeframe }> = [
+      { candles: h4, timeframe: 'H4' },
+      { candles: h1, timeframe: 'H1' },
+      { candles: m15, timeframe: 'M15' },
+      { candles: diagnosticEntryCandles, timeframe: diagnosticEntryTimeframe },
+    ];
+    for (const frame of diagnosticFrames) {
+      zones.push(
+        ...repeatedStructureZones(frame.candles, 'low', diagnosticPrice, frame.timeframe),
+        ...repeatedStructureZones(frame.candles, 'high', diagnosticPrice, frame.timeframe),
+      );
+      for (const candidateSide of ['BUY', 'SELL'] as const) {
+        const fvg = fairValueGapZone(frame.candles, candidateSide, diagnosticPrice, frame.timeframe);
+        const orderBlock = orderBlockZone(frame.candles, candidateSide, frame.timeframe);
+        const sweepZone = liquiditySweepZone(frame.candles, candidateSide, frame.timeframe);
+        if (fvg) zones.push(fvg);
+        if (orderBlock) zones.push(orderBlock);
+        if (sweepZone) zones.push(sweepZone);
+      }
+    }
+    features.marketZonesFound = zones.length;
+    features.currentPrice = diagnosticPrice;
     checks.volume = false;
     checks.structural_stop = false;
-    checks.valid_zone = false;
+    checks.valid_zone = zones.some(zone => zone.state !== 'invalidated');
     checks.risk_reward = false;
     checks.stop_direction = false;
     checks.stop_distance_limit = false;
