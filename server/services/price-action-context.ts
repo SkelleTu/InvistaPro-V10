@@ -159,7 +159,7 @@ const DEFAULT_TRADING_SESSIONS: TradingSessionWindow[] = [
 ];
 
 function parseClockMinutes(value: unknown): number | null {
-  if (typeof value !== 'string' || !/^([01]\\d|2[0-3]):[0-5]\\d$/.test(value)) return null;
+  if (typeof value !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) return null;
   const [hour, minute] = value.split(':').map(Number);
   return hour * 60 + minute;
 }
