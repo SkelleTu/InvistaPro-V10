@@ -370,6 +370,10 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
       const entryPriceForContext = entryFrameForContext.length
         ? entryFrameForContext[entryFrameForContext.length - 1].close
         : undefined;
+      const extraCostRateRaw = process.env.MT5_PRICE_ACTION_EXTRA_COST_RATE;
+      const extraCostRate = extraCostRateRaw !== undefined && extraCostRateRaw.trim() !== ''
+        ? Number(extraCostRateRaw)
+        : undefined;
       const trustedContext = buildTrustedPriceActionContext({
         bid,
         ask,
@@ -377,6 +381,7 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
         riskLimitOk: riskLimit.ok,
         newsBlocked: newsStatus.blocked || !newsStatus.valid,
         sessionOpen,
+        estimatedExtraRoundTripCostRate: extraCostRate,
       });
       priceActionSetup = evaluatePriceActionSetup(frames, trustedContext);
       if (!priceActionSetup.approved) {
