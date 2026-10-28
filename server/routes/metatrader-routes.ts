@@ -1975,7 +1975,7 @@ bool ExtractJsonBool(string json, string key) {
 `;
 }
 
-router.post('/config', mt5DashboardAccess, (req: Request, res: Response) => {
+router.post('/config', mt5DashboardAccess, async (req: Request, res: Response) => {
   try {
     const updates = { ...(req.body ?? {}) };
     const currentConfig = metaTraderBridge.getConfig();
@@ -1983,6 +1983,9 @@ router.post('/config', mt5DashboardAccess, (req: Request, res: Response) => {
       return res.status(400).json({ ok: false, code: 'MT5_INVALID_REAL_AUTHORIZATION', error: 'realTradingAuthorized deve ser booleano.' });
     }
     if (updates.accountType === 'demo') updates.realTradingAuthorized = false;
+    if (updates.accountType === 'real' && updates.realTradingAuthorized !== true && currentConfig.realTradingAuthorized !== true) {
+      return res.status(400).json({ ok: false, code: 'MT5_REAL_AUTHORIZATION_REQUIRED', error: 'Para selecionar REAL, confirme explicitamente a autorização no dashboard.' });
+    }
     if (updates.realTradingAuthorized === true && updates.accountType !== 'real' && currentConfig.accountType !== 'real') {
       return res.status(400).json({ ok: false, code: 'MT5_REAL_AUTH_REQUIRES_REAL_MODE', error: 'Selecione o modo REAL antes de autorizar execução REAL.' });
     }
@@ -1998,13 +2001,24 @@ router.post('/config', mt5DashboardAccess, (req: Request, res: Response) => {
       return res.status(400).json({ ok: false, error: 'O token MT5 precisa ter pelo menos 24 caracteres.' });
     }
     metaTraderBridge.updateConfig(updates);
+    try {
+      await metaTraderBridge.flushDurableConfig();
+    } catch (persistError) {
+      // Never leave a REAL authorization active in memory if durable persistence failed.
+      metaTraderBridge.updateConfig(currentConfig);
+      throw persistError;
+    }
     res.json({
       ok: true,
       apiTokenConfigured: true,
       tokenGenerated: generatedToken,
       message: generatedToken
         ? 'Configuração salva e token seguro gerado. Baixe novamente o EA para receber a URL e o token corretos.'
-        : 'Configuração atualizada',
+        : (updates.accountType === 'real' && updates.realTradingAuthorized === true
+          ? 'Modo REAL selecionado e autorização explícita persistida.'
+          : updates.accountType === 'demo'
+            ? 'Modo DEMO selecionado; autorização REAL revogada.'
+            : 'Configuração atualizada'),
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
