@@ -359,7 +359,7 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
         status: metaTraderBridge.getStatus(),
         observedAccountType: lastMt5ObservedAccountType,
         accountHeartbeatAt: lastMt5EnvironmentHeartbeatAt,
-        realTradingExplicitlyEnabled: String(process.env.MT5_PRODUCTION_TRADING_ENABLED ?? '').trim().toLowerCase() === 'true',
+        realTradingExplicitlyEnabled: config.realTradingAuthorized === true && String(process.env.MT5_PRODUCTION_TRADING_ENABLED ?? '').trim().toLowerCase() !== 'false',
       });
       const newsStatus = await getHighImpactNewsStatus();
       const sessionOpen = isAllowedBrasiliaTradingSession();
