@@ -649,14 +649,14 @@ void OnTick()
    }
 
    // ── Monitor de posições abertas ────────────────────────────────────────
-   if (PositionsTotal() > 0 && (now - g_lastMonitor >= g_monitorSeconds))
+   if (CountManagedPositions() > 0 && (now - g_lastMonitor >= g_monitorSeconds))
    {
       g_lastMonitor = now;
       MonitorOpenPositions();
    }
 
    // ── Busca de sinal ────────────────────────────────────────────────────
-   if (PositionsTotal() < MaxPositions && (now - g_lastSignal >= SignalSeconds))
+   if (CountManagedPositions() < MaxPositions && (now - g_lastSignal >= SignalSeconds))
    {
       g_lastSignal = now;
 
@@ -716,6 +716,24 @@ bool IsPriceActionCryptoSymbol()
 }
 
 // Derive volume precision from the broker-supported volume step.
+int CountManagedPositions()
+{
+   int managed = 0;
+   for (int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      if (!posInfo.SelectByIndex(i)) continue;
+      if (posInfo.Magic() != MagicNumber) continue;
+      if (posInfo.Symbol() != g_symbol) continue;
+      managed++;
+   }
+   return managed;
+}
+
+int ManagedSymbolDigits()
+{
+   return (int)SymbolInfoInteger(g_symbol, SYMBOL_DIGITS);
+}
+
 int VolumeDigitsFromStep()
 {
    double step = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_STEP);
@@ -1023,7 +1041,6 @@ void FetchAndProcessSignal()
    if (reason != "") Print("   Razão: ", StringSubstr(reason, 0, 150));
    Print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
-   g_pendingSignalId = signalId;
    bool success = false;
 
    if (action == "BUY")
@@ -1077,6 +1094,7 @@ void FetchAndProcessSignal()
 
    if (success)
    {
+      if (signalId != "") g_pendingSignalId = signalId;
       double executedVolume = trade.ResultVolume();
       if (executedVolume > 0 && executedVolume < lotSize)
       {
@@ -1142,7 +1160,7 @@ void MonitorOpenPositions()
                                       (posType == "SELL" && sl > openPrice);
                 if (needsBreakeven)
                 {
-                   double breakevenSL = NormalizeDouble(openPrice, _Digits);
+                   double breakevenSL = NormalizeDouble(openPrice, ManagedSymbolDigits());
                    if (trade.PositionModify(ticket, breakevenSL, tp))
                    {
                       sl = breakevenSL;
