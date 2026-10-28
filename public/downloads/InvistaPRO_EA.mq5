@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                              InvistaPRO_EA.mq5    |
 //|                                 InvistaPRO - Auto-Discovery URL   |
-//|   Versão 8.0 — Girassol 3 Níveis + AutoFibonacci + Diagnóstico   |
+//|   Versão 8.1 — Price Action operacional com gates de segurança   |
 //|   CORREÇÕES v8.0:                                                 |
 //|   • Detecção ampliada de nomes do Girassol/Fibonacci              |
 //|   • Endpoint /signal-with-indicators com fallback robusto         |
@@ -13,7 +13,7 @@
 //|   Nível 3: Bolinha pequena micro (buf 4=compra, 5=venda)         |
 //+------------------------------------------------------------------+
 #property copyright "InvistaPRO"
-#property version   "8.0"
+#property version   "8.1"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -608,7 +608,8 @@ string BuildCandlesJson(MqlRates &rates[], int count)
 string BuildTimeframeCandlesJson(ENUM_TIMEFRAMES timeframe, int count)
 {
    MqlRates rates[];
-   int copied = CopyRates(g_symbol, timeframe, 0, count, rates);
+   // Exclude the still-forming candle to prevent repainting in the deterministic strategy.
+   int copied = CopyRates(g_symbol, timeframe, 1, count, rates);
    if (copied < 30) return "[]";
    return BuildCandlesJson(rates, copied);
 }
@@ -704,18 +705,29 @@ void SendMarketDataForSyntheticGirassol()
 //+------------------------------------------------------------------+
 bool IsPriceActionCryptoSymbol()
 {
+   // Broker symbol names vary (BTCUSDT, BTCUSDm, m.BTCUSD, BTCUSDT.r, etc.).
+   // Normalize separators, then recognize the requested crypto/USD or crypto/USDT pairs.
    string normalized = g_symbol;
    StringToUpper(normalized);
    StringReplace(normalized, "/", "");
    StringReplace(normalized, ".", "");
    StringReplace(normalized, "_", "");
    StringReplace(normalized, "-", "");
-   return (StringFind(normalized, "BTCUSD") == 0 ||
-           StringFind(normalized, "ETHUSD") == 0 ||
-           StringFind(normalized, "SOLUSD") == 0);
+
+   string bases[4] = {"BTC", "XBT", "ETH", "SOL"};
+   for(int i = 0; i < ArraySize(bases); i++)
+   {
+      int pos = StringFind(normalized, bases[i]);
+      if(pos < 0) continue;
+
+      string quoteAndSuffix = StringSubstr(normalized, pos + StringLen(bases[i]));
+      if(StringFind(quoteAndSuffix, "USDT") == 0 ||
+         StringFind(quoteAndSuffix, "USD") == 0)
+         return true;
+   }
+   return false;
 }
 
-// Derive volume precision from the broker-supported volume step.
 int CountManagedPositions()
 {
    int managed = 0;
@@ -734,6 +746,7 @@ int ManagedSymbolDigits()
    return (int)SymbolInfoInteger(g_symbol, SYMBOL_DIGITS);
 }
 
+// Derive volume precision from the broker-supported volume step.
 int VolumeDigitsFromStep()
 {
    double step = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_STEP);
@@ -837,7 +850,7 @@ void FetchAndProcessSignal()
    body += "\"indicatorSignals\":"  + structuredSignals             + ",";
    body += "\"indicatorBuffers\":"  + allBuffers                    + ",";
    body += "\"indicatorCount\":"    + IntegerToString(g_indicatorCount) + ",";
-   body += "\"eaVersion\":\"8.0\"";
+   body += "\"eaVersion\":\"8.1\"";
    if (g_apiToken != "") body += ",\"token\":\"" + g_apiToken + "\"";
    body += "}";
 
@@ -854,13 +867,19 @@ void FetchAndProcessSignal()
       res = WebRequest("POST", url, headers, 10000, postData, result, responseHeaders);
    }
 
-   // ── Fallback 2: GET simples de sinal ─────────────────────────────────
-   if (res == 404 || res == -1)
+   // Legacy GET is forbidden for crypto strategy symbols: it lacks full MTF context
+   // and could bypass the deterministic Price Action gate.
+   if ((res == 404 || res == -1) && !IsPriceActionCryptoSymbol())
    {
       url = g_serverUrl + "/api/metatrader/signal?symbol=" + g_symbol;
       if (g_apiToken != "") url += "&token=" + g_apiToken;
       char emptyData[];
       res = WebRequest("GET", url, headers, 5000, emptyData, result, responseHeaders);
+   }
+   else if ((res == 404 || res == -1) && IsPriceActionCryptoSymbol())
+   {
+      Print("⛔ Price Action crypto: endpoint multi-timeframe indisponível; fallback legado bloqueado.");
+      return;
    }
 
    if (res == -1)
@@ -1042,14 +1061,20 @@ void FetchAndProcessSignal()
    Print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
    bool success = false;
+   bool requestOk = false;
 
    if (action == "BUY")
-      success = trade.Buy(lotSize, g_symbol, 0, stopLoss, takeProfit, "InvistaPRO_" + signalId);
+      requestOk = trade.Buy(lotSize, g_symbol, 0, stopLoss, takeProfit, "InvistaPRO_" + signalId);
    else if (action == "SELL")
-      success = trade.Sell(lotSize, g_symbol, 0, stopLoss, takeProfit, "InvistaPRO_" + signalId);
+      requestOk = trade.Sell(lotSize, g_symbol, 0, stopLoss, takeProfit, "InvistaPRO_" + signalId);
 
-   // ── Retry automático se stops inválidos (10016) ───────────────────────
-   if (!success && trade.ResultRetcode() == 10016 && !isPriceActionCrypto)
+   // CTrade bool only validates the request structure locally. Require a broker fill.
+   uint tradeRetcode = trade.ResultRetcode();
+   success = requestOk && (tradeRetcode == TRADE_RETCODE_DONE || tradeRetcode == TRADE_RETCODE_DONE_PARTIAL)
+             && trade.ResultDeal() > 0;
+
+   // Retry invalid stops only for non-Price-Action legacy instruments.
+   if (!success && tradeRetcode == 10016 && !isPriceActionCrypto)
    {
       Print("⚠️ Stops inválidos (10016) — recalculando...");
       double askNow   = SymbolInfoDouble(g_symbol, SYMBOL_ASK);
@@ -1074,13 +1099,19 @@ void FetchAndProcessSignal()
       {
          slRetry = NormalizeDouble(askNow - safeDist, _Digits);
          tpRetry = NormalizeDouble(askNow + safeDist, _Digits);
-         success = trade.Buy(lotSize, g_symbol, 0, slRetry, tpRetry, "InvistaPRO_" + signalId);
+         requestOk = trade.Buy(lotSize, g_symbol, 0, slRetry, tpRetry, "InvistaPRO_" + signalId);
+         tradeRetcode = trade.ResultRetcode();
+         success = requestOk && (tradeRetcode == TRADE_RETCODE_DONE || tradeRetcode == TRADE_RETCODE_DONE_PARTIAL)
+                   && trade.ResultDeal() > 0;
       }
       else
       {
          slRetry = NormalizeDouble(bidNow + safeDist, _Digits);
          tpRetry = NormalizeDouble(bidNow - safeDist, _Digits);
-         success = trade.Sell(lotSize, g_symbol, 0, slRetry, tpRetry, "InvistaPRO_" + signalId);
+         requestOk = trade.Sell(lotSize, g_symbol, 0, slRetry, tpRetry, "InvistaPRO_" + signalId);
+         tradeRetcode = trade.ResultRetcode();
+         success = requestOk && (tradeRetcode == TRADE_RETCODE_DONE || tradeRetcode == TRADE_RETCODE_DONE_PARTIAL)
+                   && trade.ResultDeal() > 0;
       }
 
       if (!success)
@@ -1305,7 +1336,7 @@ bool SendHeartbeat()
    body += "\"openPositions\":" + IntegerToString(openPos)  + ",";
    body += "\"platform\":\"MT5\",";
    body += "\"accountType\":\"" + accountType + "\",";
-   body += "\"eaVersion\":\"8.0\"";
+   body += "\"eaVersion\":\"8.1\"";
    if (g_apiToken != "") body += ",\"token\":\"" + g_apiToken + "\"";
    body += "}";
 
