@@ -359,7 +359,7 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
         status: metaTraderBridge.getStatus(),
         observedAccountType: lastMt5ObservedAccountType,
         accountHeartbeatAt: lastMt5EnvironmentHeartbeatAt,
-        realTradingExplicitlyEnabled: String(process.env.MT5_PRODUCTION_TRADING_ENABLED ?? '').trim().toLowerCase() === 'true',
+        realTradingExplicitlyEnabled: config.realTradingAuthorized === true && String(process.env.MT5_PRODUCTION_TRADING_ENABLED ?? '').trim().toLowerCase() !== 'false',
       });
       const newsStatus = await getHighImpactNewsStatus();
       const sessionOpen = isAllowedBrasiliaTradingSession();
@@ -1318,7 +1318,7 @@ router.get('/config', mt5DashboardAccess, (_req: Request, res: Response) => {
 
 /**
  * GET /api/mt5/download-ea
- * Serve o EA v8.0 com ServerURL pré-preenchida (lê arquivo do disco).
+ * Serve o EA versionado com URL/token injetados e cabeçalho de versão para validar downloads.
  */
 router.get('/download-ea', mt5DashboardAccess, async (req: Request, res: Response) => {
   try {
@@ -1367,8 +1367,35 @@ router.get('/download-ea', mt5DashboardAccess, async (req: Request, res: Respons
       content = generateEAContent(serverUrl, token, config);
     }
 
-    res.setHeader('Cache-Control', 'no-store, max-age=0');
+    const eaVersion = content.match(/#property\s+version\s+"([^"]+)"/)?.[1] ?? 'unknown';
+    // Fail closed: never serve the legacy generated v2.00 EA when the canonical source is missing/stale.
+    const requiredEaMarkers = [
+      '#property version   "8.1"',
+      'PriceActionRiskPercent = 1.0',
+      'PriceActionUseAIReview = true',
+      'CopyRates(g_symbol, timeframe, 1, count, rates)',
+      'CalculatePriceActionRiskLot',
+      'int VolumeDigitsFromStep()',
+      'TRADE_RETCODE_DONE_PARTIAL',
+    ];
+    const missingEaMarkers = requiredEaMarkers.filter((marker) => !content.includes(marker));
+    if (eaVersion !== '8.1' || missingEaMarkers.length > 0) {
+      console.error('[MT5 EA Download] Fonte ausente ou desatualizada; download bloqueado.', {
+        eaVersion,
+        missingEaMarkers,
+      });
+      return res.status(503).json({
+        ok: false,
+        code: 'MT5_EA_SOURCE_NOT_CURRENT',
+        error: 'Download bloqueado: a fonte do Expert Advisor não corresponde à versão atual da estratégia Price Action.',
+        detectedVersion: eaVersion,
+      });
+    }
+
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
     res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.setHeader('X-InvistaPRO-EA-Version', eaVersion);
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="InvistaPRO_EA.mq5"');
     res.send(content);
@@ -1972,7 +1999,7 @@ bool ExtractJsonBool(string json, string key) {
 `;
 }
 
-router.post('/config', mt5DashboardAccess, (req: Request, res: Response) => {
+router.post('/config', mt5DashboardAccess, async (req: Request, res: Response) => {
   try {
     const updates = { ...(req.body ?? {}) };
     const currentConfig = metaTraderBridge.getConfig();
@@ -1980,6 +2007,9 @@ router.post('/config', mt5DashboardAccess, (req: Request, res: Response) => {
       return res.status(400).json({ ok: false, code: 'MT5_INVALID_REAL_AUTHORIZATION', error: 'realTradingAuthorized deve ser booleano.' });
     }
     if (updates.accountType === 'demo') updates.realTradingAuthorized = false;
+    if (updates.accountType === 'real' && updates.realTradingAuthorized !== true && currentConfig.realTradingAuthorized !== true) {
+      return res.status(400).json({ ok: false, code: 'MT5_REAL_AUTHORIZATION_REQUIRED', error: 'Para selecionar REAL, confirme explicitamente a autorização no dashboard.' });
+    }
     if (updates.realTradingAuthorized === true && updates.accountType !== 'real' && currentConfig.accountType !== 'real') {
       return res.status(400).json({ ok: false, code: 'MT5_REAL_AUTH_REQUIRES_REAL_MODE', error: 'Selecione o modo REAL antes de autorizar execução REAL.' });
     }
@@ -1995,13 +2025,24 @@ router.post('/config', mt5DashboardAccess, (req: Request, res: Response) => {
       return res.status(400).json({ ok: false, error: 'O token MT5 precisa ter pelo menos 24 caracteres.' });
     }
     metaTraderBridge.updateConfig(updates);
+    try {
+      await metaTraderBridge.flushDurableConfig();
+    } catch (persistError) {
+      // Never leave a REAL authorization active in memory if durable persistence failed.
+      metaTraderBridge.updateConfig(currentConfig);
+      throw persistError;
+    }
     res.json({
       ok: true,
       apiTokenConfigured: true,
       tokenGenerated: generatedToken,
       message: generatedToken
         ? 'Configuração salva e token seguro gerado. Baixe novamente o EA para receber a URL e o token corretos.'
-        : 'Configuração atualizada',
+        : (updates.accountType === 'real' && updates.realTradingAuthorized === true
+          ? 'Modo REAL selecionado e autorização explícita persistida.'
+          : updates.accountType === 'demo'
+            ? 'Modo DEMO selecionado; autorização REAL revogada.'
+            : 'Configuração atualizada'),
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
