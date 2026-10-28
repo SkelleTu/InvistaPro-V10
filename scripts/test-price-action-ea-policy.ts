@@ -27,4 +27,10 @@ assert.ok(ea.split('\n').filter((line) => line.includes('eaVersion')).every((lin
 assert.ok(ea.includes('CopyRates(g_symbol, timeframe, 1, count, rates)'), 'Strategy must exclude the still-forming candle');
 assert.ok(ea.includes('trade.ResultDeal() > 0'), 'EA must confirm broker execution instead of trusting local request validation');
 
-console.log('Price Action EA safety invariants passed (static source check only; MetaEditor compilation is separate).');
+const route = readFileSync(new URL('../server/routes/metatrader-routes.ts', import.meta.url), 'utf8');
+assert.ok(route.includes("code: 'MT5_EA_SOURCE_NOT_CURRENT'"), 'Download must fail closed when the canonical EA is missing or stale');
+assert.ok(route.includes("if (eaVersion !== '8.1' || missingEaMarkers.length > 0)"), 'Download must validate the EA version and current strategy markers');
+assert.ok(route.includes("'CalculatePriceActionRiskLot'"), 'Download gate must require the Price Action risk sizing implementation');
+assert.ok(route.includes("'no-store, no-cache, must-revalidate, max-age=0'"), 'EA downloads must not be cached');
+
+console.log('Price Action EA safety and download-version invariants passed (static source check only; MetaEditor compilation is separate).');
