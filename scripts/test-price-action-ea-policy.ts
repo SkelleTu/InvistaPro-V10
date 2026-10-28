@@ -19,4 +19,12 @@ assert.ok(ea.includes('ManagedSymbolDigits()'), 'Stops must use the selected sym
 assert.ok(!ea.includes('trade.Buy(lotSize,  g_symbol, 0, 0, 0'), 'EA must not fall back to an unprotected BUY');
 assert.ok(!ea.includes('trade.Sell(lotSize, g_symbol, 0, 0, 0'), 'EA must not fall back to an unprotected SELL');
 
+assert.ok(!ea.includes('SYMBOL_VOLUME_DIGITS'), 'EA must not use the nonexistent SYMBOL_VOLUME_DIGITS enum');
+assert.ok(ea.includes('int VolumeDigitsFromStep()'), 'Volume precision must derive from SYMBOL_VOLUME_STEP');
+assert.ok(ea.includes('#property version   "8.1"'), 'Downloadable EA source must expose the updated version');
+assert.ok(ea.includes('StringFind(quoteAndSuffix, "USDT") == 0'), 'EA must recognize crypto symbols quoted in USDT');
+assert.ok(ea.split('\n').filter((line) => line.includes('eaVersion')).every((line) => line.includes('8.1')), 'All signal payloads must report the same EA version');
+assert.ok(ea.includes('CopyRates(g_symbol, timeframe, 1, count, rates)'), 'Strategy must exclude the still-forming candle');
+assert.ok(ea.includes('trade.ResultDeal() > 0'), 'EA must confirm broker execution instead of trusting local request validation');
+
 console.log('Price Action EA safety invariants passed (static source check only; MetaEditor compilation is separate).');
