@@ -11,6 +11,7 @@ assert.equal(missing.approved,false);
 assert.ok(missing.reasons.length>0);
 const setup = evaluatePriceActionSetup({H4:candles(40,100,1),H1:candles(40,100,0.5),M15:candles(40,100,0.2),M5:candles(40,100,0.1)});
 assert.equal(setup.approved,false,'No confirmed trigger must never be approved');
+assert.equal(setup.checks.trend_m15_alignment, false, 'M15 direction must be an explicit mandatory gate when no valid aligned entry exists');
 assert.equal(validateAIEntryReview(setup,{decision:'BUY',direction:'BUY',confidence:0.99}).approved,false,'AI cannot invent an entry');
 assert.equal(validateAIStopAdjustment('BUY',95,94,100),false,'BUY stop may not widen risk');
 assert.equal(validateAIStopAdjustment('BUY',95,97,100),true,'BUY stop may tighten protection');
