@@ -1318,7 +1318,7 @@ router.get('/config', mt5DashboardAccess, (_req: Request, res: Response) => {
 
 /**
  * GET /api/mt5/download-ea
- * Serve o EA v8.0 com ServerURL pré-preenchida (lê arquivo do disco).
+ * Serve o EA versionado com URL/token injetados e cabeçalho de versão para validar downloads.
  */
 router.get('/download-ea', mt5DashboardAccess, async (req: Request, res: Response) => {
   try {
@@ -1367,8 +1367,11 @@ router.get('/download-ea', mt5DashboardAccess, async (req: Request, res: Respons
       content = generateEAContent(serverUrl, token, config);
     }
 
-    res.setHeader('Cache-Control', 'no-store, max-age=0');
+    const eaVersion = content.match(/#property\s+version\s+"([^"]+)"/)?.[1] ?? 'unknown';
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
     res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.setHeader('X-InvistaPRO-EA-Version', eaVersion);
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="InvistaPRO_EA.mq5"');
     res.send(content);
