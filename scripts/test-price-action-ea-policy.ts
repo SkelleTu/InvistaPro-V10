@@ -12,6 +12,10 @@ assert.ok(ea.includes('CalculatePriceActionRiskLot'), 'EA must size Price Action
 assert.ok(ea.includes('riskDistance / entry > 0.015'), 'EA must reject stops wider than 1.5%');
 assert.ok(ea.includes('rewardDistance / riskDistance < 2.0'), 'EA must enforce minimum executable R:R of 1:2');
 assert.ok(ea.includes('breakeven em +1R'), 'EA must manage deterministic breakeven at +1R');
+assert.ok(ea.includes('CopyRates(g_symbol, timeframe, 1, count, rates)'), 'Strategy timeframes must exclude the live, incomplete candle');
+assert.ok(ea.includes('&& !IsPriceActionCryptoSymbol()'), 'Legacy GET fallback must not bypass the crypto Price Action gate');
+assert.ok(ea.includes('trade.ResultDeal() > 0'), 'EA must confirm a broker deal, not only CTrade local validation');
+assert.ok(ea.includes('TRADE_RETCODE_DONE_PARTIAL'), 'EA must explicitly handle confirmed partial execution retcodes');
 assert.ok(ea.includes('parcial de 50% realizada em +1,5R'), 'EA must manage the 50% partial at +1.5R');
 assert.ok(!ea.includes('trade.Buy(lotSize,  g_symbol, 0, 0, 0'), 'EA must not fall back to an unprotected BUY');
 assert.ok(!ea.includes('trade.Sell(lotSize, g_symbol, 0, 0, 0'), 'EA must not fall back to an unprotected SELL');
