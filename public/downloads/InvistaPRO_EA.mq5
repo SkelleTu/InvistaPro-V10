@@ -184,8 +184,8 @@ void FetchAssetProfile()
 {
    string url     = g_serverUrl + "/api/metatrader/asset-profile/" + g_symbol;
    string headers = "Accept: application/json\r\n";
-   uchar  data[];
-   uchar  result[];
+   char  data[];
+   char  result[];
    string responseHeaders;
 
    int res = WebRequest("GET", url, headers, 5000, data, result, responseHeaders);
@@ -1339,8 +1339,8 @@ void FetchDiscoveryUrl()
 {
    string url     = g_serverUrl + "/api/url";
    string headers = "Accept: application/json\r\n";
-   uchar  data[];
-   uchar  result[];
+   char  data[];
+   char  result[];
    string responseHeaders;
    int res = WebRequest("GET", url, headers, 5000, data, result, responseHeaders);
    if (res == 200 && ArraySize(result) > 0)
@@ -1377,8 +1377,8 @@ bool TryReconnect()
    }
    Print("🔄 Reconexão ", g_failCount, "/", MaxReconnectTries, "...");
    string headers = "Accept: application/json\r\n";
-   uchar  data[];
-   uchar  result[];
+   char  data[];
+   char  result[];
    string responseHeaders;
    int res = WebRequest("GET", g_discoverUrl, headers, 10000, data, result, responseHeaders);
    if (res == 200 && ArraySize(result) > 0)
