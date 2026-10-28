@@ -1368,6 +1368,30 @@ router.get('/download-ea', mt5DashboardAccess, async (req: Request, res: Respons
     }
 
     const eaVersion = content.match(/#property\s+version\s+"([^"]+)"/)?.[1] ?? 'unknown';
+    // Fail closed: never serve the legacy generated v2.00 EA when the canonical source is missing/stale.
+    const requiredEaMarkers = [
+      '#property version   "8.1"',
+      'PriceActionRiskPercent = 1.0',
+      'PriceActionUseAIReview = true',
+      'CopyRates(g_symbol, timeframe, 1, count, rates)',
+      'CalculatePriceActionRiskLot',
+      'int VolumeDigitsFromStep()',
+      'TRADE_RETCODE_DONE_PARTIAL',
+    ];
+    const missingEaMarkers = requiredEaMarkers.filter((marker) => !content.includes(marker));
+    if (eaVersion !== '8.1' || missingEaMarkers.length > 0) {
+      console.error('[MT5 EA Download] Fonte ausente ou desatualizada; download bloqueado.', {
+        eaVersion,
+        missingEaMarkers,
+      });
+      return res.status(503).json({
+        ok: false,
+        code: 'MT5_EA_SOURCE_NOT_CURRENT',
+        error: 'Download bloqueado: a fonte do Expert Advisor não corresponde à versão atual da estratégia Price Action.',
+        detectedVersion: eaVersion,
+      });
+    }
+
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
