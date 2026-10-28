@@ -704,15 +704,27 @@ void SendMarketDataForSyntheticGirassol()
 //+------------------------------------------------------------------+
 bool IsPriceActionCryptoSymbol()
 {
+   // Broker symbol names vary (BTCUSDT, BTCUSDm, m.BTCUSD, BTCUSDT.r, etc.).
+   // Normalize separators, then recognize the requested crypto/USD or crypto/USDT pairs.
    string normalized = g_symbol;
    StringToUpper(normalized);
    StringReplace(normalized, "/", "");
    StringReplace(normalized, ".", "");
    StringReplace(normalized, "_", "");
    StringReplace(normalized, "-", "");
-   return (StringFind(normalized, "BTCUSD") == 0 ||
-           StringFind(normalized, "ETHUSD") == 0 ||
-           StringFind(normalized, "SOLUSD") == 0);
+
+   string bases[4] = {"BTC", "XBT", "ETH", "SOL"};
+   for(int i = 0; i < ArraySize(bases); i++)
+   {
+      int pos = StringFind(normalized, bases[i]);
+      if(pos < 0) continue;
+
+      string quoteAndSuffix = StringSubstr(normalized, pos + StringLen(bases[i]));
+      if(StringFind(quoteAndSuffix, "USDT") == 0 ||
+         StringFind(quoteAndSuffix, "USD") == 0)
+         return true;
+   }
+   return false;
 }
 
 // Derive volume precision from the broker-supported volume step.
