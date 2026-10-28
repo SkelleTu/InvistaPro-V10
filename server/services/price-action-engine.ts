@@ -173,6 +173,8 @@ export function evaluatePriceActionSetup(
   if (!side) reasons.push('Sem gatilho M5/M1 confirmado na direção H4/H1');
   features.trendM15 = m15Trend;
   features.trigger = entrySide;
+  checks.trend_m15_alignment = side !== null && m15Trend === (side === 'BUY' ? 'bullish' : 'bearish');
+  if (!checks.trend_m15_alignment) reasons.push('Tendência M15 não confirma a direção H4/H1 e do gatilho');
 
   if (side) {
     // M15 defines the operating zone; M5/M1 supplies the final trigger and microstructure.
@@ -189,8 +191,7 @@ export function evaluatePriceActionSetup(
     features.orderBlockLow = ob?.low ?? null; features.orderBlockHigh = ob?.high ?? null;
     features.volumeRatio = average(volumes) > 0 ? entryFrame[entryFrame.length - 1].volume / average(volumes) : null;
     checks.volume = volumeOk;
-    checks.structure_confirmation = fvg || sweep || bos || choch || (ob !== null) ||
-      m15Trend === (side === 'BUY' ? 'bullish' : 'bearish');
+    checks.structure_confirmation = fvg || sweep || bos || choch || (ob !== null);
     checks.valid_zone = zoneNear;
     if (!volumeOk) reasons.push('Volume do gatilho abaixo da referência histórica ou sem baseline válido');
     if (!checks.structure_confirmation) reasons.push('Sem FVG, sweep de liquidez, BOS, CHoCH, Order Block válido ou alinhamento M15');
