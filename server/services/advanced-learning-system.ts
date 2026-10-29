@@ -1378,7 +1378,7 @@ export class AdvancedLearningSystem {
    * 📈 Calcular acurácia real baseada em memórias históricas
    */
   private calculateAccuracyFromMemories(memories: any[], model = ''): number {
-    if (memories.length === 0) return this.modelSeed(model, 0.70, 0.20); // Diferenciado por modelo
+    if (memories.length === 0) return 0; // Sem amostra: não apresentar desempenho sintético
     
     const correctPredictions = memories.filter(m => m.reward > 0).length;
     const accuracy = correctPredictions / memories.length;
@@ -1392,7 +1392,7 @@ export class AdvancedLearningSystem {
    * 💰 Calcular lucratividade real baseada em rewards
    */
   private calculateProfitabilityFromMemories(memories: any[], model = ''): number {
-    if (memories.length === 0) return this.modelSeed(model, 0.60, 0.25); // Diferenciado por modelo
+    if (memories.length === 0) return 0; // Sem amostra: não apresentar desempenho sintético
     
     const avgReward = memories.reduce((sum, m) => sum + (m.reward || 0), 0) / memories.length;
     
@@ -1411,12 +1411,12 @@ export class AdvancedLearningSystem {
    * 🤝 Calcular cooperação baseada em consenso histórico
    */
   private calculateCooperationFromMemories(memories: any[], model = ''): number {
-    if (memories.length === 0) return this.modelSeed(model, 0.72, 0.18); // Diferenciado por modelo
+    if (memories.length === 0) return 0; // Sem amostra: não apresentar desempenho sintético
     
     // Cooperação baseada na consistência das decisões
     const recentMemories = memories.slice(-20); // Últimas 20 memórias
     
-    if (recentMemories.length < 2) return 0.8;
+    if (recentMemories.length < 2) return 0; // Amostra insuficiente para medir consenso
     
     let consensusCount = 0;
     for (let i = 1; i < recentMemories.length; i++) {
@@ -1437,7 +1437,7 @@ export class AdvancedLearningSystem {
    * 🔄 Calcular adaptabilidade baseada em regimes de mercado
    */
   private calculateAdaptabilityFromMarketRegime(marketState: MarketState, memories: any[]): number {
-    if (memories.length === 0) return 0.7; // Default médio
+    if (memories.length === 0) return 0; // Sem dados por regime: nenhuma evidência de adaptabilidade
     
     // Avaliar performance em diferentes regimes
     const regimePerformance = new Map<string, number[]>();
@@ -1472,11 +1472,11 @@ export class AdvancedLearningSystem {
    * 📊 Calcular consistência baseada na estabilidade dos rewards
    */
   private calculateConsistencyFromMemories(memories: any[]): number {
-    if (memories.length === 0) return 0.75; // Default médio-alto
+    if (memories.length === 0) return 0; // Sem amostra: consistência não mensurável
     
     const rewards = memories.map(m => m.reward || 0);
     
-    if (rewards.length < 3) return 0.75;
+    if (rewards.length < 3) return 0; // Amostra insuficiente para estimar consistência
     
     // Calcular estabilidade dos rewards (menor desvio padrão = maior consistência)
     const avgReward = rewards.reduce((sum, r) => sum + r, 0) / rewards.length;
