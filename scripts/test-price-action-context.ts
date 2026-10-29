@@ -54,6 +54,7 @@ assert.equal(buildTrustedPriceActionContext({
 }).maxSpread, undefined, 'Adaptive spread must fail closed when M5 ATR is unavailable');
 assert.ok(Math.abs(Number(trusted.spread) - 0.1) < 1e-9, 'Spread calculation must preserve the expected price difference');
 assert.ok(Math.abs(Number(trusted.estimatedRoundTripCost) - 0.2) < 1e-9, 'With a zero extra-cost multiplier, round-trip cost must equal twice the observed spread');
+assert.equal(trusted.extraCostSpreadMultiplier, 0, 'Context must expose the configured spread-relative multiplier for the EA');
 assert.equal(trusted.highImpactNewsBlocked, false);
 assert.equal(trusted.tradingSessionOpen, true);
 assert.equal(buildTrustedPriceActionContext({
