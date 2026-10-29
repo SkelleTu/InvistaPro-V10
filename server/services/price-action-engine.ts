@@ -191,10 +191,14 @@ export function evaluatePriceActionSetup(
     features.orderBlockLow = ob?.low ?? null; features.orderBlockHigh = ob?.high ?? null;
     features.volumeRatio = average(volumes) > 0 ? entryFrame[entryFrame.length - 1].volume / average(volumes) : null;
     checks.volume = volumeOk;
-    checks.structure_confirmation = fvg || sweep || bos || choch || (ob !== null);
+    // Require confluence, not a single isolated pattern: a structural break/shift
+    // plus at least one independent liquidity/imbalance/order-block confirmation.
+    const directionalStructure = bos || choch;
+    const liquidityOrImbalance = fvg || sweep || ob !== null;
+    checks.structure_confirmation = directionalStructure && liquidityOrImbalance;
     checks.valid_zone = zoneNear;
     if (!volumeOk) reasons.push('Volume do gatilho abaixo da referência histórica ou sem baseline válido');
-    if (!checks.structure_confirmation) reasons.push('Sem FVG, sweep de liquidez, BOS, CHoCH, Order Block válido ou alinhamento M15');
+    if (!checks.structure_confirmation) reasons.push('Confluência estrutural incompleta: exige BOS/CHoCH e pelo menos FVG, sweep ou Order Block válido');
     if (!zoneNear) reasons.push('Preço não está próximo de zona estrutural válida de oferta/demanda');
 
     const recent = entryFrame.slice(-21, -1);
