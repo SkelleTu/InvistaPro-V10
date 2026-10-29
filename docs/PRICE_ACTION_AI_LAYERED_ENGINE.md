@@ -18,3 +18,9 @@ O motor de política é isolado e testável. Para operar a estratégia cripto de
 - Como comissão e slippage podem existir além do spread, configure `MT5_PRICE_ACTION_EXTRA_COST_SPREAD_MULTIPLIER` no servidor. É um multiplicador do spread vivo, não um preço fixo: custo total estimado = spread observado × (2 + multiplicador). O servidor envia o multiplicador junto com o sinal e o EA o reaplica ao spread vivo no momento da execução, para não subestimar custos se o spread mudar entre análise e ordem. Exemplo: `1` reserva duas vezes o spread para ida e volta mais uma vez o spread como margem adicional para comissão/slippage.
 - Se a variável estiver ausente, inválida ou negativa, o custo total fica indisponível e a estratégia bloqueia novas entradas. O multiplicador é uma estimativa conservadora, não substitui a validação das condições e comissões reais do broker; configure-o de acordo com os instrumentos habilitados.
 - A validação de execução deve ser feita em DEMO com os custos reais do broker antes de qualquer uso em conta REAL.
+
+## Paridade servidor ↔ EA (v8.4)
+- O percentual de risco por operação é autoritativo no servidor (`config.riskPercent`) e é enviado em cada sinal aprovado; o EA não mantém um segundo percentual configurável para dimensionar o lote.
+- Os limites de spread são fixos e iguais nos dois lados: ATR M1 × 20%, ATR M5 × 8% e teto de preço × 0,10%; vale sempre o menor limite. O EA não permite overrides locais desses três limites.
+- O EA envia a quantidade total de posições abertas observada no terminal. O servidor usa esse valor reportado, quando válido, no limite de posições da conta, mantendo o heartbeat recente como requisito.
+- A versão do EA no arquivo, no heartbeat e nos payloads de sinal deve ser 8.4; o endpoint de download bloqueia fontes que não contenham os marcadores de política atuais.
