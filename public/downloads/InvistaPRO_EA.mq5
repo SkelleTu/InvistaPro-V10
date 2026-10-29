@@ -1213,7 +1213,14 @@ void FetchAndProcessSignal()
          Print("⛔ Price Action: lote não respeita o orçamento de risco na cotação final.");
          return;
       }
-      trade.SetDeviationInPoints((ulong)MathMax(1.0, (executionEntry * 0.001) / pointForDeviation));
+      double remainingDeviationPrice = serverEntryPrice * 0.001 - MathAbs(executionEntry - serverEntryPrice);
+      ulong executionDeviationPoints = (ulong)MathFloor(remainingDeviationPrice / pointForDeviation);
+      if (remainingDeviationPrice <= 0.0 || executionDeviationPoints < 1)
+      {
+         Print("⛔ Price Action: tolerância residual de execução insuficiente para manter o limite total de 0,10%.");
+         return;
+      }
+      trade.SetDeviationInPoints(executionDeviationPoints);
    }
    if (action == "BUY")
       requestOk = trade.Buy(lotSize, g_symbol, 0, stopLoss, takeProfit, "InvistaPRO_" + signalId);
