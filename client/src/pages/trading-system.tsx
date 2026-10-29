@@ -1135,7 +1135,7 @@ export default function TradingSystemPage() {
         title: "Bloqueios salvos",
         description: "A lista de ativos bloqueados foi atualizada."
       });
-      queryClient.invalidateQueries({ queryKey: ["/api/trading/blocked-assets"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/trading/blocked-assets?mode=digit_diff"] });
     }
   });
 
