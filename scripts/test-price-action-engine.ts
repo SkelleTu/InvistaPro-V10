@@ -51,3 +51,13 @@ assert.equal(hasRequiredStructuralConfluence({ bos: true, choch: false, fvg: fal
 assert.equal(hasRequiredStructuralConfluence({ bos: false, choch: false, fvg: true, sweep: true, orderBlock: false }), false, 'FVG and sweep without BOS/CHoCH must not satisfy structural confluence');
 assert.equal(hasRequiredStructuralConfluence({ bos: true, choch: false, fvg: true, sweep: false, orderBlock: false }), true, 'BOS plus independent FVG must satisfy structural confluence');
 assert.equal(hasRequiredStructuralConfluence({ bos: false, choch: true, fvg: false, sweep: false, orderBlock: true }), true, 'CHoCH plus Order Block must satisfy structural confluence');
+
+const unordered = candles(40, 100, 0.5).reverse();
+const unorderedResult = evaluatePriceActionSetup({
+  H4: candles(40, 100, 1),
+  H1: candles(40, 100, 0.5),
+  M15: candles(40, 100, 0.2),
+  M5: unordered,
+});
+assert.equal(unorderedResult.approved, false, 'Unordered or duplicate candle timestamps must never be accepted');
+assert.equal(unorderedResult.checks.entry_data, false, 'Entry frame integrity includes strictly increasing timestamps');
