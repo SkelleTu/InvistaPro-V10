@@ -416,6 +416,9 @@ export class AdvancedLearningSystem {
     patterns: any[],
     marketState: MarketState
   ): Promise<number> {
+    if (performances.length === 0 || !performances.some(p => p.accuracy > 0 || p.consistency > 0)) {
+      return 0; // Sem evidência histórica, não afirmar confiança mínima artificial.
+    }
     let confidence = 0;
     
     // 1. Confiança baseada na performance média dos modelos
@@ -452,13 +455,13 @@ export class AdvancedLearningSystem {
       confidence *= 0.8;
     }
     
-    return Math.max(50, Math.min(99, confidence)); // Clamp entre 50-99%
+    return Number.isFinite(confidence) ? Math.max(0, Math.min(99, confidence)) : 0; // Sem piso artificial de confiança
   }
 
   // Funções movidas para HybridOrchestrator
 
   private calculateVolatility(marketData: any[]): number {
-    if (marketData.length < 2) return 0.15;
+    if (marketData.length < 2) return 0;
     
     const prices = marketData.map(d => d.price || 0);
     const returns: number[] = [];
@@ -469,7 +472,7 @@ export class AdvancedLearningSystem {
       }
     }
     
-    if (returns.length === 0) return 0.15;
+    if (returns.length === 0) return 0;
     
     const mean = returns.reduce((sum, r) => sum + r, 0) / returns.length;
     const variance = returns.reduce((sum, r) => sum + Math.pow(r - mean, 2), 0) / returns.length;
@@ -1178,31 +1181,72 @@ export class AdvancedLearningSystem {
 
   // Métodos de analytics
   private async calculateAdvancedMetrics(symbol: string, timeframe: string): Promise<any> {
+    const memories = (this.episodeMemory.get(symbol) || []).filter(memory => {
+      const timestamp = new Date(memory.timestamp || 0).getTime();
+      if (!Number.isFinite(timestamp) || timestamp <= 0) return false;
+      const age = Date.now() - timestamp;
+      const windowMs: Record<string, number> = {
+        minute: 60_000,
+        hour: 3_600_000,
+        day: 86_400_000,
+        week: 604_800_000,
+      };
+      return age >= 0 && age <= (windowMs[timeframe] ?? windowMs.day);
+    });
+    const rewards = memories
+      .map(memory => Number(memory.reward))
+      .filter(reward => Number.isFinite(reward));
+    const wins = rewards.filter(reward => reward > 0).length;
+    const losses = rewards.filter(reward => reward < 0).length;
+    const average = rewards.length
+      ? rewards.reduce((sum, reward) => sum + reward, 0) / rewards.length
+      : 0;
+    const variance = rewards.length
+      ? rewards.reduce((sum, reward) => sum + (reward - average) ** 2, 0) / rewards.length
+      : 0;
+    let peak = 0;
+    let equity = 0;
+    let maxDrawdown = 0;
+    for (const reward of rewards) {
+      equity += reward;
+      peak = Math.max(peak, equity);
+      maxDrawdown = Math.max(maxDrawdown, peak - equity);
+    }
+    const standardDeviation = Math.sqrt(variance);
     return {
-      accuracy: 0.85,
-      profitability: 0.72,
-      sharpeRatio: 1.45,
-      maxDrawdown: 0.08,
-      winRate: 0.68,
-      avgReturn: 0.12,
-      volatility: 0.15
+      sampleSize: rewards.length,
+      accuracy: rewards.length ? wins / rewards.length : 0,
+      profitability: rewards.length ? Math.max(0, Math.min(1, (average + 1) / 2)) : 0,
+      sharpeRatio: standardDeviation > 0 ? average / standardDeviation : 0,
+      maxDrawdown,
+      winRate: wins + losses ? wins / (wins + losses) : 0,
+      avgReturn: average,
+      volatility: standardDeviation,
     };
   }
 
   private async generateInsights(metrics: any): Promise<any> {
+    const hasEvidence = Number(metrics.sampleSize) > 0;
     return {
-      performance_trend: 'improving',
-      risk_level: 'moderate',
-      opportunity_score: 0.75,
-      market_alignment: 'good'
+      performance_trend: !hasEvidence ? 'insufficient_data'
+        : metrics.avgReturn > 0 ? 'positive_observed' : metrics.avgReturn < 0 ? 'negative_observed' : 'flat_observed',
+      risk_level: !hasEvidence ? 'unknown'
+        : metrics.maxDrawdown > 0.5 ? 'high_observed_drawdown'
+        : metrics.volatility > 0.25 ? 'elevated_observed_volatility' : 'based_on_available_sample',
+      opportunity_score: hasEvidence ? Math.max(0, Math.min(1, metrics.accuracy * metrics.profitability)) : 0,
+      market_alignment: hasEvidence ? 'not_assessed_from_rewards_only' : 'insufficient_data',
+      sampleSize: Number(metrics.sampleSize) || 0,
     };
   }
 
   private async generateRecommendations(insights: any, symbol: string): Promise<any> {
+    const hasEvidence = Number(insights.sampleSize) > 0;
     return {
-      weight_adjustments: 'increase_conservative_models',
-      strategy_focus: 'trend_following',
-      risk_management: 'maintain_current_levels'
+      weight_adjustments: hasEvidence ? 'require_validation_before_adjustment' : 'do_not_adjust_without_evidence',
+      strategy_focus: hasEvidence ? 'continue_paper_validation' : 'collect_validated_outcomes_first',
+      risk_management: 'keep_live_execution_disabled_until_independently_validated',
+      symbol,
+      sampleSize: Number(insights.sampleSize) || 0,
     };
   }
 
@@ -1233,7 +1277,7 @@ export class AdvancedLearningSystem {
   }
 
   private calculateSimilarity(a: number[], b: number[]): number {
-    if (a.length !== b.length) return 0;
+    if (a.length !== b.length || a.length === 0) return 0;
     
     let sum = 0;
     for (let i = 0; i < a.length; i++) {
@@ -1241,7 +1285,10 @@ export class AdvancedLearningSystem {
     }
     
     const maxDiff = Math.max(...a) - Math.min(...a);
-    return Math.max(0, 1 - sum / (maxDiff * a.length));
+    if (!Number.isFinite(maxDiff) || maxDiff === 0) {
+      return a.every((value, index) => value === b[index]) ? 1 : 0;
+    }
+    return Math.max(0, Math.min(1, 1 - sum / (maxDiff * a.length)));
   }
 
   private calculateVolatilityFromPrices(prices: number[]): number {
@@ -1378,7 +1425,7 @@ export class AdvancedLearningSystem {
    * 📈 Calcular acurácia real baseada em memórias históricas
    */
   private calculateAccuracyFromMemories(memories: any[], model = ''): number {
-    if (memories.length === 0) return this.modelSeed(model, 0.70, 0.20); // Diferenciado por modelo
+    if (memories.length === 0) return 0; // Sem amostra: não apresentar desempenho sintético
     
     const correctPredictions = memories.filter(m => m.reward > 0).length;
     const accuracy = correctPredictions / memories.length;
@@ -1392,7 +1439,7 @@ export class AdvancedLearningSystem {
    * 💰 Calcular lucratividade real baseada em rewards
    */
   private calculateProfitabilityFromMemories(memories: any[], model = ''): number {
-    if (memories.length === 0) return this.modelSeed(model, 0.60, 0.25); // Diferenciado por modelo
+    if (memories.length === 0) return 0; // Sem amostra: não apresentar desempenho sintético
     
     const avgReward = memories.reduce((sum, m) => sum + (m.reward || 0), 0) / memories.length;
     
@@ -1411,33 +1458,27 @@ export class AdvancedLearningSystem {
    * 🤝 Calcular cooperação baseada em consenso histórico
    */
   private calculateCooperationFromMemories(memories: any[], model = ''): number {
-    if (memories.length === 0) return this.modelSeed(model, 0.72, 0.18); // Diferenciado por modelo
+    if (memories.length === 0) return 0; // Sem amostra: não apresentar desempenho sintético
     
     // Cooperação baseada na consistência das decisões
-    const recentMemories = memories.slice(-20); // Últimas 20 memórias
+    const recentMemories = memories.slice(-20); // Últimas 20 memórias com evidência recente
+    const decisions = recentMemories.filter(memory => typeof memory.action === "string");
     
-    if (recentMemories.length < 2) return 0.8;
+    if (decisions.length < 2) return 0; // Sem decisões registradas, cooperação não mensurável
     
     let consensusCount = 0;
-    for (let i = 1; i < recentMemories.length; i++) {
-      const current = recentMemories[i];
-      const previous = recentMemories[i-1];
-      
-      // Verificar se as decisões são consistentes
-      if (current.action === previous.action || 
-          Math.abs(current.reward - previous.reward) < 0.5) {
-        consensusCount++;
-      }
+    for (let i = 1; i < decisions.length; i++) {
+      if (decisions[i].action === decisions[i - 1].action) consensusCount++;
     }
     
-    return (consensusCount / (recentMemories.length - 1)) * 0.4 + 0.6; // Base 0.6 + até 0.4
+    return consensusCount / (decisions.length - 1);
   }
 
   /**
    * 🔄 Calcular adaptabilidade baseada em regimes de mercado
    */
   private calculateAdaptabilityFromMarketRegime(marketState: MarketState, memories: any[]): number {
-    if (memories.length === 0) return 0.7; // Default médio
+    if (memories.length === 0) return 0; // Sem dados por regime: nenhuma evidência de adaptabilidade
     
     // Avaliar performance em diferentes regimes
     const regimePerformance = new Map<string, number[]>();
@@ -1457,7 +1498,7 @@ export class AdvancedLearningSystem {
       .map(rewards => rewards.reduce((sum, r) => sum + r, 0) / rewards.length)
       .filter(avg => !isNaN(avg));
     
-    if (regimeAverages.length < 2) return 0.7;
+    if (regimeAverages.length < 2) return 0; // Dados insuficientes para comparar regimes
     
     // Menor variância entre regimes = maior adaptabilidade
     const avgPerformance = regimeAverages.reduce((sum, avg) => sum + avg, 0) / regimeAverages.length;
@@ -1465,18 +1506,18 @@ export class AdvancedLearningSystem {
     
     const adaptability = 1 - Math.min(0.5, variance / 2); // Max penalidade de 50%
     
-    return Math.max(0.4, adaptability);
+    return Math.max(0, adaptability);
   }
 
   /**
    * 📊 Calcular consistência baseada na estabilidade dos rewards
    */
   private calculateConsistencyFromMemories(memories: any[]): number {
-    if (memories.length === 0) return 0.75; // Default médio-alto
+    if (memories.length === 0) return 0; // Sem amostra: consistência não mensurável
     
     const rewards = memories.map(m => m.reward || 0);
     
-    if (rewards.length < 3) return 0.75;
+    if (rewards.length < 3) return 0; // Amostra insuficiente para estimar consistência
     
     // Calcular estabilidade dos rewards (menor desvio padrão = maior consistência)
     const avgReward = rewards.reduce((sum, r) => sum + r, 0) / rewards.length;
@@ -1485,7 +1526,7 @@ export class AdvancedLearningSystem {
     // Normalizar desvio padrão para escala 0-1
     const consistency = 1 - Math.min(1, stdDev / 2);
     
-    return Math.max(0.5, consistency);
+    return consistency;
   }
 
   /**
@@ -1500,21 +1541,8 @@ export class AdvancedLearningSystem {
       .map(m => m.marketState.price)
       .slice(-100); // Últimos 100 preços
     
-    // Se não há histórico suficiente, gerar série sintética baseada no estado atual
-    if (recentPrices.length < 10) {
-      const basePrice = 1000; // Preço base sintético
-      const syntheticPrices: number[] = [];
-      
-      for (let i = 0; i < 50; i++) {
-        const variation = (Math.random() - 0.5) * 0.02; // ±1% de variação
-        const price = basePrice * (1 + variation * i * 0.01);
-        syntheticPrices.push(price);
-      }
-      
-      return syntheticPrices;
-    }
-    
-    return recentPrices;
+    // Sem histórico suficiente, não fabricar preços para a detecção de padrões.
+    return recentPrices.length >= 10 ? recentPrices : [];
   }
 }
 
