@@ -119,6 +119,13 @@ int OnInit()
    g_failCount   = 0;
 
    trade.SetExpertMagicNumber(MagicNumber);
+   // Use a filling policy supported by the selected broker symbol; never rely on
+   // CTrade's default policy, which may be rejected for this instrument/account.
+   if (!trade.SetTypeFillingBySymbol(g_symbol))
+   {
+      Print("⛔ Inicialização bloqueada: não foi possível selecionar um modo de execução aceito pelo broker para ", g_symbol);
+      return INIT_FAILED;
+   }
    // Timer keeps connectivity checks alive even when the chart receives no ticks.
    EventSetTimer(1);
 
