@@ -34,9 +34,10 @@ export interface PriceActionSetup {
 }
 const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
 const validCandles = (v: unknown): v is Candle[] => Array.isArray(v) && v.length >= 30 &&
-  v.every(c => c && finite(c.time) && finite(c.open) && finite(c.high) && finite(c.low) &&
+  v.every((c, i) => c && finite(c.time) && finite(c.open) && finite(c.high) && finite(c.low) &&
     finite(c.close) && finite(c.volume) && c.high >= Math.max(c.open, c.close) &&
-    c.low <= Math.min(c.open, c.close) && c.high >= c.low && c.volume >= 0);
+    c.low <= Math.min(c.open, c.close) && c.high >= c.low && c.volume >= 0 &&
+    (i === 0 || c.time > v[i - 1].time));
 
 function trend(c: Candle[]): 'bullish' | 'bearish' | 'range' {
   if (c.length < 12) return 'range';
