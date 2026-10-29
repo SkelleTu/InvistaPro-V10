@@ -40,10 +40,10 @@ input bool     AutoReconnect    = true;        // Reconexão automática de URL
 input int      MaxReconnectTries= 5;           // Tentativas máximas de reconexão
 input int      IndicatorBars    = 5;           // Quantas barras recentes dos indicadores ler
 input int      CandleCount      = 200;         // Candles para enviar à IA (histórico)
-input double   PriceActionRiskPercent = 1.0; // Risco por trade para Price Action (1% a 2%)
-input double   PriceActionSpreadATR_M1_Percent = 20.0; // Spread maximo dinamico como % do ATR M1
-input double   PriceActionSpreadATR_M5_Percent = 8.0;  // Spread maximo dinamico como % do ATR M5
-input double   PriceActionSpreadPriceCapPercent = 0.10; // Teto absoluto relativo ao preco (%)
+// Price Action policy is server-owned: risk is received in each approved signal.
+#define PRICE_ACTION_SPREAD_ATR_M1_PERCENT 20.0
+#define PRICE_ACTION_SPREAD_ATR_M5_PERCENT 8.0
+#define PRICE_ACTION_SPREAD_PRICE_CAP_PERCENT 0.10
 input bool     PriceActionUseAIReview = true; // true = estratégia + IA; false = estratégia autônoma com os mesmos gates
 
 //--- Controle de Autonomia da IA
@@ -768,9 +768,9 @@ bool IsAdaptivePriceActionSpreadAcceptable(double entryPrice, double currentSpre
 {
    maxAllowedSpread = 0.0;
    if (entryPrice <= 0.0 || currentSpread < 0.0 ||
-       PriceActionSpreadATR_M1_Percent <= 0.0 ||
-       PriceActionSpreadATR_M5_Percent <= 0.0 ||
-       PriceActionSpreadPriceCapPercent <= 0.0)
+       PRICE_ACTION_SPREAD_ATR_M1_PERCENT <= 0.0 ||
+       PRICE_ACTION_SPREAD_ATR_M5_PERCENT <= 0.0 ||
+       PRICE_ACTION_SPREAD_PRICE_CAP_PERCENT <= 0.0)
       return false;
 
    int atrM1Handle = iATR(g_symbol, PERIOD_M1, 14);
