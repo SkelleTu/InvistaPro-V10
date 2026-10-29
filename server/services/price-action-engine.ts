@@ -17,6 +17,7 @@ export interface MarketContext {
   spread?: number;
   maxSpread?: number;
   estimatedRoundTripCost?: number;
+  extraCostSpreadMultiplier?: number;
   highImpactNewsBlocked?: boolean;
   riskLimitOk?: boolean;
   tradingSessionOpen?: boolean;
@@ -227,7 +228,7 @@ export function evaluatePriceActionSetup(
     const targetDistance = risk * 2 + costs * 3;
     const target = side === 'BUY' ? entry + targetDistance : entry - targetDistance;
     const rr = risk > 0 ? (Math.abs(target - entry) - costs) / (risk + costs) : 0;
-    features.entry = entry; features.stop = stop; features.target = target; features.riskReward = rr; features.estimatedRoundTripCost = costs;
+    features.entry = entry; features.stop = stop; features.target = target; features.riskReward = rr; features.estimatedRoundTripCost = costs; features.extraCostSpreadMultiplier = context.extraCostSpreadMultiplier;
     features.stopBuffer = stopBuffer;
     checks.stop_direction = entry > 0 && (side === 'BUY' ? stop < entry : stop > entry);
     if (!checks.stop_direction) reasons.push('Stop estrutural está no lado incorreto da entrada');
@@ -237,8 +238,8 @@ export function evaluatePriceActionSetup(
     if (!checks.stop_distance_limit) reasons.push('Stop estrutural excede o limite máximo de 1,5% do preço; não será comprimido artificialmente.');
     checks.spread = finite(context.spread) && finite(context.maxSpread) && context.spread >= 0 && context.maxSpread > 0 && context.spread <= context.maxSpread;
     if (!checks.spread) reasons.push('Spread ausente, inválido ou acima do limite configurado');
-    checks.costs = finite(context.estimatedRoundTripCost) && context.estimatedRoundTripCost >= 0;
-    if (!checks.costs) reasons.push('Custos totais estimados ausentes ou inválidos');
+    checks.costs = finite(context.estimatedRoundTripCost) && context.estimatedRoundTripCost > 0 && finite(context.extraCostSpreadMultiplier) && context.extraCostSpreadMultiplier >= 0;
+    if (!checks.costs) reasons.push('Custos totais ou multiplicador de custo ausentes ou inválidos');
   } else {
     checks.volume = false; checks.structure_confirmation = false; checks.valid_zone = false; checks.risk_reward = false; checks.spread = false; checks.costs = false;
   }
