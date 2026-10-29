@@ -19,7 +19,7 @@ O motor de política é isolado e testável. Para operar a estratégia cripto de
 - Se a variável estiver ausente, inválida ou negativa, o custo total fica indisponível e a estratégia bloqueia novas entradas. O multiplicador é uma estimativa conservadora, não substitui a validação das condições e comissões reais do broker; configure-o de acordo com os instrumentos habilitados.
 - A validação de execução deve ser feita em DEMO com os custos reais do broker antes de qualquer uso em conta REAL.
 
-## Paridade servidor ↔ EA (v8.4)
+## Paridade servidor ↔ EA (v8.5)
 - A entrada executável é comparada com a entrada aprovada pelo servidor; desvios acima de 0,10% do preço aprovado são rejeitados. Custos estimados nunca ampliam essa tolerância. O EA atualiza e valida novamente a cotação imediatamente antes de enviar a ordem, recalcula spread/custo, stop, R:R líquido e lote com essa cotação final, e limita a tolerância de execução do broker a 0,10% do preço.
 - Para Price Action, lote inválido ou acima das restrições do broker bloqueia a operação; não existe fallback para lote manual que contorne o orçamento de risco.
 - O gate de posições falha fechado se a contagem total reportada pelo heartbeat do terminal não estiver disponível ou atingir o limite configurado.
@@ -28,4 +28,4 @@ O motor de política é isolado e testável. Para operar a estratégia cripto de
 - Os limites de spread são fixos e iguais nos dois lados: ATR M1 × 20%, ATR M5 × 8% e teto de preço × 0,10%; vale sempre o menor limite. O EA não permite overrides locais desses três limites.
 - O EA envia a quantidade total de posições abertas observada no terminal. O servidor usa esse valor reportado, quando válido, no limite de posições da conta, mantendo o heartbeat recente como requisito.
 - A IA pode rejeitar um setup, mas não pode criar direção, alterar SL/TP estruturais ou introduzir saídas discricionárias. No Price Action, a gestão local usa breakeven em +1R, parcial de 50% em +1,5R quando o volume mínimo permite, e os SL/TP da estratégia.
-- A versão do EA no arquivo, no heartbeat e nos payloads de sinal deve ser 8.4; o endpoint de download bloqueia fontes que não contenham os marcadores de política atuais.
+- A versão do EA no arquivo, no heartbeat e nos payloads de sinal deve ser 8.5; o endpoint de download bloqueia fontes que não contenham os marcadores de política atuais.
