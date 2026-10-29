@@ -35,6 +35,9 @@ export async function reviewPriceActionSetup(
     rationale: 'Revisão IA dedicada indisponível ou inválida; entrada bloqueada.',
   };
   if (!GROQ_API_KEY || !setup.approved || !['BUY', 'SELL'].includes(setup.action)) return rejected;
+  if (originalSignal.action !== setup.action || !Number.isFinite(originalSignal.confidence) || originalSignal.confidence < 0.7 || originalSignal.confidence > 1) {
+    return { ...rejected, rationale: 'Sinal original da IA não confirma a direção/confiança mínima do setup; entrada bloqueada.' };
+  }
 
   const payload = {
     strategy: {
@@ -99,7 +102,7 @@ export async function reviewPriceActionSetup(
       decision,
       direction,
       confidence,
-      riskOverride: parsed.riskOverride,
+      ...(parsed.riskOverride !== null ? { riskOverride: parsed.riskOverride } : {}),
       rationale: String(parsed.rationale ?? '').slice(0, 500),
     };
   } catch {

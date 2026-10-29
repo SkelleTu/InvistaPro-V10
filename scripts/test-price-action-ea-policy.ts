@@ -93,6 +93,10 @@ assert.ok(route.includes('const aiConfidence = Number(baseSignal?.confidence ?? 
 assert.ok(route.includes("from '../services/price-action-ai-review'"), 'Price Action must use a dedicated second-pass AI reviewer');
 assert.ok(route.includes('await reviewPriceActionSetup(priceActionSetup'), 'Server must send the complete deterministic candidate to a dedicated AI review call');
 assert.ok(route.includes('const validatedAIReview = validateAIEntryReview(priceActionSetup, aiReview)'), 'Dedicated AI output must pass the deterministic review validator');
+const aiReview = readFileSync(new URL('../server/services/price-action-ai-review.ts', import.meta.url), 'utf8');
+assert.ok(aiReview.includes('originalSignal.action !== setup.action'), 'Dedicated AI review must fail closed when the original AI direction conflicts with the deterministic setup');
+assert.ok(aiReview.includes('originalSignal.confidence < 0.7'), 'Dedicated AI review must require the original AI confidence threshold');
+assert.ok(aiReview.includes('parsed.riskOverride !== null'), 'Dedicated AI review must reject any risk override from the model');
 assert.ok(route.includes('const downstreamFiltersPreservedDirection = finalAction === priceActionSetup.action'), 'Downstream indicator rules may veto but must not manufacture strategy approval');
 assert.ok(!route.includes('balance: 0,\n      equity: 0,\n      freeMargin: 0'), 'Signal polling must not synthesize zero-value account heartbeats');
 assert.ok(bridge.includes('actualAccountOpenPositions'), 'Bridge must preserve actual MT5 account-wide open positions for risk gating');
