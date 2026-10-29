@@ -41,7 +41,7 @@ const trusted = buildTrustedPriceActionContext({
   ask: 100.1,
   entryPrice: 100.05,
   m1Candles: makeCandles(0.5),
-  m5Candles: makeCandles(1),
+  m5Candles: makeCandles(0.5),
   riskLimitOk: true,
   newsBlocked: false,
   sessionOpen: true,
