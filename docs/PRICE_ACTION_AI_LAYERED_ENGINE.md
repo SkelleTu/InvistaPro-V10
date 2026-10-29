@@ -20,7 +20,7 @@ O motor de política é isolado e testável. Para operar a estratégia cripto de
 - Se a variável estiver ausente, inválida ou negativa, o custo total fica indisponível e a estratégia bloqueia novas entradas. O multiplicador é uma estimativa conservadora, não substitui a validação das condições e comissões reais do broker; configure-o de acordo com os instrumentos habilitados.
 - A validação de execução deve ser feita em DEMO com os custos reais do broker antes de qualquer uso em conta REAL.
 
-## Paridade servidor ↔ EA (v8.5)
+## Paridade servidor ↔ EA (v8.6)
 - A entrada executável é comparada com a entrada aprovada pelo servidor; desvios acima de 0,10% do preço aprovado são rejeitados. Custos estimados nunca ampliam essa tolerância. O EA atualiza e valida novamente a cotação imediatamente antes de enviar a ordem, recalcula spread/custo, stop, R:R líquido e lote com essa cotação final, e limita a tolerância do broker ao orçamento residual restante dentro desse teto total de 0,10%.
 - Para Price Action, lote inválido ou acima das restrições do broker bloqueia a operação; não existe fallback para lote manual que contorne o orçamento de risco.
 - O gate de posições falha fechado se a contagem total reportada pelo heartbeat do terminal não estiver disponível ou atingir o limite configurado.
@@ -29,5 +29,6 @@ O motor de política é isolado e testável. Para operar a estratégia cripto de
 - Os limites de spread são fixos e iguais nos dois lados: ATR M1 × 20%, ATR M5 × 8% e teto de preço × 0,10%; vale sempre o menor limite. O EA não permite overrides locais desses três limites.
 - O EA envia a quantidade total de posições abertas observada no terminal. O servidor usa esse valor reportado, quando válido, no limite de posições da conta, mantendo o heartbeat recente como requisito.
 - A revisão valida a decisão original da IA e sua confiança, não uma direção reescrita por indicadores posteriores. Filtros posteriores podem vetar, nunca fabricar aprovação. A IA pode rejeitar um setup, mas não pode criar direção, alterar SL/TP estruturais ou introduzir saídas discricionárias. No Price Action, a gestão local usa breakeven em +1R, parcial de 50% em +1,5R quando o volume mínimo permite, e os SL/TP da estratégia.
-- A precisão de OHLC e bid/ask usa os dígitos do símbolo selecionado no MT5, inclusive quando `Symbol_Override` é usado.
-- A versão do EA no arquivo, no heartbeat e nos payloads de sinal deve ser 8.5; o endpoint de download bloqueia fontes que não contenham os marcadores de política atuais.
+- A precisão de OHLC e bid/ask usa os dígitos do símbolo selecionado no MT5, inclusive quando `Symbol_Override` é usado. SL/TP são arredondados conservadoramente ao `SYMBOL_TRADE_TICK_SIZE`; o SL não é aproximado para reduzir artificialmente o risco e o alvo não é aproximado para exagerar o retorno.
+- A cotação é atualizada imediatamente antes da ordem e os níveis estruturais devem continuar respeitando o `SYMBOL_TRADE_STOPS_LEVEL` vigente. Se não respeitarem, a entrada é bloqueada sem alargar o stop.
+- A versão do EA no arquivo, no heartbeat e nos payloads de sinal deve ser 8.6; o endpoint de download bloqueia fontes que não contenham os marcadores de política atuais.

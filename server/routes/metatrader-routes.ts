@@ -1373,7 +1373,7 @@ router.get('/download-ea', mt5DashboardAccess, async (req: Request, res: Respons
     const eaVersion = content.match(/#property\s+version\s+"([^"]+)"/)?.[1] ?? 'unknown';
     // Fail closed: never serve the legacy generated v2.00 EA when the canonical source is missing/stale.
     const requiredEaMarkers = [
-      '#property version   "8.5"',
+      '#property version   "8.6"',
       'ExtractJsonDouble(resp, "riskPercent")',
       '#define PRICE_ACTION_SPREAD_ATR_M1_PERCENT 20.0',
       '#define PRICE_ACTION_SPREAD_ATR_M5_PERCENT 8.0',
@@ -1385,8 +1385,12 @@ router.get('/download-ea', mt5DashboardAccess, async (req: Request, res: Respons
       'cotação ao vivo inválida após receber o sinal.',
       'double serverEntryPrice = ExtractJsonDouble(resp, "entryPrice")',
       'double tickSizeForPrice = SymbolInfoDouble(g_symbol, SYMBOL_TRADE_TICK_SIZE)',
-      'stopLoss = NormalizeDouble(MathRound(stopLoss / tickSizeForPrice) * tickSizeForPrice, priceDigits)',
-      'takeProfit = NormalizeDouble(MathRound(takeProfit / tickSizeForPrice) * tickSizeForPrice, priceDigits)',
+      'stopLoss = NormalizeDouble(MathFloor(stopLoss / tickSizeForPrice) * tickSizeForPrice, priceDigits)',
+      'takeProfit = NormalizeDouble(MathFloor(takeProfit / tickSizeForPrice) * tickSizeForPrice, priceDigits)',
+      'stopLoss = NormalizeDouble(MathCeil(stopLoss / tickSizeForPrice) * tickSizeForPrice, priceDigits)',
+      'takeProfit = NormalizeDouble(MathCeil(takeProfit / tickSizeForPrice) * tickSizeForPrice, priceDigits)',
+      'double brokerStopLevel = (double)SymbolInfoInteger(g_symbol, SYMBOL_TRADE_STOPS_LEVEL) * pointForDeviation',
+      'bool brokerStopsValid = (action == "BUY")',
       'double maxEntryDeviation = serverEntryPrice * 0.001',
       'MathAbs(executionEntry - serverEntryPrice) > serverEntryPrice * 0.001',
       'double executionSpreadCost = MathMax(executionSpread * (2.0 + extraCostSpreadMultiplier), estimatedRoundTripCost)',
@@ -1418,7 +1422,7 @@ router.get('/download-ea', mt5DashboardAccess, async (req: Request, res: Respons
       'bool IsPriceActionCryptoSymbol()',
     ];
     const missingEaMarkers = requiredEaMarkers.filter((marker) => !content.includes(marker));
-    if (eaVersion !== '8.5' || missingEaMarkers.length > 0) {
+    if (eaVersion !== '8.6' || missingEaMarkers.length > 0) {
       console.error('[MT5 EA Download] Fonte ausente ou desatualizada; download bloqueado.', {
         eaVersion,
         missingEaMarkers,

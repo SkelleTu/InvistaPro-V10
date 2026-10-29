@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                              InvistaPRO_EA.mq5    |
 //|                                 InvistaPRO - Auto-Discovery URL   |
-//|   Versão 8.5 — Price Action + spread adaptativo M1/M5 e stops estruturais imutáveis             |
+//|   Versão 8.6 — Price Action + spread adaptativo M1/M5 e stops estruturais imutáveis             |
 //|   CORREÇÕES v8.0:                                                 |
 //|   • Detecção ampliada de nomes do Girassol/Fibonacci              |
 //|   • Endpoint /signal-with-indicators com fallback robusto         |
@@ -13,7 +13,7 @@
 //|   Nível 3: Bolinha pequena micro (buf 4=compra, 5=venda)         |
 //+------------------------------------------------------------------+
 #property copyright "InvistaPRO"
-#property version   "8.5"
+#property version   "8.6"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -902,7 +902,7 @@ void FetchAndProcessSignal()
    body += "\"indicatorSignals\":"  + structuredSignals             + ",";
    body += "\"indicatorBuffers\":"  + allBuffers                    + ",";
    body += "\"indicatorCount\":"    + IntegerToString(g_indicatorCount) + ",";
-   body += "\"eaVersion\":\"8.5\"";
+   body += "\"eaVersion\":\"8.6\"";
    if (g_apiToken != "") body += ",\"token\":\"" + g_apiToken + "\"";
    body += "}";
 
@@ -1118,8 +1118,22 @@ void FetchAndProcessSignal()
           Print("⛔ Price Action recusado: precisão ou tick size do símbolo inválido.");
           return;
        }
-       stopLoss = NormalizeDouble(MathRound(stopLoss / tickSizeForPrice) * tickSizeForPrice, priceDigits);
-       takeProfit = NormalizeDouble(MathRound(takeProfit / tickSizeForPrice) * tickSizeForPrice, priceDigits);
+       // Conservative tick rounding: never tighten the structural stop or overstate target reward.
+       if (action == "BUY")
+       {
+          stopLoss = NormalizeDouble(MathFloor(stopLoss / tickSizeForPrice) * tickSizeForPrice, priceDigits);
+          takeProfit = NormalizeDouble(MathFloor(takeProfit / tickSizeForPrice) * tickSizeForPrice, priceDigits);
+       }
+       else if (action == "SELL")
+       {
+          stopLoss = NormalizeDouble(MathCeil(stopLoss / tickSizeForPrice) * tickSizeForPrice, priceDigits);
+          takeProfit = NormalizeDouble(MathCeil(takeProfit / tickSizeForPrice) * tickSizeForPrice, priceDigits);
+       }
+       else
+       {
+          Print("⛔ Price Action recusado: ação inválida antes do arredondamento de tick.");
+          return;
+       }
 
        double entry = (action == "BUY") ? ask : bid;
        if (action != "BUY" && action != "SELL")
@@ -1197,6 +1211,16 @@ void FetchAndProcessSignal()
       if (MathAbs(executionEntry - serverEntryPrice) > serverEntryPrice * 0.001)
       {
          Print("⛔ Price Action: preço mudou além do limite de 0,10% antes do envio da ordem.");
+         return;
+      }
+
+      double brokerStopLevel = (double)SymbolInfoInteger(g_symbol, SYMBOL_TRADE_STOPS_LEVEL) * pointForDeviation;
+      bool brokerStopsValid = (action == "BUY")
+         ? (executionBid - stopLoss >= brokerStopLevel && takeProfit - executionBid >= brokerStopLevel)
+         : (stopLoss - executionAsk >= brokerStopLevel && executionAsk - takeProfit >= brokerStopLevel);
+      if (!brokerStopsValid)
+      {
+         Print("⛔ Price Action: SL/TP estrutural não respeita a distância mínima atual do broker após atualização da cotação.");
          return;
       }
 
@@ -1510,7 +1534,7 @@ bool SendHeartbeat()
    body += "\"openPositions\":" + IntegerToString(openPos)  + ",";
    body += "\"platform\":\"MT5\",";
    body += "\"accountType\":\"" + accountType + "\",";
-   body += "\"eaVersion\":\"8.5\"";
+   body += "\"eaVersion\":\"8.6\"";
    if (g_apiToken != "") body += ",\"token\":\"" + g_apiToken + "\"";
    body += "}";
 
