@@ -1178,31 +1178,72 @@ export class AdvancedLearningSystem {
 
   // Métodos de analytics
   private async calculateAdvancedMetrics(symbol: string, timeframe: string): Promise<any> {
+    const memories = (this.episodeMemory.get(symbol) || []).filter(memory => {
+      const timestamp = new Date(memory.timestamp || 0).getTime();
+      if (!Number.isFinite(timestamp) || timestamp <= 0) return false;
+      const age = Date.now() - timestamp;
+      const windowMs: Record<string, number> = {
+        minute: 60_000,
+        hour: 3_600_000,
+        day: 86_400_000,
+        week: 604_800_000,
+      };
+      return age >= 0 && age <= (windowMs[timeframe] ?? windowMs.day);
+    });
+    const rewards = memories
+      .map(memory => Number(memory.reward))
+      .filter(reward => Number.isFinite(reward));
+    const wins = rewards.filter(reward => reward > 0).length;
+    const losses = rewards.filter(reward => reward < 0).length;
+    const average = rewards.length
+      ? rewards.reduce((sum, reward) => sum + reward, 0) / rewards.length
+      : 0;
+    const variance = rewards.length
+      ? rewards.reduce((sum, reward) => sum + (reward - average) ** 2, 0) / rewards.length
+      : 0;
+    let peak = 0;
+    let equity = 0;
+    let maxDrawdown = 0;
+    for (const reward of rewards) {
+      equity += reward;
+      peak = Math.max(peak, equity);
+      maxDrawdown = Math.max(maxDrawdown, peak - equity);
+    }
+    const standardDeviation = Math.sqrt(variance);
     return {
-      accuracy: 0.85,
-      profitability: 0.72,
-      sharpeRatio: 1.45,
-      maxDrawdown: 0.08,
-      winRate: 0.68,
-      avgReturn: 0.12,
-      volatility: 0.15
+      sampleSize: rewards.length,
+      accuracy: rewards.length ? wins / rewards.length : 0,
+      profitability: rewards.length ? Math.max(0, Math.min(1, (average + 1) / 2)) : 0,
+      sharpeRatio: standardDeviation > 0 ? average / standardDeviation : 0,
+      maxDrawdown,
+      winRate: wins + losses ? wins / (wins + losses) : 0,
+      avgReturn: average,
+      volatility: standardDeviation,
     };
   }
 
   private async generateInsights(metrics: any): Promise<any> {
+    const hasEvidence = Number(metrics.sampleSize) > 0;
     return {
-      performance_trend: 'improving',
-      risk_level: 'moderate',
-      opportunity_score: 0.75,
-      market_alignment: 'good'
+      performance_trend: !hasEvidence ? 'insufficient_data'
+        : metrics.avgReturn > 0 ? 'positive_observed' : metrics.avgReturn < 0 ? 'negative_observed' : 'flat_observed',
+      risk_level: !hasEvidence ? 'unknown'
+        : metrics.maxDrawdown > 0.5 ? 'high_observed_drawdown'
+        : metrics.volatility > 0.25 ? 'elevated_observed_volatility' : 'based_on_available_sample',
+      opportunity_score: hasEvidence ? Math.max(0, Math.min(1, metrics.accuracy * metrics.profitability)) : 0,
+      market_alignment: hasEvidence ? 'not_assessed_from_rewards_only' : 'insufficient_data',
+      sampleSize: Number(metrics.sampleSize) || 0,
     };
   }
 
   private async generateRecommendations(insights: any, symbol: string): Promise<any> {
+    const hasEvidence = Number(insights.sampleSize) > 0;
     return {
-      weight_adjustments: 'increase_conservative_models',
-      strategy_focus: 'trend_following',
-      risk_management: 'maintain_current_levels'
+      weight_adjustments: hasEvidence ? 'require_validation_before_adjustment' : 'do_not_adjust_without_evidence',
+      strategy_focus: hasEvidence ? 'continue_paper_validation' : 'collect_validated_outcomes_first',
+      risk_management: 'keep_live_execution_disabled_until_independently_validated',
+      symbol,
+      sampleSize: Number(insights.sampleSize) || 0,
     };
   }
 
@@ -1457,7 +1498,7 @@ export class AdvancedLearningSystem {
       .map(rewards => rewards.reduce((sum, r) => sum + r, 0) / rewards.length)
       .filter(avg => !isNaN(avg));
     
-    if (regimeAverages.length < 2) return 0.7;
+    if (regimeAverages.length < 2) return 0; // Dados insuficientes para comparar regimes
     
     // Menor variância entre regimes = maior adaptabilidade
     const avgPerformance = regimeAverages.reduce((sum, avg) => sum + avg, 0) / regimeAverages.length;
@@ -1465,7 +1506,7 @@ export class AdvancedLearningSystem {
     
     const adaptability = 1 - Math.min(0.5, variance / 2); // Max penalidade de 50%
     
-    return Math.max(0.4, adaptability);
+    return Math.max(0, adaptability);
   }
 
   /**
@@ -1485,7 +1526,7 @@ export class AdvancedLearningSystem {
     // Normalizar desvio padrão para escala 0-1
     const consistency = 1 - Math.min(1, stdDev / 2);
     
-    return Math.max(0.5, consistency);
+    return consistency;
   }
 
   /**
