@@ -1378,7 +1378,7 @@ router.get('/download-ea', mt5DashboardAccess, async (req: Request, res: Respons
       'BuildMultiTimeframeJson()',
       'int VolumeDigitsFromStep()',
       'TRADE_RETCODE_DONE_PARTIAL',
-      'MathMax(currentSpread * 2.0, estimatedRoundTripCost)',
+      'MathMax(currentSpread * (2.0 + extraCostSpreadMultiplier), estimatedRoundTripCost)',
       'ExtractJsonDouble(resp, "estimatedRoundTripCost")',
       'ExtractJsonDouble(resp, "extraCostSpreadMultiplier")',
       'if (!IsPriceActionCryptoSymbol())',
