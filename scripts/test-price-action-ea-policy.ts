@@ -4,7 +4,10 @@ import { readFileSync } from 'node:fs';
 
 const ea = readFileSync(new URL('../public/downloads/InvistaPRO_EA.mq5', import.meta.url), 'utf8');
 
-assert.ok(ea.includes('PriceActionRiskPercent = 1.0'), 'EA must expose the bounded Price Action risk setting');
+assert.ok(ea.includes('serverRiskPercent < 1.0 || serverRiskPercent > 2.0'), 'EA must enforce the server-configured 1% to 2% risk range');
+assert.ok(ea.includes('#define PRICE_ACTION_SPREAD_ATR_M1_PERCENT 20.0'), 'EA M1 spread cap must match the server strategy policy');
+assert.ok(ea.includes('#define PRICE_ACTION_SPREAD_ATR_M5_PERCENT 8.0'), 'EA M5 spread cap must match the server strategy policy');
+assert.ok(ea.includes('#define PRICE_ACTION_SPREAD_PRICE_CAP_PERCENT 0.10'), 'EA hard spread cap must match the server strategy policy');
 assert.ok(ea.includes('PriceActionUseAIReview = true'), 'EA must expose AI-reviewed and autonomous strategy modes');
 assert.ok(ea.includes('priceActionUseAIReview'), 'EA must transmit the selected Price Action mode to the server');
 assert.ok(ea.includes('requestAccountType'), 'EA must transmit its actual terminal account mode on each signal request');
