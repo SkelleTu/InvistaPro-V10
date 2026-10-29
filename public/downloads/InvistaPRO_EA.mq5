@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                              InvistaPRO_EA.mq5    |
 //|                                 InvistaPRO - Auto-Discovery URL   |
-//|   Versão 8.4 — Price Action + spread adaptativo M1/M5 e stops estruturais imutáveis             |
+//|   Versão 8.5 — Price Action + spread adaptativo M1/M5 e stops estruturais imutáveis             |
 //|   CORREÇÕES v8.0:                                                 |
 //|   • Detecção ampliada de nomes do Girassol/Fibonacci              |
 //|   • Endpoint /signal-with-indicators com fallback robusto         |
@@ -13,7 +13,7 @@
 //|   Nível 3: Bolinha pequena micro (buf 4=compra, 5=venda)         |
 //+------------------------------------------------------------------+
 #property copyright "InvistaPRO"
-#property version   "8.4"
+#property version   "8.5"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -900,7 +900,7 @@ void FetchAndProcessSignal()
    body += "\"indicatorSignals\":"  + structuredSignals             + ",";
    body += "\"indicatorBuffers\":"  + allBuffers                    + ",";
    body += "\"indicatorCount\":"    + IntegerToString(g_indicatorCount) + ",";
-   body += "\"eaVersion\":\"8.4\"";
+   body += "\"eaVersion\":\"8.5\"";
    if (g_apiToken != "") body += ",\"token\":\"" + g_apiToken + "\"";
    body += "}";
 
@@ -1489,7 +1489,7 @@ bool SendHeartbeat()
    body += "\"openPositions\":" + IntegerToString(openPos)  + ",";
    body += "\"platform\":\"MT5\",";
    body += "\"accountType\":\"" + accountType + "\",";
-   body += "\"eaVersion\":\"8.4\"";
+   body += "\"eaVersion\":\"8.5\"";
    if (g_apiToken != "") body += ",\"token\":\"" + g_apiToken + "\"";
    body += "}";
 
