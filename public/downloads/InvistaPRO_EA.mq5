@@ -708,26 +708,24 @@ void SendMarketDataForSyntheticGirassol()
 //+------------------------------------------------------------------+
 bool IsPriceActionCryptoSymbol()
 {
-   // Broker symbol names vary (BTCUSDT, BTCUSDm, m.BTCUSD, BTCUSDT.r, etc.).
-   // Normalize separators, then recognize the requested crypto/USD or crypto/USDT pairs.
+   // Keep aligned with server/routes/metatrader-routes.ts. Bounded whitelist only.
    string normalized = g_symbol;
    StringToUpper(normalized);
    StringReplace(normalized, "/", "");
    StringReplace(normalized, ".", "");
    StringReplace(normalized, "_", "");
    StringReplace(normalized, "-", "");
-
    string bases[4] = {"BTC", "XBT", "ETH", "SOL"};
-   for(int i = 0; i < ArraySize(bases); i++)
-   {
-      int pos = StringFind(normalized, bases[i]);
-      if(pos < 0) continue;
-
-      string quoteAndSuffix = StringSubstr(normalized, pos + StringLen(bases[i]));
-      if(StringFind(quoteAndSuffix, "USDT") == 0 ||
-         StringFind(quoteAndSuffix, "USD") == 0)
-         return true;
-   }
+   string suffixes[9] = {"", "M", "R", "A", "PRO", "ECN", "RAW", "C", "Z"};
+   string prefixes[2] = {"", "M"};
+   for(int p = 0; p < ArraySize(prefixes); p++)
+      for(int i = 0; i < ArraySize(bases); i++)
+         for(int q = 0; q < 2; q++)
+         {
+            string quote = (q == 0) ? "USDT" : "USD";
+            for(int s = 0; s < ArraySize(suffixes); s++)
+               if(normalized == prefixes[p] + bases[i] + quote + suffixes[s]) return true;
+         }
    return false;
 }
 
@@ -959,22 +957,27 @@ void FetchAndProcessSignal()
    if (AIControlMode == AI_MANUAL)
    {
       Print("ℹ️ Modo MANUAL: usando parâmetros do usuário");
-      lotSize    = ManualLotSize;
-      double point = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
-      stopLoss   = (ManualStopLoss   > 0) ? ManualStopLoss   * point : 0;
-      takeProfit = (ManualTakeProfit > 0) ? ManualTakeProfit * point : 0;
-      if (action == "BUY")
+      lotSize = ManualLotSize;
+      // Server-approved structural stops are immutable for Price Action crypto.
+      if (!IsPriceActionCryptoSymbol())
       {
-         double entry = SymbolInfoDouble(g_symbol, SYMBOL_ASK);
-         if (stopLoss   > 0) stopLoss   = NormalizeDouble(entry - stopLoss,   _Digits);
-         if (takeProfit > 0) takeProfit = NormalizeDouble(entry + takeProfit, _Digits);
+         double point = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
+         stopLoss   = (ManualStopLoss   > 0) ? ManualStopLoss   * point : 0;
+         takeProfit = (ManualTakeProfit > 0) ? ManualTakeProfit * point : 0;
+         if (action == "BUY")
+         {
+            double entry = SymbolInfoDouble(g_symbol, SYMBOL_ASK);
+            if (stopLoss > 0) stopLoss = NormalizeDouble(entry - stopLoss, _Digits);
+            if (takeProfit > 0) takeProfit = NormalizeDouble(entry + takeProfit, _Digits);
+         }
+         else if (action == "SELL")
+         {
+            double entry = SymbolInfoDouble(g_symbol, SYMBOL_BID);
+            if (stopLoss > 0) stopLoss = NormalizeDouble(entry + stopLoss, _Digits);
+            if (takeProfit > 0) takeProfit = NormalizeDouble(entry - takeProfit, _Digits);
+         }
       }
-      else if (action == "SELL")
-      {
-         double entry = SymbolInfoDouble(g_symbol, SYMBOL_BID);
-         if (stopLoss   > 0) stopLoss   = NormalizeDouble(entry + stopLoss,   _Digits);
-         if (takeProfit > 0) takeProfit = NormalizeDouble(entry - takeProfit, _Digits);
-      }
+      else Print("🔒 Price Action: SL/TP estruturais do servidor preservados no modo MANUAL.");
    }
    else if (AIControlMode == AI_PARTIAL)
    {
@@ -985,27 +988,31 @@ void FetchAndProcessSignal()
       }
       double point = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
       if (!AI_Lote || lotSize <= 0) lotSize = ManualLotSize;
-      if (!AI_StopLoss)
+      if (!IsPriceActionCryptoSymbol())
       {
-         double rawSL = (ManualStopLoss > 0) ? ManualStopLoss * point : 0;
-         if (rawSL > 0)
+         if (!AI_StopLoss)
          {
-            if (action == "BUY")  stopLoss = NormalizeDouble(SymbolInfoDouble(g_symbol, SYMBOL_ASK) - rawSL, _Digits);
-            else                   stopLoss = NormalizeDouble(SymbolInfoDouble(g_symbol, SYMBOL_BID) + rawSL, _Digits);
+            double rawSL = (ManualStopLoss > 0) ? ManualStopLoss * point : 0;
+            if (rawSL > 0)
+            {
+               if (action == "BUY") stopLoss = NormalizeDouble(SymbolInfoDouble(g_symbol, SYMBOL_ASK) - rawSL, _Digits);
+               else stopLoss = NormalizeDouble(SymbolInfoDouble(g_symbol, SYMBOL_BID) + rawSL, _Digits);
+            }
+            else stopLoss = 0;
          }
-         else stopLoss = 0;
-      }
-      if (!AI_TakeProfit)
-      {
-         double rawTP = (ManualTakeProfit > 0) ? ManualTakeProfit * point : 0;
-         if (rawTP > 0)
+         if (!AI_TakeProfit)
          {
-            if (action == "BUY")  takeProfit = NormalizeDouble(SymbolInfoDouble(g_symbol, SYMBOL_ASK) + rawTP, _Digits);
-            else                   takeProfit = NormalizeDouble(SymbolInfoDouble(g_symbol, SYMBOL_BID) - rawTP, _Digits);
+            double rawTP = (ManualTakeProfit > 0) ? ManualTakeProfit * point : 0;
+            if (rawTP > 0)
+            {
+               if (action == "BUY") takeProfit = NormalizeDouble(SymbolInfoDouble(g_symbol, SYMBOL_ASK) + rawTP, _Digits);
+               else takeProfit = NormalizeDouble(SymbolInfoDouble(g_symbol, SYMBOL_BID) - rawTP, _Digits);
+            }
+            else takeProfit = 0;
          }
-         else takeProfit = 0;
+         slTpSource = "parcial_usuario_ia";
       }
-      slTpSource = "parcial_usuario_ia";
+      else Print("🔒 Price Action: modo PARCIAL não pode substituir ou remover SL/TP estruturais.");
       Print("ℹ️ PARCIAL: Lote=", AI_Lote ? "IA" : "Manual", " | SL=", AI_StopLoss ? "IA" : "Manual", " | TP=", AI_TakeProfit ? "IA" : "Manual");
    }
    else
