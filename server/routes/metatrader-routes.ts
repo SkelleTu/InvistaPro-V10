@@ -1387,6 +1387,10 @@ router.get('/download-ea', mt5DashboardAccess, async (req: Request, res: Respons
       'BuildMultiTimeframeJson()',
       'int VolumeDigitsFromStep()',
       'TRADE_RETCODE_DONE_PARTIAL',
+      'if (!IsPriceActionCryptoSymbol())',
+      'modo PARCIAL não pode substituir ou remover SL/TP estruturais',
+      'string suffixes[9]',
+      'bool IsPriceActionCryptoSymbol()',
     ];
     const missingEaMarkers = requiredEaMarkers.filter((marker) => !content.includes(marker));
     if (eaVersion !== '8.3' || missingEaMarkers.length > 0) {
