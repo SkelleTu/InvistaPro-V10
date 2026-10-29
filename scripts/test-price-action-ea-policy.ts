@@ -88,6 +88,8 @@ assert.ok(ea.includes('modo PARCIAL não pode substituir ou remover SL/TP estrut
 assert.ok(route.includes("from '../services/price-action-symbol-policy'"), 'Route must import the shared bounded crypto symbol policy');
 assert.ok(route.includes('const isStrategyCrypto = isPriceActionCryptoSymbol(sym)'), 'Route must apply the deterministic crypto-symbol policy');
 assert.ok(route.includes("const aiAction = String(baseSignal?.action ?? 'HOLD').toUpperCase()"), 'AI review must validate the original AI action, not a rewritten indicator action');
+assert.ok(route.includes('let finalConfidence: number = (baseSignal?.confidence ?? 0) * 100;'), 'Route must convert normalized MT5 confidence into percentage points before applying percent-based gates');
+assert.ok(route.includes('const aiConfidence = Number(baseSignal?.confidence ?? 0) * 100;'), 'AI review confidence must be normalized consistently with the review validator');
 assert.ok(route.includes('const downstreamFiltersPreservedDirection = finalAction === priceActionSetup.action'), 'Downstream indicator rules may veto but must not manufacture strategy approval');
 assert.ok(!route.includes('balance: 0,\n      equity: 0,\n      freeMargin: 0'), 'Signal polling must not synthesize zero-value account heartbeats');
 assert.ok(bridge.includes('actualAccountOpenPositions'), 'Bridge must preserve actual MT5 account-wide open positions for risk gating');

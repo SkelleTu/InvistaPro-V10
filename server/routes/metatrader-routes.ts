@@ -651,7 +651,8 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
     //  5. Girassol NÃO detectado → fallback para IA + Técnica (threshold 70%)
 
     let finalAction: string = baseSignal?.action || 'HOLD';
-    let finalConfidence: number = baseSignal?.confidence || 0;
+    // MT5Signal.confidence is normalized to 0..1; this route's indicator gates use percentage points.
+    let finalConfidence: number = (baseSignal?.confidence ?? 0) * 100;
     let finalReason: string = baseSignal?.reason || 'Aguardando sinal';
     const indicatorNotes: string[] = [];
 
@@ -1036,7 +1037,7 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
     // that indicator rules may have rewritten later. Indicators can veto, never manufacture approval.
     if (priceActionSetup) {
       const aiAction = String(baseSignal?.action ?? 'HOLD').toUpperCase();
-      const aiConfidence = Number(baseSignal?.confidence ?? 0);
+      const aiConfidence = Number(baseSignal?.confidence ?? 0) * 100;
       const aiReview = validateAIEntryReview(priceActionSetup, {
         decision: aiAction,
         direction: aiAction,
