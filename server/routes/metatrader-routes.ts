@@ -373,6 +373,8 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
         bid,
         ask,
         entryPrice: entryPriceForContext,
+        m1Candles: frames.M1,
+        m5Candles: frames.M5,
         riskLimitOk: riskLimit.ok,
         newsBlocked: newsStatus.blocked || !newsStatus.valid,
         sessionOpen,
