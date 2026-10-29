@@ -41,7 +41,7 @@ assert.ok(context.includes('atrM1 * 0.20'), 'Server spread policy must adapt to 
 assert.ok(context.includes('atrM5 * 0.08'), 'Server spread policy must adapt to M5 ATR');
 assert.ok(context.includes('mid * 0.001'), 'Server spread policy must retain the 0.10% price cap');
 assert.ok(context.includes('limits.length ? Math.min(...limits) : undefined'), 'Server must fail closed when adaptive ATR limits are unavailable');
-assert.ok(context.includes('MT5_PRICE_ACTION_EXTRA_COST_PRICE_UNITS'), 'Server must require an explicit extra cost estimate for commission/slippage');
+assert.ok(context.includes('MT5_PRICE_ACTION_EXTRA_COST_SPREAD_MULTIPLIER'), 'Server must require an extra-cost multiplier compatible with the automatically observed spread');
 
 const route = readFileSync(new URL('../server/routes/metatrader-routes.ts', import.meta.url), 'utf8');
 assert.ok(route.includes("code: 'MT5_EA_SOURCE_NOT_CURRENT'"), 'Download must fail closed when the canonical EA is missing or stale');
