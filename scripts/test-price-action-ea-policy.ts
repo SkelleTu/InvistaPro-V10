@@ -22,6 +22,9 @@ assert.ok(ea.includes('ExtractJsonDouble(resp, "riskPercent")'), 'EA must read t
 assert.ok(ea.includes('double serverEntryPrice = ExtractJsonDouble(resp, "entryPrice")'), 'EA must compare executable price with server-approved entry');
 assert.ok(ea.includes('double maxEntryDeviation = serverEntryPrice * 0.001'), 'EA must enforce a hard 0.10% entry deviation ceiling');
 assert.ok(ea.includes('MathAbs(executionEntry - serverEntryPrice) > serverEntryPrice * 0.001'), 'EA must revalidate entry deviation immediately before order submission');
+assert.ok(ea.includes('double executionSpreadCost = MathMax(executionSpread * (2.0 + extraCostSpreadMultiplier), estimatedRoundTripCost)'), 'EA must recompute conservative round-trip costs using the final quote');
+assert.ok(ea.includes('CalculatePriceActionRiskLot(executionEntry, stopLoss, executionSpreadCost, serverRiskPercent)'), 'EA must recalculate lot size against final execution price and costs');
+assert.ok(ea.includes('executionNetRiskReward < 2.0'), 'EA must enforce net 1:2 R:R immediately before order submission');
 assert.ok(ea.includes('proibido fallback para lote manual'), 'Price Action must never bypass risk sizing with a manual lot fallback');
 assert.ok(ea.includes('trade.SetDeviationInPoints((ulong)MathMax(1.0, (executionEntry * 0.001) / pointForDeviation))'), 'Broker execution deviation must be bounded for Price Action');
 assert.ok(ea.includes('Refresh the quote after the network round-trip.'), 'EA must refresh bid/ask after network latency before validating execution');
