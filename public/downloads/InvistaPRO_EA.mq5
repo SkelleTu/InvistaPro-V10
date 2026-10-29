@@ -797,9 +797,9 @@ bool IsAdaptivePriceActionSpreadAcceptable(double entryPrice, double currentSpre
    return (maxAllowedSpread > 0.0 && currentSpread <= maxAllowedSpread);
 }
 
-double CalculatePriceActionRiskLot(double entryPrice, double stopLoss, double estimatedRoundTripCost)
+double CalculatePriceActionRiskLot(double entryPrice, double stopLoss, double estimatedRoundTripCost, double riskPercent)
 {
-   if (entryPrice <= 0 || stopLoss <= 0 || PriceActionRiskPercent < 1.0 || PriceActionRiskPercent > 2.0)
+   if (entryPrice <= 0 || stopLoss <= 0 || riskPercent < 1.0 || riskPercent > 2.0)
       return 0.0;
    double tickSize = SymbolInfoDouble(g_symbol, SYMBOL_TRADE_TICK_SIZE);
    double tickValue = SymbolInfoDouble(g_symbol, SYMBOL_TRADE_TICK_VALUE_LOSS);
@@ -812,7 +812,7 @@ double CalculatePriceActionRiskLot(double entryPrice, double stopLoss, double es
    if (tickSize <= 0 || tickValue <= 0 || volumeStep <= 0 || minVolume <= 0 || maxVolume <= 0 || distance <= 0)
       return 0.0;
    double lossPerLot = (distance / tickSize) * tickValue;
-   double riskCash = AccountInfoDouble(ACCOUNT_EQUITY) * PriceActionRiskPercent / 100.0;
+   double riskCash = AccountInfoDouble(ACCOUNT_EQUITY) * riskPercent / 100.0;
    if (lossPerLot <= 0 || riskCash <= 0) return 0.0;
    double rawVolume = riskCash / lossPerLot;
    double volume = MathFloor(rawVolume / volumeStep) * volumeStep;
@@ -946,6 +946,7 @@ void FetchAndProcessSignal()
    double takeProfit = ExtractJsonDouble(resp, "takeProfit");
    double estimatedRoundTripCost = ExtractJsonDouble(resp, "estimatedRoundTripCost");
    double extraCostSpreadMultiplier = ExtractJsonDouble(resp, "extraCostSpreadMultiplier");
+   double serverRiskPercent = ExtractJsonDouble(resp, "riskPercent");
    bool hasExtraCostMultiplier = (StringFind(resp, "extraCostSpreadMultiplier") >= 0);
    double confidence = ExtractJsonDouble(resp, "confidence");
 
@@ -1080,7 +1081,7 @@ void FetchAndProcessSignal()
           Print("⛔ Price Action recusado: ação inválida.");
           return;
        }
-       if (stopLoss <= 0 || takeProfit <= 0 || entry <= 0 || estimatedRoundTripCost <= 0 || !hasExtraCostMultiplier || extraCostSpreadMultiplier < 0 || PriceActionRiskPercent < 1.0 || PriceActionRiskPercent > 2.0)
+       if (stopLoss <= 0 || takeProfit <= 0 || entry <= 0 || estimatedRoundTripCost <= 0 || !hasExtraCostMultiplier || extraCostSpreadMultiplier < 0 || serverRiskPercent < 1.0 || serverRiskPercent > 2.0)
        {
           Print("⛔ Price Action recusado: preço, SL/TP, custo ida-e-volta ou risco configurado inválido.");
           return;
@@ -1109,7 +1110,7 @@ void FetchAndProcessSignal()
           Print("⛔ Price Action recusado: stop inválido, stop acima de 1,5% ou R:R líquido estimado abaixo de 1:2 após spread.");
           return;
        }
-       lotSize = CalculatePriceActionRiskLot(entry, stopLoss, spreadCost);
+       lotSize = CalculatePriceActionRiskLot(entry, stopLoss, spreadCost, serverRiskPercent);
        if (lotSize <= 0)
        {
           Print("⛔ Price Action recusado: lote mínimo do broker excede o orçamento de risco ou tick value indisponível.");
