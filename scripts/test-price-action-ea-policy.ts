@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { isPriceActionCryptoSymbol } from '../server/services/price-action-symbol-policy';
 import { readFileSync } from 'node:fs';
 
 const ea = readFileSync(new URL('../public/downloads/InvistaPRO_EA.mq5', import.meta.url), 'utf8');
@@ -54,3 +55,10 @@ assert.ok(ea.includes('if (!IsPriceActionCryptoSymbol())'), 'Manual SL/TP overri
 assert.ok(ea.includes('modo PARCIAL não pode substituir ou remover SL/TP estruturais'), 'Partial mode must preserve server-approved structural stops');
 assert.ok(route.includes('function isPriceActionCryptoSymbol(symbol: unknown)'), 'Server crypto gate must use bounded symbol recognition');
 assert.ok(route.includes('const isStrategyCrypto = isPriceActionCryptoSymbol(sym)'), 'Route must apply the deterministic crypto-symbol policy');
+
+for (const symbol of ['BTCUSD', 'BTCUSDm', 'm.BTCUSD', 'BTCUSDT.r', 'XBTUSD', 'ETHUSD.a', 'SOLUSDT', 'BTCUSDpro']) {
+  assert.equal(isPriceActionCryptoSymbol(symbol), true, `Supported crypto alias must be recognized: ${symbol}`);
+}
+for (const symbol of ['EURUSD', 'BTC', 'BTCJPY', 'NOTBTCUSD', 'BTCUSDXYZ', 'ETHGBP', 'SOLJPY']) {
+  assert.equal(isPriceActionCryptoSymbol(symbol), false, `Unsupported symbol must not enter crypto strategy: ${symbol}`);
+}
