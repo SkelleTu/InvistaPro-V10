@@ -2563,6 +2563,9 @@ class MetaTraderBridge extends EventEmitter {
     if (accountData.equity > 0) this.currentEquity = accountData.equity;
     if (typeof accountData.openPositionsCount === 'number' && Number.isFinite(accountData.openPositionsCount) && accountData.openPositionsCount >= 0) {
       this.status.actualAccountOpenPositions = accountData.openPositionsCount;
+    } else {
+      // Never retain an old position count when the latest heartbeat omits it.
+      this.status.actualAccountOpenPositions = undefined;
     }
     if (!this.config.enabled) {
       this.config.enabled = true;
