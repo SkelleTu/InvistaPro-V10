@@ -13,7 +13,7 @@
 //|   Nível 3: Bolinha pequena micro (buf 4=compra, 5=venda)         |
 //+------------------------------------------------------------------+
 #property copyright "InvistaPRO"
-#property version   "8.1"
+#property version   "8.2"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -761,7 +761,7 @@ int VolumeDigitsFromStep()
    return digits;
 }
 
-double CalculatePriceActionRiskLot(double entryPrice, double stopLoss)
+double CalculatePriceActionRiskLot(double entryPrice, double stopLoss, double estimatedRoundTripCost)
 {
    if (entryPrice <= 0 || stopLoss <= 0 || PriceActionRiskPercent < 1.0 || PriceActionRiskPercent > 2.0)
       return 0.0;
@@ -771,7 +771,8 @@ double CalculatePriceActionRiskLot(double entryPrice, double stopLoss)
    double volumeStep = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_STEP);
    double minVolume = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_MIN);
    double maxVolume = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_MAX);
-   double distance = MathAbs(entryPrice - stopLoss);
+   // Reserve estimated round-trip spread cost conservatively in the risk budget.
+   double distance = MathAbs(entryPrice - stopLoss) + MathMax(0.0, estimatedRoundTripCost);
    if (tickSize <= 0 || tickValue <= 0 || volumeStep <= 0 || minVolume <= 0 || maxVolume <= 0 || distance <= 0)
       return 0.0;
    double lossPerLot = (distance / tickSize) * tickValue;
@@ -850,7 +851,7 @@ void FetchAndProcessSignal()
    body += "\"indicatorSignals\":"  + structuredSignals             + ",";
    body += "\"indicatorBuffers\":"  + allBuffers                    + ",";
    body += "\"indicatorCount\":"    + IntegerToString(g_indicatorCount) + ",";
-   body += "\"eaVersion\":\"8.1\"";
+   body += "\"eaVersion\":\"8.2\"";
    if (g_apiToken != "") body += ",\"token\":\"" + g_apiToken + "\"";
    body += "}";
 
@@ -1038,12 +1039,18 @@ void FetchAndProcessSignal()
        }
        double riskDistance = (action == "BUY") ? entry - stopLoss : stopLoss - entry;
        double rewardDistance = (action == "BUY") ? takeProfit - entry : entry - takeProfit;
-       if (riskDistance <= 0 || rewardDistance <= 0 || riskDistance / entry > 0.015 || rewardDistance / riskDistance < 2.0)
+       // Conservative local check: account for the live spread on both sides.
+       // The server gate separately checks its trusted cost model and news/risk/session controls.
+       double spreadCost = MathMax(0.0, ask - bid) * 2.0;
+       double effectiveRisk = riskDistance + spreadCost;
+       double effectiveReward = rewardDistance - spreadCost;
+       double netRiskReward = (effectiveRisk > 0.0) ? effectiveReward / effectiveRisk : 0.0;
+       if (riskDistance <= 0 || rewardDistance <= 0 || riskDistance / entry > 0.015 || netRiskReward < 2.0)
        {
-          Print("⛔ Price Action recusado: stop inválido, stop acima de 1,5% ou R:R abaixo de 1:2 no preço executável.");
+          Print("⛔ Price Action recusado: stop inválido, stop acima de 1,5% ou R:R líquido estimado abaixo de 1:2 após spread.");
           return;
        }
-       lotSize = CalculatePriceActionRiskLot(entry, stopLoss);
+       lotSize = CalculatePriceActionRiskLot(entry, stopLoss, spreadCost);
        if (lotSize <= 0)
        {
           Print("⛔ Price Action recusado: lote mínimo do broker excede o orçamento de risco ou tick value indisponível.");
@@ -1336,7 +1343,7 @@ bool SendHeartbeat()
    body += "\"openPositions\":" + IntegerToString(openPos)  + ",";
    body += "\"platform\":\"MT5\",";
    body += "\"accountType\":\"" + accountType + "\",";
-   body += "\"eaVersion\":\"8.1\"";
+   body += "\"eaVersion\":\"8.2\"";
    if (g_apiToken != "") body += ",\"token\":\"" + g_apiToken + "\"";
    body += "}";
 
