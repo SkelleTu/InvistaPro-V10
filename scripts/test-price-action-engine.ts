@@ -36,3 +36,13 @@ assert.equal(validateAIStopAdjustment('BUY',95,97,100),true,'BUY stop may tighte
 assert.equal(validateAIStopAdjustment('SELL',105,106,100),false,'SELL stop may not widen risk');
 assert.equal(validateAIStopAdjustment('SELL',105,103,100),true,'SELL stop may tighten protection');
 console.log('Price Action engine policy tests passed.');
+
+const approvedFixture = {
+  action: 'BUY' as const, approved: true, reasons: [], checks: {},
+  entry: 100, stopLoss: 99, takeProfit: 102, riskReward: 2,
+  features: {},
+};
+assert.equal(validateAIEntryReview(approvedFixture, { decision: 'BUY', direction: 'BUY', confidence: 0.7 }).approved, true, 'AI review at 70% must pass only for a valid matching strategy setup');
+assert.equal(validateAIEntryReview(approvedFixture, { decision: 'SELL', direction: 'SELL', confidence: 0.99 }).approved, false, 'Opposing AI review must be rejected');
+assert.equal(validateAIEntryReview(approvedFixture, { decision: 'BUY', direction: 'BUY', confidence: 0.69 }).approved, false, 'AI review below threshold must be rejected');
+assert.equal(validateAIEntryReview(approvedFixture, { decision: 'BUY', direction: 'BUY', confidence: 0.99, riskOverride: 2 }).approved, false, 'AI cannot override deterministic risk');
