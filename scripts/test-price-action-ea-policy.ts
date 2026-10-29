@@ -8,6 +8,7 @@ assert.ok(ea.includes('serverRiskPercent < 1.0 || serverRiskPercent > 2.0'), 'EA
 assert.ok(ea.includes('#define PRICE_ACTION_SPREAD_ATR_M1_PERCENT 20.0'), 'EA M1 spread cap must match the server strategy policy');
 assert.ok(ea.includes('#define PRICE_ACTION_SPREAD_ATR_M5_PERCENT 8.0'), 'EA M5 spread cap must match the server strategy policy');
 assert.ok(ea.includes('#define PRICE_ACTION_SPREAD_PRICE_CAP_PERCENT 0.10'), 'EA hard spread cap must match the server strategy policy');
+assert.ok(!ea.includes('PriceActionSpreadATR_M1_Percent') && !ea.includes('PriceActionSpreadATR_M5_Percent') && !ea.includes('PriceActionSpreadPriceCapPercent'), 'EA must not expose local spread-policy overrides');
 assert.ok(ea.includes('PriceActionUseAIReview = true'), 'EA must expose AI-reviewed and autonomous strategy modes');
 assert.ok(ea.includes('priceActionUseAIReview'), 'EA must transmit the selected Price Action mode to the server');
 assert.ok(ea.includes('requestAccountType'), 'EA must transmit its actual terminal account mode on each signal request');
@@ -50,6 +51,7 @@ assert.ok(context.includes('limits.length ? Math.min(...limits) : undefined'), '
 assert.ok(context.includes('MT5_PRICE_ACTION_EXTRA_COST_SPREAD_MULTIPLIER'), 'Server must require an extra-cost multiplier compatible with the automatically observed spread');
 
 const route = readFileSync(new URL('../server/routes/metatrader-routes.ts', import.meta.url), 'utf8');
+const bridge = readFileSync(new URL('../server/services/metatrader-bridge.ts', import.meta.url), 'utf8');
 assert.ok(route.includes("code: 'MT5_EA_SOURCE_NOT_CURRENT'"), 'Download must fail closed when the canonical EA is missing or stale');
 assert.ok(route.includes("if (eaVersion !== '8.4' || missingEaMarkers.length > 0)"), 'Download must validate the EA version and current strategy markers');
 assert.ok(route.includes("'CalculatePriceActionRiskLot'"), 'Download gate must require the Price Action risk sizing implementation');
@@ -69,6 +71,7 @@ assert.ok(ea.includes('modo PARCIAL não pode substituir ou remover SL/TP estrut
 assert.ok(route.includes("from '../services/price-action-symbol-policy'"), 'Route must import the shared bounded crypto symbol policy');
 assert.ok(route.includes('const isStrategyCrypto = isPriceActionCryptoSymbol(sym)'), 'Route must apply the deterministic crypto-symbol policy');
 assert.ok(!route.includes('balance: 0,\n      equity: 0,\n      freeMargin: 0'), 'Signal polling must not synthesize zero-value account heartbeats');
+assert.ok(bridge.includes('actualAccountOpenPositions'), 'Bridge must preserve actual MT5 account-wide open positions for risk gating');
 
 for (const symbol of ['BTCUSD', 'BTCUSDm', 'm.BTCUSD', 'BTCUSDT.r', 'XBTUSD', 'ETHUSD.a', 'SOLUSDT', 'BTCUSDpro']) {
   assert.equal(isPriceActionCryptoSymbol(symbol), true, `Supported crypto alias must be recognized: ${symbol}`);
