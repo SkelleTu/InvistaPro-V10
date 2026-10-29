@@ -458,7 +458,7 @@ export class AdvancedLearningSystem {
   // Funções movidas para HybridOrchestrator
 
   private calculateVolatility(marketData: any[]): number {
-    if (marketData.length < 2) return 0.15;
+    if (marketData.length < 2) return 0;
     
     const prices = marketData.map(d => d.price || 0);
     const returns: number[] = [];
@@ -469,7 +469,7 @@ export class AdvancedLearningSystem {
       }
     }
     
-    if (returns.length === 0) return 0.15;
+    if (returns.length === 0) return 0;
     
     const mean = returns.reduce((sum, r) => sum + r, 0) / returns.length;
     const variance = returns.reduce((sum, r) => sum + Math.pow(r - mean, 2), 0) / returns.length;
@@ -1541,21 +1541,8 @@ export class AdvancedLearningSystem {
       .map(m => m.marketState.price)
       .slice(-100); // Últimos 100 preços
     
-    // Se não há histórico suficiente, gerar série sintética baseada no estado atual
-    if (recentPrices.length < 10) {
-      const basePrice = 1000; // Preço base sintético
-      const syntheticPrices: number[] = [];
-      
-      for (let i = 0; i < 50; i++) {
-        const variation = (Math.random() - 0.5) * 0.02; // ±1% de variação
-        const price = basePrice * (1 + variation * i * 0.01);
-        syntheticPrices.push(price);
-      }
-      
-      return syntheticPrices;
-    }
-    
-    return recentPrices;
+    // Sem histórico suficiente, não fabricar preços para a detecção de padrões.
+    return recentPrices.length >= 10 ? recentPrices : [];
   }
 }
 
