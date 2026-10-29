@@ -196,7 +196,7 @@ function calculateAtr(candles: unknown): number | undefined {
   for (let i = 1; i < recent.length; i++) {
     const current = recent[i];
     const previous = recent[i - 1];
-    if (![current?.high, current?.low, previous?.close].every(Number.isFinite)
+    if (![current?.high, current?.low, previous?.close].every(value => typeof value === 'number' && Number.isFinite(value))
       || current.high < current.low) return undefined;
     ranges.push(Math.max(
       current.high - current.low,
