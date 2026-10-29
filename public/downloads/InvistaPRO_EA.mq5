@@ -41,6 +41,9 @@ input int      MaxReconnectTries= 5;           // Tentativas máximas de reconex
 input int      IndicatorBars    = 5;           // Quantas barras recentes dos indicadores ler
 input int      CandleCount      = 200;         // Candles para enviar à IA (histórico)
 input double   PriceActionRiskPercent = 1.0; // Risco por trade para Price Action (1% a 2%)
+input double   PriceActionSpreadATR_M1_Percent = 20.0; // Spread maximo dinamico como % do ATR M1
+input double   PriceActionSpreadATR_M5_Percent = 8.0;  // Spread maximo dinamico como % do ATR M5
+input double   PriceActionSpreadPriceCapPercent = 0.10; // Teto absoluto relativo ao preco (%)
 input bool     PriceActionUseAIReview = true; // true = estratégia + IA; false = estratégia autônoma com os mesmos gates
 
 //--- Controle de Autonomia da IA
@@ -761,6 +764,41 @@ int VolumeDigitsFromStep()
    return digits;
 }
 
+// Dynamic spread filter aligned with the strategy's M1 trigger and M5 confirmation.
+// Fails closed when ATR data is missing, stale, or the live spread is too wide.
+bool IsAdaptivePriceActionSpreadAcceptable(double entryPrice, double currentSpread, double &maxAllowedSpread)
+{
+   maxAllowedSpread = 0.0;
+   if (entryPrice <= 0.0 || currentSpread < 0.0 ||
+       PriceActionSpreadATR_M1_Percent <= 0.0 ||
+       PriceActionSpreadATR_M5_Percent <= 0.0 ||
+       PriceActionSpreadPriceCapPercent <= 0.0)
+      return false;
+
+   int atrM1Handle = iATR(g_symbol, PERIOD_M1, 14);
+   int atrM5Handle = iATR(g_symbol, PERIOD_M5, 14);
+   if (atrM1Handle == INVALID_HANDLE || atrM5Handle == INVALID_HANDLE)
+   {
+      if (atrM1Handle != INVALID_HANDLE) IndicatorRelease(atrM1Handle);
+      if (atrM5Handle != INVALID_HANDLE) IndicatorRelease(atrM5Handle);
+      return false;
+   }
+
+   double atrM1Buffer[1], atrM5Buffer[1];
+   bool haveM1 = (CopyBuffer(atrM1Handle, 0, 1, 1, atrM1Buffer) == 1);
+   bool haveM5 = (CopyBuffer(atrM5Handle, 0, 1, 1, atrM5Buffer) == 1);
+   IndicatorRelease(atrM1Handle);
+   IndicatorRelease(atrM5Handle);
+   if (!haveM1 || !haveM5 || atrM1Buffer[0] <= 0.0 || atrM5Buffer[0] <= 0.0)
+      return false;
+
+   double m1Limit = atrM1Buffer[0] * PriceActionSpreadATR_M1_Percent / 100.0;
+   double m5Limit = atrM5Buffer[0] * PriceActionSpreadATR_M5_Percent / 100.0;
+   double priceCap = entryPrice * PriceActionSpreadPriceCapPercent / 100.0;
+   maxAllowedSpread = MathMin(MathMin(m1Limit, m5Limit), priceCap);
+   return (maxAllowedSpread > 0.0 && currentSpread <= maxAllowedSpread);
+}
+
 double CalculatePriceActionRiskLot(double entryPrice, double stopLoss, double estimatedRoundTripCost)
 {
    if (entryPrice <= 0 || stopLoss <= 0 || PriceActionRiskPercent < 1.0 || PriceActionRiskPercent > 2.0)
@@ -1039,9 +1077,18 @@ void FetchAndProcessSignal()
        }
        double riskDistance = (action == "BUY") ? entry - stopLoss : stopLoss - entry;
        double rewardDistance = (action == "BUY") ? takeProfit - entry : entry - takeProfit;
-       // Conservative local check: account for the live spread on both sides.
-       // The server gate separately checks its trusted cost model and news/risk/session controls.
-       double spreadCost = MathMax(0.0, ask - bid) * 2.0;
+       // Adapt the spread ceiling to M1 trigger volatility and M5 confirmation volatility.
+       // Never relax the strategy's spread cap beyond the hard percentage-of-price ceiling.
+       double currentSpread = MathMax(0.0, ask - bid);
+       double maxAllowedSpread = 0.0;
+       if (!IsAdaptivePriceActionSpreadAcceptable(entry, currentSpread, maxAllowedSpread))
+       {
+          Print("⛔ Price Action bloqueado pelo spread adaptativo. Spread atual=", DoubleToString(currentSpread, ManagedSymbolDigits()),
+                " | limite dinamico=", DoubleToString(maxAllowedSpread, ManagedSymbolDigits()),
+                ". ATR M1/M5 indisponivel ou spread excessivo.");
+          return;
+       }
+       double spreadCost = currentSpread * 2.0;
        double effectiveRisk = riskDistance + spreadCost;
        double effectiveReward = rewardDistance - spreadCost;
        double netRiskReward = (effectiveRisk > 0.0) ? effectiveReward / effectiveRisk : 0.0;
