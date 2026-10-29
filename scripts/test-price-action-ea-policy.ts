@@ -20,10 +20,11 @@ assert.ok(ea.includes('ExtractJsonDouble(resp, "estimatedRoundTripCost")'), 'EA 
 assert.ok(ea.includes('ExtractJsonDouble(resp, "extraCostSpreadMultiplier")'), 'EA must read the server cost multiplier');
 assert.ok(ea.includes('ExtractJsonDouble(resp, "riskPercent")'), 'EA must read the server-configured risk percentage');
 assert.ok(ea.includes('Refresh the quote after the network round-trip.'), 'EA must refresh bid/ask after network latency before validating execution');
+assert.ok(ea.includes('return (count == 14) ? sum / 14.0 : 0.0;'), 'EA ATR must use the same 14 true-range arithmetic mean as the server');
 assert.ok(ea.includes('currentSpread * (2.0 + extraCostSpreadMultiplier)'), 'EA must reapply the cost multiplier to the live spread');
 assert.ok(ea.includes('IsAdaptivePriceActionSpreadAcceptable(entry, currentSpread, maxAllowedSpread)'), 'EA must adapt spread limits to strategy conditions');
-assert.ok(ea.includes('iATR(g_symbol, PERIOD_M1, 14)'), 'Adaptive spread filter must use M1 trigger volatility');
-assert.ok(ea.includes('iATR(g_symbol, PERIOD_M5, 14)'), 'Adaptive spread filter must use M5 confirmation volatility');
+assert.ok(ea.includes('CalculatePriceActionSimpleAtr(PERIOD_M1)'), 'Adaptive spread filter must match server M1 true-range ATR');
+assert.ok(ea.includes('CalculatePriceActionSimpleAtr(PERIOD_M5)'), 'Adaptive spread filter must match server M5 true-range ATR');
 assert.ok(ea.includes('MathMin(MathMin(m1Limit, m5Limit), priceCap)'), 'Adaptive spread limit must retain a hard price-based ceiling');
 assert.ok(ea.includes('netRiskReward < 2.0'), 'EA must enforce net 1:2 R:R after estimated spread costs');
 assert.ok(ea.includes('riskDistance / entry > 0.015'), 'EA must reject stops wider than 1.5%');
