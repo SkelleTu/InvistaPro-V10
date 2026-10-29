@@ -14,6 +14,7 @@ O motor de política é isolado e testável. Para operar a estratégia cripto de
 
 ## Custos e confluência estrutural
 - O gate estrutural exige BOS ou CHoCH direcional **e** pelo menos uma confirmação independente entre FVG, sweep de liquidez ou Order Block. Um único padrão isolado não libera entrada.
-- O spread observado não representa necessariamente comissão e slippage. Configure `MT5_PRICE_ACTION_EXTRA_COST_PRICE_UNITS` no servidor como custo adicional estimado de ida e volta convertido para unidades de preço, de forma conservadora para os instrumentos negociados. O valor deve ser `0` apenas se comissão e slippage adicionais forem realmente zero ou já estiverem incluídos em outra fonte confiável.
-- Se a variável estiver ausente, inválida ou negativa, o custo total fica indisponível e a estratégia bloqueia novas entradas. Essa variável é uma estimativa em unidades de preço, não um valor monetário nem um custo universal para todos os símbolos; configure-a com o pior caso aplicável ao conjunto de instrumentos habilitados.
+- O spread é automático: o servidor calcula `ask - bid` com os preços atuais enviados pelo MT5. Não configurar spread manualmente.
+- Como comissão e slippage podem existir além do spread, configure `MT5_PRICE_ACTION_EXTRA_COST_SPREAD_MULTIPLIER` no servidor. É um multiplicador do spread vivo, não um preço fixo: custo total estimado = spread observado × (2 + multiplicador). Exemplo: `1` reserva duas vezes o spread para ida e volta mais uma vez o spread como margem adicional para comissão/slippage.
+- Se a variável estiver ausente, inválida ou negativa, o custo total fica indisponível e a estratégia bloqueia novas entradas. O multiplicador é uma estimativa conservadora, não substitui a validação das condições e comissões reais do broker; configure-o de acordo com os instrumentos habilitados.
 - A validação de execução deve ser feita em DEMO com os custos reais do broker antes de qualquer uso em conta REAL.
