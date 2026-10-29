@@ -1172,9 +1172,47 @@ void FetchAndProcessSignal()
    {
       double pointForDeviation = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
       if (pointForDeviation <= 0.0) { Print("⛔ Price Action: point do símbolo inválido."); return; }
-      double executionEntry = (action == "BUY") ? SymbolInfoDouble(g_symbol, SYMBOL_ASK) : SymbolInfoDouble(g_symbol, SYMBOL_BID);
-      if (executionEntry <= 0.0) { Print("⛔ Price Action: preço executável inválido antes da ordem."); return; }
-      if (MathAbs(executionEntry - serverEntryPrice) > serverEntryPrice * 0.001) { Print("⛔ Price Action: preço mudou além do limite de 0,10% antes do envio da ordem."); return; }
+      double executionAsk = SymbolInfoDouble(g_symbol, SYMBOL_ASK);
+      double executionBid = SymbolInfoDouble(g_symbol, SYMBOL_BID);
+      double executionEntry = (action == "BUY") ? executionAsk : executionBid;
+      if (executionAsk <= 0.0 || executionBid <= 0.0 || executionAsk < executionBid || executionEntry <= 0.0)
+      {
+         Print("⛔ Price Action: cotação executável inválida imediatamente antes da ordem.");
+         return;
+      }
+      if (MathAbs(executionEntry - serverEntryPrice) > serverEntryPrice * 0.001)
+      {
+         Print("⛔ Price Action: preço mudou além do limite de 0,10% antes do envio da ordem.");
+         return;
+      }
+
+      double executionSpread = executionAsk - executionBid;
+      double executionSpreadCost = MathMax(executionSpread * (2.0 + extraCostSpreadMultiplier), estimatedRoundTripCost);
+      double executionMaxSpread = 0.0;
+      if (!IsAdaptivePriceActionSpreadAcceptable(executionEntry, executionSpread, executionMaxSpread))
+      {
+         Print("⛔ Price Action: spread excedeu o limite adaptativo imediatamente antes da ordem.");
+         return;
+      }
+
+      double executionRiskDistance = (action == "BUY") ? executionEntry - stopLoss : stopLoss - executionEntry;
+      double executionRewardDistance = (action == "BUY") ? takeProfit - executionEntry : executionEntry - takeProfit;
+      double executionNetRiskReward = (executionRiskDistance + executionSpreadCost > 0.0)
+         ? (executionRewardDistance - executionSpreadCost) / (executionRiskDistance + executionSpreadCost)
+         : 0.0;
+      if (executionRiskDistance <= 0.0 || executionRewardDistance <= 0.0 ||
+          executionRiskDistance / executionEntry > 0.015 || executionNetRiskReward < 2.0)
+      {
+         Print("⛔ Price Action: stop, alvo ou R:R líquido inválido na cotação final; ordem cancelada.");
+         return;
+      }
+
+      lotSize = CalculatePriceActionRiskLot(executionEntry, stopLoss, executionSpreadCost, serverRiskPercent);
+      if (lotSize <= 0.0)
+      {
+         Print("⛔ Price Action: lote não respeita o orçamento de risco na cotação final.");
+         return;
+      }
       trade.SetDeviationInPoints((ulong)MathMax(1.0, (executionEntry * 0.001) / pointForDeviation));
    }
    if (action == "BUY")
