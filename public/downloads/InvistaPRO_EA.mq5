@@ -589,15 +589,17 @@ string BuildRawBuffersJson(int indicatorIdx, int bars)
 string BuildCandlesJson(MqlRates &rates[], int count)
 {
    string json = "[";
+   int symbolDigits = (int)SymbolInfoInteger(g_symbol, SYMBOL_DIGITS);
+   if (symbolDigits < 0 || symbolDigits > 12) return "[]";
    for (int i = 0; i < count; i++)
    {
       if (i > 0) json += ",";
       json += "{";
-      json += "\"time\":"   + IntegerToString(rates[i].time)          + ",";
-      json += "\"open\":"   + DoubleToString(rates[i].open,  _Digits) + ",";
-      json += "\"high\":"   + DoubleToString(rates[i].high,  _Digits) + ",";
-      json += "\"low\":"    + DoubleToString(rates[i].low,   _Digits) + ",";
-      json += "\"close\":"  + DoubleToString(rates[i].close, _Digits) + ",";
+      json += "\"time\":"   + IntegerToString(rates[i].time)             + ",";
+      json += "\"open\":"   + DoubleToString(rates[i].open,  symbolDigits) + ",";
+      json += "\"high\":"   + DoubleToString(rates[i].high,  symbolDigits) + ",";
+      json += "\"low\":"    + DoubleToString(rates[i].low,   symbolDigits) + ",";
+      json += "\"close\":"  + DoubleToString(rates[i].close, symbolDigits) + ",";
       json += "\"volume\":" + IntegerToString(rates[i].tick_volume);
       json += "}";
    }
@@ -892,8 +894,8 @@ void FetchAndProcessSignal()
    string body = "{";
    body += "\"accountType\":\"" + requestAccountType + "\",";
    body += "\"symbol\":\""          + g_symbol                     + "\",";
-   body += "\"ask\":"               + DoubleToString(ask, _Digits)  + ",";
-   body += "\"bid\":"               + DoubleToString(bid, _Digits)  + ",";
+   body += "\"ask\":"               + DoubleToString(ask, ManagedSymbolDigits())  + ",";
+   body += "\"bid\":"               + DoubleToString(bid, ManagedSymbolDigits())  + ",";
    body += "\"candles\":"           + candlesJson                   + ",";
    body += "\"timeframes\":"       + BuildMultiTimeframeJson()     + ",";
    body += "\"priceActionUseAIReview\":" + (PriceActionUseAIReview ? "true" : "false") + ",";
