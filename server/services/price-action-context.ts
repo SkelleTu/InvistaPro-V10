@@ -233,10 +233,18 @@ export function buildTrustedPriceActionContext(input: {
     ? [atrM1 * 0.20, atrM5 * 0.08, mid * 0.001]
     : [];
   const maxSpread = limits.length ? Math.min(...limits) : undefined;
+  // Explicit server-side price-equivalent for round-trip commission + slippage.
+  // This value must be configured conservatively for the broker/instruments traded.
+  // Missing or invalid configuration blocks entries instead of pretending spread is the full cost.
+  const extraCostRaw = process.env.MT5_PRICE_ACTION_EXTRA_COST_PRICE_UNITS;
+  const extraCost = extraCostRaw !== undefined && extraCostRaw.trim() !== ''
+    ? Number(extraCostRaw)
+    : Number.NaN;
+  const extraCostValid = Number.isFinite(extraCost) && extraCost >= 0;
   return {
     spread,
     maxSpread,
-    estimatedRoundTripCost: spread !== undefined ? spread * 2 : undefined,
+    estimatedRoundTripCost: spread !== undefined && extraCostValid ? spread * 2 + extraCost : undefined,
     highImpactNewsBlocked: input.newsBlocked,
     riskLimitOk: input.riskLimitOk,
     tradingSessionOpen: input.sessionOpen,
