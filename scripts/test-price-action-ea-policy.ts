@@ -56,6 +56,10 @@ assert.ok(ea.split('\n').filter((line) => line.includes('eaVersion')).every((lin
 assert.ok(ea.includes('CopyRates(g_symbol, timeframe, 1, count, rates)'), 'Strategy must exclude the still-forming candle');
 assert.ok(ea.includes('trade.ResultDeal() > 0'), 'EA must confirm broker execution instead of trusting local request validation');
 
+const engine = readFileSync(new URL('../server/services/price-action-engine.ts', import.meta.url), 'utf8');
+assert.ok(engine.includes('const recentWindow = 12'), 'CHoCH must use a trend window large enough for the trend classifier');
+assert.ok(engine.includes('const recent = trend(c.slice(-recentWindow))'), 'CHoCH confirmation must evaluate a reachable recent trend state');
+
 const context = readFileSync(new URL('../server/services/price-action-context.ts', import.meta.url), 'utf8');
 assert.ok(context.includes('atrM1 * 0.20'), 'Server spread policy must adapt to M1 ATR');
 assert.ok(context.includes('atrM5 * 0.08'), 'Server spread policy must adapt to M5 ATR');
