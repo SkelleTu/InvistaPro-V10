@@ -2,6 +2,7 @@
 
 ## Invariantes
 - A estratégia determinística gera o único candidato de entrada. Sem candidato aprovado, a resposta é HOLD.
+- A confirmação CHoCH usa uma janela compatível com o classificador de tendência; a janela anterior tinha apenas 10 candles, fazendo a tendência recente retornar sempre `range` e tornando CHoCH inalcançável.
 - Revisores de IA podem aprovar/rejeitar e contextualizar, mas não criar direção de entrada, remover gates, alterar risco máximo ou afrouxar stops.
 - Entradas exigem dados válidos H4, H1, M15 e M5 ou M1; alinhamento H4/H1; gatilho; volume; confirmação estrutural; RR mínimo 1:2 após custos; janela de notícias liberada; limites de risco liberados.
 - Uma saída ou ajuste de stop sugerido por IA é subordinado aos limites determinísticos. Proteções no broker/terminal não podem depender de disponibilidade da IA.
