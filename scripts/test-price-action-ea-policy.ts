@@ -9,6 +9,8 @@ assert.ok(ea.includes('priceActionUseAIReview'), 'EA must transmit the selected 
 assert.ok(ea.includes('requestAccountType'), 'EA must transmit its actual terminal account mode on each signal request');
 assert.ok(ea.includes('if (IsPriceActionCryptoSymbol() && !PriceActionUseAIReview)'), 'Autonomous mode must not invoke the AI position monitor');
 assert.ok(ea.includes('CalculatePriceActionRiskLot'), 'EA must size Price Action orders from equity and structural stop');
+assert.ok(ea.includes('CalculatePriceActionRiskLot(entry, stopLoss, spreadCost)'), 'EA must reserve round-trip spread cost when sizing risk');
+assert.ok(ea.includes('netRiskReward < 2.0'), 'EA must enforce net 1:2 R:R after estimated spread costs');
 assert.ok(ea.includes('riskDistance / entry > 0.015'), 'EA must reject stops wider than 1.5%');
 assert.ok(ea.includes('rewardDistance / riskDistance < 2.0'), 'EA must enforce minimum executable R:R of 1:2');
 assert.ok(ea.includes('breakeven em +1R'), 'EA must manage deterministic breakeven at +1R');
@@ -21,7 +23,7 @@ assert.ok(!ea.includes('trade.Sell(lotSize, g_symbol, 0, 0, 0'), 'EA must not fa
 
 assert.ok(!ea.includes('SYMBOL_VOLUME_DIGITS'), 'EA must not use the nonexistent SYMBOL_VOLUME_DIGITS enum');
 assert.ok(ea.includes('int VolumeDigitsFromStep()'), 'Volume precision must derive from SYMBOL_VOLUME_STEP');
-assert.ok(ea.includes('#property version   "8.1"'), 'Downloadable EA source must expose the updated version');
+assert.ok(ea.includes('#property version   "8.2"'), 'Downloadable EA source must expose the updated version');
 assert.ok(ea.includes('StringFind(quoteAndSuffix, "USDT") == 0'), 'EA must recognize crypto symbols quoted in USDT');
 assert.ok(ea.split('\n').filter((line) => line.includes('eaVersion')).every((line) => line.includes('8.1')), 'All signal payloads must report the same EA version');
 assert.ok(ea.includes('CopyRates(g_symbol, timeframe, 1, count, rates)'), 'Strategy must exclude the still-forming candle');
@@ -29,7 +31,7 @@ assert.ok(ea.includes('trade.ResultDeal() > 0'), 'EA must confirm broker executi
 
 const route = readFileSync(new URL('../server/routes/metatrader-routes.ts', import.meta.url), 'utf8');
 assert.ok(route.includes("code: 'MT5_EA_SOURCE_NOT_CURRENT'"), 'Download must fail closed when the canonical EA is missing or stale');
-assert.ok(route.includes("if (eaVersion !== '8.1' || missingEaMarkers.length > 0)"), 'Download must validate the EA version and current strategy markers');
+assert.ok(route.includes("if (eaVersion !== '8.2' || missingEaMarkers.length > 0)"), 'Download must validate the EA version and current strategy markers');
 assert.ok(route.includes("'CalculatePriceActionRiskLot'"), 'Download gate must require the Price Action risk sizing implementation');
 assert.ok(route.includes("'no-store, no-cache, must-revalidate, max-age=0'"), 'EA downloads must not be cached');
 
