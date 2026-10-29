@@ -130,6 +130,19 @@ router.get('/signal', mt5SignalAccess, (req: Request, res: Response) => {
     const symbolStr = (symbol as string) || '';
     const resolvedSymbol = symbolStr || config.symbols[0] || 'EURUSD';
 
+    // Price Action crypto must never receive cached/generic signals through the legacy
+    // polling endpoint. Only /signal-with-indicators carries the closed-candle payload
+    // and executes the deterministic server-side setup + risk/news/session gates.
+    if (isPriceActionCryptoSymbol(resolvedSymbol)) {
+      return res.status(409).json({
+        action: 'HOLD',
+        executionEnabled: false,
+        code: 'PRICE_ACTION_REQUIRED_ENDPOINT',
+        reason: 'Cripto exige validação Price Action determinística em /signal-with-indicators; sinais genéricos ou em cache são bloqueados.',
+        timestamp: Date.now(),
+      });
+    }
+
     // MT5 orders are placed by the user's logged-in MT5 terminal, not as Deriv contracts.
     if (process.env.NODE_ENV === 'production' && symbolStr && !isAllowedProductionSymbol(symbolStr)) {
       return res.status(403).json({
