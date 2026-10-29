@@ -50,7 +50,7 @@ assert.ok(!ea.includes('SYMBOL_VOLUME_DIGITS'), 'EA must not use the nonexistent
 assert.ok(ea.includes('int VolumeDigitsFromStep()'), 'Volume precision must derive from SYMBOL_VOLUME_STEP');
 assert.ok(ea.includes('#property version   "8.5"'), 'Downloadable EA source must expose the updated version');
 assert.ok(ea.includes('string suffixes[9]'), 'EA must recognize only supported broker suffixes for crypto symbols');
-assert.ok(ea.split('\\n').filter((line) => line.includes('eaVersion')).every((line) => line.includes('8.5')), 'All signal payloads must report the same EA version');
+assert.ok(ea.split('\n').filter((line) => line.includes('eaVersion')).every((line) => line.includes('8.5')), 'All signal payloads must report the same EA version');
 assert.ok(ea.includes('CopyRates(g_symbol, timeframe, 1, count, rates)'), 'Strategy must exclude the still-forming candle');
 assert.ok(ea.includes('trade.ResultDeal() > 0'), 'EA must confirm broker execution instead of trusting local request validation');
 
