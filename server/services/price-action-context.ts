@@ -182,12 +182,10 @@ export function assessMt5RiskLimit(input: {
   if (!Number.isFinite(config.maxDailyProfit) || config.maxDailyProfit <= 0
     || !Number.isFinite(status.dailyProfit) || status.dailyProfit < 0 || status.dailyProfit >= config.maxDailyProfit) reasons.push('Meta/limite diário de lucro atingido, indisponível ou inválido');
   if (status.circuitBreakerActive) reasons.push('Circuit breaker ativo');
-  const actualOpenPositions = Number.isFinite(status.actualAccountOpenPositions)
-    ? status.actualAccountOpenPositions!
-    : status.openPositions;
+  const actualOpenPositions = status.actualAccountOpenPositions;
   if (!Number.isFinite(config.maxOpenPositions) || config.maxOpenPositions < 1
-    || !Number.isFinite(actualOpenPositions) || actualOpenPositions < 0
-    || actualOpenPositions >= config.maxOpenPositions) reasons.push('Limite de posições abertas na conta MT5 atingido, indisponível ou inválido');
+    || !Number.isFinite(actualOpenPositions) || actualOpenPositions! < 0
+    || actualOpenPositions! >= config.maxOpenPositions) reasons.push('Limite de posições abertas na conta MT5 atingido, indisponível ou inválido');
   return { ok: reasons.length === 0, reasons };
 }
 
