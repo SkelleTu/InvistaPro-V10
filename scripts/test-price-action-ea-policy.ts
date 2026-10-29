@@ -28,9 +28,9 @@ assert.ok(!ea.includes('trade.Sell(lotSize, g_symbol, 0, 0, 0'), 'EA must not fa
 
 assert.ok(!ea.includes('SYMBOL_VOLUME_DIGITS'), 'EA must not use the nonexistent SYMBOL_VOLUME_DIGITS enum');
 assert.ok(ea.includes('int VolumeDigitsFromStep()'), 'Volume precision must derive from SYMBOL_VOLUME_STEP');
-assert.ok(ea.includes('#property version   "8.2"'), 'Downloadable EA source must expose the updated version');
+assert.ok(ea.includes('#property version   "8.3"'), 'Downloadable EA source must expose the updated version');
 assert.ok(ea.includes('StringFind(quoteAndSuffix, "USDT") == 0'), 'EA must recognize crypto symbols quoted in USDT');
-assert.ok(ea.split('\\n').filter((line) => line.includes('eaVersion')).every((line) => line.includes('8.2')), 'All signal payloads must report the same EA version');
+assert.ok(ea.split('\\n').filter((line) => line.includes('eaVersion')).every((line) => line.includes('8.3')), 'All signal payloads must report the same EA version');
 assert.ok(ea.includes('CopyRates(g_symbol, timeframe, 1, count, rates)'), 'Strategy must exclude the still-forming candle');
 assert.ok(ea.includes('trade.ResultDeal() > 0'), 'EA must confirm broker execution instead of trusting local request validation');
 
@@ -42,7 +42,7 @@ assert.ok(context.includes('limits.length ? Math.min(...limits) : undefined'), '
 
 const route = readFileSync(new URL('../server/routes/metatrader-routes.ts', import.meta.url), 'utf8');
 assert.ok(route.includes("code: 'MT5_EA_SOURCE_NOT_CURRENT'"), 'Download must fail closed when the canonical EA is missing or stale');
-assert.ok(route.includes("if (eaVersion !== '8.2' || missingEaMarkers.length > 0)"), 'Download must validate the EA version and current strategy markers');
+assert.ok(route.includes("if (eaVersion !== '8.3' || missingEaMarkers.length > 0)"), 'Download must validate the EA version and current strategy markers');
 assert.ok(route.includes("'CalculatePriceActionRiskLot'"), 'Download gate must require the Price Action risk sizing implementation');
 assert.ok(route.includes("'CalculatePriceActionRiskLot(entry, stopLoss, spreadCost)'"), 'Download gate must require cost-aware risk sizing');
 assert.ok(route.includes("'netRiskReward < 2.0'"), 'Download gate must require the net R:R check');
