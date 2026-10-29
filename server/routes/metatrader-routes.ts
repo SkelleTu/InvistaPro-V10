@@ -22,22 +22,12 @@ import { isAllowedProductionSymbol } from '../services/production-symbol-policy'
 import { getMt5ProductionBlock } from '../services/mt5-production-policy';
 import { consensusCache } from '../services/consensus-cache';
 import { evaluatePriceActionSetup, type Candle } from '../services/price-action-engine';
+import { isPriceActionCryptoSymbol } from '../services/price-action-symbol-policy';
 import { assessMt5RiskLimit, buildTrustedPriceActionContext, getHighImpactNewsStatus, isAllowedBrasiliaTradingSession } from '../services/price-action-context';
 
 
 const router = Router();
 
-/** Strict whitelist for supported crypto bases/quotes and known broker affixes. */
-export function isPriceActionCryptoSymbol(symbol: unknown): boolean {
-  if (typeof symbol !== 'string') return false;
-  const normalized = symbol.toUpperCase().replace(/[^A-Z0-9]/g, '');
-  const suffixes = ['', 'M', 'R', 'A', 'PRO', 'ECN', 'RAW', 'C', 'Z'];
-  const prefixes = ['', 'M'];
-  for (const prefix of prefixes) for (const base of ['BTC', 'XBT', 'ETH', 'SOL'])
-    for (const quote of ['USDT', 'USD']) for (const suffix of suffixes)
-      if (normalized === prefix + base + quote + suffix) return true;
-  return false;
-}
 
 // Último ambiente confirmado pelo próprio terminal MT5. Desconhecido após restart até novo heartbeat.
 let lastMt5ObservedAccountType: 'demo' | 'real' | 'contest' | null = null;
