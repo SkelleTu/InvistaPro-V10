@@ -228,7 +228,7 @@ export function evaluatePriceActionSetup(
     const targetDistance = risk * 2 + costs * 3;
     const target = side === 'BUY' ? entry + targetDistance : entry - targetDistance;
     const rr = risk > 0 ? (Math.abs(target - entry) - costs) / (risk + costs) : 0;
-    features.entry = entry; features.stop = stop; features.target = target; features.riskReward = rr; features.estimatedRoundTripCost = costs; features.extraCostSpreadMultiplier = context.extraCostSpreadMultiplier;
+    features.entry = entry; features.stop = stop; features.target = target; features.riskReward = rr; features.estimatedRoundTripCost = costs; features.extraCostSpreadMultiplier = finite(context.extraCostSpreadMultiplier) ? context.extraCostSpreadMultiplier : null;
     features.stopBuffer = stopBuffer;
     checks.stop_direction = entry > 0 && (side === 'BUY' ? stop < entry : stop > entry);
     if (!checks.stop_direction) reasons.push('Stop estrutural está no lado incorreto da entrada');
