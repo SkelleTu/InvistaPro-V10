@@ -1367,7 +1367,10 @@ router.get('/download-ea', mt5DashboardAccess, async (req: Request, res: Respons
     // Fail closed: never serve the legacy generated v2.00 EA when the canonical source is missing/stale.
     const requiredEaMarkers = [
       '#property version   "8.4"',
-      'PriceActionRiskPercent = 1.0',
+      'ExtractJsonDouble(resp, "riskPercent")',
+      '#define PRICE_ACTION_SPREAD_ATR_M1_PERCENT 20.0',
+      '#define PRICE_ACTION_SPREAD_ATR_M5_PERCENT 8.0',
+      '#define PRICE_ACTION_SPREAD_PRICE_CAP_PERCENT 0.10',
       'PriceActionUseAIReview = true',
       'CopyRates(g_symbol, timeframe, 1, count, rates)',
       'CalculatePriceActionRiskLot',
