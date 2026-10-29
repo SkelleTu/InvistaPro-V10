@@ -33,6 +33,12 @@ assert.ok(ea.split('\\n').filter((line) => line.includes('eaVersion')).every((li
 assert.ok(ea.includes('CopyRates(g_symbol, timeframe, 1, count, rates)'), 'Strategy must exclude the still-forming candle');
 assert.ok(ea.includes('trade.ResultDeal() > 0'), 'EA must confirm broker execution instead of trusting local request validation');
 
+const context = readFileSync(new URL('../server/services/price-action-context.ts', import.meta.url), 'utf8');
+assert.ok(context.includes('atrM1 * 0.20'), 'Server spread policy must adapt to M1 ATR');
+assert.ok(context.includes('atrM5 * 0.08'), 'Server spread policy must adapt to M5 ATR');
+assert.ok(context.includes('mid * 0.001'), 'Server spread policy must retain the 0.10% price cap');
+assert.ok(context.includes('limits.length ? Math.min(...limits) : undefined'), 'Server must fail closed when adaptive ATR limits are unavailable');
+
 const route = readFileSync(new URL('../server/routes/metatrader-routes.ts', import.meta.url), 'utf8');
 assert.ok(route.includes("code: 'MT5_EA_SOURCE_NOT_CURRENT'"), 'Download must fail closed when the canonical EA is missing or stale');
 assert.ok(route.includes("if (eaVersion !== '8.2' || missingEaMarkers.length > 0)"), 'Download must validate the EA version and current strategy markers');
