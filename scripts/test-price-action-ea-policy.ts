@@ -12,7 +12,7 @@ assert.ok(!ea.includes('PriceActionSpreadATR_M1_Percent') && !ea.includes('Price
 assert.ok(ea.includes('PriceActionUseAIReview = true'), 'EA must expose AI-reviewed and autonomous strategy modes');
 assert.ok(ea.includes('priceActionUseAIReview'), 'EA must transmit the selected Price Action mode to the server');
 assert.ok(ea.includes('requestAccountType'), 'EA must transmit its actual terminal account mode on each signal request');
-assert.ok(ea.includes('if (IsPriceActionCryptoSymbol() && !PriceActionUseAIReview)'), 'Autonomous mode must not invoke the AI position monitor');
+assert.ok(ea.includes('if (IsPriceActionCryptoSymbol())\n         continue;'), 'Price Action positions must not use discretionary AI exits');
 assert.ok(ea.includes('CalculatePriceActionRiskLot'), 'EA must size Price Action orders from equity and structural stop');
 assert.ok(ea.includes('CalculatePriceActionRiskLot(entry, stopLoss, spreadCost, serverRiskPercent)'), 'EA must reserve round-trip spread cost when sizing risk');
 assert.ok(ea.includes('MathMax(currentSpread * (2.0 + extraCostSpreadMultiplier), estimatedRoundTripCost)'), 'EA must include server round-trip commission/slippage estimate without understating live spread');
@@ -20,9 +20,10 @@ assert.ok(ea.includes('ExtractJsonDouble(resp, "estimatedRoundTripCost")'), 'EA 
 assert.ok(ea.includes('ExtractJsonDouble(resp, "extraCostSpreadMultiplier")'), 'EA must read the server cost multiplier');
 assert.ok(ea.includes('ExtractJsonDouble(resp, "riskPercent")'), 'EA must read the server-configured risk percentage');
 assert.ok(ea.includes('double serverEntryPrice = ExtractJsonDouble(resp, "entryPrice")'), 'EA must compare executable price with server-approved entry');
-assert.ok(ea.includes('MathAbs(entry - serverEntryPrice) > maxEntryDeviation'), 'EA must reject excessive entry slippage');
+assert.ok(ea.includes('double maxEntryDeviation = serverEntryPrice * 0.001'), 'EA must enforce a hard 0.10% entry deviation ceiling');
+assert.ok(ea.includes('MathAbs(executionEntry - serverEntryPrice) > serverEntryPrice * 0.001'), 'EA must revalidate entry deviation immediately before order submission');
 assert.ok(ea.includes('proibido fallback para lote manual'), 'Price Action must never bypass risk sizing with a manual lot fallback');
-assert.ok(ea.includes('trade.SetDeviationInPoints((ulong)MathMax(1.0, (entry * 0.001) / pointForDeviation))'), 'Broker execution deviation must be bounded for Price Action');
+assert.ok(ea.includes('trade.SetDeviationInPoints((ulong)MathMax(1.0, (executionEntry * 0.001) / pointForDeviation))'), 'Broker execution deviation must be bounded for Price Action');
 assert.ok(ea.includes('Refresh the quote after the network round-trip.'), 'EA must refresh bid/ask after network latency before validating execution');
 assert.ok(ea.includes('return (count == 14) ? sum / 14.0 : 0.0;'), 'EA ATR must use the same 14 true-range arithmetic mean as the server');
 assert.ok(ea.includes('currentSpread * (2.0 + extraCostSpreadMultiplier)'), 'EA must reapply the cost multiplier to the live spread');
