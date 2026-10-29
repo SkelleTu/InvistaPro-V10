@@ -938,6 +938,16 @@ void FetchAndProcessSignal()
    string action = ExtractJsonString(resp, "action");
    if (action == "" || action == "HOLD") return;
 
+   // Refresh the quote after the network round-trip. The pre-request quote is stale
+   // by construction and must never drive live risk/reward or spread checks.
+   ask = SymbolInfoDouble(g_symbol, SYMBOL_ASK);
+   bid = SymbolInfoDouble(g_symbol, SYMBOL_BID);
+   if (ask <= 0.0 || bid <= 0.0 || ask < bid)
+   {
+      Print("⛔ Price Action recusado: cotação ao vivo inválida após receber o sinal.");
+      return;
+   }
+
    string signalId   = ExtractJsonString(resp, "id");
    if (signalId == g_pendingSignalId) return;
 
