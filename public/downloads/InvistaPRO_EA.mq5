@@ -887,7 +887,7 @@ void FetchAndProcessSignal()
    body += "\"indicatorSignals\":"  + structuredSignals             + ",";
    body += "\"indicatorBuffers\":"  + allBuffers                    + ",";
    body += "\"indicatorCount\":"    + IntegerToString(g_indicatorCount) + ",";
-   body += "\"eaVersion\":\"8.3\"";
+   body += "\"eaVersion\":\"8.4\"";
    if (g_apiToken != "") body += ",\"token\":\"" + g_apiToken + "\"";
    body += "}";
 
@@ -1403,7 +1403,7 @@ bool SendHeartbeat()
    body += "\"openPositions\":" + IntegerToString(openPos)  + ",";
    body += "\"platform\":\"MT5\",";
    body += "\"accountType\":\"" + accountType + "\",";
-   body += "\"eaVersion\":\"8.3\"";
+   body += "\"eaVersion\":\"8.4\"";
    if (g_apiToken != "") body += ",\"token\":\"" + g_apiToken + "\"";
    body += "}";
 
