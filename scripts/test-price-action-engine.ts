@@ -70,7 +70,7 @@ const risingFrame = (count: number, start: number, step: number): Candle[] => Ar
 const positiveEntry = risingFrame(40, 100, 0.01);
 positiveEntry[37] = { time: 38, open: 100.75, close: 100.73, high: 100.752, low: 100.728, volume: 180 };
 positiveEntry[38] = { time: 39, open: 100.72, close: 100.76, high: 100.765, low: 100.715, volume: 190 };
-positiveEntry[39] = { time: 40, open: 100.76, close: 100.9, high: 100.91, low: 100.3, volume: 240 };
+positiveEntry[39] = { time: 40, open: 100.76, close: 100.9, high: 100.91, low: 100.1, volume: 240 };
 const positive = evaluatePriceActionSetup({
   H4: risingFrame(40, 100, 0.1),
   H1: risingFrame(40, 100, 0.05),
