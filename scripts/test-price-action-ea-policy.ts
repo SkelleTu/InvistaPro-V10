@@ -10,9 +10,13 @@ assert.ok(ea.includes('requestAccountType'), 'EA must transmit its actual termin
 assert.ok(ea.includes('if (IsPriceActionCryptoSymbol() && !PriceActionUseAIReview)'), 'Autonomous mode must not invoke the AI position monitor');
 assert.ok(ea.includes('CalculatePriceActionRiskLot'), 'EA must size Price Action orders from equity and structural stop');
 assert.ok(ea.includes('CalculatePriceActionRiskLot(entry, stopLoss, spreadCost)'), 'EA must reserve round-trip spread cost when sizing risk');
+assert.ok(ea.includes('IsAdaptivePriceActionSpreadAcceptable(entry, currentSpread, maxAllowedSpread)'), 'EA must adapt spread limits to strategy conditions');
+assert.ok(ea.includes('iATR(g_symbol, PERIOD_M1, 14)'), 'Adaptive spread filter must use M1 trigger volatility');
+assert.ok(ea.includes('iATR(g_symbol, PERIOD_M5, 14)'), 'Adaptive spread filter must use M5 confirmation volatility');
+assert.ok(ea.includes('MathMin(MathMin(m1Limit, m5Limit), priceCap)'), 'Adaptive spread limit must retain a hard price-based ceiling');
 assert.ok(ea.includes('netRiskReward < 2.0'), 'EA must enforce net 1:2 R:R after estimated spread costs');
 assert.ok(ea.includes('riskDistance / entry > 0.015'), 'EA must reject stops wider than 1.5%');
-assert.ok(ea.includes('rewardDistance / riskDistance < 2.0'), 'EA must enforce minimum executable R:R of 1:2');
+assert.ok(ea.includes('netRiskReward < 2.0'), 'EA must enforce net executable R:R of 1:2 after spread');
 assert.ok(ea.includes('breakeven em +1R'), 'EA must manage deterministic breakeven at +1R');
 assert.ok(ea.includes('parcial de 50% realizada em +1,5R'), 'EA must manage the 50% partial at +1.5R');
 assert.ok(ea.includes('CountManagedPositions() < MaxPositions'), 'Unrelated/manual positions must not block this EA instance');
@@ -25,7 +29,7 @@ assert.ok(!ea.includes('SYMBOL_VOLUME_DIGITS'), 'EA must not use the nonexistent
 assert.ok(ea.includes('int VolumeDigitsFromStep()'), 'Volume precision must derive from SYMBOL_VOLUME_STEP');
 assert.ok(ea.includes('#property version   "8.2"'), 'Downloadable EA source must expose the updated version');
 assert.ok(ea.includes('StringFind(quoteAndSuffix, "USDT") == 0'), 'EA must recognize crypto symbols quoted in USDT');
-assert.ok(ea.split('\n').filter((line) => line.includes('eaVersion')).every((line) => line.includes('8.1')), 'All signal payloads must report the same EA version');
+assert.ok(ea.split('\\n').filter((line) => line.includes('eaVersion')).every((line) => line.includes('8.2')), 'All signal payloads must report the same EA version');
 assert.ok(ea.includes('CopyRates(g_symbol, timeframe, 1, count, rates)'), 'Strategy must exclude the still-forming candle');
 assert.ok(ea.includes('trade.ResultDeal() > 0'), 'EA must confirm broker execution instead of trusting local request validation');
 
