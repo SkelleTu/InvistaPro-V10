@@ -762,8 +762,30 @@ int VolumeDigitsFromStep()
    return digits;
 }
 
-// Dynamic spread filter aligned with the strategy's M1 trigger and M5 confirmation.
-// Fails closed when ATR data is missing, stale, or the live spread is too wide.
+// Match the server ATR exactly: arithmetic mean of the last 14 true ranges
+// from 15 completed candles, with CopyRates returned in chronological order.
+double CalculatePriceActionSimpleAtr(ENUM_TIMEFRAMES timeframe)
+{
+   MqlRates rates[];
+   int copied = CopyRates(g_symbol, timeframe, 1, 15, rates);
+   if (copied < 15) return 0.0;
+
+   double sum = 0.0;
+   int count = 0;
+   for (int i = 1; i < copied; i++)
+   {
+      if (rates[i].high < rates[i].low) return 0.0;
+      double trueRange = MathMax(rates[i].high - rates[i].low,
+         MathMax(MathAbs(rates[i].high - rates[i - 1].close),
+                 MathAbs(rates[i].low - rates[i - 1].close)));
+      if (trueRange < 0.0) return 0.0;
+      sum += trueRange;
+      count++;
+   }
+   return (count == 14) ? sum / 14.0 : 0.0;
+}
+
+// Dynamic spread filter aligned with the server's closed-candle ATR policy.
 bool IsAdaptivePriceActionSpreadAcceptable(double entryPrice, double currentSpread, double &maxAllowedSpread)
 {
    maxAllowedSpread = 0.0;
@@ -773,26 +795,17 @@ bool IsAdaptivePriceActionSpreadAcceptable(double entryPrice, double currentSpre
        PRICE_ACTION_SPREAD_PRICE_CAP_PERCENT <= 0.0)
       return false;
 
-   int atrM1Handle = iATR(g_symbol, PERIOD_M1, 14);
-   int atrM5Handle = iATR(g_symbol, PERIOD_M5, 14);
-   if (atrM1Handle == INVALID_HANDLE || atrM5Handle == INVALID_HANDLE)
-   {
-      if (atrM1Handle != INVALID_HANDLE) IndicatorRelease(atrM1Handle);
-      if (atrM5Handle != INVALID_HANDLE) IndicatorRelease(atrM5Handle);
-      return false;
-   }
+   double atrM1 = CalculatePriceActionSimpleAtr(PERIOD_M1);
+   double atrM5 = CalculatePriceActionSimpleAtr(PERIOD_M5);
+   if (atrM1 <= 0.0 || atrM5 <= 0.0) return false;
 
-   double atrM1Buffer[1], atrM5Buffer[1];
-   bool haveM1 = (CopyBuffer(atrM1Handle, 0, 1, 1, atrM1Buffer) == 1);
-   bool haveM5 = (CopyBuffer(atrM5Handle, 0, 1, 1, atrM5Buffer) == 1);
-   IndicatorRelease(atrM1Handle);
-   IndicatorRelease(atrM5Handle);
-   if (!haveM1 || !haveM5 || atrM1Buffer[0] <= 0.0 || atrM5Buffer[0] <= 0.0)
-      return false;
-
-   double m1Limit = atrM1Buffer[0] * PRICE_ACTION_SPREAD_ATR_M1_PERCENT / 100.0;
-   double m5Limit = atrM5Buffer[0] * PRICE_ACTION_SPREAD_ATR_M5_PERCENT / 100.0;
-   double priceCap = entryPrice * PRICE_ACTION_SPREAD_PRICE_CAP_PERCENT / 100.0;
+   double m1Limit = atrM1 * PRICE_ACTION_SPREAD_ATR_M1_PERCENT / 100.0;
+   double m5Limit = atrM5 * PRICE_ACTION_SPREAD_ATR_M5_PERCENT / 100.0;
+   double liveAsk = SymbolInfoDouble(g_symbol, SYMBOL_ASK);
+   double liveBid = SymbolInfoDouble(g_symbol, SYMBOL_BID);
+   if (liveAsk <= 0.0 || liveBid <= 0.0 || liveAsk < liveBid) return false;
+   double midPrice = (liveAsk + liveBid) / 2.0;
+   double priceCap = midPrice * PRICE_ACTION_SPREAD_PRICE_CAP_PERCENT / 100.0;
    maxAllowedSpread = MathMin(MathMin(m1Limit, m5Limit), priceCap);
    return (maxAllowedSpread > 0.0 && currentSpread <= maxAllowedSpread);
 }
