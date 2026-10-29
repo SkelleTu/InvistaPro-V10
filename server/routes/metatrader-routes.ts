@@ -1032,22 +1032,29 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
       indicatorNotes.push(`📊 ${derivProfile.family} (${derivProfile.volClass}) — ${derivProfile.trendType} | RSI thr: ${derivProfile.rsiOversold}/${derivProfile.rsiOverbought}`);
     }
 
-    // Enforce strategy -> AI sequence: the AI may reject, never reverse or invent a setup.
+    // Enforce strategy -> AI sequence: review the AI's original result, not a direction
+    // that indicator rules may have rewritten later. Indicators can veto, never manufacture approval.
     if (priceActionSetup) {
+      const aiAction = String(baseSignal?.action ?? 'HOLD').toUpperCase();
+      const aiConfidence = Number(baseSignal?.confidence ?? 0);
       const aiReview = validateAIEntryReview(priceActionSetup, {
-        decision: finalAction,
-        direction: finalAction,
-        confidence: finalConfidence / 100,
+        decision: aiAction,
+        direction: aiAction,
+        confidence: aiConfidence / 100,
       });
-      if (!baseSignal || !aiReview.approved) {
+      const downstreamFiltersPreservedDirection = finalAction === priceActionSetup.action;
+      if (!baseSignal || !aiReview.approved || !downstreamFiltersPreservedDirection) {
         return res.json({
           action: 'HOLD',
           confidence: 0,
           code: 'PRICE_ACTION_AI_REVIEW_REJECTED',
-          reason: aiReview.reason,
+          reason: !aiReview.approved
+            ? aiReview.reason
+            : 'Um filtro posterior bloqueou ou alterou a direção aprovada pela estratégia; entrada recusada.',
           strategyAction: priceActionSetup.action,
-          aiAction: finalAction,
-          aiConfidence: finalConfidence,
+          aiAction,
+          aiConfidence,
+          finalFilteredAction: finalAction,
           rejectionReasons: priceActionSetup.reasons,
           timestamp: Date.now()
         });
@@ -1056,7 +1063,7 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
       refinedSL = priceActionSetup.stopLoss!;
       refinedTP = priceActionSetup.takeProfit!;
       baseSignal.entryPrice = priceActionSetup.entry;
-      indicatorNotes.push('Price Action multi-timeframe validado; SL/TP mantidos nos níveis estruturais da estratégia.');
+      indicatorNotes.push('Price Action multi-timeframe validado; IA revisou sua decisão original; SL/TP mantidos nos níveis estruturais da estratégia.');
     }
 
     // Monta resposta final
