@@ -1283,7 +1283,7 @@ export class AdvancedLearningSystem {
     
     const maxDiff = Math.max(...a) - Math.min(...a);
     if (!Number.isFinite(maxDiff) || maxDiff === 0) {
-      return a.every(value => value === b[a.indexOf(value)]) ? 1 : 0;
+      return a.every((value, index) => value === b[index]) ? 1 : 0;
     }
     return Math.max(0, Math.min(1, 1 - sum / (maxDiff * a.length)));
   }
