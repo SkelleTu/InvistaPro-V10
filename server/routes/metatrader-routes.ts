@@ -1375,6 +1375,9 @@ router.get('/download-ea', mt5DashboardAccess, async (req: Request, res: Respons
       'PriceActionUseAIReview = true',
       'CopyRates(g_symbol, timeframe, 1, count, rates)',
       'CalculatePriceActionRiskLot',
+      'CalculatePriceActionRiskLot(entry, stopLoss, spreadCost)',
+      'netRiskReward < 2.0',
+      'BuildMultiTimeframeJson()',
       'int VolumeDigitsFromStep()',
       'TRADE_RETCODE_DONE_PARTIAL',
     ];
