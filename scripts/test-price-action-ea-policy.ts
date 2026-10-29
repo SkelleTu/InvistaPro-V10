@@ -19,6 +19,7 @@ assert.ok(ea.includes('MathMax(currentSpread * (2.0 + extraCostSpreadMultiplier)
 assert.ok(ea.includes('ExtractJsonDouble(resp, "estimatedRoundTripCost")'), 'EA must read server-side total cost estimate');
 assert.ok(ea.includes('ExtractJsonDouble(resp, "extraCostSpreadMultiplier")'), 'EA must read the server cost multiplier');
 assert.ok(ea.includes('ExtractJsonDouble(resp, "riskPercent")'), 'EA must read the server-configured risk percentage');
+assert.ok(ea.includes('Refresh the quote after the network round-trip.'), 'EA must refresh bid/ask after network latency before validating execution');
 assert.ok(ea.includes('currentSpread * (2.0 + extraCostSpreadMultiplier)'), 'EA must reapply the cost multiplier to the live spread');
 assert.ok(ea.includes('IsAdaptivePriceActionSpreadAcceptable(entry, currentSpread, maxAllowedSpread)'), 'EA must adapt spread limits to strategy conditions');
 assert.ok(ea.includes('iATR(g_symbol, PERIOD_M1, 14)'), 'Adaptive spread filter must use M1 trigger volatility');
