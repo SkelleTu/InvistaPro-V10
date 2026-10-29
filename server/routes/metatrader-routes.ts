@@ -21,7 +21,7 @@ import { computeSyntheticGirassol } from '../services/synthetic-girassol';
 import { isAllowedProductionSymbol } from '../services/production-symbol-policy';
 import { getMt5ProductionBlock } from '../services/mt5-production-policy';
 import { consensusCache } from '../services/consensus-cache';
-import { evaluatePriceActionSetup, type Candle } from '../services/price-action-engine';
+import { evaluatePriceActionSetup, validateAIEntryReview, type Candle } from '../services/price-action-engine';
 import { isPriceActionCryptoSymbol } from '../services/price-action-symbol-policy';
 import { assessMt5RiskLimit, buildTrustedPriceActionContext, getHighImpactNewsStatus, isAllowedBrasiliaTradingSession } from '../services/price-action-context';
 
@@ -1049,12 +1049,17 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
 
     // Enforce strategy -> AI sequence: the AI may reject, never reverse or invent a setup.
     if (priceActionSetup) {
-      if (!baseSignal || finalAction !== priceActionSetup.action || finalConfidence < 70) {
+      const aiReview = validateAIEntryReview(priceActionSetup, {
+        decision: finalAction,
+        direction: finalAction,
+        confidence: finalConfidence / 100,
+      });
+      if (!baseSignal || !aiReview.approved) {
         return res.json({
           action: 'HOLD',
           confidence: 0,
           code: 'PRICE_ACTION_AI_REVIEW_REJECTED',
-          reason: 'O sinal da estratégia não foi aprovado pela análise de IA na mesma direção ou não atingiu a confiança mínima.',
+          reason: aiReview.reason,
           strategyAction: priceActionSetup.action,
           aiAction: finalAction,
           aiConfidence: finalConfidence,
