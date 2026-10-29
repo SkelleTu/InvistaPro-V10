@@ -1118,7 +1118,7 @@ void FetchAndProcessSignal()
           Print("⛔ Price Action recusado: preço, SL/TP, custo ida-e-volta ou risco configurado inválido.");
           return;
        }
-       double maxEntryDeviation = MathMax(estimatedRoundTripCost, serverEntryPrice * 0.001);
+       double maxEntryDeviation = serverEntryPrice * 0.001; // Hard 0.10% ceiling; costs never relax entry-price fidelity.
        if (MathAbs(entry - serverEntryPrice) > maxEntryDeviation)
        {
           Print("⛔ Price Action recusado: preço executável desviou mais de 0,10%/custo permitido da entrada aprovada pelo servidor.");
@@ -1172,7 +1172,10 @@ void FetchAndProcessSignal()
    {
       double pointForDeviation = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
       if (pointForDeviation <= 0.0) { Print("⛔ Price Action: point do símbolo inválido."); return; }
-      trade.SetDeviationInPoints((ulong)MathMax(1.0, (entry * 0.001) / pointForDeviation));
+      double executionEntry = (action == "BUY") ? SymbolInfoDouble(g_symbol, SYMBOL_ASK) : SymbolInfoDouble(g_symbol, SYMBOL_BID);
+      if (executionEntry <= 0.0) { Print("⛔ Price Action: preço executável inválido antes da ordem."); return; }
+      if (MathAbs(executionEntry - serverEntryPrice) > serverEntryPrice * 0.001) { Print("⛔ Price Action: preço mudou além do limite de 0,10% antes do envio da ordem."); return; }
+      trade.SetDeviationInPoints((ulong)MathMax(1.0, (executionEntry * 0.001) / pointForDeviation));
    }
    if (action == "BUY")
       requestOk = trade.Buy(lotSize, g_symbol, 0, stopLoss, takeProfit, "InvistaPRO_" + signalId);
@@ -1339,8 +1342,9 @@ void MonitorOpenPositions()
           }
        }
 
-// Autonomous Price Action mode uses only deterministic local protection and fixed SL/TP.
-      if (IsPriceActionCryptoSymbol() && !PriceActionUseAIReview)
+// Price Action exits are deterministic: local breakeven/partial rules plus broker SL/TP.
+      // The AI review may reject an entry, but must not introduce discretionary exit rules.
+      if (IsPriceActionCryptoSymbol())
          continue;
 
             string posJson = "{";
