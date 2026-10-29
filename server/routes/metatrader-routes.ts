@@ -1364,7 +1364,7 @@ router.get('/download-ea', mt5DashboardAccess, async (req: Request, res: Respons
     const eaVersion = content.match(/#property\s+version\s+"([^"]+)"/)?.[1] ?? 'unknown';
     // Fail closed: never serve the legacy generated v2.00 EA when the canonical source is missing/stale.
     const requiredEaMarkers = [
-      '#property version   "8.3"',
+      '#property version   "8.4"',
       'PriceActionRiskPercent = 1.0',
       'PriceActionUseAIReview = true',
       'CopyRates(g_symbol, timeframe, 1, count, rates)',
@@ -1387,7 +1387,7 @@ router.get('/download-ea', mt5DashboardAccess, async (req: Request, res: Respons
       'bool IsPriceActionCryptoSymbol()',
     ];
     const missingEaMarkers = requiredEaMarkers.filter((marker) => !content.includes(marker));
-    if (eaVersion !== '8.3' || missingEaMarkers.length > 0) {
+    if (eaVersion !== '8.4' || missingEaMarkers.length > 0) {
       console.error('[MT5 EA Download] Fonte ausente ou desatualizada; download bloqueado.', {
         eaVersion,
         missingEaMarkers,
