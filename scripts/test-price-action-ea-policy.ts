@@ -54,7 +54,7 @@ console.log('Price Action EA safety and download-version invariants passed (stat
 
 assert.ok(ea.includes('if (!IsPriceActionCryptoSymbol())'), 'Manual SL/TP overrides must be disabled for Price Action crypto');
 assert.ok(ea.includes('modo PARCIAL não pode substituir ou remover SL/TP estruturais'), 'Partial mode must preserve server-approved structural stops');
-assert.ok(route.includes('function isPriceActionCryptoSymbol(symbol: unknown)'), 'Server crypto gate must use bounded symbol recognition');
+assert.ok(route.includes("from '../services/price-action-symbol-policy'"), 'Route must import the shared bounded crypto symbol policy');
 assert.ok(route.includes('const isStrategyCrypto = isPriceActionCryptoSymbol(sym)'), 'Route must apply the deterministic crypto-symbol policy');
 
 for (const symbol of ['BTCUSD', 'BTCUSDm', 'm.BTCUSD', 'BTCUSDT.r', 'XBTUSD', 'ETHUSD.a', 'SOLUSDT', 'BTCUSDpro']) {
