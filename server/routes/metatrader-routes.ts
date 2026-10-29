@@ -22,6 +22,7 @@ import { isAllowedProductionSymbol } from '../services/production-symbol-policy'
 import { getMt5ProductionBlock } from '../services/mt5-production-policy';
 import { consensusCache } from '../services/consensus-cache';
 import { evaluatePriceActionSetup, validateAIEntryReview, type Candle } from '../services/price-action-engine';
+import { reviewPriceActionSetup } from '../services/price-action-ai-review';
 import { isPriceActionCryptoSymbol } from '../services/price-action-symbol-policy';
 import { assessMt5RiskLimit, buildTrustedPriceActionContext, getHighImpactNewsStatus, isAllowedBrasiliaTradingSession } from '../services/price-action-context';
 
@@ -1038,23 +1039,27 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
     if (priceActionSetup) {
       const aiAction = String(baseSignal?.action ?? 'HOLD').toUpperCase();
       const aiConfidence = Number(baseSignal?.confidence ?? 0) * 100;
-      const aiReview = validateAIEntryReview(priceActionSetup, {
-        decision: aiAction,
-        direction: aiAction,
-        confidence: aiConfidence / 100,
+      const aiReview = await reviewPriceActionSetup(priceActionSetup, {
+        action: aiAction,
+        confidence: Number(baseSignal?.confidence ?? 0),
+        entryPrice: baseSignal?.entryPrice,
+        stopLoss: baseSignal?.stopLoss,
+        takeProfit: baseSignal?.takeProfit,
       });
+      const validatedAIReview = validateAIEntryReview(priceActionSetup, aiReview);
       const downstreamFiltersPreservedDirection = finalAction === priceActionSetup.action;
-      if (!baseSignal || !aiReview.approved || !downstreamFiltersPreservedDirection) {
+      if (!baseSignal || !validatedAIReview.approved || !downstreamFiltersPreservedDirection) {
         return res.json({
           action: 'HOLD',
           confidence: 0,
           code: 'PRICE_ACTION_AI_REVIEW_REJECTED',
-          reason: !aiReview.approved
-            ? aiReview.reason
+          reason: !validatedAIReview.approved
+            ? validatedAIReview.reason
             : 'Um filtro posterior bloqueou ou alterou a direção aprovada pela estratégia; entrada recusada.',
           strategyAction: priceActionSetup.action,
           aiAction,
           aiConfidence,
+          aiReviewRationale: aiReview.rationale,
           finalFilteredAction: finalAction,
           rejectionReasons: priceActionSetup.reasons,
           timestamp: Date.now()
@@ -1064,7 +1069,7 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
       refinedSL = priceActionSetup.stopLoss!;
       refinedTP = priceActionSetup.takeProfit!;
       baseSignal.entryPrice = priceActionSetup.entry;
-      indicatorNotes.push('Price Action multi-timeframe validado; IA revisou sua decisão original; SL/TP mantidos nos níveis estruturais da estratégia.');
+      indicatorNotes.push('Setup determinístico aprovado por revisão IA dedicada; SL/TP estruturais mantidos.');
     }
 
     // Monta resposta final

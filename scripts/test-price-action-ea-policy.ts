@@ -90,6 +90,9 @@ assert.ok(route.includes('const isStrategyCrypto = isPriceActionCryptoSymbol(sym
 assert.ok(route.includes("const aiAction = String(baseSignal?.action ?? 'HOLD').toUpperCase()"), 'AI review must validate the original AI action, not a rewritten indicator action');
 assert.ok(route.includes('let finalConfidence: number = (baseSignal?.confidence ?? 0) * 100;'), 'Route must convert normalized MT5 confidence into percentage points before applying percent-based gates');
 assert.ok(route.includes('const aiConfidence = Number(baseSignal?.confidence ?? 0) * 100;'), 'AI review confidence must be normalized consistently with the review validator');
+assert.ok(route.includes("from '../services/price-action-ai-review'"), 'Price Action must use a dedicated second-pass AI reviewer');
+assert.ok(route.includes('await reviewPriceActionSetup(priceActionSetup'), 'Server must send the complete deterministic candidate to a dedicated AI review call');
+assert.ok(route.includes('const validatedAIReview = validateAIEntryReview(priceActionSetup, aiReview)'), 'Dedicated AI output must pass the deterministic review validator');
 assert.ok(route.includes('const downstreamFiltersPreservedDirection = finalAction === priceActionSetup.action'), 'Downstream indicator rules may veto but must not manufacture strategy approval');
 assert.ok(!route.includes('balance: 0,\n      equity: 0,\n      freeMargin: 0'), 'Signal polling must not synthesize zero-value account heartbeats');
 assert.ok(bridge.includes('actualAccountOpenPositions'), 'Bridge must preserve actual MT5 account-wide open positions for risk gating');
