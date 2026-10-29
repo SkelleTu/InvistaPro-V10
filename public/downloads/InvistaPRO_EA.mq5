@@ -970,6 +970,7 @@ void FetchAndProcessSignal()
    double estimatedRoundTripCost = ExtractJsonDouble(resp, "estimatedRoundTripCost");
    double extraCostSpreadMultiplier = ExtractJsonDouble(resp, "extraCostSpreadMultiplier");
    double serverRiskPercent = ExtractJsonDouble(resp, "riskPercent");
+   double serverEntryPrice = ExtractJsonDouble(resp, "entryPrice");
    bool hasExtraCostMultiplier = (StringFind(resp, "extraCostSpreadMultiplier") >= 0);
    double confidence = ExtractJsonDouble(resp, "confidence");
 
@@ -1044,7 +1045,15 @@ void FetchAndProcessSignal()
    }
    else
    {
-      if (lotSize <= 0) lotSize = ManualLotSize;
+      if (lotSize <= 0)
+   {
+      if (IsPriceActionCryptoSymbol())
+      {
+         Print("⛔ Price Action recusado: lote calculado inválido; proibido fallback para lote manual.");
+         return;
+      }
+      lotSize = ManualLotSize;
+   }
    }
 
    if (lotSize <= 0) lotSize = ManualLotSize;
@@ -1104,9 +1113,15 @@ void FetchAndProcessSignal()
           Print("⛔ Price Action recusado: ação inválida.");
           return;
        }
-       if (stopLoss <= 0 || takeProfit <= 0 || entry <= 0 || estimatedRoundTripCost <= 0 || !hasExtraCostMultiplier || extraCostSpreadMultiplier < 0 || serverRiskPercent < 1.0 || serverRiskPercent > 2.0)
+       if (stopLoss <= 0 || takeProfit <= 0 || entry <= 0 || serverEntryPrice <= 0 || estimatedRoundTripCost <= 0 || !hasExtraCostMultiplier || extraCostSpreadMultiplier < 0 || serverRiskPercent < 1.0 || serverRiskPercent > 2.0)
        {
           Print("⛔ Price Action recusado: preço, SL/TP, custo ida-e-volta ou risco configurado inválido.");
+          return;
+       }
+       double maxEntryDeviation = MathMax(estimatedRoundTripCost, serverEntryPrice * 0.001);
+       if (MathAbs(entry - serverEntryPrice) > maxEntryDeviation)
+       {
+          Print("⛔ Price Action recusado: preço executável desviou mais de 0,10%/custo permitido da entrada aprovada pelo servidor.");
           return;
        }
        double riskDistance = (action == "BUY") ? entry - stopLoss : stopLoss - entry;
@@ -1153,6 +1168,12 @@ void FetchAndProcessSignal()
    bool success = false;
    bool requestOk = false;
 
+   if (isPriceActionCrypto)
+   {
+      double pointForDeviation = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
+      if (pointForDeviation <= 0.0) { Print("⛔ Price Action: point do símbolo inválido."); return; }
+      trade.SetDeviationInPoints((ulong)MathMax(1.0, (entry * 0.001) / pointForDeviation));
+   }
    if (action == "BUY")
       requestOk = trade.Buy(lotSize, g_symbol, 0, stopLoss, takeProfit, "InvistaPRO_" + signalId);
    else if (action == "SELL")
