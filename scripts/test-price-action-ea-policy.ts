@@ -26,7 +26,8 @@ assert.ok(ea.includes('double executionSpreadCost = MathMax(executionSpread * (2
 assert.ok(ea.includes('CalculatePriceActionRiskLot(executionEntry, stopLoss, executionSpreadCost, serverRiskPercent)'), 'EA must recalculate lot size against final execution price and costs');
 assert.ok(ea.includes('executionNetRiskReward < 2.0'), 'EA must enforce net 1:2 R:R immediately before order submission');
 assert.ok(ea.includes('proibido fallback para lote manual'), 'Price Action must never bypass risk sizing with a manual lot fallback');
-assert.ok(ea.includes('trade.SetDeviationInPoints((ulong)MathMax(1.0, (executionEntry * 0.001) / pointForDeviation))'), 'Broker execution deviation must be bounded for Price Action');
+assert.ok(ea.includes('double remainingDeviationPrice = serverEntryPrice * 0.001 - MathAbs(executionEntry - serverEntryPrice)'), 'Broker slippage allowance must use only the remaining server-entry deviation budget');
+assert.ok(ea.includes('trade.SetDeviationInPoints(executionDeviationPoints)'), 'Broker execution deviation must be bounded by the remaining entry budget');
 assert.ok(ea.includes('Refresh the quote after the network round-trip.'), 'EA must refresh bid/ask after network latency before validating execution');
 assert.ok(ea.includes('return (count == 14) ? sum / 14.0 : 0.0;'), 'EA ATR must use the same 14 true-range arithmetic mean as the server');
 assert.ok(ea.includes('currentSpread * (2.0 + extraCostSpreadMultiplier)'), 'EA must reapply the cost multiplier to the live spread');
