@@ -61,3 +61,25 @@ const unorderedResult = evaluatePriceActionSetup({
 });
 assert.equal(unorderedResult.approved, false, 'Unordered or duplicate candle timestamps must never be accepted');
 assert.equal(unorderedResult.checks.entry_data, false, 'Entry frame integrity includes strictly increasing timestamps');
+
+const risingFrame = (count: number, start: number, step: number): Candle[] => Array.from({ length: count }, (_, i) => {
+  const open = start + i * step;
+  const close = open + step * 0.6;
+  return { time: i + 1, open, close, high: Math.max(open, close) + step * 0.1, low: Math.min(open, close) - step * 0.1, volume: 100 + i };
+});
+const positiveEntry = risingFrame(40, 100, 0.01);
+positiveEntry[37] = { time: 38, open: 100.75, close: 100.73, high: 100.752, low: 100.728, volume: 180 };
+positiveEntry[38] = { time: 39, open: 100.72, close: 100.76, high: 100.765, low: 100.715, volume: 190 };
+positiveEntry[39] = { time: 40, open: 100.76, close: 100.9, high: 100.91, low: 100.3, volume: 240 };
+const positive = evaluatePriceActionSetup({
+  H4: risingFrame(40, 100, 0.1),
+  H1: risingFrame(40, 100, 0.05),
+  M15: risingFrame(40, 100, 0.01),
+  M5: positiveEntry,
+}, {
+  spread: 0.0001, maxSpread: 0.01, estimatedRoundTripCost: 0.0002,
+  highImpactNewsBlocked: false, riskLimitOk: true, tradingSessionOpen: true,
+});
+assert.equal(positive.approved, true, 'Complete aligned setup with trigger, BOS+sweep, volume, valid costs and all safety gates must be approvable');
+assert.equal(positive.action, 'BUY');
+assert.ok(Number(positive.riskReward) >= 2, 'Approved setup must meet net R:R of at least 1:2');
