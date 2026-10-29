@@ -19,6 +19,10 @@ assert.ok(ea.includes('MathMax(currentSpread * (2.0 + extraCostSpreadMultiplier)
 assert.ok(ea.includes('ExtractJsonDouble(resp, "estimatedRoundTripCost")'), 'EA must read server-side total cost estimate');
 assert.ok(ea.includes('ExtractJsonDouble(resp, "extraCostSpreadMultiplier")'), 'EA must read the server cost multiplier');
 assert.ok(ea.includes('ExtractJsonDouble(resp, "riskPercent")'), 'EA must read the server-configured risk percentage');
+assert.ok(ea.includes('double serverEntryPrice = ExtractJsonDouble(resp, "entryPrice")'), 'EA must compare executable price with server-approved entry');
+assert.ok(ea.includes('MathAbs(entry - serverEntryPrice) > maxEntryDeviation'), 'EA must reject excessive entry slippage');
+assert.ok(ea.includes('proibido fallback para lote manual'), 'Price Action must never bypass risk sizing with a manual lot fallback');
+assert.ok(ea.includes('trade.SetDeviationInPoints((ulong)MathMax(1.0, (entry * 0.001) / pointForDeviation))'), 'Broker execution deviation must be bounded for Price Action');
 assert.ok(ea.includes('Refresh the quote after the network round-trip.'), 'EA must refresh bid/ask after network latency before validating execution');
 assert.ok(ea.includes('return (count == 14) ? sum / 14.0 : 0.0;'), 'EA ATR must use the same 14 true-range arithmetic mean as the server');
 assert.ok(ea.includes('currentSpread * (2.0 + extraCostSpreadMultiplier)'), 'EA must reapply the cost multiplier to the live spread');
@@ -74,6 +78,7 @@ assert.ok(route.includes("from '../services/price-action-symbol-policy'"), 'Rout
 assert.ok(route.includes('const isStrategyCrypto = isPriceActionCryptoSymbol(sym)'), 'Route must apply the deterministic crypto-symbol policy');
 assert.ok(!route.includes('balance: 0,\n      equity: 0,\n      freeMargin: 0'), 'Signal polling must not synthesize zero-value account heartbeats');
 assert.ok(bridge.includes('actualAccountOpenPositions'), 'Bridge must preserve actual MT5 account-wide open positions for risk gating');
+assert.ok(context.includes('const actualOpenPositions = status.actualAccountOpenPositions;'), 'Position risk gate must fail closed without account-wide position count');
 
 for (const symbol of ['BTCUSD', 'BTCUSDm', 'm.BTCUSD', 'BTCUSDT.r', 'XBTUSD', 'ETHUSD.a', 'SOLUSDT', 'BTCUSDpro']) {
   assert.equal(isPriceActionCryptoSymbol(symbol), true, `Supported crypto alias must be recognized: ${symbol}`);
