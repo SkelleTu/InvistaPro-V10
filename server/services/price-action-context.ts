@@ -233,18 +233,21 @@ export function buildTrustedPriceActionContext(input: {
     ? [atrM1 * 0.20, atrM5 * 0.08, mid * 0.001]
     : [];
   const maxSpread = limits.length ? Math.min(...limits) : undefined;
-  // Explicit server-side price-equivalent for round-trip commission + slippage.
-  // This value must be configured conservatively for the broker/instruments traded.
-  // Missing or invalid configuration blocks entries instead of pretending spread is the full cost.
-  const extraCostRaw = process.env.MT5_PRICE_ACTION_EXTRA_COST_PRICE_UNITS;
-  const extraCost = extraCostRaw !== undefined && extraCostRaw.trim() !== ''
-    ? Number(extraCostRaw)
+  // Spread is always observed automatically from the live MT5 bid/ask.
+  // Configure only the additional cost as a multiplier of that live spread, not fixed price units.
+  // Example: multiplier 1 means 2x spread for round-trip spread plus 1x spread as cost reserve.
+  // Missing or invalid configuration blocks entries rather than silently ignoring commission/slippage.
+  const extraCostMultiplierRaw = process.env.MT5_PRICE_ACTION_EXTRA_COST_SPREAD_MULTIPLIER;
+  const extraCostMultiplier = extraCostMultiplierRaw !== undefined && extraCostMultiplierRaw.trim() !== ''
+    ? Number(extraCostMultiplierRaw)
     : Number.NaN;
-  const extraCostValid = Number.isFinite(extraCost) && extraCost >= 0;
+  const extraCostMultiplierValid = Number.isFinite(extraCostMultiplier) && extraCostMultiplier >= 0;
   return {
     spread,
     maxSpread,
-    estimatedRoundTripCost: spread !== undefined && extraCostValid ? spread * 2 + extraCost : undefined,
+    estimatedRoundTripCost: spread !== undefined && extraCostMultiplierValid
+      ? spread * (2 + extraCostMultiplier)
+      : undefined,
     highImpactNewsBlocked: input.newsBlocked,
     riskLimitOk: input.riskLimitOk,
     tradingSessionOpen: input.sessionOpen,
