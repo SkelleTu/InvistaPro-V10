@@ -790,9 +790,9 @@ bool IsAdaptivePriceActionSpreadAcceptable(double entryPrice, double currentSpre
    if (!haveM1 || !haveM5 || atrM1Buffer[0] <= 0.0 || atrM5Buffer[0] <= 0.0)
       return false;
 
-   double m1Limit = atrM1Buffer[0] * PriceActionSpreadATR_M1_Percent / 100.0;
-   double m5Limit = atrM5Buffer[0] * PriceActionSpreadATR_M5_Percent / 100.0;
-   double priceCap = entryPrice * PriceActionSpreadPriceCapPercent / 100.0;
+   double m1Limit = atrM1Buffer[0] * PRICE_ACTION_SPREAD_ATR_M1_PERCENT / 100.0;
+   double m5Limit = atrM5Buffer[0] * PRICE_ACTION_SPREAD_ATR_M5_PERCENT / 100.0;
+   double priceCap = entryPrice * PRICE_ACTION_SPREAD_PRICE_CAP_PERCENT / 100.0;
    maxAllowedSpread = MathMin(MathMin(m1Limit, m5Limit), priceCap);
    return (maxAllowedSpread > 0.0 && currentSpread <= maxAllowedSpread);
 }
