@@ -80,6 +80,8 @@ assert.ok(ea.includes('if (!IsPriceActionCryptoSymbol())'), 'Manual SL/TP overri
 assert.ok(ea.includes('modo PARCIAL não pode substituir ou remover SL/TP estruturais'), 'Partial mode must preserve server-approved structural stops');
 assert.ok(route.includes("from '../services/price-action-symbol-policy'"), 'Route must import the shared bounded crypto symbol policy');
 assert.ok(route.includes('const isStrategyCrypto = isPriceActionCryptoSymbol(sym)'), 'Route must apply the deterministic crypto-symbol policy');
+assert.ok(route.includes("const aiAction = String(baseSignal?.action ?? 'HOLD').toUpperCase()"), 'AI review must validate the original AI action, not a rewritten indicator action');
+assert.ok(route.includes('const downstreamFiltersPreservedDirection = finalAction === priceActionSetup.action'), 'Downstream indicator rules may veto but must not manufacture strategy approval');
 assert.ok(!route.includes('balance: 0,\n      equity: 0,\n      freeMargin: 0'), 'Signal polling must not synthesize zero-value account heartbeats');
 assert.ok(bridge.includes('actualAccountOpenPositions'), 'Bridge must preserve actual MT5 account-wide open positions for risk gating');
 assert.ok(bridge.includes('this.status.actualAccountOpenPositions = undefined;'), 'Bridge must clear stale position counts when the latest heartbeat omits them');
