@@ -104,9 +104,12 @@ function breakOfStructure(c: Candle[], side: TradeSide): boolean {
     : last.close < Math.min(...prior.map(x => x.low));
 }
 function changeOfCharacter(c: Candle[], side: TradeSide): boolean {
-  if (c.length < 25) return false;
-  const prior = trend(c.slice(0, -10));
-  const recent = trend(c.slice(-10));
+  // trend() requires at least 12 candles. A 10-candle recent window made CHoCH
+  // mathematically unreachable because trend(recent) always returned "range".
+  const recentWindow = 12;
+  if (c.length < recentWindow + 12) return false;
+  const prior = trend(c.slice(0, -recentWindow));
+  const recent = trend(c.slice(-recentWindow));
   return side === 'BUY' ? prior === 'bearish' && recent === 'bullish'
     : prior === 'bullish' && recent === 'bearish';
 }
