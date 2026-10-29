@@ -11,7 +11,7 @@ assert.ok(ea.includes('requestAccountType'), 'EA must transmit its actual termin
 assert.ok(ea.includes('if (IsPriceActionCryptoSymbol() && !PriceActionUseAIReview)'), 'Autonomous mode must not invoke the AI position monitor');
 assert.ok(ea.includes('CalculatePriceActionRiskLot'), 'EA must size Price Action orders from equity and structural stop');
 assert.ok(ea.includes('CalculatePriceActionRiskLot(entry, stopLoss, spreadCost)'), 'EA must reserve round-trip spread cost when sizing risk');
-assert.ok(ea.includes('MathMax(currentSpread * 2.0, estimatedRoundTripCost)'), 'EA must include server round-trip commission/slippage estimate without understating live spread');
+assert.ok(ea.includes('MathMax(currentSpread * (2.0 + extraCostSpreadMultiplier), estimatedRoundTripCost)'), 'EA must include server round-trip commission/slippage estimate without understating live spread');
 assert.ok(ea.includes('ExtractJsonDouble(resp, "estimatedRoundTripCost")'), 'EA must read server-side total cost estimate');
 assert.ok(ea.includes('ExtractJsonDouble(resp, "extraCostSpreadMultiplier")'), 'EA must read the server cost multiplier');
 assert.ok(ea.includes('currentSpread * (2.0 + extraCostSpreadMultiplier)'), 'EA must reapply the cost multiplier to the live spread');
@@ -53,7 +53,7 @@ assert.ok(route.includes("'CalculatePriceActionRiskLot(entry, stopLoss, spreadCo
 assert.ok(route.includes("'netRiskReward < 2.0'"), 'Download gate must require the net R:R check');
 assert.ok(route.includes("'BuildMultiTimeframeJson()'"), 'Download gate must require multi-timeframe candle transmission');
 assert.ok(route.includes("'modo PARCIAL não pode substituir ou remover SL/TP estruturais'"), 'Download gate must require immutable structural stops');
-assert.ok(route.includes("'MathMax(currentSpread * 2.0, estimatedRoundTripCost)'"), 'Download gate must require EA full round-trip cost handling');
+assert.ok(route.includes("'MathMax(currentSpread * (2.0 + extraCostSpreadMultiplier), estimatedRoundTripCost)'"), 'Download gate must require EA full round-trip cost handling');
 assert.ok(route.includes("'ExtractJsonDouble(resp, \"estimatedRoundTripCost\")'"), 'Download gate must require EA to read server cost estimate');
 assert.ok(route.includes("'ExtractJsonDouble(resp, \"extraCostSpreadMultiplier\")'"), 'Download gate must require EA to read server cost multiplier');
 assert.ok(route.includes("'no-store, no-cache, must-revalidate, max-age=0'"), 'EA downloads must not be cached');
