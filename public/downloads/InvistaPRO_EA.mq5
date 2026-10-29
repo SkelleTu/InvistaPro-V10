@@ -1109,6 +1109,18 @@ void FetchAndProcessSignal()
     bool isPriceActionCrypto = IsPriceActionCryptoSymbol();
     if (isPriceActionCrypto)
     {
+       // Broker symbol precision must be applied before the final risk/R:R gate.
+       // If this rounding makes the structural levels invalid, fail closed below.
+       int priceDigits = ManagedSymbolDigits();
+       double tickSizeForPrice = SymbolInfoDouble(g_symbol, SYMBOL_TRADE_TICK_SIZE);
+       if (priceDigits < 0 || priceDigits > 12 || tickSizeForPrice <= 0.0)
+       {
+          Print("⛔ Price Action recusado: precisão ou tick size do símbolo inválido.");
+          return;
+       }
+       stopLoss = NormalizeDouble(MathRound(stopLoss / tickSizeForPrice) * tickSizeForPrice, priceDigits);
+       takeProfit = NormalizeDouble(MathRound(takeProfit / tickSizeForPrice) * tickSizeForPrice, priceDigits);
+
        double entry = (action == "BUY") ? ask : bid;
        if (action != "BUY" && action != "SELL")
        {
