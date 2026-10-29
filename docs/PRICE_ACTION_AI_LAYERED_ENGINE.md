@@ -21,6 +21,7 @@ O motor de política é isolado e testável. Para operar a estratégia cripto de
 
 ## Paridade servidor ↔ EA (v8.4)
 - O percentual de risco por operação é autoritativo no servidor (`config.riskPercent`) e é enviado em cada sinal aprovado; o EA não mantém um segundo percentual configurável para dimensionar o lote.
+- O EA recalcula o ATR como média aritmética dos últimos 14 true ranges de 15 candles fechados, igual ao servidor, e atualiza bid/ask depois da latência HTTP antes de validar spread, risco e R:R.
 - Os limites de spread são fixos e iguais nos dois lados: ATR M1 × 20%, ATR M5 × 8% e teto de preço × 0,10%; vale sempre o menor limite. O EA não permite overrides locais desses três limites.
 - O EA envia a quantidade total de posições abertas observada no terminal. O servidor usa esse valor reportado, quando válido, no limite de posições da conta, mantendo o heartbeat recente como requisito.
 - A versão do EA no arquivo, no heartbeat e nos payloads de sinal deve ser 8.4; o endpoint de download bloqueia fontes que não contenham os marcadores de política atuais.
