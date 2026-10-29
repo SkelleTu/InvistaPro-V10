@@ -1107,7 +1107,7 @@ export default function TradingSystemPage() {
   });
 
   const { data: initialBlockedAssets } = useQuery<string[]>({
-    queryKey: ["/api/trading/blocked-assets", "digit_diff"],
+    queryKey: ["/api/trading/blocked-assets?mode=digit_diff"],
     enabled: hasAccess,
   });
 
