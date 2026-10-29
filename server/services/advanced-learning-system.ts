@@ -416,6 +416,9 @@ export class AdvancedLearningSystem {
     patterns: any[],
     marketState: MarketState
   ): Promise<number> {
+    if (performances.length === 0 || !performances.some(p => p.accuracy > 0 || p.consistency > 0)) {
+      return 0; // Sem evidência histórica, não afirmar confiança mínima artificial.
+    }
     let confidence = 0;
     
     // 1. Confiança baseada na performance média dos modelos
@@ -452,7 +455,7 @@ export class AdvancedLearningSystem {
       confidence *= 0.8;
     }
     
-    return Math.max(50, Math.min(99, confidence)); // Clamp entre 50-99%
+    return Number.isFinite(confidence) ? Math.max(0, Math.min(99, confidence)) : 0; // Sem piso artificial de confiança
   }
 
   // Funções movidas para HybridOrchestrator
