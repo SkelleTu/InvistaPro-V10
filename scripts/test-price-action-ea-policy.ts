@@ -13,6 +13,8 @@ assert.ok(ea.includes('CalculatePriceActionRiskLot'), 'EA must size Price Action
 assert.ok(ea.includes('CalculatePriceActionRiskLot(entry, stopLoss, spreadCost)'), 'EA must reserve round-trip spread cost when sizing risk');
 assert.ok(ea.includes('MathMax(currentSpread * 2.0, estimatedRoundTripCost)'), 'EA must include server round-trip commission/slippage estimate without understating live spread');
 assert.ok(ea.includes('ExtractJsonDouble(resp, "estimatedRoundTripCost")'), 'EA must read server-side total cost estimate');
+assert.ok(ea.includes('ExtractJsonDouble(resp, "extraCostSpreadMultiplier")'), 'EA must read the server cost multiplier');
+assert.ok(ea.includes('currentSpread * (2.0 + extraCostSpreadMultiplier)'), 'EA must reapply the cost multiplier to the live spread');
 assert.ok(ea.includes('IsAdaptivePriceActionSpreadAcceptable(entry, currentSpread, maxAllowedSpread)'), 'EA must adapt spread limits to strategy conditions');
 assert.ok(ea.includes('iATR(g_symbol, PERIOD_M1, 14)'), 'Adaptive spread filter must use M1 trigger volatility');
 assert.ok(ea.includes('iATR(g_symbol, PERIOD_M5, 14)'), 'Adaptive spread filter must use M5 confirmation volatility');
@@ -53,6 +55,7 @@ assert.ok(route.includes("'BuildMultiTimeframeJson()'"), 'Download gate must req
 assert.ok(route.includes("'modo PARCIAL não pode substituir ou remover SL/TP estruturais'"), 'Download gate must require immutable structural stops');
 assert.ok(route.includes("'MathMax(currentSpread * 2.0, estimatedRoundTripCost)'"), 'Download gate must require EA full round-trip cost handling');
 assert.ok(route.includes("'ExtractJsonDouble(resp, \"estimatedRoundTripCost\")'"), 'Download gate must require EA to read server cost estimate');
+assert.ok(route.includes("'ExtractJsonDouble(resp, \"extraCostSpreadMultiplier\")'"), 'Download gate must require EA to read server cost multiplier');
 assert.ok(route.includes("'no-store, no-cache, must-revalidate, max-age=0'"), 'EA downloads must not be cached');
 
 console.log('Price Action EA safety and download-version invariants passed (static source check only; MetaEditor compilation is separate).');
@@ -61,6 +64,7 @@ assert.ok(ea.includes('if (!IsPriceActionCryptoSymbol())'), 'Manual SL/TP overri
 assert.ok(ea.includes('modo PARCIAL não pode substituir ou remover SL/TP estruturais'), 'Partial mode must preserve server-approved structural stops');
 assert.ok(route.includes("from '../services/price-action-symbol-policy'"), 'Route must import the shared bounded crypto symbol policy');
 assert.ok(route.includes('const isStrategyCrypto = isPriceActionCryptoSymbol(sym)'), 'Route must apply the deterministic crypto-symbol policy');
+assert.ok(!route.includes('balance: 0,\n      equity: 0,\n      freeMargin: 0'), 'Signal polling must not synthesize zero-value account heartbeats');
 
 for (const symbol of ['BTCUSD', 'BTCUSDm', 'm.BTCUSD', 'BTCUSDT.r', 'XBTUSD', 'ETHUSD.a', 'SOLUSDT', 'BTCUSDpro']) {
   assert.equal(isPriceActionCryptoSymbol(symbol), true, `Supported crypto alias must be recognized: ${symbol}`);
