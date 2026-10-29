@@ -10,10 +10,11 @@ assert.ok(ea.includes('priceActionUseAIReview'), 'EA must transmit the selected 
 assert.ok(ea.includes('requestAccountType'), 'EA must transmit its actual terminal account mode on each signal request');
 assert.ok(ea.includes('if (IsPriceActionCryptoSymbol() && !PriceActionUseAIReview)'), 'Autonomous mode must not invoke the AI position monitor');
 assert.ok(ea.includes('CalculatePriceActionRiskLot'), 'EA must size Price Action orders from equity and structural stop');
-assert.ok(ea.includes('CalculatePriceActionRiskLot(entry, stopLoss, spreadCost)'), 'EA must reserve round-trip spread cost when sizing risk');
+assert.ok(ea.includes('CalculatePriceActionRiskLot(entry, stopLoss, spreadCost, serverRiskPercent)'), 'EA must reserve round-trip spread cost when sizing risk');
 assert.ok(ea.includes('MathMax(currentSpread * (2.0 + extraCostSpreadMultiplier), estimatedRoundTripCost)'), 'EA must include server round-trip commission/slippage estimate without understating live spread');
 assert.ok(ea.includes('ExtractJsonDouble(resp, "estimatedRoundTripCost")'), 'EA must read server-side total cost estimate');
 assert.ok(ea.includes('ExtractJsonDouble(resp, "extraCostSpreadMultiplier")'), 'EA must read the server cost multiplier');
+assert.ok(ea.includes('ExtractJsonDouble(resp, "riskPercent")'), 'EA must read the server-configured risk percentage');
 assert.ok(ea.includes('currentSpread * (2.0 + extraCostSpreadMultiplier)'), 'EA must reapply the cost multiplier to the live spread');
 assert.ok(ea.includes('IsAdaptivePriceActionSpreadAcceptable(entry, currentSpread, maxAllowedSpread)'), 'EA must adapt spread limits to strategy conditions');
 assert.ok(ea.includes('iATR(g_symbol, PERIOD_M1, 14)'), 'Adaptive spread filter must use M1 trigger volatility');
@@ -49,7 +50,7 @@ const route = readFileSync(new URL('../server/routes/metatrader-routes.ts', impo
 assert.ok(route.includes("code: 'MT5_EA_SOURCE_NOT_CURRENT'"), 'Download must fail closed when the canonical EA is missing or stale');
 assert.ok(route.includes("if (eaVersion !== '8.4' || missingEaMarkers.length > 0)"), 'Download must validate the EA version and current strategy markers');
 assert.ok(route.includes("'CalculatePriceActionRiskLot'"), 'Download gate must require the Price Action risk sizing implementation');
-assert.ok(route.includes("'CalculatePriceActionRiskLot(entry, stopLoss, spreadCost)'"), 'Download gate must require cost-aware risk sizing');
+assert.ok(route.includes("'CalculatePriceActionRiskLot(entry, stopLoss, spreadCost, serverRiskPercent)'"), 'Download gate must require cost-aware risk sizing');
 assert.ok(route.includes("'netRiskReward < 2.0'"), 'Download gate must require the net R:R check');
 assert.ok(route.includes("'BuildMultiTimeframeJson()'"), 'Download gate must require multi-timeframe candle transmission');
 assert.ok(route.includes("'modo PARCIAL não pode substituir ou remover SL/TP estruturais'"), 'Download gate must require immutable structural stops');
