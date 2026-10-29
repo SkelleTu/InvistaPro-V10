@@ -28,14 +28,29 @@ assert.equal(isAllowedBrasiliaTradingSession(new Date('2026-10-23T15:00:00Z')), 
 assert.equal(isAllowedBrasiliaTradingSession(new Date('2026-10-23T17:00:00Z')), true, '14:00 Brasilia session start is included');
 assert.equal(isAllowedBrasiliaTradingSession(new Date('2026-10-23T20:00:00Z')), false, '17:00 Brasilia session end is excluded');
 
+const makeCandles = (range: number) => Array.from({ length: 30 }, (_, i) => ({
+  time: i + 1,
+  open: 100,
+  high: 100 + range,
+  low: 100 - range,
+  close: 100 + (i % 2 ? range / 4 : -range / 4),
+  volume: 100 + i,
+}));
 const trusted = buildTrustedPriceActionContext({
   bid: 100,
   ask: 100.1,
   entryPrice: 100.05,
+  m1Candles: makeCandles(0.5),
+  m5Candles: makeCandles(1),
   riskLimitOk: true,
   newsBlocked: false,
   sessionOpen: true,
 });
+assert.ok(Math.abs(Number(trusted.maxSpread) - 0.08) < 1e-9, 'Adaptive spread must use the tightest of M1 ATR, M5 ATR and the 0.10% price cap');
+assert.equal(buildTrustedPriceActionContext({
+  bid: 100, ask: 100.01, entryPrice: 100.005, m1Candles: makeCandles(0.5),
+  riskLimitOk: true, newsBlocked: false, sessionOpen: true,
+}).maxSpread, undefined, 'Adaptive spread must fail closed when M5 ATR is unavailable');
 assert.ok(Math.abs(Number(trusted.spread) - 0.1) < 1e-9, 'Spread calculation must preserve the expected price difference');
 assert.ok(Math.abs(Number(trusted.estimatedRoundTripCost) - 0.2) < 1e-9, 'Round-trip cost must equal twice the observed spread');
 assert.equal(trusted.highImpactNewsBlocked, false);
