@@ -2128,6 +2128,15 @@ router.post('/signal/generate', mt5DashboardAccess, async (req: Request, res: Re
     }
     const { symbol } = req.body;
     const targetSymbol = symbol || config.symbols[0] || 'EURUSD';
+    if (isPriceActionCryptoSymbol(String(targetSymbol))) {
+      return res.status(409).json({
+        action: 'HOLD',
+        executionEnabled: false,
+        code: 'PRICE_ACTION_REQUIRED_ENDPOINT',
+        reason: 'Geração genérica bloqueada para cripto; envie candles multi-timeframe ao endpoint signal-with-indicators para validar a estratégia determinística.',
+        timestamp: Date.now(),
+      });
+    }
     const signal = await metaTraderBridge.generateSignal(targetSymbol);
     if (!signal) return res.json({ action: 'HOLD', reason: 'Análise em progresso' });
     res.json(signal);
