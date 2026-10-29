@@ -1461,23 +1461,17 @@ export class AdvancedLearningSystem {
     if (memories.length === 0) return 0; // Sem amostra: não apresentar desempenho sintético
     
     // Cooperação baseada na consistência das decisões
-    const recentMemories = memories.slice(-20); // Últimas 20 memórias
+    const recentMemories = memories.slice(-20); // Últimas 20 memórias com evidência recente
+    const decisions = recentMemories.filter(memory => typeof memory.action === "string");
     
-    if (recentMemories.length < 2) return 0; // Amostra insuficiente para medir consenso
+    if (decisions.length < 2) return 0; // Sem decisões registradas, cooperação não mensurável
     
     let consensusCount = 0;
-    for (let i = 1; i < recentMemories.length; i++) {
-      const current = recentMemories[i];
-      const previous = recentMemories[i-1];
-      
-      // Verificar se as decisões são consistentes
-      if (current.action === previous.action || 
-          Math.abs(current.reward - previous.reward) < 0.5) {
-        consensusCount++;
-      }
+    for (let i = 1; i < decisions.length; i++) {
+      if (decisions[i].action === decisions[i - 1].action) consensusCount++;
     }
     
-    return (consensusCount / (recentMemories.length - 1)) * 0.4 + 0.6; // Base 0.6 + até 0.4
+    return consensusCount / (decisions.length - 1);
   }
 
   /**
