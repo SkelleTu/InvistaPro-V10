@@ -27,6 +27,18 @@ import { assessMt5RiskLimit, buildTrustedPriceActionContext, getHighImpactNewsSt
 
 const router = Router();
 
+/** Strict whitelist for supported crypto bases/quotes and known broker affixes. */
+export function isPriceActionCryptoSymbol(symbol: unknown): boolean {
+  if (typeof symbol !== 'string') return false;
+  const normalized = symbol.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const suffixes = ['', 'M', 'R', 'A', 'PRO', 'ECN', 'RAW', 'C', 'Z'];
+  const prefixes = ['', 'M'];
+  for (const prefix of prefixes) for (const base of ['BTC', 'XBT', 'ETH', 'SOL'])
+    for (const quote of ['USDT', 'USD']) for (const suffix of suffixes)
+      if (normalized === prefix + base + quote + suffix) return true;
+  return false;
+}
+
 // Último ambiente confirmado pelo próprio terminal MT5. Desconhecido após restart até novo heartbeat.
 let lastMt5ObservedAccountType: 'demo' | 'real' | 'contest' | null = null;
 let lastMt5EnvironmentHeartbeatAt = 0;
@@ -347,8 +359,7 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
     const sym = symbol as string;
     // Crypto strategy symbols must pass the deterministic multi-timeframe gate first.
     // Legacy indicator/AI logic is not allowed to create a bypass around this gate.
-    const normalizedStrategySymbol = sym.toUpperCase().replace(/[^A-Z0-9]/g, '');
-    const isStrategyCrypto = ['BTCUSDT','ETHUSDT','SOLUSDT','BTCUSD','ETHUSD','SOLUSD'].includes(normalizedStrategySymbol);
+    const isStrategyCrypto = isPriceActionCryptoSymbol(sym);
     let priceActionSetup: ReturnType<typeof evaluatePriceActionSetup> | null = null;
     if (isStrategyCrypto) {
       const frames = timeframes && typeof timeframes === 'object' ? timeframes as Partial<Record<'H4'|'H1'|'M15'|'M5'|'M1', Candle[]>> : {};
