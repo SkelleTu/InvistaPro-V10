@@ -296,28 +296,40 @@ router.post('/scheduler/:action', isAuthenticated, isTradingAuthorized, asyncErr
 
 // Obter estatísticas detalhadas
 router.get('/detailed-stats', isAuthenticated, isTradingAuthorized, asyncErrorHandler(async (req: any, res: any) => {
-  const userId = req.user.id;
-  
-  // Buscar estatísticas do usuário
-  const tradingStats = await storage.getTradingStats(userId);
-  
-  // Configuração ativa do usuário
-  const userConfig = await storage.getUserTradeConfig(userId);
-  
-  // Token Deriv do usuário
-  const derivToken = await storage.getUserDerivToken(userId);
-  
+  const userId = String(req.user.id);
+
+  // Buscar estatísticas e configuração do usuário autenticado.
+  const [tradingStats, userConfig, derivToken] = await Promise.all([
+    storage.getTradingStats(userId),
+    storage.getUserTradeConfig(userId),
+    storage.getUserDerivToken(userId),
+  ]);
+
+  // Never report a hardcoded "active" state: derive it from this user's isolated runtime.
+  const userSessions = isolatedAutoTradingScheduler.getActiveSessions()
+    .filter((session: any) => String(session.userId) === userId);
+  const emergencyStop = Boolean(
+    autoTradingScheduler.getSchedulerStatus().emergencyStop
+    || isolatedAutoTradingScheduler.getSchedulerStatus().emergencyStop
+  );
+  const schedulerActive = !emergencyStop
+    && isolatedAutoTradingScheduler.getArmedUserIds().includes(userId)
+    && userSessions.some((session: any) => session.isActive && session.workerReady);
+
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
   res.json({
     userStats: tradingStats,
     activeConfiguration: userConfig,
     derivConnectionStatus: {
       configured: !!derivToken,
       accountType: derivToken?.accountType || null,
-      tokenActive: derivToken?.isActive || false
+      tokenActive: Boolean(derivToken?.isActive),
     },
     systemStatus: {
-      schedulerActive: true,
-      lastCheck: new Date().toISOString()
+      schedulerActive,
+      emergencyStop,
+      runtimeReady: userSessions.some((session: any) => session.workerReady),
+      lastCheck: new Date().toISOString(),
     }
   });
 }));
