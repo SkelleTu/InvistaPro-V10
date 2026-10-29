@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { evaluatePriceActionSetup, validateAIEntryReview, validateAIStopAdjustment, type Candle } from '../server/services/price-action-engine';
+import { evaluatePriceActionSetup, hasRequiredStructuralConfluence, validateAIEntryReview, validateAIStopAdjustment, type Candle } from '../server/services/price-action-engine';
 
 const candles = (count: number, start: number, step: number): Candle[] => Array.from({length:count},(_,i)=>{
  const open=start+i*step, close=open+step*0.7;
@@ -46,3 +46,8 @@ assert.equal(validateAIEntryReview(approvedFixture, { decision: 'BUY', direction
 assert.equal(validateAIEntryReview(approvedFixture, { decision: 'SELL', direction: 'SELL', confidence: 0.99 }).approved, false, 'Opposing AI review must be rejected');
 assert.equal(validateAIEntryReview(approvedFixture, { decision: 'BUY', direction: 'BUY', confidence: 0.69 }).approved, false, 'AI review below threshold must be rejected');
 assert.equal(validateAIEntryReview(approvedFixture, { decision: 'BUY', direction: 'BUY', confidence: 0.99, riskOverride: 2 }).approved, false, 'AI cannot override deterministic risk');
+
+assert.equal(hasRequiredStructuralConfluence({ bos: true, choch: false, fvg: false, sweep: false, orderBlock: false }), false, 'BOS alone must not satisfy structural confluence');
+assert.equal(hasRequiredStructuralConfluence({ bos: false, choch: false, fvg: true, sweep: true, orderBlock: false }), false, 'FVG and sweep without BOS/CHoCH must not satisfy structural confluence');
+assert.equal(hasRequiredStructuralConfluence({ bos: true, choch: false, fvg: true, sweep: false, orderBlock: false }), true, 'BOS plus independent FVG must satisfy structural confluence');
+assert.equal(hasRequiredStructuralConfluence({ bos: false, choch: true, fvg: false, sweep: false, orderBlock: true }), true, 'CHoCH plus Order Block must satisfy structural confluence');
