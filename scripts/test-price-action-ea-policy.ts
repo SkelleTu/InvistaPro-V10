@@ -49,3 +49,8 @@ assert.ok(route.includes("'BuildMultiTimeframeJson()'"), 'Download gate must req
 assert.ok(route.includes("'no-store, no-cache, must-revalidate, max-age=0'"), 'EA downloads must not be cached');
 
 console.log('Price Action EA safety and download-version invariants passed (static source check only; MetaEditor compilation is separate).');
+
+assert.ok(ea.includes('if (!IsPriceActionCryptoSymbol())'), 'Manual SL/TP overrides must be disabled for Price Action crypto');
+assert.ok(ea.includes('modo PARCIAL não pode substituir ou remover SL/TP estruturais'), 'Partial mode must preserve server-approved structural stops');
+assert.ok(route.includes('function isPriceActionCryptoSymbol(symbol: unknown)'), 'Server crypto gate must use bounded symbol recognition');
+assert.ok(route.includes('const isStrategyCrypto = isPriceActionCryptoSymbol(sym)'), 'Route must apply the deterministic crypto-symbol policy');
