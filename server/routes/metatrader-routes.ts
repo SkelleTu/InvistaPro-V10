@@ -1394,6 +1394,8 @@ router.get('/download-ea', mt5DashboardAccess, async (req: Request, res: Respons
       'BuildMultiTimeframeJson()',
       'int VolumeDigitsFromStep()',
       'TRADE_RETCODE_DONE_PARTIAL',
+      'MathMax(currentSpread * 2.0, estimatedRoundTripCost)',
+      'ExtractJsonDouble(resp, "estimatedRoundTripCost")',
       'if (!IsPriceActionCryptoSymbol())',
       'modo PARCIAL não pode substituir ou remover SL/TP estruturais',
       'string suffixes[9]',
