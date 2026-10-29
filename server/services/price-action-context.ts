@@ -1,6 +1,6 @@
 import fetch from 'node-fetch';
 import type { MT5Config, MT5Status } from './metatrader-bridge';
-import type { MarketContext } from './price-action-engine';
+import type { Candle, MarketContext } from './price-action-engine';
 
 export interface EconomicCalendarEvent {
   title?: unknown;
@@ -23,11 +23,6 @@ const CALENDAR_URL = process.env.MT5_ECONOMIC_CALENDAR_URL?.trim()
 const CALENDAR_CACHE_TTL_MS = 5 * 60_000;
 const CALENDAR_MAX_STALE_MS = 10 * 60_000;
 const NEWS_WINDOW_MS = 30 * 60_000;
-const MAX_SPREAD_FRACTION = (() => {
-  const raw = Number(process.env.MT5_PRICE_ACTION_MAX_SPREAD_PCT ?? 0.0005);
-  return Number.isFinite(raw) && raw >= 0.00005 && raw <= 0.01 ? raw : 0.0005;
-})();
-
 let calendarCache: { events: EconomicCalendarEvent[]; fetchedAt: number } | null = null;
 let calendarFetch: Promise<{ events: EconomicCalendarEvent[]; fetchedAt: number }> | null = null;
 let calendarFailure: { failedAt: number; message: string } | null = null;
@@ -193,10 +188,32 @@ export function assessMt5RiskLimit(input: {
   return { ok: reasons.length === 0, reasons };
 }
 
+function calculateAtr(candles: unknown): number | undefined {
+  if (!Array.isArray(candles) || candles.length < 15) return undefined;
+  const values = candles as Candle[];
+  const recent = values.slice(-15);
+  const ranges: number[] = [];
+  for (let i = 1; i < recent.length; i++) {
+    const current = recent[i];
+    const previous = recent[i - 1];
+    if (![current?.high, current?.low, previous?.close].every(Number.isFinite)
+      || current.high < current.low) return undefined;
+    ranges.push(Math.max(
+      current.high - current.low,
+      Math.abs(current.high - previous.close),
+      Math.abs(current.low - previous.close),
+    ));
+  }
+  const atr = ranges.slice(-14).reduce((sum, value) => sum + value, 0) / 14;
+  return Number.isFinite(atr) && atr > 0 ? atr : undefined;
+}
+
 export function buildTrustedPriceActionContext(input: {
   bid: unknown;
   ask: unknown;
   entryPrice: unknown;
+  m1Candles?: Candle[];
+  m5Candles?: Candle[];
   riskLimitOk: boolean;
   newsBlocked: boolean;
   sessionOpen: boolean;
@@ -208,7 +225,14 @@ export function buildTrustedPriceActionContext(input: {
     && Number.isFinite(entry) && entry > 0;
   const spread = pricesValid ? ask - bid : undefined;
   const mid = pricesValid ? (ask + bid) / 2 : undefined;
-  const maxSpread = mid !== undefined ? mid * MAX_SPREAD_FRACTION : undefined;
+  const atrM1 = calculateAtr(input.m1Candles);
+  const atrM5 = calculateAtr(input.m5Candles);
+  // Match the EA's adaptive policy: both trigger and confirmation volatility must be available.
+  // The tightest of the M1, M5 and price-based caps wins; missing ATR fails closed.
+  const limits = mid !== undefined && atrM1 !== undefined && atrM5 !== undefined
+    ? [atrM1 * 0.20, atrM5 * 0.08, mid * 0.001]
+    : [];
+  const maxSpread = limits.length ? Math.min(...limits) : undefined;
   return {
     spread,
     maxSpread,
