@@ -39,18 +39,31 @@ const validCandles = (v: unknown): v is Candle[] => Array.isArray(v) && v.length
     c.low <= Math.min(c.open, c.close) && c.high >= c.low && c.volume >= 0);
 
 function trend(c: Candle[]): 'bullish' | 'bearish' | 'range' {
+  if (c.length < 12) return 'range';
   const recent = c.slice(-20);
+  const midpoint = Math.floor(recent.length / 2);
+  const older = recent.slice(0, midpoint);
+  const newer = recent.slice(midpoint);
+  const olderHigh = Math.max(...older.map(x => x.high));
+  const newerHigh = Math.max(...newer.map(x => x.high));
+  const olderLow = Math.min(...older.map(x => x.low));
+  const newerLow = Math.min(...newer.map(x => x.low));
   const first = recent[0].close;
   const last = recent[recent.length - 1].close;
-  const highs = recent.map(x => x.high), lows = recent.map(x => x.low);
-  const higher = highs.slice(-5).every((v, i, a) => i === 0 || v >= a[i - 1]) &&
-    lows.slice(-5).every((v, i, a) => i === 0 || v >= a[i - 1]);
-  const lower = highs.slice(-5).every((v, i, a) => i === 0 || v <= a[i - 1]) &&
-    lows.slice(-5).every((v, i, a) => i === 0 || v <= a[i - 1]);
   const move = (last - first) / Math.max(Math.abs(first), 1e-12);
-  if (move > 0.002 && (higher || move > 0.008)) return 'bullish';
-  if (move < -0.002 && (lower || move < -0.008)) return 'bearish';
+  // Approximate confirmed HH/HL and LH/LL structure using separated swing windows,
+  // with a minimum displacement to avoid classifying noise as a trend.
+  const higherHighsHigherLows = newerHigh > olderHigh && newerLow > olderLow;
+  const lowerHighsLowerLows = newerHigh < olderHigh && newerLow < olderLow;
+  if (move > 0.002 && higherHighsHigherLows) return 'bullish';
+  if (move < -0.002 && lowerHighsLowerLows) return 'bearish';
   return 'range';
+}
+
+export function hasRequiredStructuralConfluence(input: {
+  bos: boolean; choch: boolean; fvg: boolean; sweep: boolean; orderBlock: boolean;
+}): boolean {
+  return (input.bos || input.choch) && (input.fvg || input.sweep || input.orderBlock);
 }
 function average(values: number[]): number {
   return values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
@@ -193,9 +206,9 @@ export function evaluatePriceActionSetup(
     checks.volume = volumeOk;
     // Require confluence, not a single isolated pattern: a structural break/shift
     // plus at least one independent liquidity/imbalance/order-block confirmation.
-    const directionalStructure = bos || choch;
-    const liquidityOrImbalance = fvg || sweep || ob !== null;
-    checks.structure_confirmation = directionalStructure && liquidityOrImbalance;
+    checks.structure_confirmation = hasRequiredStructuralConfluence({
+      bos, choch, fvg, sweep, orderBlock: ob !== null,
+    });
     checks.valid_zone = zoneNear;
     if (!volumeOk) reasons.push('Volume do gatilho abaixo da referência histórica ou sem baseline válido');
     if (!checks.structure_confirmation) reasons.push('Confluência estrutural incompleta: exige BOS/CHoCH e pelo menos FVG, sweep ou Order Block válido');
