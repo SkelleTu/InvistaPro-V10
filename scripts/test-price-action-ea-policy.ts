@@ -41,6 +41,7 @@ assert.ok(context.includes('atrM1 * 0.20'), 'Server spread policy must adapt to 
 assert.ok(context.includes('atrM5 * 0.08'), 'Server spread policy must adapt to M5 ATR');
 assert.ok(context.includes('mid * 0.001'), 'Server spread policy must retain the 0.10% price cap');
 assert.ok(context.includes('limits.length ? Math.min(...limits) : undefined'), 'Server must fail closed when adaptive ATR limits are unavailable');
+assert.ok(context.includes('MT5_PRICE_ACTION_EXTRA_COST_PRICE_UNITS'), 'Server must require an explicit extra cost estimate for commission/slippage');
 
 const route = readFileSync(new URL('../server/routes/metatrader-routes.ts', import.meta.url), 'utf8');
 assert.ok(route.includes("code: 'MT5_EA_SOURCE_NOT_CURRENT'"), 'Download must fail closed when the canonical EA is missing or stale');
@@ -50,7 +51,8 @@ assert.ok(route.includes("'CalculatePriceActionRiskLot(entry, stopLoss, spreadCo
 assert.ok(route.includes("'netRiskReward < 2.0'"), 'Download gate must require the net R:R check');
 assert.ok(route.includes("'BuildMultiTimeframeJson()'"), 'Download gate must require multi-timeframe candle transmission');
 assert.ok(route.includes("'modo PARCIAL não pode substituir ou remover SL/TP estruturais'"), 'Download gate must require immutable structural stops');
-assert.ok(route.includes("'MathMax(currentSpread * 2.0, estimatedRoundTripCost)'") === false, 'Server download gate does not embed client implementation markers');
+assert.ok(route.includes("'MathMax(currentSpread * 2.0, estimatedRoundTripCost)'"), 'Download gate must require EA full round-trip cost handling');
+assert.ok(route.includes("'ExtractJsonDouble(resp, \"estimatedRoundTripCost\")'"), 'Download gate must require EA to read server cost estimate');
 assert.ok(route.includes("'no-store, no-cache, must-revalidate, max-age=0'"), 'EA downloads must not be cached');
 
 console.log('Price Action EA safety and download-version invariants passed (static source check only; MetaEditor compilation is separate).');
