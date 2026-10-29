@@ -1196,21 +1196,18 @@ export default function TradingSystemPage() {
     setCdbLogs([...cdbLogsRef.current]);
   }, []);
 
-  // process_data — coloca ordem se ask > threshold
-  const cdbProcessData = useCallback((tick: { bid: number; ask: number; quote: number; epoch: number; symbol: string }, ws: WebSocket) => {
+  // Auto-ordem deliberadamente bloqueada: o fluxo anterior enviava "place_order"
+  // sem proposal_id/contrato Deriv e não verificava se a conta autorizada era DEMO.
+  // Reativar somente após implementar proposal -> buy, confirmação de conta virtual
+  // e reconciliação do resultado pelo contrato/transaction_id.
+  const cdbOrderProtocolWarningRef = useRef(false);
+  const cdbProcessData = useCallback((_tick: { bid: number; ask: number; quote: number; epoch: number; symbol: string }, _ws: WebSocket) => {
     if (!cdbOrderEnabledRef.current) return;
-    if (tick.ask > cdbOrderThresholdRef.current) {
-      const order = {
-        t: "place_order",
-        args: { symbol: tick.symbol, amount: cdbOrderAmountRef.current, price: tick.ask, type: "buy" }
-      };
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify(order));
-        const entry = { time: new Date().toLocaleTimeString("pt-BR", { hour12: false }), symbol: tick.symbol, price: tick.ask, amount: cdbOrderAmountRef.current };
-        setCdbOrders(prev => [entry, ...prev].slice(0, 50));
-        setCdbOrderCount(prev => prev + 1);
-        cdbAddLog("order", `📤 Ordem BUY enviada → ${tick.symbol}  ask=${tick.ask}  amount=${cdbOrderAmountRef.current}`);
-      }
+    cdbOrderEnabledRef.current = false;
+    setCdbOrderEnabled(false);
+    if (!cdbOrderProtocolWarningRef.current) {
+      cdbOrderProtocolWarningRef.current = true;
+      cdbAddLog("error", "Auto-ordem bloqueada por segurança: o fluxo atual não gera uma proposta Deriv válida nem confirma conta DEMO. Nenhuma ordem foi enviada. A coleta de ticks continua disponível.");
     }
   }, [cdbAddLog]);
 
@@ -6021,13 +6018,18 @@ export default function TradingSystemPage() {
                   </div>
                   <Button
                     size="sm"
-                    variant={cdbOrderEnabled ? "destructive" : "default"}
-                    className={`w-full gap-2 ${!cdbOrderEnabled ? 'bg-orange-600 hover:bg-orange-700 text-white' : ''}`}
-                    onClick={() => setCdbOrderEnabled(v => !v)}
+                    variant="secondary"
+                    className="w-full gap-2"
+                    disabled
+                    title="Indisponível até a implementação segura do fluxo proposal → buy em conta DEMO"
                     data-testid="button-cdb-toggle-order"
                   >
-                    {cdbOrderEnabled ? <><XCircle className="h-4 w-4" />Desativar Auto-Ordem</> : <><PlugZap className="h-4 w-4" />Ativar Auto-Ordem</>}
+                    <Shield className="h-4 w-4" />Auto-Ordem bloqueada por segurança
                   </Button>
+                  <p className="text-xs text-amber-500">
+                    A coleta de dados continua disponível. A auto-ordem só será liberada após validar conta DEMO,
+                    proposta e compra Deriv, e confirmação do resultado. O fluxo atual não atende esses requisitos.
+                  </p>
                   {/* Últimas ordens */}
                   {cdbOrders.length > 0 && (
                     <div className="border rounded-md overflow-hidden">
