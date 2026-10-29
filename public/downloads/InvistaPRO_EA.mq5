@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                              InvistaPRO_EA.mq5    |
 //|                                 InvistaPRO - Auto-Discovery URL   |
-//|   Versão 8.2 — Price Action + spread adaptativo M1/M5             |
+//|   Versão 8.3 — Price Action + spread adaptativo M1/M5 e stops estruturais imutáveis             |
 //|   CORREÇÕES v8.0:                                                 |
 //|   • Detecção ampliada de nomes do Girassol/Fibonacci              |
 //|   • Endpoint /signal-with-indicators com fallback robusto         |
@@ -13,7 +13,7 @@
 //|   Nível 3: Bolinha pequena micro (buf 4=compra, 5=venda)         |
 //+------------------------------------------------------------------+
 #property copyright "InvistaPRO"
-#property version   "8.2"
+#property version   "8.3"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -518,7 +518,7 @@ string ReadStructuredIndicatorSignals()
          ArrayResize(fibNames, 11);
          fibNames[0]  = "0%";
          fibNames[1]  = "23.6%";
-         fibNames[2]  = "38.2%";
+         fibNames[2]  = "38.3%";
          fibNames[3]  = "50%";
          fibNames[4]  = "61.8%";
          fibNames[5]  = "78.6%";
@@ -887,7 +887,7 @@ void FetchAndProcessSignal()
    body += "\"indicatorSignals\":"  + structuredSignals             + ",";
    body += "\"indicatorBuffers\":"  + allBuffers                    + ",";
    body += "\"indicatorCount\":"    + IntegerToString(g_indicatorCount) + ",";
-   body += "\"eaVersion\":\"8.2\"";
+   body += "\"eaVersion\":\"8.3\"";
    if (g_apiToken != "") body += ",\"token\":\"" + g_apiToken + "\"";
    body += "}";
 
@@ -1397,7 +1397,7 @@ bool SendHeartbeat()
    body += "\"openPositions\":" + IntegerToString(openPos)  + ",";
    body += "\"platform\":\"MT5\",";
    body += "\"accountType\":\"" + accountType + "\",";
-   body += "\"eaVersion\":\"8.2\"";
+   body += "\"eaVersion\":\"8.3\"";
    if (g_apiToken != "") body += ",\"token\":\"" + g_apiToken + "\"";
    body += "}";
 
