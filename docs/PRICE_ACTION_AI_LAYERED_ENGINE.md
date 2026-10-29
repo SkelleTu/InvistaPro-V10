@@ -20,7 +20,7 @@ O motor de política é isolado e testável. Para operar a estratégia cripto de
 - A validação de execução deve ser feita em DEMO com os custos reais do broker antes de qualquer uso em conta REAL.
 
 ## Paridade servidor ↔ EA (v8.4)
-- A entrada executável é comparada com a entrada aprovada pelo servidor; desvios acima de 0,10% do preço aprovado são rejeitados. Custos estimados nunca ampliam essa tolerância. O EA atualiza e valida novamente a cotação imediatamente antes de enviar a ordem, e limita a tolerância de execução do broker a 0,10% do preço.
+- A entrada executável é comparada com a entrada aprovada pelo servidor; desvios acima de 0,10% do preço aprovado são rejeitados. Custos estimados nunca ampliam essa tolerância. O EA atualiza e valida novamente a cotação imediatamente antes de enviar a ordem, recalcula spread/custo, stop, R:R líquido e lote com essa cotação final, e limita a tolerância de execução do broker a 0,10% do preço.
 - Para Price Action, lote inválido ou acima das restrições do broker bloqueia a operação; não existe fallback para lote manual que contorne o orçamento de risco.
 - O gate de posições falha fechado se a contagem total reportada pelo heartbeat do terminal não estiver disponível ou atingir o limite configurado.
 - O percentual de risco por operação é autoritativo no servidor (`config.riskPercent`) e é enviado em cada sinal aprovado; o EA não mantém um segundo percentual configurável para dimensionar o lote.
