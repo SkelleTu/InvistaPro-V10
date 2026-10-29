@@ -36,7 +36,7 @@ const makeCandles = (range: number) => Array.from({ length: 30 }, (_, i) => ({
   close: 100 + (i % 2 ? range / 4 : -range / 4),
   volume: 100 + i,
 }));
-process.env.MT5_PRICE_ACTION_EXTRA_COST_PRICE_UNITS = '0'; // Explicitly declare zero extra cost for this isolated unit fixture.
+process.env.MT5_PRICE_ACTION_EXTRA_COST_SPREAD_MULTIPLIER = '0'; // Explicitly declare zero extra cost for this isolated unit fixture.
 const trusted = buildTrustedPriceActionContext({
   bid: 100,
   ask: 100.1,
@@ -53,7 +53,7 @@ assert.equal(buildTrustedPriceActionContext({
   riskLimitOk: true, newsBlocked: false, sessionOpen: true,
 }).maxSpread, undefined, 'Adaptive spread must fail closed when M5 ATR is unavailable');
 assert.ok(Math.abs(Number(trusted.spread) - 0.1) < 1e-9, 'Spread calculation must preserve the expected price difference');
-assert.ok(Math.abs(Number(trusted.estimatedRoundTripCost) - 0.2) < 1e-9, 'Round-trip cost must equal twice the observed spread');
+assert.ok(Math.abs(Number(trusted.estimatedRoundTripCost) - 0.2) < 1e-9, 'With a zero extra-cost multiplier, round-trip cost must equal twice the observed spread');
 assert.equal(trusted.highImpactNewsBlocked, false);
 assert.equal(trusted.tradingSessionOpen, true);
 assert.equal(buildTrustedPriceActionContext({
@@ -93,18 +93,18 @@ assert.equal(assessMt5RiskLimit({
 
 console.log('Price Action context safety tests passed.');
 
-delete process.env.MT5_PRICE_ACTION_EXTRA_COST_PRICE_UNITS;
+delete process.env.MT5_PRICE_ACTION_EXTRA_COST_SPREAD_MULTIPLIER;
 const unconfiguredCosts = buildTrustedPriceActionContext({
   bid: 100, ask: 100.01, entryPrice: 100.005,
   m1Candles: makeCandles(0.5), m5Candles: makeCandles(0.5),
   riskLimitOk: true, newsBlocked: false, sessionOpen: true,
 });
 assert.equal(unconfiguredCosts.estimatedRoundTripCost, undefined, 'Missing commission/slippage estimate must fail closed rather than treating spread as total costs');
-process.env.MT5_PRICE_ACTION_EXTRA_COST_PRICE_UNITS = '-1';
+process.env.MT5_PRICE_ACTION_EXTRA_COST_SPREAD_MULTIPLIER = '-1';
 const invalidCosts = buildTrustedPriceActionContext({
   bid: 100, ask: 100.01, entryPrice: 100.005,
   m1Candles: makeCandles(0.5), m5Candles: makeCandles(0.5),
   riskLimitOk: true, newsBlocked: false, sessionOpen: true,
 });
 assert.equal(invalidCosts.estimatedRoundTripCost, undefined, 'Negative additional costs must fail closed');
-delete process.env.MT5_PRICE_ACTION_EXTRA_COST_PRICE_UNITS;
+delete process.env.MT5_PRICE_ACTION_EXTRA_COST_SPREAD_MULTIPLIER;
