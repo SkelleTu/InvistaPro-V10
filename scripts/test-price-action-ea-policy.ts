@@ -14,6 +14,7 @@ assert.ok(ea.includes('priceActionUseAIReview'), 'EA must transmit the selected 
 assert.ok(ea.includes('requestAccountType'), 'EA must transmit its actual terminal account mode on each signal request');
 assert.ok(ea.includes('if (IsPriceActionCryptoSymbol())\n         continue;'), 'Price Action positions must not use discretionary AI exits');
 assert.ok(ea.includes('CalculatePriceActionRiskLot'), 'EA must size Price Action orders from equity and structural stop');
+assert.ok(ea.includes('trade.SetTypeFillingBySymbol(g_symbol)'), 'EA must select a broker-supported order filling mode during initialization');
 assert.ok(ea.includes('CalculatePriceActionRiskLot(entry, stopLoss, spreadCost, serverRiskPercent)'), 'EA must reserve round-trip spread cost when sizing risk');
 assert.ok(ea.includes('MathMax(currentSpread * (2.0 + extraCostSpreadMultiplier), estimatedRoundTripCost)'), 'EA must include server round-trip commission/slippage estimate without understating live spread');
 assert.ok(ea.includes('ExtractJsonDouble(resp, "estimatedRoundTripCost")'), 'EA must read server-side total cost estimate');
