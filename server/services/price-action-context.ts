@@ -248,6 +248,7 @@ export function buildTrustedPriceActionContext(input: {
     estimatedRoundTripCost: spread !== undefined && extraCostMultiplierValid
       ? spread * (2 + extraCostMultiplier)
       : undefined,
+    extraCostSpreadMultiplier: extraCostMultiplierValid ? extraCostMultiplier : undefined,
     highImpactNewsBlocked: input.newsBlocked,
     riskLimitOk: input.riskLimitOk,
     tradingSessionOpen: input.sessionOpen,
