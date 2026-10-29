@@ -1274,7 +1274,7 @@ export class AdvancedLearningSystem {
   }
 
   private calculateSimilarity(a: number[], b: number[]): number {
-    if (a.length !== b.length) return 0;
+    if (a.length !== b.length || a.length === 0) return 0;
     
     let sum = 0;
     for (let i = 0; i < a.length; i++) {
@@ -1282,7 +1282,10 @@ export class AdvancedLearningSystem {
     }
     
     const maxDiff = Math.max(...a) - Math.min(...a);
-    return Math.max(0, 1 - sum / (maxDiff * a.length));
+    if (!Number.isFinite(maxDiff) || maxDiff === 0) {
+      return a.every(value => value === b[a.indexOf(value)]) ? 1 : 0;
+    }
+    return Math.max(0, Math.min(1, 1 - sum / (maxDiff * a.length)));
   }
 
   private calculateVolatilityFromPrices(prices: number[]): number {
