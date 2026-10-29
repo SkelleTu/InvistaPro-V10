@@ -1371,7 +1371,7 @@ router.get('/download-ea', mt5DashboardAccess, async (req: Request, res: Respons
       'PriceActionUseAIReview = true',
       'CopyRates(g_symbol, timeframe, 1, count, rates)',
       'CalculatePriceActionRiskLot',
-      'CalculatePriceActionRiskLot(entry, stopLoss, spreadCost)',
+      'CalculatePriceActionRiskLot(entry, stopLoss, spreadCost, serverRiskPercent)',
       'netRiskReward < 2.0',
       'IsAdaptivePriceActionSpreadAcceptable(entry, currentSpread, maxAllowedSpread)',
       'iATR(g_symbol, PERIOD_M1, 14)',
