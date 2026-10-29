@@ -78,6 +78,7 @@ assert.ok(route.includes("from '../services/price-action-symbol-policy'"), 'Rout
 assert.ok(route.includes('const isStrategyCrypto = isPriceActionCryptoSymbol(sym)'), 'Route must apply the deterministic crypto-symbol policy');
 assert.ok(!route.includes('balance: 0,\n      equity: 0,\n      freeMargin: 0'), 'Signal polling must not synthesize zero-value account heartbeats');
 assert.ok(bridge.includes('actualAccountOpenPositions'), 'Bridge must preserve actual MT5 account-wide open positions for risk gating');
+assert.ok(bridge.includes('this.status.actualAccountOpenPositions = undefined;'), 'Bridge must clear stale position counts when the latest heartbeat omits them');
 assert.ok(context.includes('const actualOpenPositions = status.actualAccountOpenPositions;'), 'Position risk gate must fail closed without account-wide position count');
 
 for (const symbol of ['BTCUSD', 'BTCUSDm', 'm.BTCUSD', 'BTCUSDT.r', 'XBTUSD', 'ETHUSD.a', 'SOLUSDT', 'BTCUSDpro']) {
