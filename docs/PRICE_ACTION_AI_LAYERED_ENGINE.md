@@ -10,3 +10,10 @@
 
 ## Observação de integração
 O motor de política é isolado e testável. Para operar a estratégia cripto de forma integral, o EA deve transmitir candles separados por timeframe e o endpoint deve ligar a revisão de IA a esse candidato antes de responder BUY/SELL. Não declarar estratégia operacional completa nem habilitar produção até esses contratos estarem integrados e testados no MT5/DEMO.
+
+
+## Custos e confluência estrutural
+- O gate estrutural exige BOS ou CHoCH direcional **e** pelo menos uma confirmação independente entre FVG, sweep de liquidez ou Order Block. Um único padrão isolado não libera entrada.
+- O spread observado não representa necessariamente comissão e slippage. Configure `MT5_PRICE_ACTION_EXTRA_COST_PRICE_UNITS` no servidor como custo adicional estimado de ida e volta convertido para unidades de preço, de forma conservadora para os instrumentos negociados. O valor deve ser `0` apenas se comissão e slippage adicionais forem realmente zero ou já estiverem incluídos em outra fonte confiável.
+- Se a variável estiver ausente, inválida ou negativa, o custo total fica indisponível e a estratégia bloqueia novas entradas. Essa variável é uma estimativa em unidades de preço, não um valor monetário nem um custo universal para todos os símbolos; configure-a com o pior caso aplicável ao conjunto de instrumentos habilitados.
+- A validação de execução deve ser feita em DEMO com os custos reais do broker antes de qualquer uso em conta REAL.
