@@ -945,6 +945,8 @@ void FetchAndProcessSignal()
    double stopLoss   = ExtractJsonDouble(resp, "stopLoss");
    double takeProfit = ExtractJsonDouble(resp, "takeProfit");
    double estimatedRoundTripCost = ExtractJsonDouble(resp, "estimatedRoundTripCost");
+   double extraCostSpreadMultiplier = ExtractJsonDouble(resp, "extraCostSpreadMultiplier");
+   bool hasExtraCostMultiplier = (StringFind(resp, "extraCostSpreadMultiplier") >= 0);
    double confidence = ExtractJsonDouble(resp, "confidence");
 
    string slTpSource    = ExtractJsonString(resp, "slTpSource");
@@ -1078,7 +1080,7 @@ void FetchAndProcessSignal()
           Print("⛔ Price Action recusado: ação inválida.");
           return;
        }
-       if (stopLoss <= 0 || takeProfit <= 0 || entry <= 0 || estimatedRoundTripCost <= 0 || PriceActionRiskPercent < 1.0 || PriceActionRiskPercent > 2.0)
+       if (stopLoss <= 0 || takeProfit <= 0 || entry <= 0 || estimatedRoundTripCost <= 0 || !hasExtraCostMultiplier || extraCostSpreadMultiplier < 0 || PriceActionRiskPercent < 1.0 || PriceActionRiskPercent > 2.0)
        {
           Print("⛔ Price Action recusado: preço, SL/TP, custo ida-e-volta ou risco configurado inválido.");
           return;
@@ -1098,7 +1100,7 @@ void FetchAndProcessSignal()
        }
        // Use server's round-trip estimate (spread + configured commission/slippage equivalent),
        // but never let it understate the spread observed at execution time.
-       double spreadCost = MathMax(currentSpread * 2.0, estimatedRoundTripCost);
+       double spreadCost = MathMax(currentSpread * (2.0 + extraCostSpreadMultiplier), estimatedRoundTripCost);
        double effectiveRisk = riskDistance + spreadCost;
        double effectiveReward = rewardDistance - spreadCost;
        double netRiskReward = (effectiveRisk > 0.0) ? effectiveReward / effectiveRisk : 0.0;
