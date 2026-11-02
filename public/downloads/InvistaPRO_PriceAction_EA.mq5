@@ -548,6 +548,9 @@ bool ExecuteSetupLocked(Setup &s) {
       Print("Ordem rejeitada: ",trade.ResultRetcode()," ",trade.ResultRetcodeDescription());
       return false;
    }
+   // Count every accepted order response before slippage checks; ambiguous fills stay fail-closed.
+   g_tradesToday++;
+   PersistDailyState();
    double fillPrice=trade.ResultPrice();
    double maxSlippage=InpMaxSlippagePoints>0 ? InpMaxSlippagePoints*_Point : ATR(PERIOD_M15)*0.10;
    if(fillPrice<=0 || maxSlippage<=0 || MathAbs(fillPrice-s.entry)>maxSlippage) {
@@ -556,8 +559,6 @@ bool ExecuteSetupLocked(Setup &s) {
          trade.PositionClose(_Symbol);
       return false;
    }
-   g_tradesToday++;
-   PersistDailyState();
    Print("Price Action executado: ",s.side==1?"BUY":"SELL"," ",_Symbol," volume=",volume,
          " SL=",s.stop," TP=",s.target," RR=",DoubleToString(s.rr,2));
    return true;
