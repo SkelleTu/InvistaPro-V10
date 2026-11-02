@@ -13,6 +13,10 @@ on:
       - ".github/workflows/mt5-ea-compile.yml"
   workflow_dispatch:
 
+concurrency:
+  group: mt5-ea-compile-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
