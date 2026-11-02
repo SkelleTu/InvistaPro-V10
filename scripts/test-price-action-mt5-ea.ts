@@ -113,6 +113,11 @@ assert.ok(ea.includes('dealMagic==(ulong)InpMagic'), 'Price Action entry trackin
 assert.ok(ea.includes('DEAL_COMMISSION)+\n                            HistoryDealGetDouble(positionDeal,DEAL_FEE)'), 'Net trade PnL must include every deal commission and fee for the position');
 assert.ok(ea.includes('InpRiskPercent<1.0 || InpRiskPercent>2.0'), 'EA risk input must stay within the documented 1%-2% range');
 assert.ok(ea.includes('if(!IsDemoAccount())'), 'This validation build must block non-DEMO accounts');
+assert.ok(ea.includes('InpMaxConsecutiveLosses>5'), 'Consecutive-loss circuit breaker must have a bounded configuration');
+assert.ok(ea.includes('InpMaxLosingTradesPerDay>5'), 'Daily losing-trade circuit breaker must have a bounded configuration');
+assert.ok(ea.includes('InpMagic<=0'), 'EA magic number must be a valid positive identifier');
+assert.ok(ea.includes('StringLen(InpApiToken)==0 || StringFind(InpServerURL,"https://")!=0'), 'EA must require an API token and HTTPS before startup');
+
 assert.ok(!ea.toLowerCase().includes('binance'), 'EA strategy must not depend on Binance');
 assert.ok(!ea.toLowerCase().includes('deriv'), 'EA strategy must not depend on Deriv');
 assert.ok(!ea.includes('Symbol_Override'), 'EA must use the chart symbol, not a broker-specific override');
