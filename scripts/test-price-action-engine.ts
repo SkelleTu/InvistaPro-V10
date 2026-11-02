@@ -68,7 +68,7 @@ const makeBullStructure = (seconds: number, withTrigger = false): Candle[] => {
  push(finalLow + 1, finalLow + 5, finalLow + 0.5, finalLow + 4);
  push(finalLow + 4, finalLow + 10, finalLow + 3, finalLow + 9);
  if (withTrigger) {
-  push(finalLow + 5, finalLow + 5.5, finalLow + 3.5, finalLow + 4);
+  push(finalLow + 5, finalLow + 12, finalLow + 3.5, finalLow + 4);
   push(finalLow + 3.5, finalLow + 8, finalLow - 15, finalLow + 7);
   push(finalLow + 7, finalLow + 11, finalLow + 6.5, finalLow + 9.5, 300);
  }
