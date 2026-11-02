@@ -279,8 +279,8 @@ export class HuggingFaceAIService {
     if (!this.isConfigured || !this.apiKey || this.apiKey === 'missing-key') {
       throw new Error('Price Action AI unavailable: Hugging Face inference is not configured');
     }
-    if (!['BTCUSDT', 'ETHUSDT', 'SOLUSDT'].includes(symbol.toUpperCase())) {
-      throw new Error('Unsupported Price Action symbol');
+    if (!/^[A-Z0-9._-]{1,32}$/.test(symbol.toUpperCase())) {
+      throw new Error('Invalid chart symbol for Price Action review');
     }
 
     const raw = snapshot && typeof snapshot === 'object' ? snapshot as Record<string, any> : {};
