@@ -19,6 +19,13 @@ Status: design baseline only. Not approved for live trading.
 - [ ] Connect real exchange position stream, material-event detector and bounded heartbeat scheduler.
 - [ ] AI stop changes may tighten only; hard risk limits and emergency exits remain deterministic.
 - [ ] Backtest, out-of-sample, replay, fault-injection and DEMO evidence before any live enablement.
-- [ ] Preserve existing Girassol EA and its download route unchanged.
+- [x] Independent MT5 Price Action EA source uses the selected chart symbol and broker-provided contract specifications; no Binance/Deriv dependency.
+- [x] Separate authenticated download route and dashboard button; existing Girassol EA and its download route remain unchanged.
+- [x] MT5 AI review endpoint accepts closed OHLCV frames for arbitrary broker symbol names, validates candles and fails closed on news/AI unavailability.
+- [x] EA risk controls include account-currency lot sizing, broker volume/tick/margin constraints, structural pivot stop, net cost estimate, daily circuit breakers, persistent state, break-even, one-time partial and tightening-only trailing.
+- [x] Event-driven position AI reviews use material price moves plus a 15-minute bounded heartbeat; AI can HOLD, take one partial, tighten stop or request close.
+- [ ] MetaEditor compile and runtime validation across MT5 brokers/symbol contract types.
+- [ ] DEMO forward test, restart/reconnect tests, execution rejection/slippage tests and trade-history reconciliation.
+- [ ] Full deterministic scanner parity with documented sweep/FVG/OB/BOS/CHoCH/range criteria; current EA uses local structure/pattern gates and AI reviews the raw frames.
 
 No checklist item is complete merely because its interface or documentation exists. Each item requires implementation evidence and tests.
