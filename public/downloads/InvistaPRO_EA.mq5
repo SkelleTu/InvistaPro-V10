@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                              InvistaPRO_EA.mq5    |
 //|                                 InvistaPRO - Auto-Discovery URL   |
-//|   Versão 8.2 — Price Action operacional com gates de segurança   |
+//|   Versão 8.1 — Price Action operacional com gates de segurança   |
 //|   CORREÇÕES v8.0:                                                 |
 //|   • Detecção ampliada de nomes do Girassol/Fibonacci              |
 //|   • Endpoint /signal-with-indicators com fallback robusto         |
@@ -13,7 +13,7 @@
 //|   Nível 3: Bolinha pequena micro (buf 4=compra, 5=venda)         |
 //+------------------------------------------------------------------+
 #property copyright "InvistaPRO"
-#property version   "8.2"
+#property version   "8.1"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -41,7 +41,7 @@ input int      MaxReconnectTries= 5;           // Tentativas máximas de reconex
 input int      IndicatorBars    = 5;           // Quantas barras recentes dos indicadores ler
 input int      CandleCount      = 200;         // Candles para enviar à IA (histórico)
 input double   PriceActionRiskPercent = 1.0; // Risco por trade para Price Action (1% a 2%)
-input bool     PriceActionUseAIReview = false; // EA novo: motor Price Action autônomo, independente do Girassol/IA legada
+input bool     PriceActionUseAIReview = true; // true = estratégia + IA; false = estratégia autônoma com os mesmos gates
 
 //--- Controle de Autonomia da IA
 input ENUM_AI_CONTROL_MODE AIControlMode = AI_FULL; // Modo de Controle da IA
@@ -71,7 +71,6 @@ datetime g_lastSignal     = 0;
 int      g_failCount      = 0;
 bool     g_isDiscovering  = false;
 string   g_pendingSignalId= "";
-datetime g_lastClosedTradeSync = 0;
 datetime g_lastMonitor    = 0;
 int      g_monitorSeconds = 2;
 datetime g_warmupUntil    = 0;
@@ -116,21 +115,7 @@ int OnInit()
    g_apiToken    = ApiToken;
    g_failCount   = 0;
 
-   if (g_symbol == "" || !SymbolSelect(g_symbol, true))
-   {
-      Print("⛔ Símbolo MT5 indisponível ou não selecionável: ", g_symbol);
-      return INIT_FAILED;
-   }
-   long symbolTradeMode = SymbolInfoInteger(g_symbol, SYMBOL_TRADE_MODE);
-   if (symbolTradeMode == SYMBOL_TRADE_MODE_DISABLED)
-   {
-      Print("⛔ O broker marcou o símbolo como indisponível para negociação: ", g_symbol);
-      return INIT_FAILED;
-   }
-
    trade.SetExpertMagicNumber(MagicNumber);
-   trade.SetTypeFillingBySymbol(g_symbol);
-   trade.SetDeviationInPoints(20);
    // Timer keeps connectivity checks alive even when the chart receives no ticks.
    EventSetTimer(1);
 
@@ -146,7 +131,7 @@ int OnInit()
    else
       g_warmupUntil = now;
 
-   Print("🚀 InvistaPRO EA v8.2 iniciado | Símbolo: ", g_symbol);
+   Print("🚀 InvistaPRO EA v8.0 iniciado | Símbolo: ", g_symbol);
    Print("   → URL: ", g_serverUrl);
    Print("   → CandleCount: ", CandleCount, " | IndicatorBars: ", IndicatorBars);
    if (WarmupSeconds > 0)
@@ -155,7 +140,7 @@ int OnInit()
    string modeLabel = "";
    if (AIControlMode == AI_MANUAL)
       modeLabel = "MANUAL";
-   else if (!IsPriceActionEnabled() && AIControlMode == AI_PARTIAL)
+   else if (AIControlMode == AI_PARTIAL)
       modeLabel = "PARCIAL";
    else
       modeLabel = "TOTAL (IA controla 100%)";
@@ -367,7 +352,7 @@ string ReadAllIndicatorBuffers()
                if (buf[v] >= 1e20 || buf[v] <= -1e20)
                   json += "null";
                else
-                  json += DoubleToString(buf[v], ManagedSymbolDigits());
+                  json += DoubleToString(buf[v], _Digits);
             }
          }
          json += "]}";
@@ -450,16 +435,16 @@ string ReadStructuredIndicatorSignals()
                      if (bufB[v] == 0.0) continue;
                      if (!firstEntry) levelsJson += ",";
                      firstEntry = false;
-                     levelsJson += "{\"bar\":" + IntegerToString(v) + ",\"value\":" + DoubleToString(bufB[v], ManagedSymbolDigits()) + ",\"direction\":\"buy\",\"color\":\"blue\"}";
+                     levelsJson += "{\"bar\":" + IntegerToString(v) + ",\"value\":" + DoubleToString(bufB[v], _Digits) + ",\"direction\":\"buy\",\"color\":\"blue\"}";
                      if (!firstBuy) allBuyJson += ",";
                      firstBuy = false;
-                     allBuyJson += "{\"level\":\"" + levelNames[lvl] + "\",\"bar\":" + IntegerToString(v) + ",\"value\":" + DoubleToString(bufB[v], ManagedSymbolDigits()) + "}";
+                     allBuyJson += "{\"level\":\"" + levelNames[lvl] + "\",\"bar\":" + IntegerToString(v) + ",\"value\":" + DoubleToString(bufB[v], _Digits) + "}";
                      if (v == 0 && ask > 0)
                      {
                         string srType = (bufB[v] < ask) ? "support" : "resistance";
                         if (!firstSR) srLevels += ",";
                         firstSR = false;
-                        srLevels += "{\"type\":\"" + srType + "\",\"price\":" + DoubleToString(bufB[v], ManagedSymbolDigits()) + ",\"level\":\"" + levelNames[lvl] + "\",\"direction\":\"buy\",\"buffer\":" + IntegerToString(bufBuy) + "}";
+                        srLevels += "{\"type\":\"" + srType + "\",\"price\":" + DoubleToString(bufB[v], _Digits) + ",\"level\":\"" + levelNames[lvl] + "\",\"direction\":\"buy\",\"buffer\":" + IntegerToString(bufBuy) + "}";
                      }
                   }
                }
@@ -482,16 +467,16 @@ string ReadStructuredIndicatorSignals()
                      if (bufS[v] == 0.0) continue;
                      if (!firstEntry) levelsJson += ",";
                      firstEntry = false;
-                     levelsJson += "{\"bar\":" + IntegerToString(v) + ",\"value\":" + DoubleToString(bufS[v], ManagedSymbolDigits()) + ",\"direction\":\"sell\",\"color\":\"red\"}";
+                     levelsJson += "{\"bar\":" + IntegerToString(v) + ",\"value\":" + DoubleToString(bufS[v], _Digits) + ",\"direction\":\"sell\",\"color\":\"red\"}";
                      if (!firstSell) allSellJson += ",";
                      firstSell = false;
-                     allSellJson += "{\"level\":\"" + levelNames[lvl] + "\",\"bar\":" + IntegerToString(v) + ",\"value\":" + DoubleToString(bufS[v], ManagedSymbolDigits()) + "}";
+                     allSellJson += "{\"level\":\"" + levelNames[lvl] + "\",\"bar\":" + IntegerToString(v) + ",\"value\":" + DoubleToString(bufS[v], _Digits) + "}";
                      if (v == 0 && ask > 0)
                      {
                         string srType = (bufS[v] < ask) ? "support" : "resistance";
                         if (!firstSR) srLevels += ",";
                         firstSR = false;
-                        srLevels += "{\"type\":\"" + srType + "\",\"price\":" + DoubleToString(bufS[v], ManagedSymbolDigits()) + ",\"level\":\"" + levelNames[lvl] + "\",\"direction\":\"sell\",\"buffer\":" + IntegerToString(bufSell) + "}";
+                        srLevels += "{\"type\":\"" + srType + "\",\"price\":" + DoubleToString(bufS[v], _Digits) + ",\"level\":\"" + levelNames[lvl] + "\",\"direction\":\"sell\",\"buffer\":" + IntegerToString(bufSell) + "}";
                      }
                   }
                }
@@ -552,7 +537,7 @@ string ReadStructuredIndicatorSignals()
 
             string levelName = (b < ArraySize(fibNames)) ? fibNames[b] : ("L" + IntegerToString(b));
             json += "{\"level\":\"" + levelName + "\",";
-            json += "\"price\":" + DoubleToString(buf[0], ManagedSymbolDigits()) + ",";
+            json += "\"price\":" + DoubleToString(buf[0], _Digits) + ",";
             json += "\"buffer\":" + IntegerToString(b) + "}";
          }
          json += "]},";
@@ -586,7 +571,7 @@ string BuildRawBuffersJson(int indicatorIdx, int bars)
          {
             if (v > 0) json += ",";
             if (buf[v] >= 1e20 || buf[v] <= -1e20) json += "null";
-            else json += DoubleToString(buf[v], ManagedSymbolDigits());
+            else json += DoubleToString(buf[v], _Digits);
          }
       }
       json += "]";
@@ -606,10 +591,10 @@ string BuildCandlesJson(MqlRates &rates[], int count)
       if (i > 0) json += ",";
       json += "{";
       json += "\"time\":"   + IntegerToString(rates[i].time)          + ",";
-      json += "\"open\":"   + DoubleToString(rates[i].open,  ManagedSymbolDigits()) + ",";
-      json += "\"high\":"   + DoubleToString(rates[i].high,  ManagedSymbolDigits()) + ",";
-      json += "\"low\":"    + DoubleToString(rates[i].low,   ManagedSymbolDigits()) + ",";
-      json += "\"close\":"  + DoubleToString(rates[i].close, ManagedSymbolDigits()) + ",";
+      json += "\"open\":"   + DoubleToString(rates[i].open,  _Digits) + ",";
+      json += "\"high\":"   + DoubleToString(rates[i].high,  _Digits) + ",";
+      json += "\"low\":"    + DoubleToString(rates[i].low,   _Digits) + ",";
+      json += "\"close\":"  + DoubleToString(rates[i].close, _Digits) + ",";
       json += "\"volume\":" + IntegerToString(rates[i].tick_volume);
       json += "}";
    }
@@ -647,13 +632,6 @@ void OnTick()
 {
    datetime now = TimeCurrent();
 
-   // Reconcile closed trades from terminal history so temporary HTTP outages do not lose daily risk accounting.
-   if (now - g_lastClosedTradeSync >= 30)
-   {
-      g_lastClosedTradeSync = now;
-      SyncClosedTradeReports();
-   }
-
    // ── Heartbeat ────────────────────────────────────────────────────────
    if (now - g_lastHeartbeat >= HeartbeatSeconds)
    {
@@ -679,7 +657,7 @@ void OnTick()
    }
 
    // ── Busca de sinal ────────────────────────────────────────────────────
-   if (CountManagedPositions() < MaxPositions && CountSymbolPositions() == 0 && (now - g_lastSignal >= SignalSeconds))
+   if (CountManagedPositions() < MaxPositions && (now - g_lastSignal >= SignalSeconds))
    {
       g_lastSignal = now;
 
@@ -725,11 +703,29 @@ void SendMarketDataForSyntheticGirassol()
 //+------------------------------------------------------------------+
 //| Busca e processa sinal com indicadores reais                      |
 //+------------------------------------------------------------------+
-bool IsPriceActionEnabled()
+bool IsPriceActionCryptoSymbol()
 {
-   // Price Action runs on the chart instrument selected by the user.
-   // Symbol-specific contract properties are validated by the sizing/execution layer.
-   return true;
+   // Broker symbol names vary (BTCUSDT, BTCUSDm, m.BTCUSD, BTCUSDT.r, etc.).
+   // Normalize separators, then recognize the requested crypto/USD or crypto/USDT pairs.
+   string normalized = g_symbol;
+   StringToUpper(normalized);
+   StringReplace(normalized, "/", "");
+   StringReplace(normalized, ".", "");
+   StringReplace(normalized, "_", "");
+   StringReplace(normalized, "-", "");
+
+   string bases[4] = {"BTC", "XBT", "ETH", "SOL"};
+   for(int i = 0; i < ArraySize(bases); i++)
+   {
+      int pos = StringFind(normalized, bases[i]);
+      if(pos < 0) continue;
+
+      string quoteAndSuffix = StringSubstr(normalized, pos + StringLen(bases[i]));
+      if(StringFind(quoteAndSuffix, "USDT") == 0 ||
+         StringFind(quoteAndSuffix, "USD") == 0)
+         return true;
+   }
+   return false;
 }
 
 int CountManagedPositions()
@@ -745,37 +741,9 @@ int CountManagedPositions()
    return managed;
 }
 
-int CountSymbolPositions()
-{
-   int count = 0;
-   for (int i = PositionsTotal() - 1; i >= 0; i--)
-   {
-      if (!posInfo.SelectByIndex(i)) continue;
-      if (posInfo.Symbol() == g_symbol) count++;
-   }
-   return count;
-}
-
-long GetManagedPositionIdentifier()
-{
-   for (int i = PositionsTotal() - 1; i >= 0; i--)
-   {
-      if (!posInfo.SelectByIndex(i)) continue;
-      if (posInfo.Magic() != MagicNumber || posInfo.Symbol() != g_symbol) continue;
-      return (long)PositionGetInteger(POSITION_IDENTIFIER);
-   }
-   return 0;
-}
-
 int ManagedSymbolDigits()
 {
    return (int)SymbolInfoInteger(g_symbol, SYMBOL_DIGITS);
-}
-
-string PriceActionStateKey(string prefix, long identifier)
-{
-   return prefix + "_" + IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN))
-          + "_" + IntegerToString(identifier);
 }
 
 // Derive volume precision from the broker-supported volume step.
@@ -797,110 +765,31 @@ double CalculatePriceActionRiskLot(double entryPrice, double stopLoss)
 {
    if (entryPrice <= 0 || stopLoss <= 0 || PriceActionRiskPercent < 1.0 || PriceActionRiskPercent > 2.0)
       return 0.0;
-
+   double tickSize = SymbolInfoDouble(g_symbol, SYMBOL_TRADE_TICK_SIZE);
+   double tickValue = SymbolInfoDouble(g_symbol, SYMBOL_TRADE_TICK_VALUE_LOSS);
+   if (tickValue <= 0) tickValue = SymbolInfoDouble(g_symbol, SYMBOL_TRADE_TICK_VALUE);
    double volumeStep = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_STEP);
    double minVolume = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_MIN);
    double maxVolume = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_MAX);
-   double equity = AccountInfoDouble(ACCOUNT_EQUITY);
-   double freeMargin = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
-   if (volumeStep <= 0 || minVolume <= 0 || maxVolume <= 0 || equity <= 0 || freeMargin <= 0)
+   double distance = MathAbs(entryPrice - stopLoss);
+   if (tickSize <= 0 || tickValue <= 0 || volumeStep <= 0 || minVolume <= 0 || maxVolume <= 0 || distance <= 0)
       return 0.0;
-
-   ENUM_ORDER_TYPE orderType = (stopLoss < entryPrice) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
-   double oneLotProfit = 0.0;
-   // OrderCalcProfit converts the contract's tick economics into account currency.
-   // If the broker cannot calculate the contract, fail closed instead of guessing.
-   if (!OrderCalcProfit(orderType, g_symbol, 1.0, entryPrice, stopLoss, oneLotProfit))
-      return 0.0;
-   double lossPerLot = MathAbs(oneLotProfit);
-   if (lossPerLot <= 0.0) return 0.0;
-
-   // Keep 10% of the configured risk budget as execution-friction reserve.
-   double riskCash = equity * PriceActionRiskPercent / 100.0 * 0.90;
+   double lossPerLot = (distance / tickSize) * tickValue;
+   double riskCash = AccountInfoDouble(ACCOUNT_EQUITY) * PriceActionRiskPercent / 100.0;
+   if (lossPerLot <= 0 || riskCash <= 0) return 0.0;
    double rawVolume = riskCash / lossPerLot;
    double volume = MathFloor(rawVolume / volumeStep) * volumeStep;
    if (volume < minVolume) return 0.0;
-   if (volume > maxVolume) volume = MathFloor(maxVolume / volumeStep) * volumeStep;
+   if (volume > maxVolume) volume = maxVolume;
    int volumeDigits = VolumeDigitsFromStep();
-   volume = NormalizeDouble(volume, volumeDigits);
-   if (volume < minVolume || volume <= 0.0) return 0.0;
-
-   double requiredMargin = 0.0;
-   if (!OrderCalcMargin(orderType, g_symbol, volume, entryPrice, requiredMargin)
-       || requiredMargin <= 0.0 || requiredMargin > freeMargin * 0.80)
-      return 0.0;
-   return volume;
-}
-
-void PersistPriceActionPositionState()
-{
-   for (int i = PositionsTotal() - 1; i >= 0; i--)
-   {
-      if (!posInfo.SelectByIndex(i)) continue;
-      if (posInfo.Magic() != MagicNumber || posInfo.Symbol() != g_symbol) continue;
-      ulong ticket = posInfo.Ticket();
-      double initialRisk = MathAbs(posInfo.PriceOpen() - posInfo.StopLoss());
-      if (initialRisk <= 0.0) continue;
-      string riskKey = PriceActionStateKey("InvistaPA_R", (long)ticket);
-      if (!GlobalVariableCheck(riskKey)) GlobalVariableSet(riskKey, initialRisk);
-   }
-}
-
-// Swing trailing uses only fully confirmed M5 pivots and can only tighten protection.
-double CalculatePriceActionSwingStop(string positionType, double currentStop)
-{
-   MqlRates rates[];
-   int copied = CopyRates(g_symbol, PERIOD_M5, 1, 40, rates);
-   if (copied < 10) return 0.0;
-   double ranges = 0.0;
-   int rangeCount = 0;
-   for (int i = MathMax(1, copied - 15); i < copied; i++)
-   {
-      ranges += MathMax(rates[i].high - rates[i].low,
-                        MathMax(MathAbs(rates[i].high - rates[i-1].close),
-                                MathAbs(rates[i].low - rates[i-1].close)));
-      rangeCount++;
-   }
-   if (rangeCount <= 0) return 0.0;
-   double buffer = (ranges / rangeCount) * 0.10;
-   double point = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
-   long stopsLevel = SymbolInfoInteger(g_symbol, SYMBOL_TRADE_STOPS_LEVEL);
-   double minimumDistance = MathMax((double)stopsLevel * point, point * 2.0);
-
-   for (int i = copied - 3; i >= 2; i--)
-   {
-      if (positionType == "BUY")
-      {
-         bool pivot = rates[i].low < rates[i-1].low && rates[i].low < rates[i-2].low
-                   && rates[i].low <= rates[i+1].low && rates[i].low <= rates[i+2].low;
-         if (!pivot) continue;
-         double candidate = NormalizeDouble(rates[i].low - buffer, ManagedSymbolDigits());
-         double bid = SymbolInfoDouble(g_symbol, SYMBOL_BID);
-         if (candidate > currentStop && candidate < bid - minimumDistance) return candidate;
-      }
-      else
-      {
-         bool pivot = rates[i].high > rates[i-1].high && rates[i].high > rates[i-2].high
-                   && rates[i].high >= rates[i+1].high && rates[i].high >= rates[i+2].high;
-         if (!pivot) continue;
-         double candidate = NormalizeDouble(rates[i].high + buffer, ManagedSymbolDigits());
-         double ask = SymbolInfoDouble(g_symbol, SYMBOL_ASK);
-         if (candidate < currentStop && candidate > ask + minimumDistance) return candidate;
-      }
-   }
-   return 0.0;
+   return NormalizeDouble(volume, volumeDigits);
 }
 
 bool ClosePriceActionPartial(ulong ticket, double volume, string positionType)
 {
    long marginMode = AccountInfoInteger(ACCOUNT_MARGIN_MODE);
    if (marginMode == ACCOUNT_MARGIN_MODE_RETAIL_HEDGING)
-   {
-      bool sent = trade.PositionClosePartial(ticket, volume);
-      uint retcode = trade.ResultRetcode();
-      return sent && (retcode == TRADE_RETCODE_DONE || retcode == TRADE_RETCODE_DONE_PARTIAL)
-             && trade.ResultDeal() > 0;
-   }
+      return trade.PositionClosePartial(ticket, volume);
 
    // Netting accounts reduce the existing position with an opposite deal.
    MqlTradeRequest request = {};
@@ -928,7 +817,7 @@ bool ClosePriceActionPartial(ulong ticket, double volume, string positionType)
       Print("⛔ Price Action: falha de envio da parcial netting. erro=", GetLastError());
       return false;
    }
-   return (result.retcode == TRADE_RETCODE_DONE || result.retcode == TRADE_RETCODE_DONE_PARTIAL) && result.deal > 0 && result.volume > 0;
+   return result.retcode == TRADE_RETCODE_DONE || result.retcode == TRADE_RETCODE_DONE_PARTIAL;
 }
 
 void FetchAndProcessSignal()
@@ -953,15 +842,15 @@ void FetchAndProcessSignal()
    string body = "{";
    body += "\"accountType\":\"" + requestAccountType + "\",";
    body += "\"symbol\":\""          + g_symbol                     + "\",";
-   body += "\"ask\":"               + DoubleToString(ask, ManagedSymbolDigits())  + ",";
-   body += "\"bid\":"               + DoubleToString(bid, ManagedSymbolDigits())  + ",";
+   body += "\"ask\":"               + DoubleToString(ask, _Digits)  + ",";
+   body += "\"bid\":"               + DoubleToString(bid, _Digits)  + ",";
    body += "\"candles\":"           + candlesJson                   + ",";
    body += "\"timeframes\":"       + BuildMultiTimeframeJson()     + ",";
    body += "\"priceActionUseAIReview\":" + (PriceActionUseAIReview ? "true" : "false") + ",";
    body += "\"indicatorSignals\":"  + structuredSignals             + ",";
    body += "\"indicatorBuffers\":"  + allBuffers                    + ",";
    body += "\"indicatorCount\":"    + IntegerToString(g_indicatorCount) + ",";
-   body += "\"eaVersion\":\"8.2\"";
+   body += "\"eaVersion\":\"8.1\"";
    if (g_apiToken != "") body += ",\"token\":\"" + g_apiToken + "\"";
    body += "}";
 
@@ -980,16 +869,16 @@ void FetchAndProcessSignal()
 
    // Legacy GET is forbidden for crypto strategy symbols: it lacks full MTF context
    // and could bypass the deterministic Price Action gate.
-   if ((res == 404 || res == -1) && !IsPriceActionEnabled())
+   if ((res == 404 || res == -1) && !IsPriceActionCryptoSymbol())
    {
       url = g_serverUrl + "/api/metatrader/signal?symbol=" + g_symbol;
       if (g_apiToken != "") url += "&token=" + g_apiToken;
       char emptyData[];
       res = WebRequest("GET", url, headers, 5000, emptyData, result, responseHeaders);
    }
-   else if ((res == 404 || res == -1) && IsPriceActionEnabled())
+   else if ((res == 404 || res == -1) && IsPriceActionCryptoSymbol())
    {
-      Print("⛔ Price Action: endpoint multi-timeframe indisponível; fallback legado bloqueado.");
+      Print("⛔ Price Action crypto: endpoint multi-timeframe indisponível; fallback legado bloqueado.");
       return;
    }
 
@@ -1028,7 +917,7 @@ void FetchAndProcessSignal()
    string girassolBias  = ExtractJsonString(resp, "girassolBias");
 
    // ── Aplicação do Modo de Controle da IA ──────────────────────────────
-   if (!IsPriceActionEnabled() && AIControlMode == AI_MANUAL)
+   if (AIControlMode == AI_MANUAL)
    {
       Print("ℹ️ Modo MANUAL: usando parâmetros do usuário");
       lotSize    = ManualLotSize;
@@ -1038,14 +927,14 @@ void FetchAndProcessSignal()
       if (action == "BUY")
       {
          double entry = SymbolInfoDouble(g_symbol, SYMBOL_ASK);
-         if (stopLoss   > 0) stopLoss   = NormalizeDouble(entry - stopLoss,   ManagedSymbolDigits());
-         if (takeProfit > 0) takeProfit = NormalizeDouble(entry + takeProfit, ManagedSymbolDigits());
+         if (stopLoss   > 0) stopLoss   = NormalizeDouble(entry - stopLoss,   _Digits);
+         if (takeProfit > 0) takeProfit = NormalizeDouble(entry + takeProfit, _Digits);
       }
       else if (action == "SELL")
       {
          double entry = SymbolInfoDouble(g_symbol, SYMBOL_BID);
-         if (stopLoss   > 0) stopLoss   = NormalizeDouble(entry + stopLoss,   ManagedSymbolDigits());
-         if (takeProfit > 0) takeProfit = NormalizeDouble(entry - takeProfit, ManagedSymbolDigits());
+         if (stopLoss   > 0) stopLoss   = NormalizeDouble(entry + stopLoss,   _Digits);
+         if (takeProfit > 0) takeProfit = NormalizeDouble(entry - takeProfit, _Digits);
       }
    }
    else if (AIControlMode == AI_PARTIAL)
@@ -1062,8 +951,8 @@ void FetchAndProcessSignal()
          double rawSL = (ManualStopLoss > 0) ? ManualStopLoss * point : 0;
          if (rawSL > 0)
          {
-            if (action == "BUY")  stopLoss = NormalizeDouble(SymbolInfoDouble(g_symbol, SYMBOL_ASK) - rawSL, ManagedSymbolDigits());
-            else                   stopLoss = NormalizeDouble(SymbolInfoDouble(g_symbol, SYMBOL_BID) + rawSL, ManagedSymbolDigits());
+            if (action == "BUY")  stopLoss = NormalizeDouble(SymbolInfoDouble(g_symbol, SYMBOL_ASK) - rawSL, _Digits);
+            else                   stopLoss = NormalizeDouble(SymbolInfoDouble(g_symbol, SYMBOL_BID) + rawSL, _Digits);
          }
          else stopLoss = 0;
       }
@@ -1072,8 +961,8 @@ void FetchAndProcessSignal()
          double rawTP = (ManualTakeProfit > 0) ? ManualTakeProfit * point : 0;
          if (rawTP > 0)
          {
-            if (action == "BUY")  takeProfit = NormalizeDouble(SymbolInfoDouble(g_symbol, SYMBOL_ASK) + rawTP, ManagedSymbolDigits());
-            else                   takeProfit = NormalizeDouble(SymbolInfoDouble(g_symbol, SYMBOL_BID) - rawTP, ManagedSymbolDigits());
+            if (action == "BUY")  takeProfit = NormalizeDouble(SymbolInfoDouble(g_symbol, SYMBOL_ASK) + rawTP, _Digits);
+            else                   takeProfit = NormalizeDouble(SymbolInfoDouble(g_symbol, SYMBOL_BID) - rawTP, _Digits);
          }
          else takeProfit = 0;
       }
@@ -1087,7 +976,17 @@ void FetchAndProcessSignal()
 
    if (lotSize <= 0) lotSize = ManualLotSize;
 
-   if (stopLoss > 0 || takeProfit > 0)
+   string symUpper = g_symbol;
+   StringToUpper(symUpper);
+   bool isSpikeIndex = (StringFind(symUpper, "CRASH") >= 0 || StringFind(symUpper, "BOOM") >= 0);
+
+   if (isSpikeIndex)
+   {
+      stopLoss   = 0;
+      takeProfit = 0;
+      Print("ℹ️ Crash/Boom — sem SL/TP fixo (spike index)");
+   }
+   else if (stopLoss > 0 || takeProfit > 0)
    {
       double point      = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
       long   stopsLevel = SymbolInfoInteger(g_symbol, SYMBOL_TRADE_STOPS_LEVEL);
@@ -1111,20 +1010,20 @@ void FetchAndProcessSignal()
       if (action == "BUY")
       {
          double entry = ask;
-         if (stopLoss > 0 && (entry - stopLoss) < minDist) { if (IsPriceActionEnabled()) { Print("⛔ Price Action: distância mínima do broker exigiria alargar o stop; sinal cancelado."); return; } stopLoss = NormalizeDouble(entry - minDist, ManagedSymbolDigits()); }
-         if (takeProfit > 0 && (takeProfit - entry) < minDist) { if (IsPriceActionEnabled()) { Print("⛔ Price Action: TP abaixo da distância mínima do broker; sinal cancelado."); return; } takeProfit = NormalizeDouble(entry + minDist, ManagedSymbolDigits()); }
+         if (stopLoss > 0 && (entry - stopLoss) < minDist) { if (IsPriceActionCryptoSymbol()) { Print("⛔ Price Action: distância mínima do broker exigiria alargar o stop; sinal cancelado."); return; } stopLoss = NormalizeDouble(entry - minDist, _Digits); }
+         if (takeProfit > 0 && (takeProfit - entry) < minDist) { if (IsPriceActionCryptoSymbol()) { Print("⛔ Price Action: TP abaixo da distância mínima do broker; sinal cancelado."); return; } takeProfit = NormalizeDouble(entry + minDist, _Digits); }
       }
       else if (action == "SELL")
       {
          double entry = bid;
-         if (stopLoss > 0 && (stopLoss - entry) < minDist) { if (IsPriceActionEnabled()) { Print("⛔ Price Action: distância mínima do broker exigiria alargar o stop; sinal cancelado."); return; } stopLoss = NormalizeDouble(entry + minDist, ManagedSymbolDigits()); }
-         if (takeProfit > 0 && (entry - takeProfit) < minDist) { if (IsPriceActionEnabled()) { Print("⛔ Price Action: TP abaixo da distância mínima do broker; sinal cancelado."); return; } takeProfit = NormalizeDouble(entry - minDist, ManagedSymbolDigits()); }
+         if (stopLoss > 0 && (stopLoss - entry) < minDist) { if (IsPriceActionCryptoSymbol()) { Print("⛔ Price Action: distância mínima do broker exigiria alargar o stop; sinal cancelado."); return; } stopLoss = NormalizeDouble(entry + minDist, _Digits); }
+         if (takeProfit > 0 && (entry - takeProfit) < minDist) { if (IsPriceActionCryptoSymbol()) { Print("⛔ Price Action: TP abaixo da distância mínima do broker; sinal cancelado."); return; } takeProfit = NormalizeDouble(entry - minDist, _Digits); }
       }
    }
 
    Print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    bool isPriceActionInstrument = IsPriceActionEnabled();
-    if (isPriceActionInstrument)
+    bool isPriceActionCrypto = IsPriceActionCryptoSymbol();
+    if (isPriceActionCrypto)
     {
        double entry = (action == "BUY") ? ask : bid;
        if (action != "BUY" && action != "SELL")
@@ -1152,11 +1051,11 @@ void FetchAndProcessSignal()
        }
     }
 
-   Print("📡 SINAL v8.2: ", action, " | ", g_symbol, " | Confiança: ", confidence, "%");
+   Print("📡 SINAL v8.0: ", action, " | ", g_symbol, " | Confiança: ", confidence, "%");
    if (assetFamily  != "") Print("   Ativo: ", assetFamily, " | ", assetTrend, " | Vol: ", assetVolClass);
    if (girassolBias != "") Print("   Girassol: ", girassolBias);
    if (slTpSource   != "") Print("   SL/TP via: ", slTpSource);
-   Print("   SL: ", NormalizeDouble(stopLoss, ManagedSymbolDigits()), " | TP: ", NormalizeDouble(takeProfit, ManagedSymbolDigits()));
+   Print("   SL: ", NormalizeDouble(stopLoss, _Digits), " | TP: ", NormalizeDouble(takeProfit, _Digits));
    Print("   Indicadores no gráfico: ", g_indicatorCount);
    if (reason != "") Print("   Razão: ", StringSubstr(reason, 0, 150));
    Print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
@@ -1175,7 +1074,7 @@ void FetchAndProcessSignal()
              && trade.ResultDeal() > 0;
 
    // Retry invalid stops only for non-Price-Action legacy instruments.
-   if (!success && tradeRetcode == 10016 && !isPriceActionInstrument)
+   if (!success && tradeRetcode == 10016 && !isPriceActionCrypto)
    {
       Print("⚠️ Stops inválidos (10016) — recalculando...");
       double askNow   = SymbolInfoDouble(g_symbol, SYMBOL_ASK);
@@ -1198,8 +1097,8 @@ void FetchAndProcessSignal()
       double slRetry = 0, tpRetry = 0;
       if (action == "BUY")
       {
-         slRetry = NormalizeDouble(askNow - safeDist, ManagedSymbolDigits());
-         tpRetry = NormalizeDouble(askNow + safeDist, ManagedSymbolDigits());
+         slRetry = NormalizeDouble(askNow - safeDist, _Digits);
+         tpRetry = NormalizeDouble(askNow + safeDist, _Digits);
          requestOk = trade.Buy(lotSize, g_symbol, 0, slRetry, tpRetry, "InvistaPRO_" + signalId);
          tradeRetcode = trade.ResultRetcode();
          success = requestOk && (tradeRetcode == TRADE_RETCODE_DONE || tradeRetcode == TRADE_RETCODE_DONE_PARTIAL)
@@ -1207,8 +1106,8 @@ void FetchAndProcessSignal()
       }
       else
       {
-         slRetry = NormalizeDouble(bidNow + safeDist, ManagedSymbolDigits());
-         tpRetry = NormalizeDouble(bidNow - safeDist, ManagedSymbolDigits());
+         slRetry = NormalizeDouble(bidNow + safeDist, _Digits);
+         tpRetry = NormalizeDouble(bidNow - safeDist, _Digits);
          requestOk = trade.Sell(lotSize, g_symbol, 0, slRetry, tpRetry, "InvistaPRO_" + signalId);
          tradeRetcode = trade.ResultRetcode();
          success = requestOk && (tradeRetcode == TRADE_RETCODE_DONE || tradeRetcode == TRADE_RETCODE_DONE_PARTIAL)
@@ -1236,12 +1135,9 @@ void FetchAndProcessSignal()
       }
       Print("✅ Ordem executada: ", action, " | Ticket: ", trade.ResultOrder(),
             " | Volume confirmado: ", DoubleToString(lotSize, 8),
-            " | SL: ", NormalizeDouble(stopLoss, ManagedSymbolDigits()),
-            " | TP: ", NormalizeDouble(takeProfit, ManagedSymbolDigits()));
-      PersistPriceActionPositionState();
-      long positionIdentifier = GetManagedPositionIdentifier();
-      if (positionIdentifier <= 0) positionIdentifier = (long)trade.ResultOrder();
-      ConfirmTradeOpen(signalId, positionIdentifier, action, lotSize, stopLoss, takeProfit, trade.ResultPrice());
+            " | SL: ", NormalizeDouble(stopLoss, _Digits),
+            " | TP: ", NormalizeDouble(takeProfit, _Digits));
+      ConfirmTradeOpen(signalId, (int)trade.ResultOrder(), action, lotSize, stopLoss, takeProfit);
    }
    else
       Print("❌ Falha definitiva: ", trade.ResultRetcode(), " / ", GetLastError());
@@ -1276,12 +1172,12 @@ void MonitorOpenPositions()
  
        // Deterministic Price Action management: breakeven at +1R and 50% partial at +1.5R.
        // These controls run locally and never depend on AI availability.
-       if (IsPriceActionEnabled() && sl > 0 && tp > 0)
+       if (IsPriceActionCryptoSymbol() && sl > 0 && tp > 0)
        {
-          string riskKey = PriceActionStateKey("InvistaPA_R", (long)ticket);
-          string partialKey = PriceActionStateKey("InvistaPA_TP1", (long)ticket);
+          string riskKey = "InvistaPA_R_" + IntegerToString((long)ticket);
+          string partialKey = "InvistaPA_TP1_" + IntegerToString((long)ticket);
           double initialRisk = GlobalVariableCheck(riskKey) ? GlobalVariableGet(riskKey) : 0.0;
-          if (initialRisk <= 0.0 && MathAbs(openPrice - sl) > SymbolInfoDouble(g_symbol, SYMBOL_POINT) * 2.0)
+          if (initialRisk <= 0.0 && MathAbs(openPrice - sl) > _Point * 2.0)
           {
              initialRisk = MathAbs(openPrice - sl);
              GlobalVariableSet(riskKey, initialRisk);
@@ -1296,15 +1192,13 @@ void MonitorOpenPositions()
                 if (needsBreakeven)
                 {
                    double breakevenSL = NormalizeDouble(openPrice, ManagedSymbolDigits());
-                   bool modifySent = trade.PositionModify(ticket, breakevenSL, tp);
-                   uint modifyRetcode = trade.ResultRetcode();
-                   if (modifySent && modifyRetcode == TRADE_RETCODE_DONE)
+                   if (trade.PositionModify(ticket, breakevenSL, tp))
                    {
                       sl = breakevenSL;
-                      Print("🛡️ Price Action: stop confirmado em breakeven +1R. Ticket=", ticket);
+                      Print("🛡️ Price Action: stop movido para breakeven em +1R. Ticket=", ticket);
                    }
                    else
-                      Print("⛔ Price Action: breakeven não confirmado pelo broker; ticket=", ticket, " retcode=", modifyRetcode);
+                      Print("⛔ Price Action: falha ao mover stop para breakeven; ticket=", ticket, " retcode=", trade.ResultRetcode());
                 }
              }
              if (favorableMove >= initialRisk * 1.5 && !GlobalVariableCheck(partialKey) && ((posType == "BUY" && sl >= openPrice) || (posType == "SELL" && sl <= openPrice)))
@@ -1331,27 +1225,11 @@ void MonitorOpenPositions()
                    Print("ℹ️ Price Action: lote mínimo do broker impede parcial de 50%; posição segue protegida pelo SL/TP.");
                 }
              }
-             if (favorableMove >= initialRisk * 1.5)
-             {
-                double swingStop = CalculatePriceActionSwingStop(posType, sl);
-                if (swingStop > 0.0)
-                {
-                   bool swingSent = trade.PositionModify(ticket, swingStop, tp);
-                   uint swingRetcode = trade.ResultRetcode();
-                   if (swingSent && swingRetcode == TRADE_RETCODE_DONE)
-                   {
-                      sl = swingStop;
-                      Print("📈 Price Action: trailing por pivô M5 confirmado. Ticket=", ticket, " SL=", DoubleToString(sl, ManagedSymbolDigits()));
-                   }
-                   else
-                      Print("⛔ Price Action: trailing por swing recusado; ticket=", ticket, " retcode=", swingRetcode);
-                }
-             }
           }
        }
 
 // Autonomous Price Action mode uses only deterministic local protection and fixed SL/TP.
-      if (IsPriceActionEnabled() && !PriceActionUseAIReview)
+      if (IsPriceActionCryptoSymbol() && !PriceActionUseAIReview)
          continue;
 
             string posJson = "{";
@@ -1359,10 +1237,10 @@ void MonitorOpenPositions()
       posJson += "\"symbol\":\""      + g_symbol                           + "\",";
       posJson += "\"type\":\""        + posType                             + "\",";
       posJson += "\"lots\":"          + DoubleToString(posInfo.Volume(), 2) + ",";
-      posJson += "\"openPrice\":"     + DoubleToString(openPrice, ManagedSymbolDigits())  + ",";
-      posJson += "\"currentPrice\":"  + DoubleToString(curPrice, ManagedSymbolDigits())   + ",";
-      posJson += "\"stopLoss\":"      + DoubleToString(sl, ManagedSymbolDigits())         + ",";
-      posJson += "\"takeProfit\":"    + DoubleToString(tp, ManagedSymbolDigits())         + ",";
+      posJson += "\"openPrice\":"     + DoubleToString(openPrice, _Digits)  + ",";
+      posJson += "\"currentPrice\":"  + DoubleToString(curPrice, _Digits)   + ",";
+      posJson += "\"stopLoss\":"      + DoubleToString(sl, _Digits)         + ",";
+      posJson += "\"takeProfit\":"    + DoubleToString(tp, _Digits)         + ",";
       posJson += "\"profit\":"        + DoubleToString(profit, 2)           + ",";
       posJson += "\"openTime\":"      + IntegerToString((long)posInfo.Time()) + ",";
       posJson += "\"signalId\":\""    + posType + "_" + IntegerToString(ticket) + "\"";
@@ -1458,7 +1336,7 @@ bool SendHeartbeat()
    body += "\"openPositions\":" + IntegerToString(openPos)  + ",";
    body += "\"platform\":\"MT5\",";
    body += "\"accountType\":\"" + accountType + "\",";
-   body += "\"eaVersion\":\"8.2\"";
+   body += "\"eaVersion\":\"8.1\"";
    if (g_apiToken != "") body += ",\"token\":\"" + g_apiToken + "\"";
    body += "}";
 
@@ -1480,170 +1358,20 @@ bool SendHeartbeat()
 //+------------------------------------------------------------------+
 //| Confirma abertura de trade                                        |
 //+------------------------------------------------------------------+
-
-bool IsPositionIdentifierOpen(ulong positionId)
-{
-   for (int i = PositionsTotal() - 1; i >= 0; i--)
-   {
-      if (!posInfo.SelectByIndex(i)) continue;
-      if ((ulong)PositionGetInteger(POSITION_IDENTIFIER) == positionId) return true;
-   }
-   return false;
-}
-
-bool ReportClosedPosition(ulong positionId)
-{
-   if (positionId == 0 || IsPositionIdentifierOpen(positionId)) return false;
-   string closedKey = PriceActionStateKey("InvistaPA_CLOSED", (long)positionId);
-   if (GlobalVariableCheck(closedKey)) return true;
-   if (!HistorySelectByPosition(positionId)) return false;
-
-   double entryVolume = 0.0, entryValue = 0.0;
-   double exitVolume = 0.0, exitValue = 0.0;
-   double netProfit = 0.0;
-   datetime openTime = 0, closeTime = 0;
-   string symbol = "", signalId = "", positionType = "";
-   long closeReason = DEAL_REASON_CLIENT;
-
-   int total = HistoryDealsTotal();
-   for (int i = 0; i < total; i++)
-   {
-      ulong deal = HistoryDealGetTicket(i);
-      if (deal == 0) continue;
-      if ((long)HistoryDealGetInteger(deal, DEAL_MAGIC) != MagicNumber) continue;
-      string dealSymbol = HistoryDealGetString(deal, DEAL_SYMBOL);
-      if (dealSymbol != g_symbol) continue;
-
-      long entry = HistoryDealGetInteger(deal, DEAL_ENTRY);
-      double volume = HistoryDealGetDouble(deal, DEAL_VOLUME);
-      double price = HistoryDealGetDouble(deal, DEAL_PRICE);
-      datetime dealTime = (datetime)HistoryDealGetInteger(deal, DEAL_TIME);
-      if (entry == DEAL_ENTRY_IN)
-      {
-         entryVolume += volume;
-         entryValue += price * volume;
-         if (openTime == 0 || dealTime < openTime) openTime = dealTime;
-         if (symbol == "") symbol = dealSymbol;
-         long dealType = HistoryDealGetInteger(deal, DEAL_TYPE);
-         positionType = dealType == DEAL_TYPE_BUY ? "BUY" : dealType == DEAL_TYPE_SELL ? "SELL" : positionType;
-         string comment = HistoryDealGetString(deal, DEAL_COMMENT);
-         int prefix = StringFind(comment, "InvistaPRO_");
-         if (prefix >= 0) signalId = StringSubstr(comment, prefix + StringLen("InvistaPRO_"));
-      }
-      else if (entry == DEAL_ENTRY_OUT || entry == DEAL_ENTRY_OUT_BY || entry == DEAL_ENTRY_INOUT)
-      {
-         exitVolume += volume;
-         exitValue += price * volume;
-         netProfit += HistoryDealGetDouble(deal, DEAL_PROFIT)
-                    + HistoryDealGetDouble(deal, DEAL_COMMISSION)
-                    + HistoryDealGetDouble(deal, DEAL_SWAP)
-                    + HistoryDealGetDouble(deal, DEAL_FEE);
-         if (dealTime >= closeTime)
-         {
-            closeTime = dealTime;
-            closeReason = HistoryDealGetInteger(deal, DEAL_REASON);
-         }
-         if (symbol == "") symbol = dealSymbol;
-      }
-   }
-
-   if (entryVolume <= 0.0 || exitVolume <= 0.0 || openTime <= 0 || closeTime <= 0
-       || symbol == "" || (positionType != "BUY" && positionType != "SELL")) return false;
-
-   double openPrice = entryValue / entryVolume;
-   double closePrice = exitValue / exitVolume;
-   string reason = "MANUAL";
-   if (closeReason == DEAL_REASON_SL) reason = "STOP_LOSS";
-   else if (closeReason == DEAL_REASON_TP) reason = "TAKE_PROFIT";
-   else if (closeReason == DEAL_REASON_SO) reason = "STOP_OUT";
-
-   string body = "{";
-   body += "\"ticket\":" + IntegerToString((long)positionId) + ",";
-   body += "\"signalId\":\"" + signalId + "\",";
-   body += "\"symbol\":\"" + symbol + "\",";
-   body += "\"type\":\"" + positionType + "\",";
-   body += "\"lots\":" + DoubleToString(entryVolume, 8) + ",";
-   body += "\"openPrice\":" + DoubleToString(openPrice, ManagedSymbolDigits()) + ",";
-   body += "\"closePrice\":" + DoubleToString(closePrice, ManagedSymbolDigits()) + ",";
-   body += "\"profit\":" + DoubleToString(netProfit, 2) + ",";
-   body += "\"pips\":0,";
-   body += "\"openTime\":" + IntegerToString((long)openTime * 1000) + ",";
-   body += "\"closeTime\":" + IntegerToString((long)closeTime * 1000) + ",";
-   body += "\"closeReason\":\"" + reason + "\"";
-   if (g_apiToken != "") body += ",\"token\":\"" + g_apiToken + "\"";
-   body += "}";
-
-   string url = g_serverUrl + "/api/metatrader/trade/close";
-   string headers = "Content-Type: application/json\r\n";
-   char postData[], result[];
-   StringToCharArray(body, postData, 0, StringLen(body));
-   string responseHeaders;
-   int response = WebRequest("POST", url, headers, 7000, postData, result, responseHeaders);
-   if (response == 200)
-   {
-      GlobalVariableSet(closedKey, 1.0);
-      Print("📚 Fechamento sincronizado com o servidor. PositionId=", positionId,
-            " P&L líquido=", DoubleToString(netProfit, 2));
-      return true;
-   }
-   Print("⚠️ Falha ao sincronizar fechamento; será tentado novamente. PositionId=", positionId,
-         " HTTP=", response);
-   return false;
-}
-
-void SyncClosedTradeReports()
-{
-   datetime from = TimeCurrent() - 90 * 86400;
-   if (!HistorySelect(from, TimeCurrent())) return;
-   ulong positionIds[];
-   int total = HistoryDealsTotal();
-   for (int i = 0; i < total; i++)
-   {
-      ulong deal = HistoryDealGetTicket(i);
-      if (deal == 0 || (long)HistoryDealGetInteger(deal, DEAL_MAGIC) != MagicNumber) continue;
-      long entry = HistoryDealGetInteger(deal, DEAL_ENTRY);
-      if (entry != DEAL_ENTRY_OUT && entry != DEAL_ENTRY_OUT_BY && entry != DEAL_ENTRY_INOUT) continue;
-      ulong positionId = (ulong)HistoryDealGetInteger(deal, DEAL_POSITION_ID);
-      if (positionId == 0 || IsPositionIdentifierOpen(positionId)) continue;
-      string key = PriceActionStateKey("InvistaPA_CLOSED", (long)positionId);
-      if (GlobalVariableCheck(key)) continue;
-      bool exists = false;
-      for (int j = 0; j < ArraySize(positionIds); j++) if (positionIds[j] == positionId) { exists = true; break; }
-      if (!exists)
-      {
-         int size = ArraySize(positionIds);
-         ArrayResize(positionIds, size + 1);
-         positionIds[size] = positionId;
-      }
-   }
-   for (int i = 0; i < ArraySize(positionIds); i++) ReportClosedPosition(positionIds[i]);
-}
-
-void OnTradeTransaction(const MqlTradeTransaction &trans, const MqlTradeRequest &request, const MqlTradeResult &result)
-{
-   if (trans.type != TRADE_TRANSACTION_DEAL_ADD || trans.deal == 0) return;
-   if (!HistoryDealSelect(trans.deal)) return;
-   if ((long)HistoryDealGetInteger(trans.deal, DEAL_MAGIC) != MagicNumber) return;
-   long entry = HistoryDealGetInteger(trans.deal, DEAL_ENTRY);
-   if (entry != DEAL_ENTRY_OUT && entry != DEAL_ENTRY_OUT_BY && entry != DEAL_ENTRY_INOUT) return;
-   ulong positionId = (ulong)HistoryDealGetInteger(trans.deal, DEAL_POSITION_ID);
-   if (positionId > 0 && !IsPositionIdentifierOpen(positionId)) ReportClosedPosition(positionId);
-}
-
-void ConfirmTradeOpen(string signalId, long ticket, string type, double lots, double sl, double tp, double executedPrice)
+void ConfirmTradeOpen(string signalId, int ticket, string type, double lots, double sl, double tp)
 {
    string url     = g_serverUrl + "/api/metatrader/trade/open";
    string headers = "Content-Type: application/json\r\n";
-   double openPrice = executedPrice > 0 ? executedPrice : ((type == "BUY") ? SymbolInfoDouble(g_symbol, SYMBOL_ASK) : SymbolInfoDouble(g_symbol, SYMBOL_BID));
+   double openPrice = (type == "BUY") ? SymbolInfoDouble(g_symbol, SYMBOL_ASK) : SymbolInfoDouble(g_symbol, SYMBOL_BID);
    string body = "{";
    body += "\"ticket\":"       + IntegerToString(ticket)          + ",";
    body += "\"symbol\":\""     + g_symbol                        + "\",";
    body += "\"type\":\""       + type                            + "\",";
    body += "\"lots\":"         + DoubleToString(lots, 2)         + ",";
-   body += "\"openPrice\":"    + DoubleToString(openPrice, ManagedSymbolDigits()) + ",";
-   body += "\"stopLoss\":"     + DoubleToString(sl, ManagedSymbolDigits())     + ",";
-   body += "\"takeProfit\":"   + DoubleToString(tp, ManagedSymbolDigits())     + ",";
-   body += "\"openTime\":"     + IntegerToString((long)TimeCurrent() * 1000)  + ",";
+   body += "\"openPrice\":"    + DoubleToString(openPrice, _Digits) + ",";
+   body += "\"stopLoss\":"     + DoubleToString(sl, _Digits)     + ",";
+   body += "\"takeProfit\":"   + DoubleToString(tp, _Digits)     + ",";
+   body += "\"openTime\":"     + IntegerToString(TimeCurrent())  + ",";
    body += "\"signalId\":\""   + signalId                        + "\"";
    if (g_apiToken != "") body += ",\"token\":\"" + g_apiToken + "\"";
    body += "}";
