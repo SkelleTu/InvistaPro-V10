@@ -218,7 +218,7 @@ double JsonNumber(string body,string key) {
 void ReviewOpenPositionAI() {
    if(!InpRequireAIApproval || !PositionSelect(_Symbol)) return;
    if((long)PositionGetInteger(POSITION_MAGIC)!=InpMagic) return;
-   ulong ticket=(ulong)PositionGetInteger(POSITION_TICKET);
+   ulong ticket=(ulong)PositionGetInteger(POSITION_IDENTIFIER);
    long type=PositionGetInteger(POSITION_TYPE);
    int side=type==POSITION_TYPE_BUY ? 1 : -1;
    double currentStop=PositionGetDouble(POSITION_SL);
@@ -433,7 +433,7 @@ string PartialKey(ulong ticket) { return "PA_PARTIAL_"+(string)ticket; }
 void ManageOpenPosition() {
    if(!PositionSelect(_Symbol)) return;
    if((long)PositionGetInteger(POSITION_MAGIC)!=InpMagic) return;
-   ulong ticket=(ulong)PositionGetInteger(POSITION_TICKET);
+   ulong ticket=(ulong)PositionGetInteger(POSITION_IDENTIFIER);
    long type=PositionGetInteger(POSITION_TYPE);
    int side=type==POSITION_TYPE_BUY ? 1 : -1;
    double open=PositionGetDouble(POSITION_PRICE_OPEN);
