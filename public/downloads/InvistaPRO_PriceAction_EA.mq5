@@ -779,7 +779,12 @@ bool ClosePartialPosition(ulong positionTicket,int side,double closeVolume,doubl
    bool requested=side==1
       ? trade.Sell(closeVolume,_Symbol,0,0,0,"PA partial reduction")
       : trade.Buy(closeVolume,_Symbol,0,0,0,"PA partial reduction");
-   if(!requested || !TradeRequestSucceeded()) return false;
+   if(!requested) return false;
+   // A server-accepted asynchronous close must be marked pending by the caller;
+   // otherwise the next timer tick could submit the same reduction twice.
+   if(trade.ResultRetcode()==TRADE_RETCODE_PLACED) return trade.ResultOrder()>0;
+   if(trade.ResultRetcode()!=TRADE_RETCODE_DONE &&
+      trade.ResultRetcode()!=TRADE_RETCODE_DONE_PARTIAL) return false;
    if(!PositionSelect(_Symbol)) return false;
    double afterVolume=PositionGetDouble(POSITION_VOLUME);
    bool samePosition=(ulong)PositionGetInteger(POSITION_IDENTIFIER)==identifier &&
