@@ -788,7 +788,11 @@ void ProcessPendingDeals() {
       string account=(string)AccountInfoInteger(ACCOUNT_LOGIN);
       string trackKey="PA_TRACK_"+account+"_"+(string)positionId;
       string comment=HistoryDealGetString(deal,DEAL_COMMENT);
-      bool isEntry=entry==DEAL_ENTRY_IN && StringFind(comment,"InvistaPRO PA")>=0;
+      ulong dealMagic=(ulong)HistoryDealGetInteger(deal,DEAL_MAGIC);
+      // Magic is the primary identity; the comment is a compatibility fallback
+      // for instances using distinct configured magic numbers.
+      bool isEntry=entry==DEAL_ENTRY_IN &&
+                   (dealMagic==(ulong)InpMagic || StringFind(comment,"InvistaPRO PA")>=0);
       bool isExit=(entry==DEAL_ENTRY_OUT || entry==DEAL_ENTRY_OUT_BY) && GlobalVariableCheck(trackKey);
       if(!isEntry && !isExit) { GlobalVariableDel(pendingName); continue; }
 
