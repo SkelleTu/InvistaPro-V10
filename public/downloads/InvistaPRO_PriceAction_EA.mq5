@@ -457,8 +457,10 @@ void ReviewOpenPositionAI() {
       if(realizedR>=1.5 && !GlobalVariableCheck(key) && PositionSelectByTicket(positionTicket)) {
          double volume=PositionGetDouble(POSITION_VOLUME);
          double partial=NormalizeVolume(volume*0.5);
-         if(partial>0 && partial<volume && ClosePartialPosition(positionTicket,side,partial,volume))
+         if(partial>0 && partial<volume && ClosePartialPosition(positionTicket,side,partial,volume)) {
             GlobalVariableSet(key,1.0);
+            GlobalVariablesFlush();
+         }
       }
    } else if(action=="CLOSE") {
       string reason=JsonString(response,"closeReason");
@@ -988,8 +990,10 @@ void ManageOpenPosition() {
          volume>SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN)*1.5) {
          double closeVol=NormalizeVolume(volume*0.5);
          if(closeVol>0 && closeVol<volume &&
-            ClosePartialPosition(positionTicket,side,closeVol,volume))
+            ClosePartialPosition(positionTicket,side,closeVol,volume)) {
             GlobalVariableSet(partialKey,1.0);
+            GlobalVariablesFlush();
+         }
       }
       if(rNow>=2.0 && PositionSelectByTicket(positionTicket)) {
          MqlRates r[];
@@ -1054,6 +1058,21 @@ bool ReconcilePriceActionHistory(datetime serverDayStart) {
 
       if(PositionIdentifierOpen(positionId)) {
          GlobalVariableSet(trackKey,1.0);
+         if(!HistorySelectByPosition(positionId)) return false;
+         bool hasPartialExit=false;
+         for(int j=0;j<HistoryDealsTotal();j++) {
+            ulong positionDeal=HistoryDealGetTicket(j);
+            if(positionDeal==0) continue;
+            long dealEntry=(long)HistoryDealGetInteger(positionDeal,DEAL_ENTRY);
+            if(dealEntry==DEAL_ENTRY_OUT || dealEntry==DEAL_ENTRY_OUT_BY) {
+               hasPartialExit=true;
+               break;
+            }
+         }
+         if(hasPartialExit) {
+            GlobalVariableSet(PartialKey(positionId),1.0);
+            GlobalVariablesFlush();
+         }
          if(entryTimes[i]>=serverDayStart) PersistPositionRisk(positionId);
          continue;
       }
