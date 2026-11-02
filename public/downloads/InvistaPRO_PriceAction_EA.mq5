@@ -487,6 +487,10 @@ bool DailyRiskAllowed() {
          Print("Baseline de equity diário não pode ser reconstruído com segurança. Novas entradas bloqueadas.");
          return false;
       }
+      if(!RebuildDailyLossCountersFromLedger()) {
+         Print("Ledger diário não foi reconciliado com segurança. Novas entradas bloqueadas.");
+         return false;
+      }
       PersistDailyState();
    }
    else {
@@ -775,6 +779,7 @@ string PendingDealPrefix() {
 }
 
 bool RebuildDailyLossCountersFromLedger() {
+   g_dailyLedgerReady=false;
    datetime nowBrt=TimeGMT()-3*60*60;
    MqlDateTime d; TimeToStruct(nowBrt,d); d.hour=0; d.min=0; d.sec=0;
    datetime brtStart=StructToTime(d);
@@ -916,7 +921,6 @@ void ProcessPendingDeals() {
          GlobalVariableDel(trackKey);
          GlobalVariableDel(PartialKey(positionId));
          GlobalVariableDel("PA_RISK_"+account+"_"+(string)positionId);
-         GlobalVariableDel(entryKey); // the durable PA_ENTRY ledger remains for daily trade reconstruction
          PersistDailyState();
       }
       GlobalVariableSet(dealGuard,(double)TimeCurrent());
@@ -946,6 +950,7 @@ void CleanupOldDealGuards() {
    string account=(string)AccountInfoInteger(ACCOUNT_LOGIN);
    string prefix="PA_DEAL_"+account+"_";
    string closedPrefix="PA_CLOSED_"+account+"_";
+   string entryPrefix="PA_ENTRY_"+account+"_";
    for(int i=GlobalVariablesTotal()-1;i>=0;i--) {
       string name=GlobalVariableName(i);
       if(StringFind(name,prefix)==0) {
@@ -959,7 +964,11 @@ void CleanupOldDealGuards() {
             GlobalVariableDel("PA_CLOSED_PNL_"+account+"_"+positionId);
             GlobalVariableDel(name);
          }
+         continue;
       }
+      if(StringFind(name,entryPrefix)==0 &&
+         TimeCurrent()-(datetime)GlobalVariableGet(name)>90*24*60*60)
+         GlobalVariableDel(name);
    }
 }
 
