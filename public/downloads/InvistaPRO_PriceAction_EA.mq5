@@ -156,6 +156,60 @@ bool RelativeVolume(ENUM_TIMEFRAMES tf) {
    return avg>0 && (double)r[0].tick_volume>=avg;
 }
 
+bool HasLiquiditySweep(int side) {
+   MqlRates r[];
+   if(!GetRates(PERIOD_M15,22,r)) return false;
+   double priorLow=r[1].low, priorHigh=r[1].high;
+   for(int i=2;i<=20;i++) { priorLow=MathMin(priorLow,r[i].low); priorHigh=MathMax(priorHigh,r[i].high); }
+   return side==1 ? r[0].low<priorLow && r[0].close>priorLow
+                  : r[0].high>priorHigh && r[0].close<priorHigh;
+}
+
+bool HasFVGConfluence(int side,double price) {
+   MqlRates r[];
+   if(!GetRates(PERIOD_M15,25,r)) return false;
+   double atr=ATR(PERIOD_M15);
+   if(atr<=0) return false;
+   for(int i=0;i<10;i++) {
+      double zoneLow=0,zoneHigh=0;
+      bool valid=side==1 ? r[i].low>r[i+2].high : r[i].high<r[i+2].low;
+      if(!valid) continue;
+      if(side==1) { zoneLow=r[i+2].high; zoneHigh=r[i].low; }
+      else { zoneLow=r[i].high; zoneHigh=r[i+2].low; }
+      if(price>=zoneLow-atr*0.25 && price<=zoneHigh+atr*0.25) return true;
+   }
+   return false;
+}
+
+bool HasOrderBlockConfluence(int side,double price) {
+   MqlRates r[];
+   if(!GetRates(PERIOD_M15,25,r)) return false;
+   double avgRange=0;
+   for(int j=2;j<22;j++) avgRange+=r[j].high-r[j].low;
+   avgRange/=20.0;
+   if(avgRange<=0) return false;
+   double tolerance=ATR(PERIOD_M15)*0.25;
+   if(tolerance<=0) return false;
+   for(int i=0;i<10;i++) {
+      MqlRates candidate=r[i+1], impulse=r[i];
+      bool opposite=side==1 ? candidate.close<candidate.open : candidate.close>candidate.open;
+      bool displacement=side==1 ? impulse.close>impulse.open : impulse.close<impulse.open;
+      if(!opposite || !displacement || MathAbs(impulse.close-impulse.open)<avgRange*1.5) continue;
+      double zoneLow=MathMin(candidate.open,candidate.close);
+      double zoneHigh=MathMax(candidate.open,candidate.close);
+      if(price>=zoneLow-tolerance && price<=zoneHigh+tolerance) return true;
+   }
+   return false;
+}
+
+bool HasBreakOfStructure(int side) {
+   MqlRates r[];
+   if(!GetRates(PERIOD_M15,12,r)) return false;
+   double priorHigh=r[1].high, priorLow=r[1].low;
+   for(int i=2;i<=10;i++) { priorHigh=MathMax(priorHigh,r[i].high); priorLow=MathMin(priorLow,r[i].low); }
+   return side==1 ? r[0].close>priorHigh : r[0].close<priorLow;
+}
+
 bool LatestClosedCandleFresh(ENUM_TIMEFRAMES tf) {
    MqlRates latest[];
    if(!GetRates(tf,1,latest)) return false;
@@ -210,6 +264,10 @@ bool RequestAIReview(int side,double trigger,double invalidation,datetime patter
    body+="\"estimatedRoundTripCostPercent\":"+DoubleToString(InpEstimatedRoundTripCostPercent,3)+",";
    body+="\"accountEquity\":"+DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY),2)+",";
    body+="\"freeMargin\":"+DoubleToString(AccountInfoDouble(ACCOUNT_MARGIN_FREE),2)+",";
+   body+="\"liquiditySweep\":"+(HasLiquiditySweep(side)?"true":"false")+",";
+   body+="\"fvgConfluence\":"+(HasFVGConfluence(side,marketTick.ask)?"true":"false")+",";
+   body+="\"orderBlockConfluence\":"+(HasOrderBlockConfluence(side,marketTick.ask)?"true":"false")+",";
+   body+="\"breakOfStructure\":"+(HasBreakOfStructure(side)?"true":"false")+",";
    body+="\"tradesToday\":"+(string)g_tradesToday+",\"consecutiveLosses\":"+(string)g_consecutiveLosses+"},";
    body+="\"frames\":{\"H4\":"+h4+",\"H1\":"+h1+",\"M15\":"+m15+",\"M5\":"+m5+",\"M1\":"+m1+"}}";
    char data[],result[];
