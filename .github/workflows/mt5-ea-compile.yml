@@ -47,7 +47,7 @@ jobs:
           if (!$editor) {
             throw "MetaEditor 64-bit was not found after installation."
           }
-          $installRoot = $editor.Directory.Parent.FullName
+          $installRoot = $editor.Directory.FullName
           $source = Join-Path $env:GITHUB_WORKSPACE "public/downloads/InvistaPRO_PriceAction_EA.mq5"
           $experts = Join-Path $installRoot "MQL5\Experts"
           New-Item -ItemType Directory -Force -Path $experts | Out-Null
@@ -68,8 +68,10 @@ jobs:
           if ($report -notmatch "(?im)\b0 errors?,\s*0 warnings?\b") {
             throw "MQL5 compile did not report zero errors and zero warnings."
           }
-          "METAEDITOR=$($editor.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "EA_TARGET=$target" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          $artifactDir = Join-Path $env:GITHUB_WORKSPACE "mt5-compile-artifacts"
+          New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
+          Copy-Item $log (Join-Path $artifactDir "InvistaPRO_PriceAction_EA.log") -Force
+          Copy-Item ([IO.Path]::ChangeExtension($target, ".ex5")) (Join-Path $artifactDir "InvistaPRO_PriceAction_EA.ex5") -Force
 
       - name: Upload compiler log and EX5 artifact
         if: always()
@@ -77,7 +79,6 @@ jobs:
         with:
           name: invistapro-price-action-mt5-compile
           path: |
-            **/InvistaPRO_PriceAction_EA.log
-            **/InvistaPRO_PriceAction_EA.ex5
+            mt5-compile-artifacts/*
           if-no-files-found: warn
           retention-days: 14
