@@ -33,7 +33,7 @@ The primary deliverable is a broker-neutral MetaTrader 5 EA. It reads the select
 - [x] Basic range regime detection requires H4/H1/M15 range alignment and permits setups only at M15 extremes; targets are rejected when blocked by a confirmed opposing pivot.
 - [ ] Complete deterministic definitions and tests for liquidity sweeps, FVG, Order Blocks, BOS/CHoCH and persistent zone lifecycle.
 - [ ] Backtest, out-of-sample, replay, fault-injection and DEMO forward evidence.
-- [ ] Review daily drawdown baseline when EA is attached mid-session and shared account-wide risk across multiple charts/magic instances.
+- [ ] Validate reconstructed drawdown baseline against broker history with deposits/withdrawals and carried positions; verify shared account-wide risk across multiple charts/terminals.
 
 ## Separate Binance research adapter (not an EA dependency)
 
