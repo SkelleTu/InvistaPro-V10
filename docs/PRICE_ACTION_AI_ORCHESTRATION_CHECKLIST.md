@@ -2,10 +2,12 @@
 
 Status: design baseline only. Not approved for live trading.
 
-- [ ] Binance market-data adapter for BTC/USDT, ETH/USDT and SOL/USDT.
-- [ ] Closed-candle multi-timeframe scanner (H4, H1, M15, M5/M1).
+- [x] Public Binance REST/WebSocket closed-candle feed for BTCUSDT, ETHUSDT and SOLUSDT; Spot or USD-M Futures must be selected explicitly.
+- [ ] Connect the feed lifecycle to a supervised worker and operational health endpoint.
+- [ ] Closed-candle multi-timeframe pre-trigger scanner (H4, H1, M15, M5/M1), including confirmed pivots and stale/gap checks.
 - [ ] Cheap deterministic pre-trigger scanner; no AI call without a candidate.
-- [ ] AI full-context review only after pre-trigger, with per-symbol deduplication and cooldown.
+- [x] AI review coordinator contract with per-symbol cooldown, in-flight deduplication and fail-closed behavior.
+- [ ] Adapter that sends the complete Binance multi-timeframe snapshot to the existing Invista PRO AI ensemble.
 - [ ] Final deterministic gates rerun after AI approval; AI cannot create signals or override risk.
 - [ ] DEMO/testnet-only execution adapter with idempotency and reconciliation.
 - [ ] Exchange-side protective stop confirmed before considering a position protected.
