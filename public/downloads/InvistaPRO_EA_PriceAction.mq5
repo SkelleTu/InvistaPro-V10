@@ -432,8 +432,10 @@ bool ClosePriceActionPartial(ulong ticket, double volume, string positionType)
    {
       bool sent = trade.PositionClosePartial(ticket, volume);
       uint retcode = trade.ResultRetcode();
+      double filledVolume = trade.ResultVolume();
+      double tolerance = MathMax(SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_STEP) * 0.5, 1e-8);
       return sent && (retcode == TRADE_RETCODE_DONE || retcode == TRADE_RETCODE_DONE_PARTIAL)
-             && trade.ResultDeal() > 0;
+             && trade.ResultDeal() > 0 && filledVolume + tolerance >= volume;
    }
 
    // Netting accounts reduce the existing position with an opposite deal.
@@ -462,7 +464,9 @@ bool ClosePriceActionPartial(ulong ticket, double volume, string positionType)
       Print("⛔ Price Action: falha de envio da parcial netting. erro=", GetLastError());
       return false;
    }
-   return (result.retcode == TRADE_RETCODE_DONE || result.retcode == TRADE_RETCODE_DONE_PARTIAL) && result.deal > 0 && result.volume > 0;
+   double tolerance = MathMax(SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_STEP) * 0.5, 1e-8);
+   return (result.retcode == TRADE_RETCODE_DONE || result.retcode == TRADE_RETCODE_DONE_PARTIAL)
+          && result.deal > 0 && result.volume + tolerance >= volume;
 }
 
 void FetchAndProcessSignal()
@@ -740,8 +744,14 @@ void MonitorOpenPositions()
           double initialVolume = GlobalVariableCheck(volumeKey) ? GlobalVariableGet(volumeKey) : posInfo.Volume();
           if (!GlobalVariableCheck(volumeKey)) GlobalVariableSet(volumeKey, initialVolume);
           double volumeStepForState = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_STEP);
+          double minVolumeForState = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_MIN);
+          double partialTolerance = MathMax(volumeStepForState * 0.5, 1e-8);
+          double desiredPartialVolume = volumeStepForState > 0.0
+             ? MathFloor((initialVolume * 0.5) / volumeStepForState) * volumeStepForState : 0.0;
+          double alreadyClosedVolume = MathMax(0.0, initialVolume - posInfo.Volume());
           bool partialAlreadyDone = GlobalVariableCheck(partialKey)
-             || (volumeStepForState > 0.0 && posInfo.Volume() <= initialVolume - volumeStepForState * 0.5);
+             || (desiredPartialVolume >= minVolumeForState
+                 && alreadyClosedVolume + partialTolerance >= desiredPartialVolume);
           if (partialAlreadyDone && !GlobalVariableCheck(partialKey)) GlobalVariableSet(partialKey, 1.0);
           if (initialRisk <= 0.0 && MathAbs(openPrice - sl) > SymbolInfoDouble(g_symbol, SYMBOL_POINT) * 2.0)
           {
@@ -771,26 +781,29 @@ void MonitorOpenPositions()
              }
              if (favorableMove >= initialRisk * 1.5 && !partialAlreadyDone && ((posType == "BUY" && sl >= openPrice) || (posType == "SELL" && sl <= openPrice)))
              {
-                double volume = posInfo.Volume();
+                double currentVolume = posInfo.Volume();
                 double volumeStep = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_STEP);
                 double minVolume = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_MIN);
                 int volumeDigits = VolumeDigitsFromStep();
-                double partialVolume = (volumeStep > 0) ? MathFloor((volume * 0.5) / volumeStep) * volumeStep : 0.0;
+                double remainingToClose = MathMax(0.0, desiredPartialVolume - alreadyClosedVolume);
+                double partialVolume = (volumeStep > 0.0)
+                   ? MathFloor((remainingToClose + partialTolerance) / volumeStep) * volumeStep : 0.0;
                 partialVolume = NormalizeDouble(partialVolume, volumeDigits);
-                if (partialVolume >= minVolume && volume - partialVolume >= minVolume)
+                if (desiredPartialVolume >= minVolume && partialVolume >= minVolume
+                    && currentVolume - partialVolume >= minVolume)
                 {
                    if (ClosePriceActionPartial(ticket, partialVolume, posType))
                    {
                       GlobalVariableSet(partialKey, 1.0);
-                      Print("🎯 Price Action: parcial de 50% realizada em +1,5R. Ticket=", ticket);
+                      Print("🎯 Price Action: parcial-alvo de 50% confirmada em +1,5R. Ticket=", ticket);
                       continue;
                    }
-                   Print("⛔ Price Action: parcial falhou; ticket=", ticket, " retcode=", trade.ResultRetcode());
+                   Print("⛔ Price Action: parcial incompleta/recusada; será reconciliada pelo volume real. Ticket=", ticket, " retcode=", trade.ResultRetcode());
                 }
                 else
                 {
                    GlobalVariableSet(partialKey, -1.0);
-                   Print("ℹ️ Price Action: lote mínimo do broker impede parcial de 50%; posição segue protegida pelo SL/TP.");
+                   Print("ℹ️ Price Action: lote mínimo do broker impede completar a parcial de 50%; posição segue protegida pelo SL/TP.");
                 }
              }
              if (favorableMove >= initialRisk * 1.5)
