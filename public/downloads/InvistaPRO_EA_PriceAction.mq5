@@ -385,6 +385,23 @@ double CalculatePriceActionRiskLot(double entryPrice, double stopLoss)
    return volume;
 }
 
+double RecoverInitialPositionVolume(long positionIdentifier)
+{
+   if (positionIdentifier <= 0 || !HistorySelectByPosition(positionIdentifier)) return 0.0;
+   double openedVolume = 0.0;
+   for (int i = 0; i < HistoryDealsTotal(); i++)
+   {
+      ulong deal = HistoryDealGetTicket(i);
+      if (deal == 0) continue;
+      if (HistoryDealGetInteger(deal, DEAL_MAGIC) != MagicNumber) continue;
+      if (HistoryDealGetString(deal, DEAL_SYMBOL) != g_symbol) continue;
+      ENUM_DEAL_ENTRY entry = (ENUM_DEAL_ENTRY)HistoryDealGetInteger(deal, DEAL_ENTRY);
+      if (entry == DEAL_ENTRY_IN || entry == DEAL_ENTRY_INOUT)
+         openedVolume += HistoryDealGetDouble(deal, DEAL_VOLUME);
+   }
+   return openedVolume;
+}
+
 void PersistPriceActionPositionState()
 {
    for (int i = PositionsTotal() - 1; i >= 0; i--)
@@ -396,8 +413,10 @@ void PersistPriceActionPositionState()
       if (initialRisk <= 0.0) continue;
       string riskKey = PriceActionStateKey("InvistaPA_R", (long)ticket);
       string volumeKey = PriceActionStateKey("InvistaPA_V", (long)ticket);
+      double recoveredInitialVolume = RecoverInitialPositionVolume(posInfo.Identifier());
       if (!GlobalVariableCheck(riskKey)) GlobalVariableSet(riskKey, initialRisk);
-      if (!GlobalVariableCheck(volumeKey)) GlobalVariableSet(volumeKey, posInfo.Volume());
+      if (!GlobalVariableCheck(volumeKey))
+         GlobalVariableSet(volumeKey, recoveredInitialVolume > 0.0 ? recoveredInitialVolume : posInfo.Volume());
    }
 }
 
@@ -770,7 +789,9 @@ void MonitorOpenPositions()
           string volumeKey = PriceActionStateKey("InvistaPA_V", (long)ticket);
           string partialKey = PriceActionStateKey("InvistaPA_TP1", (long)ticket);
           double initialRisk = GlobalVariableCheck(riskKey) ? GlobalVariableGet(riskKey) : 0.0;
-          double initialVolume = GlobalVariableCheck(volumeKey) ? GlobalVariableGet(volumeKey) : posInfo.Volume();
+          double recoveredInitialVolume = RecoverInitialPositionVolume(posInfo.Identifier());
+          double initialVolume = GlobalVariableCheck(volumeKey) ? GlobalVariableGet(volumeKey)
+             : (recoveredInitialVolume > 0.0 ? recoveredInitialVolume : posInfo.Volume());
           if (!GlobalVariableCheck(volumeKey)) GlobalVariableSet(volumeKey, initialVolume);
           double volumeStepForState = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_STEP);
           double minVolumeForState = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_MIN);
