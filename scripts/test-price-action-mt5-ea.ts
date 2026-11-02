@@ -85,6 +85,9 @@ assert.ok(ea.includes('SYMBOL_TRADE_TICK_SIZE'), 'Prices must align to broker ti
 assert.ok(ea.includes('PersistDailyState'), 'Daily circuit-breaker state must persist across EA restarts');
 assert.ok(ea.includes('GlobalVariableSet(pending,(double)TimeCurrent())'), 'Trade transaction events must be queued persistently');
 assert.ok(ea.includes('GlobalVariablesFlush(); // transaction callback must survive an abrupt terminal restart'), 'Pending transaction markers must be forced to disk immediately');
+assert.ok(ea.includes('if(!EventSetTimer(1))'), 'EA startup must fail if its protective timer cannot be started');
+assert.ok(ea.includes('void OnDeinit(const int reason) { EventKillTimer(); GlobalVariablesFlush(); }'), 'EA shutdown must flush terminal state after stopping the timer');
+
 assert.ok(ea.includes('GlobalVariablesFlush(); // force daily risk state to disk before a terminal/power interruption'), 'Daily risk counters must be flushed to disk after persistence');
 assert.ok(ea.includes('GlobalVariablesFlush(); // commit accounting guard and pending-marker deletion together'), 'Deal idempotency state must be flushed after processing');
 
