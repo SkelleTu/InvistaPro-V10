@@ -35,6 +35,7 @@ double g_lastPositionAIReference = 0;
 ulong g_lastPositionTicket = 0;
 datetime g_pauseUntil = 0;
 datetime g_dayStart = 0;
+double g_dailyLockToken = 0.0;
 double g_dayStartEquity = 0;
 int g_tradesToday = 0;
 int g_consecutiveLosses = 0;
@@ -588,15 +589,25 @@ string DailyLockKey() { return DailyStatePrefix()+"_LOCK"; }
 
 bool AcquireDailyLock() {
    string key=DailyLockKey();
-   if(!GlobalVariableCheck(key)) GlobalVariableSet(key,0.0);
+   // Create-if-absent without overwriting another chart's active lock.
+   if(!GlobalVariableTemp(key) && !GlobalVariableCheck(key)) return false;
    double observed=GlobalVariableGet(key);
    datetime now=TimeLocal();
    if(observed!=0 && now-(datetime)observed<30) return false;
-   return GlobalVariableSetOnCondition(key,(double)now,observed);
+   // Include millisecond and chart identity fragments so lock ownership is
+   // distinguishable between charts even when they execute in the same second.
+   double token=(double)now+(double)(GetTickCount()%1000)/1000.0+
+                (double)(MathAbs((double)ChartID())%100)/100000.0;
+   if(!GlobalVariableSetOnCondition(key,token,observed)) return false;
+   g_dailyLockToken=token;
+   return true;
 }
 void ReleaseDailyLock() {
+   if(g_dailyLockToken==0) return;
    string key=DailyLockKey();
-   if(GlobalVariableCheck(key)) GlobalVariableSet(key,0.0);
+   // Never release a lock that expired and was acquired by another chart.
+   GlobalVariableSetOnCondition(key,0.0,g_dailyLockToken);
+   g_dailyLockToken=0.0;
 }
 
 bool ExecuteSetup(Setup &s) {
