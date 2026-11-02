@@ -61,6 +61,8 @@ assert.ok(ea.includes('GlobalVariableSet(dealGuard,(double)TimeCurrent())'), 'De
 assert.ok(ea.includes('HistorySelectByPosition(positionId)'), 'Final position PnL must be reconstructed from all position deals');
 assert.ok(ea.includes('PA_CLOSED_'), 'Closed-position accounting must be idempotent by position identifier');
 assert.ok(ea.includes('RebuildDailyLossCountersFromLedger()'), 'Daily loss streaks must be reconstructed from the durable closed-position ledger');
+assert.ok(ea.includes('!GlobalVariableCheck(closedKey) || !GlobalVariableCheck(closedPnlKey)'), 'Interrupted closed-position ledger writes must be repaired from deal history');
+
 assert.ok(ea.includes('PA_CLOSED_PNL_'), 'Closed-position PnL must be persisted separately for restart-safe reconciliation');
 assert.ok(ea.includes('closeTimes[j]<closeTimes[i]'), 'Consecutive losses must be reconstructed in chronological order');
 assert.ok(ea.includes('GlobalVariableDel("PA_CLOSED_PNL_"+account+"_"+positionId)'), 'Old closed-position PnL ledger entries must be cleaned up with their timestamps');
