@@ -403,9 +403,14 @@ export default function MetaTraderPage() {
     });
   };
 
-  const downloadEA = async () => {
+  const downloadEAFile = async (
+    endpoint: string,
+    filename: string,
+    successTitle: string,
+    successDescription: string,
+  ) => {
     try {
-      const response = await fetch('/api/mt5/download-ea', {
+      const response = await fetch(endpoint, {
         method: 'GET',
         credentials: 'same-origin',
         headers: { Accept: 'text/plain' },
@@ -419,38 +424,26 @@ export default function MetaTraderPage() {
         } catch {
           // Keep the HTTP status message when the server did not return JSON.
         }
-        toast({
-          title: 'Não foi possível baixar o EA',
-          description: message,
-          variant: 'destructive',
-        });
+        toast({ title: 'Não foi possível baixar o EA', description: message, variant: 'destructive' });
         return;
       }
 
       const contentType = (response.headers.get('content-type') || '').toLowerCase();
       if (!contentType.includes('text/plain')) {
-        throw new Error('A resposta do servidor não parece ser o arquivo EA. Confirme que sua sessão está autenticada e tente novamente.');
+        throw new Error('A resposta do servidor não parece ser um arquivo EA válido. Confirme sua sessão e tente novamente.');
       }
-
       const blob = await response.blob();
-      if (blob.size === 0) {
-        throw new Error('O servidor retornou um arquivo vazio.');
-      }
+      if (blob.size === 0) throw new Error('O servidor retornou um arquivo vazio.');
 
       const objectUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = objectUrl;
-      link.download = 'InvistaPRO_EA.mq5';
+      link.download = filename;
       document.body.appendChild(link);
       link.click();
       link.remove();
       window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
-
-      toast({
-        title: '✅ InvistaPRO EA v8.0 baixado!',
-        description: 'IMPORTANTE: Substitua o EA anterior por este novo arquivo. Copie para MQL5/Experts → Compilar (F7) → Arraste ao gráfico e habilite AlgoTrading. A URL do servidor já está pré-configurada.',
-        duration: 8000,
-      });
+      toast({ title: successTitle, description: successDescription, duration: 9000 });
     } catch (error: any) {
       toast({
         title: 'Falha no download do EA',
@@ -459,6 +452,20 @@ export default function MetaTraderPage() {
       });
     }
   };
+
+  const downloadEA = () => downloadEAFile(
+    '/api/mt5/download-ea',
+    'InvistaPRO_EA.mq5',
+    'EA Girassol legado v8.1 baixado',
+    'Este é o EA legado com a integração Girassol/Fibonacci. Mantenha-o separado do novo EA Price Action.',
+  );
+
+  const downloadPriceActionEA = () => downloadEAFile(
+    '/api/mt5/download-ea-price-action',
+    'InvistaPRO_EA_PriceAction.mq5',
+    'EA Price Action v1.0 baixado',
+    'EA novo da estratégia Price Action. Copie para MQL5/Experts, compile no MetaEditor (F7), instale no gráfico do ativo desejado e habilite AlgoTrading. Opera o símbolo do gráfico; não requer Girassol. Configure EstimatedRoundTripCommissionPerLot com a comissão total de ida e volta por lote na moeda da conta; mantenha zero somente se o broker não cobrar comissão.',
+  );
 
   return (
     <div className="min-h-screen bg-background p-4 md:p-6">
@@ -547,9 +554,13 @@ export default function MetaTraderPage() {
                     : 'Aguardando EA'}
               </span>
             </div>
-            <Button onClick={downloadEA} data-testid="button-download-ea" className="gap-2">
+            <Button onClick={downloadEA} data-testid="button-download-ea" className="gap-2" variant="outline">
               <Download className="h-4 w-4" />
-              Baixar EA v8.0
+              EA Girassol legado v8.1
+            </Button>
+            <Button onClick={downloadPriceActionEA} data-testid="button-download-price-action-ea" className="gap-2">
+              <Download className="h-4 w-4" />
+              Baixar EA Price Action v1.0
             </Button>
           </div>
         </div>
@@ -2489,9 +2500,13 @@ export default function MetaTraderPage() {
                     </Button>
                   </div>
                 </div>
-                <Button onClick={downloadEA} className="w-full gap-2" data-testid="button-download-ea-config">
+                <Button onClick={downloadEA} variant="outline" className="w-full gap-2" data-testid="button-download-ea-config">
                   <Download className="h-4 w-4" />
-                  ⬇ Baixar InvistaPRO EA v8.0
+                  Baixar EA Girassol legado v8.1
+                </Button>
+                <Button onClick={downloadPriceActionEA} className="w-full gap-2 mt-2" data-testid="button-download-price-action-ea-config">
+                  <Download className="h-4 w-4" />
+                  Baixar EA Price Action v1.0
                 </Button>
               </CardContent>
             </Card>

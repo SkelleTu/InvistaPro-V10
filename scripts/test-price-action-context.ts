@@ -49,7 +49,7 @@ const config = {
   maxOpenPositions: 5,
 } as MT5Config;
 const status = {
-  lastBalance: 1000, lastEquity: 1000, dailyLoss: 0, dailyProfit: 0, openPositions: 0, circuitBreakerActive: false,
+  lastBalance: 1000, lastEquity: 1000, dailyLoss: 0, dailyProfit: 0, dailyWins: 0, dailyLosses: 0, openPositions: 0, circuitBreakerActive: false,
 } as MT5Status;
 assert.equal(assessMt5RiskLimit({
   config, status, observedAccountType: 'demo', accountHeartbeatAt: now - 1000, now,
@@ -63,6 +63,16 @@ assert.equal(assessMt5RiskLimit({
 assert.equal(assessMt5RiskLimit({
   config, status: { ...status, dailyLoss: 100 }, observedAccountType: 'demo', accountHeartbeatAt: now - 1000, now,
 }).ok, false, 'Daily loss limit must block entries');
+assert.equal(assessMt5RiskLimit({
+  config, status: { ...status, dailyLosses: 3 }, observedAccountType: 'demo', accountHeartbeatAt: now - 1000, now,
+}).ok, false, 'Three losing trades in one day must block further entries');
+assert.equal(assessMt5RiskLimit({
+  config, status: { ...status, dailyWins: 5 }, observedAccountType: 'demo', accountHeartbeatAt: now - 1000, now,
+}).ok, false, 'The default five-trade daily cap must block further entries');
+assert.equal(assessMt5RiskLimit({
+  config, status: { ...status, dailyWins: 1, dailyLosses: 1, dailyTrades: 5, dailyBreakeven: 3 },
+  observedAccountType: 'demo', accountHeartbeatAt: now - 1000, now,
+}).ok, false, 'Breakeven trades must count toward the five-trade daily cap without being classified as wins or losses');
 
 const realConfig = { ...config, accountType: 'real' } as MT5Config;
 assert.equal(assessMt5RiskLimit({

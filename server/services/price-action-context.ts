@@ -23,6 +23,14 @@ const CALENDAR_URL = process.env.MT5_ECONOMIC_CALENDAR_URL?.trim()
 const CALENDAR_CACHE_TTL_MS = 5 * 60_000;
 const CALENDAR_MAX_STALE_MS = 10 * 60_000;
 const NEWS_WINDOW_MS = 30 * 60_000;
+const MAX_DAILY_LOSSES = (() => {
+  const value = Number(process.env.MT5_PRICE_ACTION_MAX_DAILY_LOSSES ?? 3);
+  return Number.isInteger(value) && value >= 1 && value <= 3 ? value : 3;
+})();
+const MAX_DAILY_TRADES = (() => {
+  const value = Number(process.env.MT5_PRICE_ACTION_MAX_DAILY_TRADES ?? 5);
+  return Number.isInteger(value) && value >= 3 && value <= 5 ? value : 5;
+})();
 const MAX_SPREAD_FRACTION = (() => {
   const raw = Number(process.env.MT5_PRICE_ACTION_MAX_SPREAD_PCT ?? 0.0005);
   return Number.isFinite(raw) && raw >= 0.00005 && raw <= 0.01 ? raw : 0.0005;
@@ -186,7 +194,16 @@ export function assessMt5RiskLimit(input: {
   if (!Number.isFinite(config.maxDailyLoss) || config.maxDailyLoss <= 0 || effectiveDailyLoss >= config.maxDailyLoss) reasons.push('Limite diário de perda atingido, inválido ou incluindo drawdown aberto');
   if (!Number.isFinite(config.maxDailyProfit) || config.maxDailyProfit <= 0
     || !Number.isFinite(status.dailyProfit) || status.dailyProfit < 0 || status.dailyProfit >= config.maxDailyProfit) reasons.push('Meta/limite diário de lucro atingido, indisponível ou inválido');
-  if (status.circuitBreakerActive) reasons.push('Circuit breaker ativo');
+  if (status.circuitBreakerActive) reasons.push('Circuit breaker ativo: pausa obrigatória após duas perdas consecutivas');
+  const dailyTrades = typeof status.dailyTrades === 'number' && Number.isFinite(status.dailyTrades)
+    ? status.dailyTrades
+    : Number(status.dailyWins) + Number(status.dailyLosses) + Number(status.dailyBreakeven ?? 0);
+  if (!Number.isFinite(dailyTrades) || dailyTrades >= MAX_DAILY_TRADES) {
+    reasons.push('Limite diário de ' + MAX_DAILY_TRADES + ' operações atingido');
+  }
+  if (!Number.isFinite(status.dailyLosses) || status.dailyLosses >= MAX_DAILY_LOSSES) {
+    reasons.push('Limite diário de ' + MAX_DAILY_LOSSES + ' operações perdedoras atingido');
+  }
   if (!Number.isFinite(config.maxOpenPositions) || config.maxOpenPositions < 1
     || !Number.isFinite(status.openPositions) || status.openPositions < 0
     || status.openPositions >= config.maxOpenPositions) reasons.push('Limite de posições abertas atingido, indisponível ou inválido');
