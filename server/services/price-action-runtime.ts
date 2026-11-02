@@ -1,6 +1,6 @@
 import { EventEmitter } from 'events';
 import { BinancePriceActionFeed, type BinanceMarket, type BinancePriceTick } from './binance-price-action-feed';
-import { priceActionAiPipeline, priceActionAiCoordinator } from './price-action-ai-pipeline';
+import { priceActionAiPipeline, priceActionAiCoordinator } from './price-action-ai-service';
 import type { MarketContext } from './price-action-engine';
 import type { PositionState } from './price-action-ai-coordinator';
 
