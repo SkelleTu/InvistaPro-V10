@@ -349,7 +349,7 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
     // Legacy indicator/AI logic is not allowed to create a bypass around this gate.
     // The EA applies the same deterministic Price Action engine to the chart symbol.
     // Bitcoin remains the reference calibration asset; eligibility is determined by data and execution gates, not a symbol allowlist.
-    const isPriceActionInstrument = true;
+    const isPriceActionInstrument = sym.trim().length > 0;
     let priceActionSetup: ReturnType<typeof evaluatePriceActionSetup> | null = null;
     if (isPriceActionInstrument) {
       const frames = timeframes && typeof timeframes === 'object' ? timeframes as Partial<Record<'H4'|'H1'|'M15'|'M5'|'M1', Candle[]>> : {};
