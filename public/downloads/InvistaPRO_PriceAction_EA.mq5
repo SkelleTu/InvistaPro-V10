@@ -487,6 +487,7 @@ double ReconstructDayStartEquity(datetime dayStart) {
 }
 
 bool RebuildDailyLossCountersFromLedger();
+string PendingDealPrefix();
 
 bool HasPendingDealEvents() {
    string prefix=PendingDealPrefix();
