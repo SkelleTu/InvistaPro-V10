@@ -69,6 +69,10 @@ assert.equal(assessMt5RiskLimit({
 assert.equal(assessMt5RiskLimit({
   config, status: { ...status, dailyWins: 5 }, observedAccountType: 'demo', accountHeartbeatAt: now - 1000, now,
 }).ok, false, 'The default five-trade daily cap must block further entries');
+assert.equal(assessMt5RiskLimit({
+  config, status: { ...status, dailyWins: 1, dailyLosses: 1, dailyTrades: 5, dailyBreakeven: 3 },
+  observedAccountType: 'demo', accountHeartbeatAt: now - 1000, now,
+}).ok, false, 'Breakeven trades must count toward the five-trade daily cap without being classified as wins or losses');
 
 const realConfig = { ...config, accountType: 'real' } as MT5Config;
 assert.equal(assessMt5RiskLimit({
