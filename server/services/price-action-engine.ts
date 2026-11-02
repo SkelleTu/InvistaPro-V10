@@ -262,7 +262,7 @@ export function arePriceActionFramesFresh(
   }
   const entryFrames = (['M5', 'M1'] as const).filter(timeframe => validCandles(frames[timeframe]));
   if (!entryFrames.length) return false;
-  return entryFrames.some(timeframe => {
+  return entryFrames.every(timeframe => {
     const values = frames[timeframe]!;
     const rawTime = values[values.length - 1].time;
     const timestampMs = rawTime < 10_000_000_000 ? rawTime * 1000 : rawTime;
