@@ -17,7 +17,6 @@
 input string   ServerURL        = "https://invista-pro-v10-kzlv.onrender.com"; // URL do servidor InvistaPRO
 input string   DiscoveryBlobURL = "https://invista-pro-v10-kzlv.onrender.com/api/url"; // URL de descoberta automática
 input string   ApiToken         = "";          // Token de autenticação (opcional)
-input string   Symbol_Override  = "";          // Símbolo (vazio = gráfico atual)
 input int      HeartbeatSeconds = 30;          // Intervalo do heartbeat (segundos)
 input int      SignalSeconds    = 5;           // Intervalo de busca de sinal (segundos)
 input int      MagicNumber      = 20261102;    // Número mágico
@@ -64,7 +63,7 @@ int OnInit()
    }
    g_serverUrl   = ServerURL;
    g_discoverUrl = DiscoveryBlobURL;
-   g_symbol      = (Symbol_Override != "") ? Symbol_Override : _Symbol;
+   g_symbol      = _Symbol;
    g_apiToken    = ApiToken;
    g_failCount   = 0;
 
