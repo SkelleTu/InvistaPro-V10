@@ -23,6 +23,7 @@ input int    InpMaxLosingTradesPerDay = 3;
 input int    InpPauseMinutesAfterLosses = 60;
 input double InpDailyLossLimitPercent = 3.0;
 input int    InpDeviationPoints = 30;
+input int    InpMaxSlippagePoints = 0; // 0 = automatic ATR-based limit
 input int    InpHeartbeatSeconds = 30;
 
 CTrade trade;
@@ -429,8 +430,16 @@ bool ExecuteSetup(Setup &s) {
    trade.SetTypeFillingBySymbol(_Symbol);
    bool ok=s.side==1 ? trade.Buy(volume,_Symbol,0,s.stop,s.target,"InvistaPRO PA")
                      : trade.Sell(volume,_Symbol,0,s.stop,s.target,"InvistaPRO PA");
-   if(!ok || (trade.ResultRetcode()!=TRADE_RETCODE_DONE && trade.ResultRetcode()!=TRADE_RETCODE_PLACED)) {
+   if(!ok || (trade.ResultRetcode()!=TRADE_RETCODE_DONE && trade.ResultRetcode()!=TRADE_RETCODE_PLACED && trade.ResultRetcode()!=TRADE_RETCODE_DONE_PARTIAL)) {
       Print("Ordem rejeitada: ",trade.ResultRetcode()," ",trade.ResultRetcodeDescription());
+      return false;
+   }
+   double fillPrice=trade.ResultPrice();
+   double maxSlippage=InpMaxSlippagePoints>0 ? InpMaxSlippagePoints*_Point : ATR(PERIOD_M15)*0.10;
+   if(fillPrice<=0 || maxSlippage<=0 || MathAbs(fillPrice-s.entry)>maxSlippage) {
+      Print("Slippage acima do limite ou preço de execução inválido. Tentando zerar a posição imediatamente.");
+      if(PositionSelect(_Symbol) && (long)PositionGetInteger(POSITION_MAGIC)==InpMagic)
+         trade.PositionClose(_Symbol);
       return false;
    }
    g_tradesToday++;
