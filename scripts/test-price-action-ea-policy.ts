@@ -5,8 +5,8 @@ const ea = readFileSync(new URL('../public/downloads/InvistaPRO_EA_PriceAction.m
 const legacyEa = readFileSync(new URL('../public/downloads/InvistaPRO_EA.mq5', import.meta.url), 'utf8');
 
 assert.ok(ea.includes('PriceActionRiskPercent = 1.0'), 'EA must expose the bounded Price Action risk setting');
-assert.ok(ea.includes('strategyMode\\\":\\\"PRICE_ACTION'), 'Dedicated EA must explicitly select the Price Action backend path');
-assert.ok(ea.includes('priceActionUseAIReview\\\":false'), 'Dedicated EA must run the deterministic strategy without legacy AI/Girassol review');
+assert.ok(ea.includes('strategyMode\\":\\"PRICE_ACTION'), 'Dedicated EA must explicitly select the Price Action backend path');
+assert.ok(ea.includes('priceActionUseAIReview\\":false'), 'Dedicated EA must run the deterministic strategy without legacy AI/Girassol review');
 assert.ok(!ea.includes('SendMarketDataForSyntheticGirassol();'), 'Dedicated EA must not call the legacy Girassol market-data channel');
 assert.ok(!ea.includes('ScanChartIndicators();'), 'Dedicated EA must not scan legacy chart indicators');
 assert.ok(legacyEa.includes('#property version   "8.1"'), 'Legacy Girassol EA must retain its original downloadable source/version');
@@ -27,7 +27,7 @@ assert.ok(ea.includes('riskDistance / entry > 0.015'), 'EA must reject stops wid
 assert.ok(ea.includes('executableRiskReward < 2.0'), 'EA must enforce minimum net executable R:R of 1:2 after spread');
 assert.ok(ea.includes('estimatedRoundTripCost = currentSpread * 2.0'), 'EA must include round-trip spread in executable R:R validation');
 assert.ok(ea.includes('CloseAtEndOfBrasiliaSession = true') && ea.includes('IsPastBrasiliaSessionEnd()'), 'EA must enforce day-trade session-end position handling');
-assert.ok(ea.includes('breakeven em +1R'), 'EA must manage deterministic breakeven at +1R');
+assert.ok(ea.includes('breakeven +1R'), 'EA must manage deterministic breakeven at +1R');
 assert.ok(ea.includes('parcial de 50% realizada em +1,5R'), 'EA must manage the 50% partial at +1.5R');
 assert.ok(ea.includes('CountManagedPositions() < MaxPositions'), 'Unrelated/manual positions must not block this EA instance');
 assert.ok(ea.includes('if (signalId != "") g_pendingSignalId = signalId;'), 'Failed order attempts must not permanently consume the signal ID');
