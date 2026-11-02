@@ -2089,6 +2089,9 @@ router.get('/download-ea-price-action', mt5DashboardAccess, async (req: Request,
       'RecoverInitialPositionRisk',
       'RecoverInitialPositionVolume',
       'HistoryOrderGetDouble(orderTicket, ORDER_SL)',
+      'ReportClosedPosition(positionId)',
+      'exitVolume += volume',
+      'netProfit += HistoryDealGetDouble(deal, DEAL_PROFIT)',
     ];    const missingEaMarkers = requiredEaMarkers.filter((marker) => !content.includes(marker));
     if (eaVersion !== '1.0' || missingEaMarkers.length > 0) {
       console.error('[MT5 EA Download] Fonte ausente ou desatualizada; download bloqueado.', {
