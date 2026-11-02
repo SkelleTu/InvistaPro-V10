@@ -316,8 +316,10 @@ export function evaluatePriceActionSetup(
   const side: TradeSide | null = expectedSide && entryTrigger === expectedSide ? expectedSide : null;
   features.trigger = entryTrigger;
   features.entryTimeframe = entryFrame === frames.M1 ? 'M1' : 'M5';
-  checks.entry_trigger = side !== null;
-  if (!checks.entry_trigger) reasons.push('Sem padrão M5/M1 confirmado por rompimento de gatilho na direção da estrutura H4/H1');
+  checks.entry_trigger = entryTrigger !== null;
+  if (!checks.entry_trigger) reasons.push('Sem padrão M5/M1 confirmado por rompimento de gatilho');
+  checks.trigger_direction_alignment = side !== null;
+  if (!checks.trigger_direction_alignment) reasons.push('Gatilho de entrada não está alinhado à direção estrutural H4/H1');
   checks.trend_m15_alignment = side !== null && m15Trend === (side === 'BUY' ? 'bullish' : 'bearish');
   if (!checks.trend_m15_alignment) reasons.push('Estrutura M15 não confirma a direção operacional');
 
