@@ -504,7 +504,9 @@ bool PersistPositionRisk(ulong identifier) {
       double stop=PositionGetDouble(POSITION_SL);
       double risk=MathAbs(open-stop);
       if(open<=0 || stop<=0 || risk<=0) return false;
-      return GlobalVariableSet(riskKey,risk);
+      if(!GlobalVariableSet(riskKey,risk)) return false;
+      GlobalVariablesFlush(); // persist original risk before any break-even/trailing stop modification
+      return true;
    }
    return false;
 }
