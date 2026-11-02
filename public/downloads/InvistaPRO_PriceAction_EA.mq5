@@ -19,6 +19,7 @@ input int    InpMagic = 26110201;
 input int    InpMaxSpreadPoints = 0; // 0 = automatic ATR-based spread cap
 input int    InpMaxTradesPerDay = 3;
 input int    InpMaxConsecutiveLosses = 2;
+input int    InpMaxLosingTradesPerDay = 3;
 input int    InpPauseMinutesAfterLosses = 60;
 input double InpDailyLossLimitPercent = 3.0;
 input int    InpDeviationPoints = 30;
@@ -35,6 +36,7 @@ datetime g_dayStart = 0;
 double g_dayStartEquity = 0;
 int g_tradesToday = 0;
 int g_consecutiveLosses = 0;
+int g_losingTradesToday = 0;
 datetime g_approvedPatternTime = 0;
 int g_approvedSide = 0; // 1 buy, -1 sell
 double g_approvedTrigger = 0;
@@ -279,6 +281,7 @@ void PersistDailyState() {
    string key=DailyStatePrefix();
    GlobalVariableSet(key+"_T",(double)g_tradesToday);
    GlobalVariableSet(key+"_L",(double)g_consecutiveLosses);
+   GlobalVariableSet(key+"_D",(double)g_losingTradesToday);
    GlobalVariableSet(key+"_P",(double)g_pauseUntil);
    GlobalVariableSet(key+"_E",g_dayStartEquity);
 }
@@ -300,11 +303,12 @@ bool DailyRiskAllowed() {
       string key=DailyStatePrefix();
       g_tradesToday=GlobalVariableCheck(key+"_T") ? (int)GlobalVariableGet(key+"_T") : 0;
       g_consecutiveLosses=GlobalVariableCheck(key+"_L") ? (int)GlobalVariableGet(key+"_L") : 0;
+      g_losingTradesToday=GlobalVariableCheck(key+"_D") ? (int)GlobalVariableGet(key+"_D") : 0;
       g_pauseUntil=GlobalVariableCheck(key+"_P") ? (datetime)GlobalVariableGet(key+"_P") : 0;
       g_dayStartEquity=GlobalVariableCheck(key+"_E") ? GlobalVariableGet(key+"_E") : AccountInfoDouble(ACCOUNT_EQUITY);
       PersistDailyState();
    }
-   if(TimeCurrent()<g_pauseUntil || g_tradesToday>=InpMaxTradesPerDay) return false;
+   if(TimeCurrent()<g_pauseUntil || g_tradesToday>=InpMaxTradesPerDay || g_losingTradesToday>=InpMaxLosingTradesPerDay) return false;
    if(g_dayStartEquity<=0) return false;
    double dd=(g_dayStartEquity-AccountInfoDouble(ACCOUNT_EQUITY))/g_dayStartEquity*100.0;
    return dd<InpDailyLossLimitPercent && g_consecutiveLosses<InpMaxConsecutiveLosses;
@@ -483,6 +487,7 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,const MqlTradeRequest &
    // Partial exits are aggregated; only count the trade after its position is fully closed.
    if(!PositionIdentifierOpen(positionId)) {
       if(cumulative<0) {
+         g_losingTradesToday++;
          g_consecutiveLosses++;
          if(g_consecutiveLosses>=InpMaxConsecutiveLosses)
             g_pauseUntil=TimeCurrent()+InpPauseMinutesAfterLosses*60;
