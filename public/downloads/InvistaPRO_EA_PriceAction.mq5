@@ -306,8 +306,9 @@ double CommissionPriceDistance(ENUM_ORDER_TYPE orderType, double entryPrice)
    if (tickSize <= 0.0) tickSize = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
    if (tickSize <= 0.0) return -1.0;
    double adverseExit = orderType == ORDER_TYPE_BUY ? entryPrice - tickSize : entryPrice + tickSize;
+   if (adverseExit <= 0.0) adverseExit = entryPrice + tickSize;
    double tickProfit = 0.0;
-   if (adverseExit <= 0.0 || !OrderCalcProfit(orderType, g_symbol, 1.0, entryPrice, adverseExit, tickProfit))
+   if (!OrderCalcProfit(orderType, g_symbol, 1.0, entryPrice, adverseExit, tickProfit))
       return -1.0;
    double tickValue = MathAbs(tickProfit);
    if (tickValue <= 0.0) return -1.0;
