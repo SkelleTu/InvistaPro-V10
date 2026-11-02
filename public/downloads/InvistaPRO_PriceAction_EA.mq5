@@ -436,6 +436,25 @@ bool PositionIdentifierOpen(ulong identifier) {
    return false;
 }
 
+bool PersistPositionRisk(ulong identifier) {
+   string account=(string)AccountInfoInteger(ACCOUNT_LOGIN);
+   string riskKey="PA_RISK_"+account+"_"+(string)identifier;
+   if(GlobalVariableCheck(riskKey)) return GlobalVariableGet(riskKey)>0;
+   for(int i=PositionsTotal()-1;i>=0;i--) {
+      ulong ticket=PositionGetTicket(i);
+      if(ticket==0 || !PositionSelectByTicket(ticket)) continue;
+      if((ulong)PositionGetInteger(POSITION_IDENTIFIER)!=identifier ||
+         PositionGetString(POSITION_SYMBOL)!=_Symbol ||
+         (long)PositionGetInteger(POSITION_MAGIC)!=InpMagic) continue;
+      double open=PositionGetDouble(POSITION_PRICE_OPEN);
+      double stop=PositionGetDouble(POSITION_SL);
+      double risk=MathAbs(open-stop);
+      if(open<=0 || stop<=0 || risk<=0) return false;
+      return GlobalVariableSet(riskKey,risk);
+   }
+   return false;
+}
+
 double ReconstructDayStartEquity(datetime dayStart) {
    // If a position was carried across midnight, its midnight floating PnL
    // cannot be reconstructed safely from current MT5 history. Fail closed.
@@ -670,6 +689,13 @@ bool ExecuteSetupLocked(Setup &s) {
    }
    // Count every accepted order response before slippage checks; ambiguous fills stay fail-closed.
    // Filled entry deals are counted once by the durable PA_ENTRY ledger.
+   // Persist the original structural risk immediately after the fill.
+   // It must survive break-even/trailing changes and terminal restarts.
+   ulong fillDealForRisk=trade.ResultDeal();
+   if(fillDealForRisk>0 && HistoryDealSelect(fillDealForRisk)) {
+      ulong filledPositionId=(ulong)HistoryDealGetInteger(fillDealForRisk,DEAL_POSITION_ID);
+      if(filledPositionId>0) PersistPositionRisk(filledPositionId);
+   }
    double fillPrice=trade.ResultPrice();
    double maxSlippage=InpMaxSlippagePoints>0 ? InpMaxSlippagePoints*_Point : ATR(PERIOD_M15)*0.10;
    if(fillPrice<=0 || maxSlippage<=0 || MathAbs(fillPrice-s.entry)>maxSlippage) {
@@ -704,20 +730,43 @@ bool TradeRequestSucceeded() {
 string PartialKey(ulong ticket) { return "PA_PARTIAL_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+(string)ticket; }
 
 bool ClosePartialPosition(ulong positionTicket,int side,double closeVolume,double currentVolume) {
-   if(closeVolume<=0 || closeVolume>=currentVolume) return false;
+   double step=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_STEP);
+   double minVolume=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN);
+   if(step<=0 || minVolume<=0 || closeVolume<=0 || closeVolume>=currentVolume) return false;
    if(!PositionSelectByTicket(positionTicket) ||
-      PositionGetString(POSITION_SYMBOL)!=_Symbol) return false;
+      PositionGetString(POSITION_SYMBOL)!=_Symbol ||
+      (long)PositionGetInteger(POSITION_MAGIC)!=InpMagic) return false;
+   ulong identifier=(ulong)PositionGetInteger(POSITION_IDENTIFIER);
+   long expectedType=side==1 ? POSITION_TYPE_BUY : POSITION_TYPE_SELL;
+   double beforeVolume=PositionGetDouble(POSITION_VOLUME);
+   if(PositionGetInteger(POSITION_TYPE)!=expectedType ||
+      MathAbs(beforeVolume-currentVolume)>step*0.5 ||
+      beforeVolume-closeVolume<minVolume-step*0.25) return false;
+
    ENUM_ACCOUNT_MARGIN_MODE mode=(ENUM_ACCOUNT_MARGIN_MODE)AccountInfoInteger(ACCOUNT_MARGIN_MODE);
-   bool requested=false;
    if(mode==ACCOUNT_MARGIN_MODE_RETAIL_HEDGING) {
-      requested=trade.PositionClosePartial(positionTicket,closeVolume);
-   } else {
-      // Netting/exchange accounts reduce the existing net position with an opposite deal.
-      requested=side==1
-         ? trade.Sell(closeVolume,_Symbol,0,0,0,"PA partial reduction")
-         : trade.Buy(closeVolume,_Symbol,0,0,0,"PA partial reduction");
+      bool requested=trade.PositionClosePartial(positionTicket,closeVolume);
+      return requested && TradeRequestSucceeded();
    }
-   return requested && TradeRequestSucceeded();
+
+   // Netting accounts have one aggregate position per symbol. Never send an
+   // opposite deal unless the current net position is still this EA's position.
+   bool requested=side==1
+      ? trade.Sell(closeVolume,_Symbol,0,0,0,"PA partial reduction")
+      : trade.Buy(closeVolume,_Symbol,0,0,0,"PA partial reduction");
+   if(!requested || !TradeRequestSucceeded()) return false;
+   if(!PositionSelect(_Symbol)) return false;
+   double afterVolume=PositionGetDouble(POSITION_VOLUME);
+   bool samePosition=(ulong)PositionGetInteger(POSITION_IDENTIFIER)==identifier &&
+                     PositionGetString(POSITION_SYMBOL)==_Symbol &&
+                     (long)PositionGetInteger(POSITION_MAGIC)==InpMagic &&
+                     PositionGetInteger(POSITION_TYPE)==expectedType;
+   bool reduced=afterVolume>0 && afterVolume<beforeVolume-step*0.25;
+   if(!samePosition || !reduced) {
+      Print("ALERTA: redução parcial netting não confirmou a mesma posição. Verificação manual necessária.");
+      return false;
+   }
+   return true;
 }
 
 void ManageOpenPosition() {
