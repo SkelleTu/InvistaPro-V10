@@ -1,7 +1,7 @@
 import { EventEmitter } from 'events';
-import { BinancePriceActionFeed, type BinanceMarket } from './binance-price-action-feed';
+import { BinancePriceActionFeed, type BinanceMarket, type BinancePriceTick } from './binance-price-action-feed';
 import { priceActionAiPipeline, priceActionAiCoordinator } from './price-action-ai-pipeline';
-import type { MarketContext, Timeframe } from './price-action-engine';
+import type { MarketContext } from './price-action-engine';
 import type { PositionState } from './price-action-ai-coordinator';
 
 export interface PriceActionContextProvider {
@@ -10,8 +10,8 @@ export interface PriceActionContextProvider {
 }
 export interface PriceActionPositionProvider {
   listOpenPositions(symbol: string): Promise<PositionState[]>;
-  getPositionSnapshot(position: PositionState, frames: unknown): Promise<unknown>;
-  isMaterialEvent(position: PositionState, frames: unknown): Promise<boolean>;
+  getPositionSnapshot(position: PositionState, frames: unknown, tick: BinancePriceTick): Promise<unknown>;
+  isMaterialEvent(position: PositionState, frames: unknown, tick: BinancePriceTick): Promise<boolean>;
 }
 
 /**
@@ -21,8 +21,10 @@ export interface PriceActionPositionProvider {
  */
 export class PriceActionRuntime extends EventEmitter {
   private unsubscribe: (() => void) | null = null;
+  private unsubscribeTick: (() => void) | null = null;
   private started = false;
   private readonly busy = new Set<string>();
+  private readonly positionBusy = new Set<string>();
 
   constructor(
     private readonly market: BinanceMarket,
@@ -39,8 +41,11 @@ export class PriceActionRuntime extends EventEmitter {
     this.unsubscribe = feed.onClosedCandle((symbol) => {
       void this.evaluateSymbol(symbol, feed);
     });
-    feed.start();
+    this.unsubscribeTick = feed.onPriceTick((tick) => {
+      void this.monitorPositions(tick, feed);
+    });
     this.feed = feed;
+    feed.start();
     this.started = true;
     this.emit('status', { active: true, market: this.market, symbols: ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'] });
   }
@@ -61,17 +66,6 @@ export class PriceActionRuntime extends EventEmitter {
       const result = await priceActionAiPipeline.evaluate(symbol, frames, context);
       this.emit('analysis', { ...result, market: snapshot.market, generatedAt: snapshot.generatedAt });
 
-      if (this.positionProvider) {
-        const positions = await this.positionProvider.listOpenPositions(symbol);
-        for (const position of positions) {
-          const marketSnapshot = await this.positionProvider.getPositionSnapshot(position, frames);
-          const materialEvent = await this.positionProvider.isMaterialEvent(position, frames);
-          const review = await priceActionAiCoordinator.reviewOpenPosition(
-            position, marketSnapshot, materialEvent,
-          );
-          if (review.invoked) this.emit('position-review', { positionId: position.id, symbol, ...review });
-        }
-      }
     } catch (error) {
       this.emit('hold', {
         symbol,
@@ -79,6 +73,35 @@ export class PriceActionRuntime extends EventEmitter {
       });
     } finally {
       this.busy.delete(symbol);
+    }
+  }
+
+  private async monitorPositions(tick: BinancePriceTick, feed: BinancePriceActionFeed): Promise<void> {
+    if (!this.positionProvider || this.positionBusy.has(tick.symbol)) return;
+    this.positionBusy.add(tick.symbol);
+    try {
+      const snapshot = feed.getSnapshot(tick.symbol);
+      if (snapshot.stale) return;
+      const frames = feed.getStrategyFrames(tick.symbol);
+      const positions = await this.positionProvider.listOpenPositions(tick.symbol);
+      for (const original of positions) {
+        const position: PositionState = {
+          ...original,
+          currentPrice: tick.price,
+          lastMaterialEventAt: tick.eventTime,
+        };
+        const marketSnapshot = await this.positionProvider.getPositionSnapshot(position, frames, tick);
+        const materialEvent = await this.positionProvider.isMaterialEvent(position, frames, tick);
+        const review = await priceActionAiCoordinator.reviewOpenPosition(position, marketSnapshot, materialEvent);
+        if (review.invoked) this.emit('position-review', { positionId: position.id, symbol: tick.symbol, ...review });
+      }
+    } catch (error) {
+      this.emit('position-monitor-error', {
+        symbol: tick.symbol,
+        reason: error instanceof Error ? error.message : 'Position monitor failure',
+      });
+    } finally {
+      this.positionBusy.delete(tick.symbol);
     }
   }
 
@@ -93,6 +116,8 @@ export class PriceActionRuntime extends EventEmitter {
   stop(): void {
     this.unsubscribe?.();
     this.unsubscribe = null;
+    this.unsubscribeTick?.();
+    this.unsubscribeTick = null;
     this.feed?.stop();
     this.feed = null;
     this.started = false;
