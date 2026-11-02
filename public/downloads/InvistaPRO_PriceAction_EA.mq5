@@ -1138,8 +1138,20 @@ void CleanupOldDealGuards() {
 }
 
 int OnInit() {
-   if(InpRiskPercent<1.0 || InpRiskPercent>2.0 || InpMaxStopPercent<=0 || InpMaxStopPercent>1.5 || InpMinimumRR<2.0 || InpEstimatedRoundTripCostPercent<0 || InpEstimatedRoundTripCostPercent>2.0 || InpDailyLossLimitPercent<=0 || InpDailyLossLimitPercent>10.0 || InpMaxTradesPerDay<1 || InpMaxTradesPerDay>5 || InpMaxConsecutiveLosses<1 || InpMaxLosingTradesPerDay<1 || InpPauseMinutesAfterLosses<1 || InpMarginReserveMultiplier<1.0 || InpMarginReserveMultiplier>5.0) {
+   if(InpRiskPercent<1.0 || InpRiskPercent>2.0 || InpMaxStopPercent<=0 || InpMaxStopPercent>1.5 ||
+      InpMinimumRR<2.0 || InpEstimatedRoundTripCostPercent<0 || InpEstimatedRoundTripCostPercent>2.0 ||
+      InpDailyLossLimitPercent<=0 || InpDailyLossLimitPercent>10.0 ||
+      InpMaxTradesPerDay<1 || InpMaxTradesPerDay>5 ||
+      InpMaxConsecutiveLosses<1 || InpMaxConsecutiveLosses>5 ||
+      InpMaxLosingTradesPerDay<1 || InpMaxLosingTradesPerDay>5 ||
+      InpPauseMinutesAfterLosses<1 || InpMarginReserveMultiplier<1.0 ||
+      InpMarginReserveMultiplier>5.0 || InpMagic<=0 ||
+      InpDeviationPoints<0 || InpMaxSlippagePoints<0) {
       Print("Configuracao de risco invalida. EA bloqueado."); return INIT_PARAMETERS_INCORRECT;
+   }
+   if(StringLen(InpApiToken)==0 || StringFind(InpServerURL,"https://")!=0) {
+      Print("Token Price Action ausente ou servidor sem HTTPS. EA bloqueado.");
+      return INIT_PARAMETERS_INCORRECT;
    }
    if(!IsDemoAccount()) {
       Print("Conta nao-DEMO bloqueada nesta versao de validacao. Use uma conta DEMO MT5."); return INIT_FAILED;
