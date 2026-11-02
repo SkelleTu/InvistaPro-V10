@@ -181,11 +181,19 @@ void OnDeinit(const int reason)
 // Timer independent of market ticks: keep heartbeat/reconnect diagnostics alive.
 void OnTimer()
 {
+   datetime serverNow = TimeCurrent();
+   if (serverNow - g_lastClosedTradeSync >= 30)
+   {
+      g_lastClosedTradeSync = serverNow;
+      SyncClosedTradeReports();
+      SyncOpenPositionReports();
+   }
+
    datetime localNow = TimeLocal();
    if (HeartbeatSeconds > 0 && (g_lastTimerHeartbeat == 0 || localNow - g_lastTimerHeartbeat >= HeartbeatSeconds))
    {
       g_lastTimerHeartbeat = localNow;
-      g_lastHeartbeat = TimeCurrent();
+      g_lastHeartbeat = serverNow;
       bool ok = SendHeartbeat();
       if (!ok && AutoReconnect && !g_isDiscovering)
          TryReconnect();
@@ -646,14 +654,6 @@ string BuildMultiTimeframeJson()
 void OnTick()
 {
    datetime now = TimeCurrent();
-
-   // Reconcile closed trades from terminal history so temporary HTTP outages do not lose daily risk accounting.
-   if (now - g_lastClosedTradeSync >= 30)
-   {
-      g_lastClosedTradeSync = now;
-      SyncClosedTradeReports();
-      SyncOpenPositionReports();
-   }
 
    // ── Heartbeat ────────────────────────────────────────────────────────
    if (now - g_lastHeartbeat >= HeartbeatSeconds)
