@@ -13,14 +13,6 @@
 #include <Trade\PositionInfo.mqh>
 #include <Trade\DealInfo.mqh>
 
-//--- Modo de Controle da IA
-enum ENUM_AI_CONTROL_MODE
-{
-   AI_MANUAL  = 0,  // Manual — Defino tudo, IA não decide nada
-   AI_PARTIAL = 1,  // Parcial — Escolho exatamente o que a IA controla
-   AI_FULL    = 2   // Total — IA controla 100% de forma autônoma
-};
-
 //--- Parâmetros de entrada
 input string   ServerURL        = "https://invista-pro-v10-kzlv.onrender.com"; // URL do servidor InvistaPRO
 input string   DiscoveryBlobURL = "https://invista-pro-v10-kzlv.onrender.com/api/url"; // URL de descoberta automática
@@ -121,16 +113,7 @@ int OnInit()
    if (WarmupSeconds > 0)
       Print("   ⏳ AQUECIMENTO ATIVO: operações bloqueadas por ", WarmupSeconds, "s");
 
-   string modeLabel = "";
-   if (AIControlMode == AI_MANUAL)
-      modeLabel = "MANUAL";
-   else if (!IsPriceActionEnabled() && AIControlMode == AI_PARTIAL)
-      modeLabel = "PARCIAL";
-   else
-      modeLabel = "TOTAL (IA controla 100%)";
-   Print("🤖 Modo de Controle da IA: ", modeLabel);
-
-
+   Print("🤖 Motor determinístico Price Action ativo | revisão de IA desativada.");
 
    if (g_discoverUrl == "") FetchDiscoveryUrl();
 
@@ -561,7 +544,7 @@ void FetchAndProcessSignal()
    string signalId   = ExtractJsonString(resp, "id");
    if (signalId == g_pendingSignalId) return;
 
-   double lotSize    = ExtractJsonDouble(resp, "lotSize");
+   double lotSize    = 0.0;
    double stopLoss   = ExtractJsonDouble(resp, "stopLoss");
    double takeProfit = ExtractJsonDouble(resp, "takeProfit");
    double confidence = ExtractJsonDouble(resp, "confidence");
@@ -572,65 +555,6 @@ void FetchAndProcessSignal()
    string assetVolClass = ExtractJsonString(resp, "assetVolClass");
    string reason        = ExtractJsonString(resp, "reason");
 
-   // ── Aplicação do Modo de Controle da IA ──────────────────────────────
-   if (!IsPriceActionEnabled() && AIControlMode == AI_MANUAL)
-   {
-      Print("ℹ️ Modo MANUAL: usando parâmetros do usuário");
-      lotSize    = ManualLotSize;
-      double point = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
-      stopLoss   = (ManualStopLoss   > 0) ? ManualStopLoss   * point : 0;
-      takeProfit = (ManualTakeProfit > 0) ? ManualTakeProfit * point : 0;
-      if (action == "BUY")
-      {
-         double entry = SymbolInfoDouble(g_symbol, SYMBOL_ASK);
-         if (stopLoss   > 0) stopLoss   = NormalizeDouble(entry - stopLoss,   ManagedSymbolDigits());
-         if (takeProfit > 0) takeProfit = NormalizeDouble(entry + takeProfit, ManagedSymbolDigits());
-      }
-      else if (action == "SELL")
-      {
-         double entry = SymbolInfoDouble(g_symbol, SYMBOL_BID);
-         if (stopLoss   > 0) stopLoss   = NormalizeDouble(entry + stopLoss,   ManagedSymbolDigits());
-         if (takeProfit > 0) takeProfit = NormalizeDouble(entry - takeProfit, ManagedSymbolDigits());
-      }
-   }
-   else if (!IsPriceActionEnabled() && AIControlMode == AI_PARTIAL)
-   {
-      if (!AI_Entrada)
-      {
-         Print("ℹ️ Modo PARCIAL: AI_Entrada=false — entrada bloqueada pelo usuário");
-         return;
-      }
-      double point = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
-      if (!AI_Lote || lotSize <= 0) lotSize = ManualLotSize;
-      if (!AI_StopLoss)
-      {
-         double rawSL = (ManualStopLoss > 0) ? ManualStopLoss * point : 0;
-         if (rawSL > 0)
-         {
-            if (action == "BUY")  stopLoss = NormalizeDouble(SymbolInfoDouble(g_symbol, SYMBOL_ASK) - rawSL, ManagedSymbolDigits());
-            else                   stopLoss = NormalizeDouble(SymbolInfoDouble(g_symbol, SYMBOL_BID) + rawSL, ManagedSymbolDigits());
-         }
-         else stopLoss = 0;
-      }
-      if (!AI_TakeProfit)
-      {
-         double rawTP = (ManualTakeProfit > 0) ? ManualTakeProfit * point : 0;
-         if (rawTP > 0)
-         {
-            if (action == "BUY")  takeProfit = NormalizeDouble(SymbolInfoDouble(g_symbol, SYMBOL_ASK) + rawTP, ManagedSymbolDigits());
-            else                   takeProfit = NormalizeDouble(SymbolInfoDouble(g_symbol, SYMBOL_BID) - rawTP, ManagedSymbolDigits());
-         }
-         else takeProfit = 0;
-      }
-      slTpSource = "parcial_usuario_ia";
-      Print("ℹ️ PARCIAL: Lote=", AI_Lote ? "IA" : "Manual", " | SL=", AI_StopLoss ? "IA" : "Manual", " | TP=", AI_TakeProfit ? "IA" : "Manual");
-   }
-   else
-   {
-      if (lotSize <= 0) lotSize = ManualLotSize;
-   }
-
-   if (lotSize <= 0) lotSize = ManualLotSize;
 
    if (stopLoss > 0 || takeProfit > 0)
    {
@@ -638,20 +562,7 @@ void FetchAndProcessSignal()
       long   stopsLevel = SymbolInfoInteger(g_symbol, SYMBOL_TRADE_STOPS_LEVEL);
       double minDist    = MathMax((double)stopsLevel * point * 1.5, (ask - bid) * 5.0);
 
-      string symUpper2 = g_symbol;
-      StringToUpper(symUpper2);
-      if (StringFind(symUpper2, "JUMP") >= 0 && ask > 1000)
-      {
-         double jumpMinPct = 0.06;
-         if (StringFind(symUpper2, "100") >= 0) jumpMinPct = 0.12;
-         else if (StringFind(symUpper2, "75")  >= 0) jumpMinPct = 0.10;
-         else if (StringFind(symUpper2, "50")  >= 0) jumpMinPct = 0.08;
-         else if (StringFind(symUpper2, "25")  >= 0) jumpMinPct = 0.07;
-         minDist = MathMax(minDist, ask * jumpMinPct);
-         Print("⚡ Jump — distância mínima: ", NormalizeDouble(minDist, 2), " pts");
-      }
-
-      if (minDist <= 0) minDist = ask * 0.01;
+      if (minDist <= 0) { Print("⛔ Price Action: distância mínima do broker inválida."); return; }
 
       if (action == "BUY")
       {
@@ -834,10 +745,6 @@ bool IsPastBrasiliaSessionEnd()
 
 void MonitorOpenPositions()
 {
-   string candlesJson = "[]";
-   string structuredSignals = "{}";
-   string allBuffers = "{}";
-
    for (int i = PositionsTotal() - 1; i >= 0; i--)
    {
       if (!posInfo.SelectByIndex(i))      continue;
@@ -950,72 +857,7 @@ void MonitorOpenPositions()
           }
        }
 
-// Autonomous Price Action mode uses only deterministic local protection and fixed SL/TP.
-      if (IsPriceActionEnabled())
-         continue;
 
-            string posJson = "{";
-      posJson += "\"ticket\":"        + IntegerToString(ticket)             + ",";
-      posJson += "\"symbol\":\""      + g_symbol                           + "\",";
-      posJson += "\"type\":\""        + posType                             + "\",";
-      posJson += "\"lots\":"          + DoubleToString(posInfo.Volume(), 2) + ",";
-      posJson += "\"openPrice\":"     + DoubleToString(openPrice, ManagedSymbolDigits())  + ",";
-      posJson += "\"currentPrice\":"  + DoubleToString(curPrice, ManagedSymbolDigits())   + ",";
-      posJson += "\"stopLoss\":"      + DoubleToString(sl, ManagedSymbolDigits())         + ",";
-      posJson += "\"takeProfit\":"    + DoubleToString(tp, ManagedSymbolDigits())         + ",";
-      posJson += "\"profit\":"        + DoubleToString(profit, 2)           + ",";
-      posJson += "\"openTime\":"      + IntegerToString((long)posInfo.Time()) + ",";
-      posJson += "\"signalId\":\""    + posType + "_" + IntegerToString(ticket) + "\"";
-      posJson += "}";
-
-      string body = "{";
-      body += "\"position\":"         + posJson          + ",";
-      body += "\"marketData\":"       + candlesJson       + ",";
-      body += "\"symbol\":\""         + g_symbol         + "\",";
-      body += "\"indicatorSignals\":" + structuredSignals + ",";
-      body += "\"indicatorBuffers\":" + allBuffers;
-      if (g_apiToken != "") body += ",\"token\":\"" + g_apiToken + "\"";
-      body += "}";
-
-      string url     = g_serverUrl + "/api/mt5/position/monitor";
-      string headers = "Content-Type: application/json\r\n";
-      char   postData[], result[];
-      StringToCharArray(body, postData, 0, StringLen(body));
-      string responseHeaders;
-
-      int res = WebRequest("POST", url, headers, 5000, postData, result, responseHeaders);
-      if (res != 200) continue;
-
-      string resp    = CharArrayToString(result);
-      string action  = ExtractJsonString(resp, "action");
-      string reason  = ExtractJsonString(resp, "reason");
-      string urgency = ExtractJsonString(resp, "urgency");
-
-      bool shouldClose = (action == "CLOSE_PROFIT"     ||
-                          action == "CLOSE_SPIKE_EXIT" ||
-                          action == "CLOSE_LOSS_PREVENTION");
-
-      bool aiCanClose = (AIControlMode == AI_FULL) ||
-                        (AIControlMode == AI_PARTIAL && AI_Saida);
-      if (!aiCanClose && shouldClose)
-      {
-         Print("ℹ️ Monitor sugeriu ", action, " mas saída por IA desativada");
-         shouldClose = false;
-      }
-
-      if (shouldClose)
-      {
-         Print("🤖 Monitor IA → ", action, " | #", ticket, " | Urgência: ", urgency, " | ", reason);
-         bool closed = trade.PositionClose(ticket);
-         if (closed) Print("✅ Posição #", ticket, " fechada pelo monitor IA");
-         else        Print("❌ Falha ao fechar #", ticket, ": ", GetLastError());
-      }
-      else
-      {
-         string narrative = ExtractJsonString(resp, "narrative");
-         if (narrative != "")
-            Print("📐 Monitor #", ticket, " [HOLD]: ", StringSubstr(narrative, 0, 150));
-      }
    }
 }
 
