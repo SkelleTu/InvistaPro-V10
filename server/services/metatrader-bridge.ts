@@ -1370,8 +1370,9 @@ class MetaTraderBridge extends EventEmitter {
   // Rastreamento de perdas consecutivas — circuit breaker
   private consecutiveLosses = 0;
   private circuitBreakerUntil = 0;
-  private readonly MAX_CONSECUTIVE_LOSSES = 3;
-  private readonly CIRCUIT_BREAKER_MS = 15 * 60 * 1000; // 15 min de pausa
+  private readonly MAX_CONSECUTIVE_LOSSES = 2;
+  private readonly CIRCUIT_BREAKER_MS = 60 * 60 * 1000; // 1 hora de pausa após 2 perdas consecutivas
+  private dailyStatsDate = '';
   private readonly MIN_AI_CONSENSUS = 70; // 70% mínimo de consenso da IA
 
   private diagnostics: ConnectionDiagnostics = {
@@ -1629,6 +1630,40 @@ class MetaTraderBridge extends EventEmitter {
     super();
     this.status = this.initStatus();
     this.loadFromDB();
+    this.ensureDailyStatsDate();
+  }
+
+  private getBrasiliaDateKey(timestamp = Date.now()): string {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).formatToParts(new Date(timestamp));
+    const year = parts.find(part => part.type === 'year')?.value ?? '';
+    const month = parts.find(part => part.type === 'month')?.value ?? '';
+    const day = parts.find(part => part.type === 'day')?.value ?? '';
+    return year + '-' + month + '-' + day;
+  }
+
+  private ensureDailyStatsDate(now = Date.now()): void {
+    const today = this.getBrasiliaDateKey(now);
+    if (this.dailyStatsDate === today) return;
+    this.dailyStatsDate = today;
+    this.status.dailyProfit = 0;
+    this.status.dailyLoss = 0;
+    this.status.dailyWins = 0;
+    this.status.dailyLosses = 0;
+    for (const trade of this.recentTrades) {
+      if (this.getBrasiliaDateKey(trade.closeTime) !== today) continue;
+      if (trade.profit > 0) {
+        this.status.dailyProfit += trade.profit;
+        this.status.dailyWins++;
+      } else {
+        this.status.dailyLoss += Math.abs(trade.profit);
+        this.status.dailyLosses++;
+      }
+    }
+    const total = this.status.dailyWins + this.status.dailyLosses;
+    this.status.winRate = total > 0 ? (this.status.dailyWins / total) * 100 : 0;
+    this.saveBridgeState();
   }
 
   private loadFromDB(): void {
@@ -2008,6 +2043,11 @@ class MetaTraderBridge extends EventEmitter {
         ['totalTradesExecuted', this.status.totalTradesExecuted],
         ['consecutiveLosses', this.consecutiveLosses],
         ['circuitBreakerUntil', this.circuitBreakerUntil],
+        ['dailyStatsDate', this.dailyStatsDate],
+        ['dailyProfit', this.status.dailyProfit],
+        ['dailyLoss', this.status.dailyLoss],
+        ['dailyWins', this.status.dailyWins],
+        ['dailyLosses', this.status.dailyLosses],
       ];
       const stmt = sqlite.prepare(`
         INSERT INTO mt5_bridge_state (key, value, updated_at)
@@ -2147,6 +2187,7 @@ class MetaTraderBridge extends EventEmitter {
 
   getStatus(): MT5Status {
     const now = Date.now();
+    this.ensureDailyStatsDate(now);
     const connected = (now - this.status.lastHeartbeat) < 120000 && this.status.lastHeartbeat > 0;
 
     let health: MT5Status['systemHealth'] = 'excellent';
@@ -4555,6 +4596,7 @@ class MetaTraderBridge extends EventEmitter {
   }
 
   confirmTradeClose(result: MT5TradeResult): void {
+    this.ensureDailyStatsDate();
     this.openPositions.delete(result.ticket);
     this.removePositionFromDB(result.ticket);
     this.clearPositionContext(result.ticket); // Limpar memória desta posição
@@ -4574,7 +4616,7 @@ class MetaTraderBridge extends EventEmitter {
       // Circuit breaker: pausa após perdas consecutivas
       if (this.consecutiveLosses >= this.MAX_CONSECUTIVE_LOSSES) {
         this.circuitBreakerUntil = Date.now() + this.CIRCUIT_BREAKER_MS;
-        console.log(`[MT5Bridge] 🛑 Circuit Breaker ativado após ${this.consecutiveLosses} perdas consecutivas — pausa de 15 min`);
+        console.log(`[MT5Bridge] 🛑 Circuit Breaker ativado após ${this.consecutiveLosses} perdas consecutivas — pausa de 1 hora`);
       }
     }
 
