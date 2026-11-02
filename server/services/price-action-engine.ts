@@ -260,9 +260,9 @@ export function arePriceActionFramesFresh(
     const ageMs = now - timestampMs;
     if (ageMs < -30_000 || ageMs > secondsByTimeframe[timeframe] * 2_000 + 120_000) return false;
   }
-  const entryFrames = (['M5', 'M1'] as const).filter(timeframe => validCandles(frames[timeframe]));
-  if (!entryFrames.length) return false;
-  return entryFrames.every(timeframe => {
+  const suppliedEntryFrames = (['M5', 'M1'] as const).filter(timeframe => frames[timeframe] !== undefined);
+  if (!suppliedEntryFrames.length || suppliedEntryFrames.some(timeframe => !validCandles(frames[timeframe]))) return false;
+  return suppliedEntryFrames.every(timeframe => {
     const values = frames[timeframe]!;
     const rawTime = values[values.length - 1].time;
     const timestampMs = rawTime < 10_000_000_000 ? rawTime * 1000 : rawTime;
