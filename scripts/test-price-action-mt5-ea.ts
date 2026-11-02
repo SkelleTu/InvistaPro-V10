@@ -44,6 +44,7 @@ assert.ok(ea.includes('ACCOUNT_MARGIN_MODE_RETAIL_HEDGING'), 'Partial exits must
 assert.ok(ea.includes('PA partial reduction'), 'Partial exits must reduce netting accounts with an opposite deal');
 assert.ok(ea.includes('GlobalVariableCheck(partialKey)'), 'The deterministic partial exit must happen at most once per position');
 assert.ok(ea.includes('realizedR>=1.5'), 'AI-requested partial exits must not happen before the strategy 1.5R trigger');
+assert.ok(ea.includes('plannedPartialPercent\\":50') && ea.includes('plannedPartialTriggerR\\":1.5'), 'AI context must receive the planned scale-out and 1.5R trigger');
 assert.ok(ea.includes('ReviewOpenPositionAI'), 'Open positions must receive event-driven AI reviews');
 assert.ok(ea.includes('POSITION_IDENTIFIER)!=identifier'), 'Stale AI responses must not modify a replaced position');
 assert.ok(ea.includes('bool PersistPositionRisk(ulong identifier)'), 'Original structural risk must be persisted independently of a moved stop');
