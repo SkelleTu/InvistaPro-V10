@@ -108,6 +108,8 @@ int OnInit()
       Print("   ⏳ AQUECIMENTO ATIVO: operações bloqueadas por ", WarmupSeconds, "s");
 
    Print("🤖 Motor determinístico Price Action ativo | revisão de IA desativada.");
+   if (EstimatedRoundTripCommissionPerLot == 0.0)
+      Print("⚠️ Comissão estimada configurada como zero; confirme que o broker não cobra comissão ou informe o custo total por lote.");
 
    if (g_discoverUrl == "") FetchDiscoveryUrl();
 
