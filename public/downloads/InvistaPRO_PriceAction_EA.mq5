@@ -363,8 +363,16 @@ bool BuildSetup(int side,double trigger,Setup &s) {
    double entry=side==1 ? tick.ask : tick.bid;
    MqlRates r[];
    if(!GetRates(PERIOD_M15,30,r)) return false;
-   double swing=side==1 ? r[1].low : r[1].high;
-   for(int i=2;i<15;i++) swing=side==1 ? MathMin(swing,r[i].low) : MathMax(swing,r[i].high);
+   // Confirmed 2-left/2-right pivots only. The newest two candles cannot be pivots yet.
+   double swing=0;
+   bool foundSwing=false;
+   for(int i=2;i<15;i++) {
+      bool pivot=side==1
+         ? r[i].low<r[i-1].low && r[i].low<r[i-2].low && r[i].low<=r[i+1].low && r[i].low<=r[i+2].low
+         : r[i].high>r[i-1].high && r[i].high>r[i-2].high && r[i].high>=r[i+1].high && r[i].high>=r[i+2].high;
+      if(pivot) { swing=side==1 ? r[i].low : r[i].high; foundSwing=true; break; }
+   }
+   if(!foundSwing) return false;
    double atr=ATR(PERIOD_M15);
    if(atr<=0) return false;
    double stop=side==1 ? swing-atr*0.15 : swing+atr*0.15;
