@@ -2351,4 +2351,56 @@ router.get('/brazil-news', async (req: Request, res: Response) => {
   }
 });
 
+
+/**
+ * Broker-neutral MT5 Price Action AI review.
+ * Receives closed OHLCV candles from the selected chart, never places orders.
+ * EA token is validated before any model request.
+ */
+router.post('/price-action/review', mt5EaTokenAccess, async (req: Request, res: Response) => {
+  try {
+    const symbol = String(req.body?.symbol ?? '').trim().toUpperCase();
+    const direction = String(req.body?.direction ?? '').trim().toUpperCase();
+    const frames = req.body?.frames;
+    if (!/^[A-Z0-9._-]{1,32}$/.test(symbol) || !['BUY', 'SELL'].includes(direction)) {
+      return res.status(400).json({ decision: 'REJECT', reason: 'Símbolo ou direção inválidos.' });
+    }
+    const required = ['H4', 'H1', 'M15', 'M5', 'M1'];
+    for (const tf of required) {
+      const candles = frames?.[tf];
+      if (!Array.isArray(candles) || candles.length < 30 || candles.length > 200) {
+        return res.status(400).json({ decision: 'REJECT', reason: 'Histórico insuficiente ou excessivo em ' + tf });
+      }
+      let previous = 0;
+      for (const candle of candles) {
+        const values = ['time', 'open', 'high', 'low', 'close', 'volume'].map(k => Number(candle?.[k]));
+        if (values.some(v => !Number.isFinite(v)) || values[1] <= 0 || values[2] < Math.max(values[1], values[4]) ||
+            values[3] > Math.min(values[1], values[4]) || values[2] < values[3] || values[5] < 0 ||
+            values[0] <= previous) {
+          return res.status(400).json({ decision: 'REJECT', reason: 'OHLCV inválido ou fora de ordem em ' + tf });
+        }
+        previous = values[0];
+      }
+    }
+    const review = await huggingFaceAI.reviewPriceActionSnapshot(symbol, 'ENTRY', {
+      generatedAt: Date.now(),
+      frames,
+      context: { brokerNeutral: true, source: 'MetaTrader 5 chart', direction },
+      early: {
+        side: direction,
+        triggerLevel: Number(req.body?.triggerPrice),
+        invalidationLevel: Number(req.body?.invalidationPrice),
+        patternTime: Number(req.body?.patternTime),
+      },
+    });
+    if (review.decision !== 'APPROVE' || review.direction !== direction) {
+      return res.json({ decision: 'REJECT', direction, confidence: review.confidence, reasoning: review.reasoning, risks: review.risks });
+    }
+    return res.json({ decision: 'APPROVE', direction, confidence: review.confidence, reasoning: review.reasoning, risks: review.risks });
+  } catch (error: any) {
+    console.error('[MT5 Price Action AI] review failed:', error?.message ?? error);
+    return res.status(503).json({ decision: 'HOLD', reason: 'IA indisponível ou análise incompleta. Entrada bloqueada.' });
+  }
+});
+
 export default router;
