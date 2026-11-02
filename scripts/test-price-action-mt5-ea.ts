@@ -11,6 +11,7 @@ assert.ok(ea.includes('_Symbol'), 'EA must operate on the selected chart symbol'
 assert.ok(ea.includes('CopyRates(_Symbol, tf, 1, count, rates)'), 'EA must use closed candles only');
 assert.ok(ea.includes('bool AllFramesFresh()'), 'Entry and position AI reviews must reject stale chart history');
 assert.ok(ea.includes('PERIOD_H4') && ea.includes('PERIOD_H1') && ea.includes('PERIOD_M15') && ea.includes('PERIOD_M5') && ea.includes('PERIOD_M1'), 'EA must implement top-down multi-timeframe analysis');
+assert.ok(ea.includes('(t4!=0 && t15!=0 && t15!=t4)'), 'A conflicting M15 trend must block a directional H4/H1 setup');
 assert.ok(ea.includes('bool rangeMode=(t4==0 && t1==0 && t15==0)'), 'Range mode must require H4/H1/M15 range and operate only at extremes');
 assert.ok(ea.includes('TrendDataReady(PERIOD_H4)'), 'Missing trend history must not be mistaken for a valid range');
 assert.ok(ea.includes('barrier<=target+cost'), 'Long targets must not be placed into the nearest opposing pivot');
