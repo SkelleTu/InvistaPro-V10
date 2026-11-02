@@ -26,6 +26,11 @@ assert.ok(ea.includes('2.0*((InpMinimumRR-0.75)*risk+(InpMinimumRR+1.0)*cost)'),
 assert.ok(ea.includes('0.75*finalRisk+0.5*MathAbs(s.target-entry)-cost'), 'Final net RR must weight the partial exit and remaining target');
 
 assert.ok(ea.includes('OrderCalcProfit'), 'Position size must use account-currency loss per lot');
+assert.ok(ea.includes('double slippageBuffer=InpMaxSlippagePoints>0 ? InpMaxSlippagePoints*_Point : ATR(PERIOD_M15)*0.10'), 'Position sizing must reserve risk for the maximum permitted adverse fill');
+assert.ok(ea.includes('double sizingEntry=side==1 ? entry+slippageBuffer : entry-slippageBuffer'), 'Risk sizing must use the adverse side of the slippage envelope');
+assert.ok(ea.includes('double actualStopPercent=fillPrice>0 ? actualRisk/fillPrice*100.0 : 1.0e9'), 'Actual fill must be rechecked against the maximum stop percentage');
+assert.ok(ea.includes('double actualNetRR=(actualRisk+actualCost)>0 ? actualWeightedReward/(actualRisk+actualCost) : 0.0'), 'Actual fill must pass the weighted net RR gate after slippage and costs');
+
 assert.ok(ea.includes('SYMBOL_VOLUME_STEP') && ea.includes('SYMBOL_VOLUME_MIN') && ea.includes('SYMBOL_VOLUME_MAX'), 'Volume must respect broker contract steps and limits');
 assert.ok(ea.includes('TerminalInfoInteger(TERMINAL_CONNECTED)'), 'Disconnected terminal must block new entries');
 assert.ok(ea.includes('TerminalInfoInteger(TERMINAL_TRADE_ALLOWED)'), 'Disabled terminal trading must block new entries');
