@@ -54,7 +54,7 @@ jobs:
           $target = Join-Path $experts "InvistaPRO_PriceAction_EA.mq5"
           Copy-Item $source $target -Force
 
-          $compile = Start-Process -FilePath $editor.FullName -ArgumentList @("/compile:$target", "/log") -Wait -PassThru
+          $compile = Start-Process -FilePath $editor.FullName -ArgumentList @("/compile:`"$target`"", "/log") -Wait -PassThru
           Start-Sleep -Seconds 3
           $log = "$target.log"
           if (!(Test-Path $log)) {
