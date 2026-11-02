@@ -30,7 +30,7 @@ assert.ok(ea.includes('trade.ResultDeal() > 0'), 'EA must confirm broker executi
 const route = readFileSync(new URL('../server/routes/metatrader-routes.ts', import.meta.url), 'utf8');
 assert.ok(route.includes("code: 'MT5_EA_SOURCE_NOT_CURRENT'"), 'Download must fail closed when the canonical EA is missing or stale');
 assert.ok(route.includes("if (eaVersion !== '8.2' || missingEaMarkers.length > 0)"), 'Download must validate the EA version and current strategy markers');
-assert.ok(route.includes('const isPriceActionInstrument = true;'), 'Server must not restrict the Price Action engine to a fixed symbol allowlist');
+assert.ok(route.includes('const isPriceActionInstrument = sym.trim().length > 0;'), 'Server must not restrict the Price Action engine to a fixed symbol allowlist');
 assert.ok(route.includes("'CalculatePriceActionRiskLot'"), 'Download gate must require the Price Action risk sizing implementation');
 assert.ok(route.includes("'no-store, no-cache, must-revalidate, max-age=0'"), 'EA downloads must not be cached');
 
