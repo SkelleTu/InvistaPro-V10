@@ -279,7 +279,7 @@ export class HuggingFaceAIService {
     if (!this.isConfigured || !this.apiKey || this.apiKey === 'missing-key') {
       throw new Error('Price Action AI unavailable: Hugging Face inference is not configured');
     }
-    if (!/^[A-Z0-9._-]{1,32}$/.test(symbol.toUpperCase())) {
+    if (!symbol || symbol.length > 64 || /[\\u0000-\\u001F]/.test(symbol)) {
       throw new Error('Invalid chart symbol for Price Action review');
     }
 
