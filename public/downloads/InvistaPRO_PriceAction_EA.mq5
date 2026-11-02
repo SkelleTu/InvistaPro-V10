@@ -890,7 +890,7 @@ void ProcessPendingDeals() {
       } else if(!PositionIdentifierOpen(positionId)) {
          string closedKey="PA_CLOSED_"+account+"_"+(string)positionId;
          string closedPnlKey="PA_CLOSED_PNL_"+account+"_"+(string)positionId;
-         if(!GlobalVariableCheck(closedKey)) {
+         if(!GlobalVariableCheck(closedKey) || !GlobalVariableCheck(closedPnlKey)) {
             // Reconstruct the entire position result from history, not from the
             // order in which partial-exit callbacks happen to be processed.
             double totalPnl=0;
@@ -906,7 +906,8 @@ void ProcessPendingDeals() {
                // Persist the PnL first, then the close timestamp. A pending event
                // can resume safely if the terminal stops between these writes.
                GlobalVariableSet(closedPnlKey,totalPnl);
-               GlobalVariableSet(closedKey,(double)HistoryDealGetInteger(deal,DEAL_TIME));
+               if(!GlobalVariableCheck(closedKey))
+                  GlobalVariableSet(closedKey,(double)HistoryDealGetInteger(deal,DEAL_TIME));
             } else {
                ReleaseDailyLock();
                continue;
