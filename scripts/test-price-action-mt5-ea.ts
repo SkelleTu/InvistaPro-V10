@@ -39,6 +39,8 @@ assert.ok(ea.includes('InpMaxSlippagePoints'), 'EA must expose a broker-configur
 assert.ok(ea.includes('trade.ResultPrice()'), 'EA must validate the actual execution price after fill');
 assert.ok(ea.includes('SYMBOL_TRADE_TICK_SIZE'), 'Prices must align to broker tick size');
 assert.ok(ea.includes('PersistDailyState'), 'Daily circuit-breaker state must persist across EA restarts');
+assert.ok(ea.includes('GlobalVariableSetOnCondition'), 'Concurrent chart instances must serialize entry attempts with an atomic risk lock');
+assert.ok(ea.includes('DailyRiskAllowed() || !AcquireDailyLock()'), 'Entry must acquire the shared daily risk lock before sending an order');
 assert.ok(ea.includes('ReconstructDayStartEquity'), 'Daily drawdown baseline must be reconstructed from history or fail closed');
 assert.ok(ea.includes('TimeGMT()-3*60*60'), 'Daily circuit breakers must use the Brasília calendar day, not broker server midnight');
 assert.ok(ea.includes('Baseline de equity diário não pode ser reconstruído'), 'Uncertain daily drawdown baseline must block new entries');
