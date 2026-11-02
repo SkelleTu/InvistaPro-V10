@@ -24,6 +24,7 @@ input int    InpPauseMinutesAfterLosses = 60;
 input double InpDailyLossLimitPercent = 3.0;
 input int    InpDeviationPoints = 30;
 input int    InpMaxSlippagePoints = 0; // 0 = automatic ATR-based limit
+input double InpMarginReserveMultiplier = 1.5;
 input int    InpHeartbeatSeconds = 30;
 
 CTrade trade;
@@ -451,7 +452,7 @@ bool ExecuteSetup(Setup &s) {
    ENUM_ORDER_TYPE orderType=s.side==1 ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
    double requiredMargin=0;
    if(!OrderCalcMargin(orderType,_Symbol,volume,s.entry,requiredMargin) ||
-      requiredMargin<=0 || requiredMargin>AccountInfoDouble(ACCOUNT_MARGIN_FREE)) {
+      requiredMargin<=0 || requiredMargin*InpMarginReserveMultiplier>AccountInfoDouble(ACCOUNT_MARGIN_FREE)) {
       Print("Margem insuficiente ou nao calculavel. Entrada bloqueada.");
       return false;
    }
@@ -583,7 +584,7 @@ void OnInitHeartbeat() {
 }
 
 int OnInit() {
-   if(InpRiskPercent<=0 || InpRiskPercent>2.0 || InpMaxStopPercent<=0 || InpMaxStopPercent>1.5 || InpMinimumRR<2.0 || InpEstimatedRoundTripCostPercent<0 || InpEstimatedRoundTripCostPercent>2.0 || InpDailyLossLimitPercent<=0 || InpDailyLossLimitPercent>10.0 || InpMaxTradesPerDay<1 || InpMaxTradesPerDay>5 || InpMaxConsecutiveLosses<1 || InpMaxLosingTradesPerDay<1 || InpPauseMinutesAfterLosses<1) {
+   if(InpRiskPercent<=0 || InpRiskPercent>2.0 || InpMaxStopPercent<=0 || InpMaxStopPercent>1.5 || InpMinimumRR<2.0 || InpEstimatedRoundTripCostPercent<0 || InpEstimatedRoundTripCostPercent>2.0 || InpDailyLossLimitPercent<=0 || InpDailyLossLimitPercent>10.0 || InpMaxTradesPerDay<1 || InpMaxTradesPerDay>5 || InpMaxConsecutiveLosses<1 || InpMaxLosingTradesPerDay<1 || InpPauseMinutesAfterLosses<1 || InpMarginReserveMultiplier<1.0 || InpMarginReserveMultiplier>5.0) {
       Print("Configuracao de risco invalida. EA bloqueado."); return INIT_PARAMETERS_INCORRECT;
    }
    if(!IsDemoAccount()) {
