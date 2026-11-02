@@ -44,7 +44,7 @@ assert.ok(ea.includes('ACCOUNT_MARGIN_MODE_RETAIL_HEDGING'), 'Partial exits must
 assert.ok(ea.includes('PA partial reduction'), 'Partial exits must reduce netting accounts with an opposite deal');
 assert.ok(ea.includes('GlobalVariableCheck(partialKey)'), 'The deterministic partial exit must happen at most once per position');
 assert.ok(ea.includes('ReviewOpenPositionAI'), 'Open positions must receive event-driven AI reviews');
-assert.ok(ea.includes('POSITION_IDENTIFIER)!=ticket'), 'Stale AI responses must not modify a replaced position');
+assert.ok(ea.includes('POSITION_IDENTIFIER)!=identifier'), 'Stale AI responses must not modify a replaced position');
 assert.ok(ea.includes('SYMBOL_TRADE_FREEZE_LEVEL'), 'AI stop tightening must respect broker freeze distance');
 assert.ok(ea.includes('TimeCurrent()-g_lastPositionAIReview)>=900'), 'AI position review must have a bounded 15-minute heartbeat');
 assert.ok(ea.includes('InpEstimatedRoundTripCostPercent'), 'Net RR and sizing must account for broker-specific costs');
