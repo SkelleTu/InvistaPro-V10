@@ -464,7 +464,7 @@ export default function MetaTraderPage() {
     '/api/mt5/download-ea-price-action',
     'InvistaPRO_EA_PriceAction.mq5',
     'EA Price Action v1.0 baixado',
-    'Este é o EA novo da estratégia do sócio. Copie para MQL5/Experts, compile no MetaEditor (F7), instale no gráfico do ativo desejado e habilite AlgoTrading. Não requer o indicador Girassol.',
+    'EA novo da estratégia Price Action. Copie para MQL5/Experts, compile no MetaEditor (F7), instale no gráfico do ativo desejado e habilite AlgoTrading. Opera o símbolo do gráfico; não requer Girassol. Configure EstimatedRoundTripCommissionPerLot com a comissão total de ida e volta por lote na moeda da conta; mantenha zero somente se o broker não cobrar comissão.',
   );
 
   return (
