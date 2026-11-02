@@ -716,6 +716,25 @@ void FetchAndProcessSignal()
    bool success = false;
    bool requestOk = false;
 
+   if (!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED)
+       || !MQLInfoInteger(MQL_TRADE_ALLOWED)
+       || !AccountInfoInteger(ACCOUNT_TRADE_ALLOWED)
+       || !AccountInfoInteger(ACCOUNT_TRADE_EXPERT))
+   {
+      Print("⛔ Price Action: negociação bloqueada pelas permissões do terminal, EA ou conta.");
+      return;
+   }
+
+   long currentSymbolTradeMode = SymbolInfoInteger(g_symbol, SYMBOL_TRADE_MODE);
+   if (currentSymbolTradeMode == SYMBOL_TRADE_MODE_DISABLED
+       || currentSymbolTradeMode == SYMBOL_TRADE_MODE_CLOSEONLY
+       || (action == "BUY" && currentSymbolTradeMode == SYMBOL_TRADE_MODE_SHORTONLY)
+       || (action == "SELL" && currentSymbolTradeMode == SYMBOL_TRADE_MODE_LONGONLY))
+   {
+      Print("⛔ Price Action: direção indisponível nas regras atuais do símbolo. mode=", currentSymbolTradeMode);
+      return;
+   }
+
    if (action == "BUY")
       requestOk = trade.Buy(lotSize, g_symbol, 0, stopLoss, takeProfit, "InvistaPRO_" + signalId);
    else if (action == "SELL")
