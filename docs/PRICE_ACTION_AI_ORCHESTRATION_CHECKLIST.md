@@ -1,31 +1,44 @@
-# Price Action AI orchestration checklist
+# Price Action EA implementation checklist
 
-Status: design baseline only. Not approved for live trading.
+The primary deliverable is a broker-neutral MetaTrader 5 EA. It reads the selected chart symbol and uses the connected MT5 broker for quotes, contract specifications and execution. It does not require Binance or Deriv APIs. The experimental Binance service below is a separate adapter and is not a prerequisite for this EA.
 
-- [x] Public Binance REST/WebSocket closed-candle feed for BTCUSDT, ETHUSDT and SOLUSDT; Spot or USD-M Futures must be selected explicitly.
-- [ ] Connect the feed lifecycle to a supervised worker and operational health endpoint.
-- [x] Closed-candle pre-trigger detector using H4/H1 alignment, M15 structure zone, candle pattern, volume and unbroken trigger.
-- [ ] Full pivot-confirmed structure scanner, zone lifecycle and data-freshness orchestration.
-- [ ] Cheap deterministic pre-trigger scanner; no AI call without a candidate.
-- [x] AI review coordinator contract with per-symbol cooldown, in-flight deduplication and fail-closed behavior.
-- [x] Provider adapter calls the existing Invista PRO multi-model ensemble with original OHLCV candles and structured strategy context; missing model response fails closed.
-- [x] Binance context adapter for bid/ask, configured taker fees and slippage, macro-news window, Brasília sessions and injected account-risk authority; missing configuration fails closed.
-- [ ] Wire runtime into supervised worker and supply a verified account-risk implementation.
-- [x] Pipeline contract connects pre-trigger approval to the final deterministic gate; no order is sent by the pipeline.
-- [ ] Final deterministic gates rerun after AI approval; AI cannot create signals or override risk.
-- [ ] DEMO/testnet-only execution adapter with idempotency and reconciliation.
-- [ ] Exchange-side protective stop confirmed before considering a position protected.
-- [x] Runtime port for event-driven position reviews through the AI coordinator, fed by Binance trade ticks rather than waiting only for candle closes.
-- [ ] Connect real exchange position stream, material-event detector and bounded heartbeat scheduler.
-- [ ] AI stop changes may tighten only; hard risk limits and emergency exits remain deterministic.
-- [ ] Backtest, out-of-sample, replay, fault-injection and DEMO evidence before any live enablement.
-- [x] Independent MT5 Price Action EA source uses the selected chart symbol and broker-provided contract specifications; no Binance/Deriv dependency.
-- [x] Separate authenticated download route and dashboard button; existing Girassol EA and its download route remain unchanged.
-- [x] MT5 AI review endpoint accepts closed OHLCV frames for arbitrary broker symbol names, validates candles and fails closed on news/AI unavailability.
-- [x] EA risk controls include account-currency lot sizing, broker volume/tick/margin constraints, structural pivot stop, net cost estimate, daily circuit breakers, persistent state, break-even, one-time partial and tightening-only trailing.
-- [x] Event-driven position AI reviews use material price moves plus a 15-minute bounded heartbeat; AI can HOLD, take one partial, tighten stop or request close.
-- [ ] MetaEditor compile and runtime validation across MT5 brokers/symbol contract types.
-- [ ] DEMO forward test, restart/reconnect tests, execution rejection/slippage tests and trade-history reconciliation.
-- [ ] Full deterministic scanner parity with documented sweep/FVG/OB/BOS/CHoCH/range criteria; current EA uses local structure/pattern gates and AI reviews the raw frames.
+## MT5 EA implemented in source
 
-No checklist item is complete merely because its interface or documentation exists. Each item requires implementation evidence and tests.
+- [x] Independent MT5 EA source: `public/downloads/InvistaPRO_PriceAction_EA.mq5`.
+- [x] Uses `_Symbol` from the selected chart; no hardcoded broker, exchange or BTC symbol suffix.
+- [x] H4/H1 trend alignment and closed-candle M15/M5 structure/pattern checks.
+- [x] Pre-trigger request to the existing multi-model AI ensemble; approval is mandatory and fail-closed.
+- [x] AI review endpoint validates OHLCV, symbol, timeframe data and high-impact-news status.
+- [x] Final breakout is checked on the next closed M5 candle; trend, invalidation, zone and volume are revalidated.
+- [x] Structural stop from confirmed two-left/two-right M15 swing pivot with ATR margin.
+- [x] Broker-specific volume step/minimum/maximum, tick size, stop/freeze levels, trade mode and margin validation.
+- [x] Account-currency sizing via `OrderCalcProfit`; 1% default risk, 2% hard ceiling and 1.5% maximum stop distance.
+- [x] Estimated round-trip cost and net R:R validation, with broker-configurable cost assumption.
+- [x] Default daily cap of 3 trades, two consecutive losses pause, three daily losing trades stop, daily drawdown circuit breaker.
+- [x] Persisted daily risk state and initial R distance across EA restarts.
+- [x] Broker-side SL/TP on entry, break-even at +1R, one 50% partial at +1.5R and tightening-only structural trailing from +2R.
+- [x] Event-driven AI position reviews on material price movement plus 15-minute bounded heartbeat; HOLD, one partial, tighten-only stop or reasoned close.
+- [x] DEMO-only initialization in this validation build.
+- [x] Separate authenticated download route and dashboard button; Girassol EA source, endpoint and button are not replaced.
+- [x] Authenticated telemetry heartbeat for the independent EA.
+- [x] Static source-policy test included in the project test script.
+
+## MT5 EA still required before production-ready / 100%
+
+- [ ] MetaEditor compile with zero errors; review warnings and confirm behavior on current MT5 builds.
+- [ ] Forward DEMO validation on at least two brokers and different Bitcoin symbol suffixes/contract types.
+- [ ] Verify commission, fees and slippage assumptions against actual DEMO fills and configure cost inputs per broker.
+- [ ] Test restart/reconnect with open positions, partial fills, order rejection, failed stop modification, market closure and lost responses.
+- [ ] Reconcile terminal positions and trade history after reconnect/restart; verify no duplicate entry after ambiguous execution.
+- [ ] Complete deterministic definitions and tests for liquidity sweeps, FVG, Order Blocks, BOS/CHoCH, range-extreme logic and persistent zone lifecycle.
+- [ ] Backtest, out-of-sample, replay, fault-injection and DEMO forward evidence.
+- [ ] Review daily drawdown baseline when EA is attached mid-session and shared account-wide risk across multiple charts/magic instances.
+
+## Separate Binance research adapter (not an EA dependency)
+
+- [x] Experimental Binance public REST/WebSocket closed-candle feed for BTCUSDT, ETHUSDT and SOLUSDT.
+- [x] Experimental Binance pre-trigger scanner and AI provider contracts.
+- [ ] Supervised worker, exchange position stream, DEMO/testnet execution, exchange-side protection and reconciliation.
+- [ ] Keep this adapter isolated; it must never impose Binance/Deriv restrictions on the MT5 EA.
+
+No source-level checkbox proves compilation, broker execution, profitability or readiness for live trading. No live trading is enabled by this validation build.
