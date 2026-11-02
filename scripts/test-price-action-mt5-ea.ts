@@ -16,6 +16,7 @@ assert.ok(ea.includes('TrendDataReady(PERIOD_H4)'), 'Missing trend history must 
 assert.ok(ea.includes('barrier<=target+cost'), 'Long targets must not be placed into the nearest opposing pivot');
 assert.ok(ea.includes('/api/mt5/price-action/review'), 'EA must request independent AI pre-trigger review');
 assert.ok(ea.includes('g_approvedPatternTime>0'), 'EA must retain and revalidate AI-approved pre-trigger before final breakout');
+assert.ok(ea.includes('PeriodSeconds(PERIOD_M5)*3'), 'AI pre-trigger approval must expire after three M5 candles');
 assert.ok(ea.includes('InpRiskPercent>2.0'), 'EA must cap configurable risk at 2%');
 assert.ok(ea.includes('InpMaxStopPercent>1.5'), 'EA must cap stop distance at 1.5%');
 assert.ok(ea.includes('InpMinimumRR<2.0'), 'EA must enforce minimum net reward/risk of 1:2');
