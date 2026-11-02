@@ -24,7 +24,9 @@ assert.ok(ea.includes('CalculatePriceActionSwingStop'), 'Open positions must tra
 assert.ok(ea.includes('SymbolSelect(g_symbol, true)'), 'EA must select and validate the actual chart/override symbol before operating');
 assert.ok(ea.includes('SetTypeFillingBySymbol(g_symbol)'), 'EA must use the broker-supported filling policy');
 assert.ok(ea.includes('riskDistance / entry > 0.015'), 'EA must reject stops wider than 1.5%');
-assert.ok(ea.includes('rewardDistance / riskDistance < 2.0'), 'EA must enforce minimum executable R:R of 1:2');
+assert.ok(ea.includes('executableRiskReward < 2.0'), 'EA must enforce minimum net executable R:R of 1:2 after spread');
+assert.ok(ea.includes('estimatedRoundTripCost = currentSpread * 2.0'), 'EA must include round-trip spread in executable R:R validation');
+assert.ok(ea.includes('CloseAtEndOfBrasiliaSession = true') && ea.includes('IsPastBrasiliaSessionEnd()'), 'EA must enforce day-trade session-end position handling');
 assert.ok(ea.includes('breakeven em +1R'), 'EA must manage deterministic breakeven at +1R');
 assert.ok(ea.includes('parcial de 50% realizada em +1,5R'), 'EA must manage the 50% partial at +1.5R');
 assert.ok(ea.includes('CountManagedPositions() < MaxPositions'), 'Unrelated/manual positions must not block this EA instance');
