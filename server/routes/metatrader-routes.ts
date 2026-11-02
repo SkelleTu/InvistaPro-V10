@@ -2405,7 +2405,7 @@ router.post('/price-action/review', mt5EaTokenAccess, async (req: Request, res: 
     const review = await huggingFaceAI.reviewPriceActionSnapshot(symbol, phase as 'ENTRY' | 'POSITION', {
       generatedAt: Date.now(),
       frames,
-      context: { brokerNeutral: true, source: 'MetaTrader 5 chart', direction },
+      context: { ...(req.body?.context ?? {}), brokerNeutral: true, source: 'MetaTrader 5 chart', direction },
       early: phase === 'ENTRY' ? {
         side: direction,
         triggerLevel: Number(req.body?.triggerPrice),
