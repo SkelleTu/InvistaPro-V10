@@ -57,9 +57,13 @@ CPositionInfo  posInfo;
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   if (MaxDeviationPoints < 0 || MaxDeviationPoints > 1000 || EstimatedRoundTripCommissionPerLot < 0.0)
+   if (MaxDeviationPoints < 0 || MaxDeviationPoints > 1000
+       || EstimatedRoundTripCommissionPerLot < 0.0
+       || PriceActionRiskPercent < 1.0 || PriceActionRiskPercent > 2.0
+       || SignalSeconds < 1 || HeartbeatSeconds < 5
+       || MaxPositions < 1 || WarmupSeconds < 0)
    {
-      Print("⛔ MaxDeviationPoints inválido; configure um valor entre 0 e 1000.");
+      Print("⛔ Parâmetros inválidos: risco 1–2%, slippage 0–1000 pontos, comissão não negativa, sinal >=1s, heartbeat >=5s, posições >=1 e aquecimento >=0s.");
       return INIT_PARAMETERS_INCORRECT;
    }
    g_serverUrl   = ServerURL;
