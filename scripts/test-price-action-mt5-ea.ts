@@ -63,7 +63,10 @@ assert.ok(ea.includes('if(reservedAt>=serverDayStart && reservedAt<=TimeCurrent(
 assert.ok(ea.includes('GlobalVariableDel("PA_RESERVE_"+account+"_"+(string)orderId)'), 'Broker-history reconciliation must release filled-order reservations');
 
 assert.ok(ea.includes('!g_dailyLedgerReady || HasPendingDealEvents()'), 'Daily risk gate must fail closed while the trade ledger is pending');
-assert.ok(ea.includes('headers,5000,data,result,responseHeaders)'), 'Position AI review must not block local protection for 25 seconds');
+const entryReview = ea.slice(ea.indexOf('bool RequestAIReview'), ea.indexOf('double JsonNumber'));
+const positionReview = ea.slice(ea.indexOf('void ReviewOpenPositionAI'), ea.indexOf('string DailyStatePrefix'));
+assert.ok(entryReview.includes('headers,25000,data,result,responseHeaders)'), 'Entry AI review must allow the server cold-start window while failing closed');
+assert.ok(positionReview.includes('headers,5000,data,result,responseHeaders)'), 'Noncritical position AI review must have a short timeout so local protection is not delayed');
 
 assert.ok(ea.includes('SYMBOL_TRADE_FREEZE_LEVEL'), 'AI stop tightening must respect broker freeze distance');
 assert.ok(ea.includes('TimeCurrent()-g_lastPositionAIReview)>=900'), 'AI position review must have a bounded 15-minute heartbeat');
