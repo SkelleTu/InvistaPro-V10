@@ -1659,7 +1659,7 @@ class MetaTraderBridge extends EventEmitter {
     const breakevenTolerance = Math.max(1e-8, (this.status.lastBalance || this.status.lastEquity || 1) * 1e-6);
     for (const trade of this.recentTrades) {
       if (this.getBrasiliaDateKey(trade.closeTime) !== today) continue;
-      this.status.dailyTrades++;
+      this.status.dailyTrades = (this.status.dailyTrades ?? 0) + 1;
       if (trade.profit > 0) this.status.dailyProfit += trade.profit;
       else this.status.dailyLoss += Math.abs(trade.profit);
       if (trade.profit > breakevenTolerance) this.status.dailyWins++;
