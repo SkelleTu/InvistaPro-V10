@@ -1280,7 +1280,7 @@ int OnInit() {
       InpMaxConsecutiveLosses<1 || InpMaxConsecutiveLosses>5 ||
       InpMaxLosingTradesPerDay<1 || InpMaxLosingTradesPerDay>5 ||
       InpPauseMinutesAfterLosses<1 || InpMarginReserveMultiplier<1.0 ||
-      InpMarginReserveMultiplier>5.0 || InpMagic<=0 ||
+      InpMarginReserveMultiplier>5.0 || InpMagic<=0 || InpMagic>999999999 ||
       InpDeviationPoints<0 || InpMaxSlippagePoints<0) {
       Print("Configuracao de risco invalida. EA bloqueado."); return INIT_PARAMETERS_INCORRECT;
    }
