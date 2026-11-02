@@ -14,6 +14,7 @@ assert.ok(ea.includes('PERIOD_H4') && ea.includes('PERIOD_H1') && ea.includes('P
 assert.ok(ea.includes('bool rangeMode=(t4==0 && t1==0 && t15==0)'), 'Range mode must require H4/H1/M15 range and operate only at extremes');
 assert.ok(ea.includes('TrendDataReady(PERIOD_H4)'), 'Missing trend history must not be mistaken for a valid range');
 assert.ok(ea.includes('barrier<=target+cost'), 'Long targets must not be placed into the nearest opposing pivot');
+assert.ok(ea.includes('HasLiquiditySweep') && ea.includes('HasFVGConfluence') && ea.includes('HasOrderBlockConfluence') && ea.includes('HasBreakOfStructure'), 'EA must expose structural confluence features to the AI review');
 assert.ok(ea.includes('/api/mt5/price-action/review'), 'EA must request independent AI pre-trigger review');
 assert.ok(ea.includes('g_approvedPatternTime>0'), 'EA must retain and revalidate AI-approved pre-trigger before final breakout');
 assert.ok(ea.includes('PeriodSeconds(PERIOD_M5)*3'), 'AI pre-trigger approval must expire after three M5 candles');
