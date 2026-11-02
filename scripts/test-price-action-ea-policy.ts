@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 const ea = readFileSync(new URL('../public/downloads/InvistaPRO_EA.mq5', import.meta.url), 'utf8');
 
 assert.ok(ea.includes('PriceActionRiskPercent = 1.0'), 'EA must expose the bounded Price Action risk setting');
-assert.ok(ea.includes('PriceActionUseAIReview = true'), 'EA must expose AI-reviewed and autonomous strategy modes');
+assert.ok(ea.includes('PriceActionUseAIReview = false'), 'New Price Action EA must default to autonomous mode, independent of legacy Girassol/AI signals');
 assert.ok(ea.includes('priceActionUseAIReview'), 'EA must transmit the selected Price Action mode to the server');
 assert.ok(ea.includes('requestAccountType'), 'EA must transmit its actual terminal account mode on each signal request');
 assert.ok(ea.includes('if (IsPriceActionEnabled() && !PriceActionUseAIReview)'), 'Autonomous mode must not invoke the AI position monitor');
