@@ -838,7 +838,9 @@ void PersistPriceActionPositionState()
       double initialRisk = MathAbs(posInfo.PriceOpen() - posInfo.StopLoss());
       if (initialRisk <= 0.0) continue;
       string riskKey = PriceActionStateKey("InvistaPA_R", (long)ticket);
+      string volumeKey = PriceActionStateKey("InvistaPA_V", (long)ticket);
       if (!GlobalVariableCheck(riskKey)) GlobalVariableSet(riskKey, initialRisk);
+      if (!GlobalVariableCheck(volumeKey)) GlobalVariableSet(volumeKey, posInfo.Volume());
    }
 }
 
@@ -1304,8 +1306,15 @@ void MonitorOpenPositions()
        if (IsPriceActionEnabled() && sl > 0 && tp > 0)
        {
           string riskKey = PriceActionStateKey("InvistaPA_R", (long)ticket);
+          string volumeKey = PriceActionStateKey("InvistaPA_V", (long)ticket);
           string partialKey = PriceActionStateKey("InvistaPA_TP1", (long)ticket);
           double initialRisk = GlobalVariableCheck(riskKey) ? GlobalVariableGet(riskKey) : 0.0;
+          double initialVolume = GlobalVariableCheck(volumeKey) ? GlobalVariableGet(volumeKey) : posInfo.Volume();
+          if (!GlobalVariableCheck(volumeKey)) GlobalVariableSet(volumeKey, initialVolume);
+          double volumeStepForState = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_STEP);
+          bool partialAlreadyDone = GlobalVariableCheck(partialKey)
+             || (volumeStepForState > 0.0 && posInfo.Volume() <= initialVolume - volumeStepForState * 0.5);
+          if (partialAlreadyDone && !GlobalVariableCheck(partialKey)) GlobalVariableSet(partialKey, 1.0);
           if (initialRisk <= 0.0 && MathAbs(openPrice - sl) > SymbolInfoDouble(g_symbol, SYMBOL_POINT) * 2.0)
           {
              initialRisk = MathAbs(openPrice - sl);
@@ -1332,7 +1341,7 @@ void MonitorOpenPositions()
                       Print("⛔ Price Action: breakeven não confirmado pelo broker; ticket=", ticket, " retcode=", modifyRetcode);
                 }
              }
-             if (favorableMove >= initialRisk * 1.5 && !GlobalVariableCheck(partialKey) && ((posType == "BUY" && sl >= openPrice) || (posType == "SELL" && sl <= openPrice)))
+             if (favorableMove >= initialRisk * 1.5 && !partialAlreadyDone && ((posType == "BUY" && sl >= openPrice) || (posType == "SELL" && sl <= openPrice)))
              {
                 double volume = posInfo.Volume();
                 double volumeStep = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_STEP);
