@@ -40,7 +40,7 @@ assert.ok(ea.includes('PriceActionRiskPercent < 1.0 || PriceActionRiskPercent > 
 assert.ok(ea.includes('EstimatedRoundTripCommissionPerLot') && ea.includes('CommissionPriceDistance(costOrderType, entry)') && ea.includes('MathAbs(oneLotProfit) + EstimatedRoundTripCommissionPerLot'), 'Net R:R and risk sizing must include the broker round-trip commission estimate in account currency');
 assert.ok(ea.includes('CloseAtEndOfBrasiliaSession = true') && ea.includes('IsPastBrasiliaSessionEnd()'), 'EA must enforce day-trade session-end position handling');
 assert.ok(ea.includes('breakeven +1R'), 'EA must manage deterministic breakeven at +1R');
-assert.ok(ea.includes('parcial de 50% realizada em +1,5R'), 'EA must manage the 50% partial at +1.5R');
+assert.ok(ea.includes('parcial-alvo de 50% confirmada em +1,5R'), 'EA must reconcile and confirm the 50% partial at +1.5R');
 assert.ok(ea.includes('CountManagedPositions() < MaxPositions'), 'Unrelated/manual positions must not block this EA instance');
 assert.ok(ea.includes('if (signalId != "") g_pendingSignalId = signalId;'), 'Failed order attempts must not permanently consume the signal ID');
 assert.ok(ea.includes('g_symbol      = _Symbol;') && !ea.includes('Symbol_Override') && ea.includes('ManagedSymbolDigits()'), 'EA must operate only the installed chart symbol and use that symbol precision');
