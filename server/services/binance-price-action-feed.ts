@@ -36,6 +36,7 @@ const WS_BASE: Record<BinanceMarket, string> = {
   spot: 'wss://stream.binance.com:9443/stream',
   usdm: 'wss://fstream.binance.com/stream',
 };
+const INTERVAL_MS: Record<BinanceInterval, number> = { '1m': 60_000, '5m': 300_000, '15m': 900_000, '1h': 3_600_000, '4h': 14_400_000 };
 const MAX_CANDLE_AGE_MS: Record<BinanceInterval, number> = {
   '1m': 90_000, '5m': 390_000, '15m': 990_000, '1h': 3_900_000, '4h': 14_700_000,
 };
@@ -177,7 +178,9 @@ export class BinancePriceActionFeed {
       if (closed.length < 30) issues.push(interval + ': insufficient closed candles');
       if (!latest || now - latest.closeTime > MAX_CANDLE_AGE_MS[interval]) issues.push(interval + ': stale or missing latest candle');
       for (let i = 1; i < closed.length; i++) {
-        if (closed[i].openTime <= closed[i - 1].openTime) issues.push(interval + ': duplicate or out-of-order candle');
+        const delta = closed[i].openTime - closed[i - 1].openTime;
+        if (delta <= 0) issues.push(interval + ': duplicate or out-of-order candle');
+        else if (delta > INTERVAL_MS[interval] * 1.5) issues.push(interval + ': candle gap detected');
       }
     }
     if (!this.lastMessageAt || now - this.lastMessageAt > 30_000) issues.push('Binance websocket heartbeat missing or stale');
