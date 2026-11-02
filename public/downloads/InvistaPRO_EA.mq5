@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                              InvistaPRO_EA.mq5    |
 //|                                 InvistaPRO - Auto-Discovery URL   |
-//|   Versão 8.1 — Price Action operacional com gates de segurança   |
+//|   Versão 8.2 — Price Action operacional com gates de segurança   |
 //|   CORREÇÕES v8.0:                                                 |
 //|   • Detecção ampliada de nomes do Girassol/Fibonacci              |
 //|   • Endpoint /signal-with-indicators com fallback robusto         |
@@ -13,7 +13,7 @@
 //|   Nível 3: Bolinha pequena micro (buf 4=compra, 5=venda)         |
 //+------------------------------------------------------------------+
 #property copyright "InvistaPRO"
-#property version   "8.1"
+#property version   "8.2"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -703,29 +703,11 @@ void SendMarketDataForSyntheticGirassol()
 //+------------------------------------------------------------------+
 //| Busca e processa sinal com indicadores reais                      |
 //+------------------------------------------------------------------+
-bool IsPriceActionCryptoSymbol()
+bool IsPriceActionEnabled()
 {
-   // Broker symbol names vary (BTCUSDT, BTCUSDm, m.BTCUSD, BTCUSDT.r, etc.).
-   // Normalize separators, then recognize the requested crypto/USD or crypto/USDT pairs.
-   string normalized = g_symbol;
-   StringToUpper(normalized);
-   StringReplace(normalized, "/", "");
-   StringReplace(normalized, ".", "");
-   StringReplace(normalized, "_", "");
-   StringReplace(normalized, "-", "");
-
-   string bases[4] = {"BTC", "XBT", "ETH", "SOL"};
-   for(int i = 0; i < ArraySize(bases); i++)
-   {
-      int pos = StringFind(normalized, bases[i]);
-      if(pos < 0) continue;
-
-      string quoteAndSuffix = StringSubstr(normalized, pos + StringLen(bases[i]));
-      if(StringFind(quoteAndSuffix, "USDT") == 0 ||
-         StringFind(quoteAndSuffix, "USD") == 0)
-         return true;
-   }
-   return false;
+   // Price Action runs on the chart instrument selected by the user.
+   // Symbol-specific contract properties are validated by the sizing/execution layer.
+   return true;
 }
 
 int CountManagedPositions()
@@ -850,7 +832,7 @@ void FetchAndProcessSignal()
    body += "\"indicatorSignals\":"  + structuredSignals             + ",";
    body += "\"indicatorBuffers\":"  + allBuffers                    + ",";
    body += "\"indicatorCount\":"    + IntegerToString(g_indicatorCount) + ",";
-   body += "\"eaVersion\":\"8.1\"";
+   body += "\"eaVersion\":\"8.2\"";
    if (g_apiToken != "") body += ",\"token\":\"" + g_apiToken + "\"";
    body += "}";
 
@@ -869,14 +851,14 @@ void FetchAndProcessSignal()
 
    // Legacy GET is forbidden for crypto strategy symbols: it lacks full MTF context
    // and could bypass the deterministic Price Action gate.
-   if ((res == 404 || res == -1) && !IsPriceActionCryptoSymbol())
+   if ((res == 404 || res == -1) && !IsPriceActionEnabled())
    {
       url = g_serverUrl + "/api/metatrader/signal?symbol=" + g_symbol;
       if (g_apiToken != "") url += "&token=" + g_apiToken;
       char emptyData[];
       res = WebRequest("GET", url, headers, 5000, emptyData, result, responseHeaders);
    }
-   else if ((res == 404 || res == -1) && IsPriceActionCryptoSymbol())
+   else if ((res == 404 || res == -1) && IsPriceActionEnabled())
    {
       Print("⛔ Price Action crypto: endpoint multi-timeframe indisponível; fallback legado bloqueado.");
       return;
@@ -1010,19 +992,19 @@ void FetchAndProcessSignal()
       if (action == "BUY")
       {
          double entry = ask;
-         if (stopLoss > 0 && (entry - stopLoss) < minDist) { if (IsPriceActionCryptoSymbol()) { Print("⛔ Price Action: distância mínima do broker exigiria alargar o stop; sinal cancelado."); return; } stopLoss = NormalizeDouble(entry - minDist, _Digits); }
-         if (takeProfit > 0 && (takeProfit - entry) < minDist) { if (IsPriceActionCryptoSymbol()) { Print("⛔ Price Action: TP abaixo da distância mínima do broker; sinal cancelado."); return; } takeProfit = NormalizeDouble(entry + minDist, _Digits); }
+         if (stopLoss > 0 && (entry - stopLoss) < minDist) { if (IsPriceActionEnabled()) { Print("⛔ Price Action: distância mínima do broker exigiria alargar o stop; sinal cancelado."); return; } stopLoss = NormalizeDouble(entry - minDist, _Digits); }
+         if (takeProfit > 0 && (takeProfit - entry) < minDist) { if (IsPriceActionEnabled()) { Print("⛔ Price Action: TP abaixo da distância mínima do broker; sinal cancelado."); return; } takeProfit = NormalizeDouble(entry + minDist, _Digits); }
       }
       else if (action == "SELL")
       {
          double entry = bid;
-         if (stopLoss > 0 && (stopLoss - entry) < minDist) { if (IsPriceActionCryptoSymbol()) { Print("⛔ Price Action: distância mínima do broker exigiria alargar o stop; sinal cancelado."); return; } stopLoss = NormalizeDouble(entry + minDist, _Digits); }
-         if (takeProfit > 0 && (entry - takeProfit) < minDist) { if (IsPriceActionCryptoSymbol()) { Print("⛔ Price Action: TP abaixo da distância mínima do broker; sinal cancelado."); return; } takeProfit = NormalizeDouble(entry - minDist, _Digits); }
+         if (stopLoss > 0 && (stopLoss - entry) < minDist) { if (IsPriceActionEnabled()) { Print("⛔ Price Action: distância mínima do broker exigiria alargar o stop; sinal cancelado."); return; } stopLoss = NormalizeDouble(entry + minDist, _Digits); }
+         if (takeProfit > 0 && (entry - takeProfit) < minDist) { if (IsPriceActionEnabled()) { Print("⛔ Price Action: TP abaixo da distância mínima do broker; sinal cancelado."); return; } takeProfit = NormalizeDouble(entry - minDist, _Digits); }
       }
    }
 
    Print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    bool isPriceActionCrypto = IsPriceActionCryptoSymbol();
+    bool isPriceActionCrypto = IsPriceActionEnabled();
     if (isPriceActionCrypto)
     {
        double entry = (action == "BUY") ? ask : bid;
@@ -1172,7 +1154,7 @@ void MonitorOpenPositions()
  
        // Deterministic Price Action management: breakeven at +1R and 50% partial at +1.5R.
        // These controls run locally and never depend on AI availability.
-       if (IsPriceActionCryptoSymbol() && sl > 0 && tp > 0)
+       if (IsPriceActionEnabled() && sl > 0 && tp > 0)
        {
           string riskKey = "InvistaPA_R_" + IntegerToString((long)ticket);
           string partialKey = "InvistaPA_TP1_" + IntegerToString((long)ticket);
@@ -1229,7 +1211,7 @@ void MonitorOpenPositions()
        }
 
 // Autonomous Price Action mode uses only deterministic local protection and fixed SL/TP.
-      if (IsPriceActionCryptoSymbol() && !PriceActionUseAIReview)
+      if (IsPriceActionEnabled() && !PriceActionUseAIReview)
          continue;
 
             string posJson = "{";
@@ -1336,7 +1318,7 @@ bool SendHeartbeat()
    body += "\"openPositions\":" + IntegerToString(openPos)  + ",";
    body += "\"platform\":\"MT5\",";
    body += "\"accountType\":\"" + accountType + "\",";
-   body += "\"eaVersion\":\"8.1\"";
+   body += "\"eaVersion\":\"8.2\"";
    if (g_apiToken != "") body += ",\"token\":\"" + g_apiToken + "\"";
    body += "}";
 
