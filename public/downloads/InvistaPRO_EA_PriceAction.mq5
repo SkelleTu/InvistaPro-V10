@@ -520,12 +520,18 @@ bool ClosePriceActionPartial(ulong ticket, double volume, string positionType)
       ? SymbolInfoDouble(g_symbol, SYMBOL_BID)
       : SymbolInfoDouble(g_symbol, SYMBOL_ASK);
    long filling = SymbolInfoInteger(g_symbol, SYMBOL_FILLING_MODE);
+   long executionMode = SymbolInfoInteger(g_symbol, SYMBOL_TRADE_EXEMODE);
    if ((filling & SYMBOL_FILLING_IOC) == SYMBOL_FILLING_IOC)
       request.type_filling = ORDER_FILLING_IOC;
    else if ((filling & SYMBOL_FILLING_FOK) == SYMBOL_FILLING_FOK)
       request.type_filling = ORDER_FILLING_FOK;
-   else
+   else if (executionMode != SYMBOL_TRADE_EXECUTION_MARKET)
       request.type_filling = ORDER_FILLING_RETURN;
+   else
+   {
+      Print("⛔ Price Action: broker não expõe política IOC/FOK válida para parcial netting; parcial bloqueada.");
+      return false;
+   }
 
    if (request.price <= 0 || !OrderSend(request, result))
    {
