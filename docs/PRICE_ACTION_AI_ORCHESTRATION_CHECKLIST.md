@@ -15,7 +15,7 @@ The primary deliverable is a broker-neutral MetaTrader 5 EA. It reads the select
 - [x] Account-currency sizing via `OrderCalcProfit`; 1% default risk, 2% hard ceiling and 1.5% maximum stop distance.
 - [x] Estimated round-trip cost and net R:R validation, with broker-configurable cost assumption.
 - [x] Default daily cap of 3 trades, two consecutive losses pause, three daily losing trades stop, daily drawdown circuit breaker.
-- [x] Persisted daily risk state and initial R distance across EA restarts; atomic terminal-global entry lock serializes charts sharing the same account and magic.
+- [x] Persisted daily risk state and initial R distance across EA restarts; atomic terminal-global entry lock and deal-event deduplication share daily limits across charts on the same account, including different magic numbers.
 - [x] Broker-side SL/TP on entry, break-even at +1R, one 50% partial at +1.5R and tightening-only structural trailing from +2R.
 - [x] Event-driven AI position reviews on material price movement plus 15-minute bounded heartbeat; HOLD, one partial, tighten-only stop or reasoned close.
 - [x] DEMO-only initialization in this validation build.
