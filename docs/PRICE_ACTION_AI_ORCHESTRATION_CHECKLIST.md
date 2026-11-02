@@ -9,7 +9,8 @@ Status: design baseline only. Not approved for live trading.
 - [ ] Cheap deterministic pre-trigger scanner; no AI call without a candidate.
 - [x] AI review coordinator contract with per-symbol cooldown, in-flight deduplication and fail-closed behavior.
 - [x] Provider adapter calls the existing Invista PRO multi-model ensemble with original OHLCV candles and structured strategy context; missing model response fails closed.
-- [ ] Wire runtime into supervised worker and provide complete context/position adapters.
+- [x] Binance context adapter for bid/ask, configured taker fees and slippage, macro-news window, Brasília sessions and injected account-risk authority; missing configuration fails closed.
+- [ ] Wire runtime into supervised worker and supply a verified account-risk implementation.
 - [x] Pipeline contract connects pre-trigger approval to the final deterministic gate; no order is sent by the pipeline.
 - [ ] Final deterministic gates rerun after AI approval; AI cannot create signals or override risk.
 - [ ] DEMO/testnet-only execution adapter with idempotency and reconciliation.
