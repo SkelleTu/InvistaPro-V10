@@ -264,9 +264,10 @@ bool RequestAIReview(int side,double trigger,double invalidation,datetime patter
    body+="\"estimatedRoundTripCostPercent\":"+DoubleToString(InpEstimatedRoundTripCostPercent,3)+",";
    body+="\"accountEquity\":"+DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY),2)+",";
    body+="\"freeMargin\":"+DoubleToString(AccountInfoDouble(ACCOUNT_MARGIN_FREE),2)+",";
+   double confluencePrice=side==1 ? marketTick.ask : marketTick.bid;
    body+="\"liquiditySweep\":"+(HasLiquiditySweep(side)?"true":"false")+",";
-   body+="\"fvgConfluence\":"+(HasFVGConfluence(side,marketTick.ask)?"true":"false")+",";
-   body+="\"orderBlockConfluence\":"+(HasOrderBlockConfluence(side,marketTick.ask)?"true":"false")+",";
+   body+="\"fvgConfluence\":"+(HasFVGConfluence(side,confluencePrice)?"true":"false")+",";
+   body+="\"orderBlockConfluence\":"+(HasOrderBlockConfluence(side,confluencePrice)?"true":"false")+",";
    body+="\"breakOfStructure\":"+(HasBreakOfStructure(side)?"true":"false")+",";
    body+="\"tradesToday\":"+(string)g_tradesToday+",\"consecutiveLosses\":"+(string)g_consecutiveLosses+"},";
    body+="\"frames\":{\"H4\":"+h4+",\"H1\":"+h1+",\"M15\":"+m15+",\"M5\":"+m5+",\"M1\":"+m1+"}}";
