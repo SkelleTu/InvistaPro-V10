@@ -25,6 +25,7 @@ assert.ok(ea.includes('void OnTradeTransaction('), 'EA must reconcile broker dea
 assert.ok(ea.includes('SyncClosedTradeReports()'), 'EA must retry closed-trade reporting after temporary HTTP failures');
 assert.ok(ea.includes('SyncOpenPositionReports()'), 'EA must reconcile open positions after temporary HTTP failures or terminal restarts');
 assert.ok(ea.includes('InvistaPA_V') && ea.includes('partialAlreadyDone'), 'EA must persist original volume and prevent repeated TP1 partial reductions after reconnects');
+assert.ok(ea.includes('desiredPartialVolume') && ea.includes('alreadyClosedVolume') && ea.includes('filledVolume + tolerance >= volume') && ea.includes('result.volume + tolerance >= volume'), 'TP1 must reconcile actual partial-fill volume and retry only the unfilled remainder after restart or broker partial execution');
 assert.ok(ea.includes('DEAL_COMMISSION') && ea.includes('DEAL_SWAP') && ea.includes('DEAL_FEE'), 'Daily risk statistics must use net P&L including trading costs');
 assert.ok(ea.includes('CountSymbolPositions() == 0'), 'EA must not merge a new strategy order into an existing same-symbol position');
 assert.ok(ea.includes('CalculatePriceActionSwingStop'), 'Open positions must trail only by confirmed M5 swing structure');
