@@ -195,7 +195,9 @@ export function assessMt5RiskLimit(input: {
   if (!Number.isFinite(config.maxDailyProfit) || config.maxDailyProfit <= 0
     || !Number.isFinite(status.dailyProfit) || status.dailyProfit < 0 || status.dailyProfit >= config.maxDailyProfit) reasons.push('Meta/limite diário de lucro atingido, indisponível ou inválido');
   if (status.circuitBreakerActive) reasons.push('Circuit breaker ativo: pausa obrigatória após duas perdas consecutivas');
-  const dailyTrades = Number.isFinite(status.dailyTrades) ? Number(status.dailyTrades) : Number(status.dailyWins) + Number(status.dailyLosses) + Number(status.dailyBreakeven ?? 0);
+  const dailyTrades = typeof status.dailyTrades === 'number' && Number.isFinite(status.dailyTrades)
+    ? status.dailyTrades
+    : Number(status.dailyWins) + Number(status.dailyLosses) + Number(status.dailyBreakeven ?? 0);
   if (!Number.isFinite(dailyTrades) || dailyTrades >= MAX_DAILY_TRADES) {
     reasons.push('Limite diário de ' + MAX_DAILY_TRADES + ' operações atingido');
   }
