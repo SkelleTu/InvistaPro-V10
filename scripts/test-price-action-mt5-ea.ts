@@ -22,6 +22,9 @@ assert.ok(ea.includes('PeriodSeconds(PERIOD_M5)*3'), 'AI pre-trigger approval mu
 assert.ok(ea.includes('InpRiskPercent>2.0'), 'EA must cap configurable risk at 2%');
 assert.ok(ea.includes('InpMaxStopPercent>1.5'), 'EA must cap stop distance at 1.5%');
 assert.ok(ea.includes('InpMinimumRR<2.0'), 'EA must enforce minimum net reward/risk of 1:2');
+assert.ok(ea.includes('risk*InpMinimumRR+cost*(InpMinimumRR+1.0)'), 'Target distance must solve the net RR equation including entry/exit costs');
+assert.ok(ea.includes('finalReward/(finalRisk+cost)<InpMinimumRR'), 'Normalized target must still pass the final net RR gate');
+
 assert.ok(ea.includes('OrderCalcProfit'), 'Position size must use account-currency loss per lot');
 assert.ok(ea.includes('SYMBOL_VOLUME_STEP') && ea.includes('SYMBOL_VOLUME_MIN') && ea.includes('SYMBOL_VOLUME_MAX'), 'Volume must respect broker contract steps and limits');
 assert.ok(ea.includes('TRADE_RETCODE_DONE'), 'EA must validate execution return code');
