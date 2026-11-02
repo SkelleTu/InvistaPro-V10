@@ -51,6 +51,10 @@ assert.ok(ea.includes('Baseline de equity diário não pode ser reconstruído'),
 assert.ok(ea.includes('InpMaxLosingTradesPerDay = 3'), 'Three losing trades must stop entries for the day');
 assert.ok(ea.includes('g_losingTradesToday>=InpMaxLosingTradesPerDay'), 'Daily losing-trade circuit breaker must be enforced');
 assert.ok(ea.includes('DEAL_POSITION_ID'), 'Partial exit PnL must be aggregated by position before counting losses');
+assert.ok(ea.includes('PA_TRACK_'), 'Account-wide loss accounting must track Price Action positions independent of chart magic number');
+assert.ok(ea.includes('StringFind(dealComment,"InvistaPRO PA")>=0'), 'Price Action entry tracking must identify the EA order comment');
+assert.ok(ea.includes('DEAL_COMMISSION)+HistoryDealGetDouble(trans.deal,DEAL_FEE)'), 'Net trade PnL must include entry and exit commissions/fees');
+assert.ok(ea.includes('InpRiskPercent<1.0 || InpRiskPercent>2.0'), 'EA risk input must stay within the documented 1%-2% range');
 assert.ok(ea.includes('if(!IsDemoAccount())'), 'This validation build must block non-DEMO accounts');
 assert.ok(!ea.toLowerCase().includes('binance'), 'EA strategy must not depend on Binance');
 assert.ok(!ea.toLowerCase().includes('deriv'), 'EA strategy must not depend on Deriv');
