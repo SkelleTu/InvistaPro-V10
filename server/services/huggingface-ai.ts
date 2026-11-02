@@ -368,7 +368,9 @@ export class HuggingFaceAIService {
     if (action === 'MOVE_STOP') {
       const stops = valid.map(item => Number(item.parsed.proposedStop)).filter(Number.isFinite);
       if (stops.length !== valid.length) return { action: 'HOLD', confidence, reasoning: 'Modelos não forneceram stops válidos. ' + reasoning };
-      return { action, confidence, reasoning, proposedStop: stops[0] };
+      const side = String(raw.position?.direction ?? '').toUpperCase();
+      const conservativeStop = side === 'BUY' ? Math.max(...stops) : side === 'SELL' ? Math.min(...stops) : stops[0];
+      return { action, confidence, reasoning, proposedStop: conservativeStop };
     }
     if (action === 'CLOSE') {
       const reasons = valid.map(item => String(item.parsed.closeReason ?? '').trim()).filter(Boolean);
