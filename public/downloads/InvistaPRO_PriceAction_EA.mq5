@@ -717,7 +717,8 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,const MqlTradeRequest &
    if(!HistoryDealSelect(trans.deal)) return;
    if((long)HistoryDealGetInteger(trans.deal,DEAL_MAGIC)!=InpMagic) return;
    string dealGuard="PA_DEAL_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+(string)trans.deal;
-   if(!GlobalVariableTemp(dealGuard)) return;
+   if(!GlobalVariableCheck(dealGuard)) GlobalVariableSet(dealGuard,0.0);
+   if(!GlobalVariableSetOnCondition(dealGuard,(double)TimeCurrent(),0.0)) return;
    long entry=(long)HistoryDealGetInteger(trans.deal,DEAL_ENTRY);
    if(entry!=DEAL_ENTRY_OUT && entry!=DEAL_ENTRY_OUT_BY) return;
    ulong positionId=(ulong)HistoryDealGetInteger(trans.deal,DEAL_POSITION_ID);
@@ -751,6 +752,16 @@ void OnInitHeartbeat() {
    WebRequest("POST",InpServerURL+"/api/mt5/price-action/heartbeat",headers,5000,data,result,rh);
 }
 
+void CleanupOldDealGuards() {
+   string prefix="PA_DEAL_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_";
+   for(int i=GlobalVariablesTotal()-1;i>=0;i--) {
+      string name=GlobalVariableName(i);
+      if(StringFind(name,prefix)!=0) continue;
+      if(TimeCurrent()-(datetime)GlobalVariableGet(name)>30*24*60*60)
+         GlobalVariableDel(name);
+   }
+}
+
 int OnInit() {
    if(InpRiskPercent<=0 || InpRiskPercent>2.0 || InpMaxStopPercent<=0 || InpMaxStopPercent>1.5 || InpMinimumRR<2.0 || InpEstimatedRoundTripCostPercent<0 || InpEstimatedRoundTripCostPercent>2.0 || InpDailyLossLimitPercent<=0 || InpDailyLossLimitPercent>10.0 || InpMaxTradesPerDay<1 || InpMaxTradesPerDay>5 || InpMaxConsecutiveLosses<1 || InpMaxLosingTradesPerDay<1 || InpPauseMinutesAfterLosses<1 || InpMarginReserveMultiplier<1.0 || InpMarginReserveMultiplier>5.0) {
       Print("Configuracao de risco invalida. EA bloqueado."); return INIT_PARAMETERS_INCORRECT;
@@ -759,6 +770,7 @@ int OnInit() {
       Print("Conta nao-DEMO bloqueada nesta versao de validacao. Use uma conta DEMO MT5."); return INIT_FAILED;
    }
    if(!SymbolSelect(_Symbol,true)) return INIT_FAILED;
+   CleanupOldDealGuards();
    trade.SetExpertMagicNumber(InpMagic);
    g_lastM5Bar=iTime(_Symbol,PERIOD_M5,0);
    EventSetTimer(1);
