@@ -2383,6 +2383,10 @@ router.post('/price-action/review', mt5EaTokenAccess, async (req: Request, res: 
         previous = values[0];
       }
     }
+    const newsStatus = await getHighImpactNewsStatus();
+    if (!newsStatus.valid || newsStatus.blocked) {
+      return res.json({ decision: 'REJECT', direction, confidence: 0, reason: 'Janela de notícia de alto impacto ativa ou fonte de notícias indisponível.' });
+    }
     const review = await huggingFaceAI.reviewPriceActionSnapshot(symbol, 'ENTRY', {
       generatedAt: Date.now(),
       frames,
