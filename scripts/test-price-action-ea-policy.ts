@@ -49,6 +49,7 @@ assert.ok(ea.includes('CopyRates(g_symbol, timeframe, 1, count, rates)'), 'Strat
 assert.ok(ea.includes('string BuildMultiTimeframeJson()') && ['PERIOD_H4','PERIOD_H1','PERIOD_M15','PERIOD_M5','PERIOD_M1'].every((tf) => ea.includes('BuildTimeframeCandlesJson(' + tf)), 'EA must serialize all five required closed-candle timeframes');
 assert.ok(ea.includes('BrokerTimeToUtc(rates[i].time)') && ea.includes('BrokerTimeToUtc((datetime)HistoryDealGetInteger(deal, DEAL_TIME))'), 'Broker-local candle and deal times must be normalized to UTC for freshness and Brasilia daily limits');
 assert.ok(ea.includes('trade.ResultDeal() > 0'), 'EA must confirm broker execution instead of trusting local request validation');
+assert.ok(['TERMINAL_TRADE_ALLOWED','MQL_TRADE_ALLOWED','ACCOUNT_TRADE_ALLOWED','ACCOUNT_TRADE_EXPERT','SYMBOL_TRADE_MODE_CLOSEONLY','SYMBOL_TRADE_MODE_SHORTONLY','SYMBOL_TRADE_MODE_LONGONLY'].every((flag) => ea.includes(flag)), 'EA must respect terminal, account, expert and per-symbol direction permissions before sending an order');
 
 const route = readFileSync(new URL('../server/routes/metatrader-routes.ts', import.meta.url), 'utf8');
 assert.ok(route.includes("code: 'MT5_EA_SOURCE_NOT_CURRENT'"), 'Download must fail closed when the canonical EA is missing or stale');
