@@ -620,7 +620,7 @@ string BuildCandlesJson(MqlRates &rates[], int count)
    {
       if (i > 0) json += ",";
       json += "{";
-      json += "\"time\":"   + IntegerToString(rates[i].time)          + ",";
+      json += "\"time\":"   + IntegerToString((long)BrokerTimeToUtc(rates[i].time)) + ",";
       json += "\"open\":"   + DoubleToString(rates[i].open,  ManagedSymbolDigits()) + ",";
       json += "\"high\":"   + DoubleToString(rates[i].high,  ManagedSymbolDigits()) + ",";
       json += "\"low\":"    + DoubleToString(rates[i].low,   ManagedSymbolDigits()) + ",";
@@ -772,6 +772,12 @@ long GetManagedPositionIdentifier()
 int ManagedSymbolDigits()
 {
    return (int)SymbolInfoInteger(g_symbol, SYMBOL_DIGITS);
+}
+
+datetime BrokerTimeToUtc(datetime brokerTime)
+{
+   long brokerUtcOffsetSeconds = (long)TimeCurrent() - (long)TimeGMT();
+   return (datetime)((long)brokerTime - brokerUtcOffsetSeconds);
 }
 
 string PriceActionStateKey(string prefix, long identifier)
@@ -1253,7 +1259,7 @@ void FetchAndProcessSignal()
       PersistPriceActionPositionState();
       long positionIdentifier = GetManagedPositionIdentifier();
       if (positionIdentifier > 0)
-         ConfirmTradeOpen(signalId, positionIdentifier, action, lotSize, stopLoss, takeProfit, trade.ResultPrice());
+         ConfirmTradeOpen(signalId, positionIdentifier, action, lotSize, stopLoss, takeProfit, trade.ResultPrice(), TimeCurrent());
       else
          Print("⚠️ Ordem executada, mas posição ainda não identificada; reconciliação automática fará o registro.");
    }
@@ -1511,7 +1517,7 @@ bool SendHeartbeat()
 //| Confirma abertura de trade                                        |
 //+------------------------------------------------------------------+
 
-bool ConfirmTradeOpen(string signalId, long ticket, string type, double lots, double sl, double tp, double executedPrice)
+bool ConfirmTradeOpen(string signalId, long ticket, string type, double lots, double sl, double tp, double executedPrice, datetime openedAt)
 {
    if (ticket <= 0 || lots <= 0.0 || executedPrice <= 0.0) return false;
    string url     = g_serverUrl + "/api/metatrader/trade/open";
@@ -1524,7 +1530,7 @@ bool ConfirmTradeOpen(string signalId, long ticket, string type, double lots, do
    body += "\"openPrice\":"    + DoubleToString(executedPrice, ManagedSymbolDigits()) + ",";
    body += "\"stopLoss\":"     + DoubleToString(sl, ManagedSymbolDigits())     + ",";
    body += "\"takeProfit\":"   + DoubleToString(tp, ManagedSymbolDigits())     + ",";
-   body += "\"openTime\":"     + IntegerToString((long)TimeCurrent() * 1000)  + ",";
+   body += "\"openTime\":"     + IntegerToString((long)BrokerTimeToUtc(openedAt) * 1000)  + ",";
    body += "\"signalId\":\""   + signalId                        + "\"";
    if (g_apiToken != "") body += ",\"token\":\"" + g_apiToken + "\"";
    body += "}";
@@ -1555,7 +1561,7 @@ void SyncOpenPositionReports()
       if (prefix >= 0) signalId = StringSubstr(comment, prefix + StringLen("InvistaPRO_"));
       string type = posInfo.PositionType() == POSITION_TYPE_BUY ? "BUY" : "SELL";
       ConfirmTradeOpen(signalId, identifier, type, posInfo.Volume(), posInfo.StopLoss(),
-                       posInfo.TakeProfit(), posInfo.PriceOpen());
+                       posInfo.TakeProfit(), posInfo.PriceOpen(), posInfo.Time());
    }
 }
 
@@ -1595,7 +1601,7 @@ bool ReportClosedPosition(ulong positionId)
       long entry = HistoryDealGetInteger(deal, DEAL_ENTRY);
       double volume = HistoryDealGetDouble(deal, DEAL_VOLUME);
       double price = HistoryDealGetDouble(deal, DEAL_PRICE);
-      datetime dealTime = (datetime)HistoryDealGetInteger(deal, DEAL_TIME);
+      datetime dealTime = BrokerTimeToUtc((datetime)HistoryDealGetInteger(deal, DEAL_TIME));
       if (entry == DEAL_ENTRY_IN)
       {
          entryVolume += volume;
