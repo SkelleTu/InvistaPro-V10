@@ -299,7 +299,7 @@ bool RequestAIReview(int side,double trigger,double invalidation,datetime patter
    string headers="Content-Type: application/json\r\n";
    StringToCharArray(body,data,0,StringLen(body),CP_UTF8);
    string responseHeaders;
-   int code=WebRequest("POST",InpServerURL+"/api/mt5/price-action/review",headers,25000,data,result,responseHeaders);
+   int code=WebRequest("POST",InpServerURL+"/api/mt5/price-action/review",headers,5000,data,result,responseHeaders);
    if(code!=200) { Print("Price Action AI indisponivel: HTTP ",code); return false; }
    string response=CharArrayToString(result,0,-1,CP_UTF8);
    bool approved=JsonString(response,"decision")=="APPROVE" && JsonString(response,"direction")==direction;
@@ -488,6 +488,13 @@ double ReconstructDayStartEquity(datetime dayStart) {
 
 bool RebuildDailyLossCountersFromLedger();
 
+bool HasPendingDealEvents() {
+   string prefix=PendingDealPrefix();
+   for(int i=GlobalVariablesTotal()-1;i>=0;i--)
+      if(StringFind(GlobalVariableName(i),prefix)==0) return true;
+   return false;
+}
+
 bool DailyRiskAllowed() {
    // Daily limits use Brasília calendar day, independent of broker server timezone.
    datetime nowBrt=TimeGMT()-3*60*60;
@@ -521,7 +528,7 @@ bool DailyRiskAllowed() {
       if(GlobalVariableCheck(key+"_E")) g_dayStartEquity=GlobalVariableGet(key+"_E");
    }
    if(TimeCurrent()<g_pauseUntil || g_tradesToday>=InpMaxTradesPerDay || g_losingTradesToday>=InpMaxLosingTradesPerDay) return false;
-   if(g_dayStartEquity<=0 || !g_dailyLedgerReady) return false;
+   if(g_dayStartEquity<=0 || !g_dailyLedgerReady || HasPendingDealEvents()) return false;
    double dd=(g_dayStartEquity-AccountInfoDouble(ACCOUNT_EQUITY))/g_dayStartEquity*100.0;
    return dd<InpDailyLossLimitPercent && g_consecutiveLosses<InpMaxConsecutiveLosses;
 }
