@@ -25,6 +25,8 @@ assert.ok(ea.includes('ReviewOpenPositionAI'), 'Open positions must receive even
 assert.ok(ea.includes('TimeCurrent()-g_lastPositionAIReview)>=900'), 'AI position review must have a bounded 15-minute heartbeat');
 assert.ok(ea.includes('InpEstimatedRoundTripCostPercent'), 'Net RR and sizing must account for broker-specific costs');
 assert.ok(ea.includes('OrderCalcMargin'), 'Entry must validate available margin');
+assert.ok(ea.includes('InpMaxSlippagePoints'), 'EA must expose a broker-configurable slippage ceiling');
+assert.ok(ea.includes('trade.ResultPrice()'), 'EA must validate the actual execution price after fill');
 assert.ok(ea.includes('SYMBOL_TRADE_TICK_SIZE'), 'Prices must align to broker tick size');
 assert.ok(ea.includes('PersistDailyState'), 'Daily circuit-breaker state must persist across EA restarts');
 assert.ok(ea.includes('InpMaxLosingTradesPerDay = 3'), 'Three losing trades must stop entries for the day');
