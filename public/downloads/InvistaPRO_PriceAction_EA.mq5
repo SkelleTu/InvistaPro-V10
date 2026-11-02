@@ -29,6 +29,9 @@ CTrade trade;
 datetime g_lastM5Bar = 0;
 datetime g_lastM1Bar = 0;
 datetime g_lastHeartbeat = 0;
+datetime g_lastPositionAIReview = 0;
+double g_lastPositionAIReference = 0;
+ulong g_lastPositionTicket = 0;
 datetime g_pauseUntil = 0;
 datetime g_dayStart = 0;
 double g_dayStartEquity = 0;
@@ -191,6 +194,87 @@ bool RequestAIReview(int side,double trigger,double invalidation,datetime patter
    bool approved=JsonString(response,"decision")=="APPROVE" && JsonString(response,"direction")==direction;
    g_aiUnavailable=!approved;
    return approved;
+}
+
+double JsonNumber(string body,string key) {
+   string k="\""+key+"\"";
+   int p=StringFind(body,k);
+   if(p<0) return 0;
+   p=StringFind(body,":",p+StringLen(k));
+   if(p<0) return 0;
+   p++;
+   while(p<StringLen(body) && StringGetCharacter(body,p)==' ') p++;
+   int e=p;
+   while(e<StringLen(body)) {
+      ushort ch=StringGetCharacter(body,e);
+      if((ch>='0' && ch<='9') || ch=='-' || ch=='.' || ch=='e' || ch=='E' || ch=='+') e++;
+      else break;
+   }
+   if(e<=p) return 0;
+   return StringToDouble(StringSubstr(body,p,e-p));
+}
+
+void ReviewOpenPositionAI() {
+   if(!InpRequireAIApproval || !PositionSelect(_Symbol)) return;
+   if((long)PositionGetInteger(POSITION_MAGIC)!=InpMagic) return;
+   ulong ticket=(ulong)PositionGetInteger(POSITION_TICKET);
+   long type=PositionGetInteger(POSITION_TYPE);
+   int side=type==POSITION_TYPE_BUY ? 1 : -1;
+   double currentStop=PositionGetDouble(POSITION_SL);
+   double takeProfit=PositionGetDouble(POSITION_TP);
+   MqlTick tick; if(!SymbolInfoTick(_Symbol,tick)) return;
+   double currentPrice=side==1 ? tick.bid : tick.ask;
+   double atr=ATR(PERIOD_M15);
+   bool newPosition=ticket!=g_lastPositionTicket;
+   bool material=newPosition || g_lastPositionAIReference<=0 ||
+      (atr>0 && MathAbs(currentPrice-g_lastPositionAIReference)>=atr*0.5);
+   bool heartbeat=(TimeCurrent()-g_lastPositionAIReview)>=900;
+   if(!material && !heartbeat) return;
+
+   // Rate-limit before the network call; a failed model request must not create a retry storm.
+   g_lastPositionTicket=ticket;
+   g_lastPositionAIReview=TimeCurrent();
+   g_lastPositionAIReference=currentPrice;
+
+   string h4=FrameJSON(PERIOD_H4),h1=FrameJSON(PERIOD_H1),m15=FrameJSON(PERIOD_M15),
+          m5=FrameJSON(PERIOD_M5),m1=FrameJSON(PERIOD_M1);
+   if(h4=="" || h1=="" || m15=="" || m5=="" || m1=="") return;
+   string direction=side==1 ? "BUY" : "SELL";
+   string body="{\"token\":\""+InpApiToken+"\",\"symbol\":\""+_Symbol+"\",\"phase\":\"POSITION\",";
+   body+="\"direction\":\""+direction+"\",\"currentPrice\":"+DoubleToString(currentPrice,_Digits)+",";
+   body+="\"currentStop\":"+DoubleToString(currentStop,_Digits)+",\"takeProfit\":"+DoubleToString(takeProfit,_Digits)+",";
+   body+="\"lastMaterialEventAt\":"+(string)(long)TimeCurrent()+",";
+   body+="\"frames\":{\"H4\":"+h4+",\"H1\":"+h1+",\"M15\":"+m15+",\"M5\":"+m5+",\"M1\":"+m1+"}}";
+   char data[],result[]; StringToCharArray(body,data,0,StringLen(body),CP_UTF8);
+   string headers="Content-Type: application/json\r\n",responseHeaders;
+   int code=WebRequest("POST",InpServerURL+"/api/mt5/price-action/review",headers,25000,data,result,responseHeaders);
+   if(code!=200) { Print("AI position review indisponivel; protecao local mantida. HTTP ",code); return; }
+   string response=CharArrayToString(result,0,-1,CP_UTF8);
+   double confidence=JsonNumber(response,"confidence");
+   if(confidence<0.80 || confidence>1.0) return;
+   string action=JsonString(response,"action");
+   if(action=="MOVE_STOP") {
+      double proposed=JsonNumber(response,"proposedStop");
+      bool tighter=side==1 ? proposed>=currentStop && proposed<currentPrice
+                           : proposed<=currentStop && proposed>currentPrice;
+      if(tighter && proposed>0) {
+         proposed=NormalizeDouble(proposed,_Digits);
+         if(trade.PositionModify(_Symbol,proposed,takeProfit))
+            Print("IA apertou stop protetivo. Stop nunca e ampliado.");
+      }
+   } else if(action=="TAKE_PARTIAL") {
+      string key="PA_PARTIAL_"+(string)ticket;
+      if(!GlobalVariableCheck(key) && PositionSelect(_Symbol)) {
+         double volume=PositionGetDouble(POSITION_VOLUME);
+         double partial=NormalizeVolume(volume*0.5);
+         if(partial>0 && partial<volume && trade.PositionClosePartial(_Symbol,partial))
+            GlobalVariableSet(key,1.0);
+      }
+   } else if(action=="CLOSE") {
+      string reason=JsonString(response,"closeReason");
+      if(StringLen(reason)>0 && PositionSelect(_Symbol))
+         if(trade.PositionClose(_Symbol)) Print("IA recomendou encerramento: ",reason);
+   }
 }
 
 bool DailyRiskAllowed() {
@@ -357,6 +441,7 @@ void OnDeinit(const int reason) { EventKillTimer(); }
 void OnTimer() {
    OnInitHeartbeat();
    ManageOpenPosition();
+   ReviewOpenPositionAI();
 }
 
 void OnTick() {
