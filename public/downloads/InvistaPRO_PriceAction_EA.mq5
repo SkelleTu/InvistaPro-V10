@@ -283,7 +283,8 @@ bool RequestAIReview(int side,double trigger,double invalidation,datetime patter
    MqlTick marketTick; if(!SymbolInfoTick(_Symbol,marketTick)) return false;
    body+="\"context\":{\"spread\":"+DoubleToString(marketTick.ask-marketTick.bid,_Digits)+",";
    body+="\"brokerUtcOffsetSeconds\":"+(string)(long)(TimeCurrent()-TimeGMT())+",";
-   body+="\"riskPercent\":"+DoubleToString(InpRiskPercent,2)+",\"maxStopPercent\":"+DoubleToString(InpMaxStopPercent,2)+",\"marketRegime\":\""+(Trend(PERIOD_H4)==0?"RANGE":"TREND")+"\",";
+   body+="\"riskPercent\":"+DoubleToString(InpRiskPercent,2)+",\"maxStopPercent\":"+DoubleToString(InpMaxStopPercent,2)+",\"minimumNetRR\":"+DoubleToString(InpMinimumRR,2)+",";
+   body+="\"plannedPartialPercent\":50,\"plannedPartialTriggerR\":1.5,\"marketRegime\":\""+(Trend(PERIOD_H4)==0?"RANGE":"TREND")+"\",";
    body+="\"estimatedRoundTripCostPercent\":"+DoubleToString(InpEstimatedRoundTripCostPercent,3)+",";
    body+="\"accountEquity\":"+DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY),2)+",";
    body+="\"freeMargin\":"+DoubleToString(AccountInfoDouble(ACCOUNT_MARGIN_FREE),2)+",";
