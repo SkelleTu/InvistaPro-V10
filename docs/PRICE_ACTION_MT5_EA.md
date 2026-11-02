@@ -9,13 +9,13 @@ Quotes, candles, contract size, tick size, volume step/minimum/maximum, trade mo
 ## Entry process
 
 1. Read closed candles only from H4, H1, M15, M5 and M1.
-2. Require H4/H1 EMA trend alignment.
+2. Require H4/H1 EMA trend alignment; when all H4/H1/M15 classify as range, only allow rejection setups at M15 range extremes, never the middle.
 3. Detect a closed M5 candle pattern and require proximity to an M15 structure extreme.
 4. Require relative tick volume above the prior 20 closed candles.
 5. Send the complete OHLCV snapshot, symbol, trigger, invalidation, spread and account-risk context to the authenticated MT5 AI review endpoint.
 6. The existing multi-model AI ensemble must return a unanimous approval. Missing models, invalid news status, malformed data, low confidence or disagreement blocks the entry.
 7. On the next M5 close, revalidate trend, invalidation, M15 zone and volume, then require the final trigger breakout.
-8. Recalculate structural stop, broker tick normalization, estimated round-trip costs, net R:R, lot size and margin immediately before sending the order.
+8. Recalculate structural stop, broker tick normalization, estimated round-trip costs, net R:R, room to the nearest confirmed opposing M15 pivot, lot size and margin immediately before sending the order.
 
 The EA does not let AI create an entry or bypass local risk gates.
 
@@ -26,7 +26,8 @@ The EA does not let AI create an entry or bypass local risk gates.
 - Stop distance above 1.5% of entry is rejected.
 - Minimum estimated net reward/risk: 1:2 after the configured cost estimate.
 - Lot size uses `OrderCalcProfit` in account currency and broker volume constraints.
-- Broker tick size, stop/freeze distance, trade mode and free margin are validated.
+- Broker tick size, stop/freeze distance, trade mode and free margin reserve are validated.
+- Partial exits support both MT5 hedging accounts and netting/exchange-style accounts.
 - Default daily trade cap: 3 (configurable up to 5).
 - Two consecutive losing positions trigger a 60-minute pause.
 - Three losing positions stop entries for the day.
