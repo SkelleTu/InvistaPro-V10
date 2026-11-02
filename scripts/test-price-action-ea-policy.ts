@@ -37,7 +37,7 @@ assert.ok(!ea.includes('SYMBOL_VOLUME_DIGITS'), 'EA must not use the nonexistent
 assert.ok(ea.includes('int VolumeDigitsFromStep()'), 'Volume precision must derive from SYMBOL_VOLUME_STEP');
 assert.ok(ea.includes('#property version   "1.0"'), 'Dedicated Price Action EA must expose its independent version');
 assert.ok(ea.includes('bool IsPriceActionEnabled()'), 'Price Action must be available on any chart symbol, with eligibility decided by validated market data and execution conditions');
-assert.ok(ea.split('\n').filter((line) => line.includes('eaVersion')).every((line) => line.includes('8.2')), 'All signal payloads must report the same EA version');
+assert.ok(ea.split('\n').filter((line) => line.includes('eaVersion')).every((line) => line.includes('1.0')), 'All signal payloads must report the dedicated Price Action EA version');
 assert.ok(ea.includes('CopyRates(g_symbol, timeframe, 1, count, rates)'), 'Strategy must exclude the still-forming candle');
 assert.ok(ea.includes('trade.ResultDeal() > 0'), 'EA must confirm broker execution instead of trusting local request validation');
 
