@@ -467,7 +467,8 @@ double CalculatePriceActionSwingStop(string positionType, double currentStop)
    double buffer = (ranges / rangeCount) * 0.10;
    double point = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
    long stopsLevel = SymbolInfoInteger(g_symbol, SYMBOL_TRADE_STOPS_LEVEL);
-   double minimumDistance = MathMax((double)stopsLevel * point, point * 2.0);
+   long freezeLevel = SymbolInfoInteger(g_symbol, SYMBOL_TRADE_FREEZE_LEVEL);
+   double minimumDistance = MathMax((double)MathMax(stopsLevel, freezeLevel) * point, point * 2.0);
 
    for (int i = copied - 3; i >= 2; i--)
    {
