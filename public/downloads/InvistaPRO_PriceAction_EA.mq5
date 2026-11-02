@@ -94,6 +94,10 @@ int Trend(ENUM_TIMEFRAMES tf) {
    return 0;
 }
 
+bool TrendDataReady(ENUM_TIMEFRAMES tf) {
+   return EMA(tf,20,1)>0 && EMA(tf,50,1)>0 && EMA(tf,20,5)>0;
+}
+
 double ATR(ENUM_TIMEFRAMES tf, int period=14) {
    int h=iATR(_Symbol,tf,period);
    if(h==INVALID_HANDLE) return 0;
@@ -580,6 +584,7 @@ void OnTick() {
    ManageOpenPosition();
    if(!IsNewBar(PERIOD_M5,g_lastM5Bar)) return;
    if(!DailyRiskAllowed() || !SpreadAllowed() || PositionSelect(_Symbol)) return;
+   if(!TrendDataReady(PERIOD_H4) || !TrendDataReady(PERIOD_H1) || !TrendDataReady(PERIOD_M15)) { g_approvedPatternTime=0; return; }
    int t4=Trend(PERIOD_H4),t1=Trend(PERIOD_H1),t15=Trend(PERIOD_M15);
    bool rangeMode=(t4==0 && t1==0 && t15==0);
    if(t4!=t1 || (t4==0 && !rangeMode)) { g_approvedPatternTime=0; return; }
