@@ -41,17 +41,19 @@ jobs:
           if ($install.ExitCode -ne 0) {
             Write-Warning "MetaTrader bootstrapper returned exit code $($install.ExitCode); checking whether its terminal installation completed."
           }
-          $roots = @("C:\Program Files", "C:\Program Files (x86)", $env:APPDATA, $env:LOCALAPPDATA)
-          $editor = $null
-          for ($attempt = 0; $attempt -lt 6 -and !$editor; $attempt++) {
-            $editor = Get-ChildItem -Path $roots -Filter "metaeditor64.exe" -File -Recurse -ErrorAction SilentlyContinue |
-              Select-Object -First 1
-            if (!$editor) { Start-Sleep -Seconds 5 }
-          }
+          Start-Sleep -Seconds 8
+          $roots = @(
+            "C:\Program Files\MetaTrader 5",
+            "C:\Program Files (x86)\MetaTrader 5",
+            (Join-Path $env:APPDATA "MetaQuotes\Terminal")
+          ) | Where-Object { Test-Path $_ }
+          $editor = Get-ChildItem -Path $roots -Filter "metaeditor64.exe" -File -Recurse -ErrorAction SilentlyContinue |
+            Select-Object -First 1
           if (!$editor) {
             Write-Host "MetaTrader install diagnostics:"
-            Get-ChildItem -Path $env:APPDATA -Directory -ErrorAction SilentlyContinue |
-              Where-Object { $_.Name -match "MetaQuotes|MetaTrader" } | Select-Object -ExpandProperty FullName
+            Get-ChildItem -Path $roots -Directory -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
+            Get-ChildItem -Path "C:\Program Files","C:\Program Files (x86)" -Directory -ErrorAction SilentlyContinue |
+              Where-Object { $_.Name -match "MetaTrader|MetaQuotes" } | Select-Object -ExpandProperty FullName
             throw "MetaEditor 64-bit was not found after installation."
           }
           $installRoot = $editor.Directory.FullName
