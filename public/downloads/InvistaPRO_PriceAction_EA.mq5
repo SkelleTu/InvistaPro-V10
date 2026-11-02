@@ -329,7 +329,7 @@ void OnInitHeartbeat() {
    if(InpHeartbeatSeconds<=0 || TimeCurrent()-g_lastHeartbeat<InpHeartbeatSeconds) return;
    g_lastHeartbeat=TimeCurrent();
    // Heartbeat endpoint is informational; no market or execution decision depends on it.
-   string body="{\"symbol\":\""+_Symbol+"\",\"broker\":\""+AccountInfoString(ACCOUNT_COMPANY)+"\",\"accountType\":\""+(IsDemoAccount()?"demo":"real")+"\"}";
+   string body="{\"token\":\""+InpApiToken+"\",\"symbol\":\""+_Symbol+"\",\"broker\":\""+AccountInfoString(ACCOUNT_COMPANY)+"\",\"accountType\":\""+(IsDemoAccount()?"demo":"real")+"\"}";
    char data[],result[]; StringToCharArray(body,data,0,StringLen(body),CP_UTF8);
    string headers="Content-Type: application/json\r\n",rh;
    WebRequest("POST",InpServerURL+"/api/mt5/price-action/heartbeat",headers,5000,data,result,rh);
