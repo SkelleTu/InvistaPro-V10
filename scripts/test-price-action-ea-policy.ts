@@ -7,7 +7,7 @@ assert.ok(ea.includes('PriceActionRiskPercent = 1.0'), 'EA must expose the bound
 assert.ok(ea.includes('PriceActionUseAIReview = true'), 'EA must expose AI-reviewed and autonomous strategy modes');
 assert.ok(ea.includes('priceActionUseAIReview'), 'EA must transmit the selected Price Action mode to the server');
 assert.ok(ea.includes('requestAccountType'), 'EA must transmit its actual terminal account mode on each signal request');
-assert.ok(ea.includes('if (IsPriceActionCryptoSymbol() && !PriceActionUseAIReview)'), 'Autonomous mode must not invoke the AI position monitor');
+assert.ok(ea.includes('if (IsPriceActionEnabled() && !PriceActionUseAIReview)'), 'Autonomous mode must not invoke the AI position monitor');
 assert.ok(ea.includes('CalculatePriceActionRiskLot'), 'EA must size Price Action orders from equity and structural stop');
 assert.ok(ea.includes('riskDistance / entry > 0.015'), 'EA must reject stops wider than 1.5%');
 assert.ok(ea.includes('rewardDistance / riskDistance < 2.0'), 'EA must enforce minimum executable R:R of 1:2');
@@ -21,7 +21,7 @@ assert.ok(!ea.includes('trade.Sell(lotSize, g_symbol, 0, 0, 0'), 'EA must not fa
 
 assert.ok(!ea.includes('SYMBOL_VOLUME_DIGITS'), 'EA must not use the nonexistent SYMBOL_VOLUME_DIGITS enum');
 assert.ok(ea.includes('int VolumeDigitsFromStep()'), 'Volume precision must derive from SYMBOL_VOLUME_STEP');
-assert.ok(ea.includes('#property version   "8.1"'), 'Downloadable EA source must expose the updated version');
+assert.ok(ea.includes('#property version   "8.2"'), 'Downloadable EA source must expose the updated version');
 assert.ok(ea.includes('StringFind(quoteAndSuffix, "USDT") == 0'), 'EA must recognize crypto symbols quoted in USDT');
 assert.ok(ea.split('\n').filter((line) => line.includes('eaVersion')).every((line) => line.includes('8.1')), 'All signal payloads must report the same EA version');
 assert.ok(ea.includes('CopyRates(g_symbol, timeframe, 1, count, rates)'), 'Strategy must exclude the still-forming candle');
