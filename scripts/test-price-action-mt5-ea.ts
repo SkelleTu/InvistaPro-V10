@@ -23,6 +23,9 @@ assert.ok(ea.includes('SYMBOL_VOLUME_STEP') && ea.includes('SYMBOL_VOLUME_MIN') 
 assert.ok(ea.includes('TRADE_RETCODE_DONE'), 'EA must validate execution return code');
 assert.ok(ea.includes('PositionModify'), 'EA must manage protective stops');
 assert.ok(ea.includes('PositionClosePartial'), 'EA must support partial exit');
+assert.ok(ea.includes('ClosePartialPosition'), 'Partial exits must be abstracted for account margin mode');
+assert.ok(ea.includes('ACCOUNT_MARGIN_MODE_RETAIL_HEDGING'), 'Partial exits must support hedging accounts');
+assert.ok(ea.includes('PA partial reduction'), 'Partial exits must reduce netting accounts with an opposite deal');
 assert.ok(ea.includes('GlobalVariableCheck(partialKey)'), 'The deterministic partial exit must happen at most once per position');
 assert.ok(ea.includes('ReviewOpenPositionAI'), 'Open positions must receive event-driven AI reviews');
 assert.ok(ea.includes('POSITION_IDENTIFIER)!=ticket'), 'Stale AI responses must not modify a replaced position');
