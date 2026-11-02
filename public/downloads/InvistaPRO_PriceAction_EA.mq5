@@ -277,10 +277,14 @@ void ReviewOpenPositionAI() {
    string action=JsonString(response,"action");
    if(action=="MOVE_STOP") {
       double proposed=JsonNumber(response,"proposedStop");
+      proposed=NormalizeTradePrice(proposed,side,true);
       bool tighter=side==1 ? proposed>=currentStop && proposed<currentPrice
                            : proposed<=currentStop && proposed>currentPrice;
-      if(tighter && proposed>0) {
-         proposed=NormalizeDouble(proposed,_Digits);
+      int minStop=(int)MathMax(SymbolInfoInteger(_Symbol,SYMBOL_TRADE_STOPS_LEVEL),
+                               SymbolInfoInteger(_Symbol,SYMBOL_TRADE_FREEZE_LEVEL));
+      bool brokerDistance=side==1 ? currentPrice-proposed>=minStop*_Point
+                                  : proposed-currentPrice>=minStop*_Point;
+      if(tighter && brokerDistance && proposed>0) {
          if(trade.PositionModify(_Symbol,proposed,takeProfit) && TradeRequestSucceeded())
             Print("IA apertou stop protetivo. Stop nunca e ampliado.");
       }
