@@ -10,6 +10,9 @@ assert.ok(ea.includes('priceActionUseAIReview\\":false'), 'Dedicated EA must run
 assert.ok(!ea.includes('SendMarketDataForSyntheticGirassol();'), 'Dedicated EA must not call the legacy Girassol market-data channel');
 assert.ok(!ea.includes('ScanChartIndicators();'), 'Dedicated EA must not scan legacy chart indicators');
 assert.ok(!ea.includes('SendMarketDataForSyntheticGirassol') && !ea.includes('ReadStructuredIndicatorSignals') && !ea.includes('ScanChartIndicators'), 'Dedicated Price Action EA source must not contain the unused Girassol/Fibonacci indicator pipeline');
+assert.ok(!ea.includes('/api/mt5/position/monitor') && !ea.includes('AIControlMode') && !ea.includes('ManualLotSize'), 'Dedicated Price Action EA must not invoke legacy AI position monitoring or fixed manual-lot fallbacks');
+assert.ok(!ea.includes('/api/metatrader/signal?symbol='), 'Dedicated Price Action EA must never fall back to a legacy signal endpoint without MTF context');
+assert.ok(ea.includes('lotSize = CalculatePriceActionRiskLot(entry, stopLoss)') && ea.includes('if (lotSize <= 0)'), 'Every entry must be sized locally from account equity and the structural stop, failing closed when sizing is unavailable');
 assert.ok(!ea.includes('g_assetProfileLoaded') && !ea.includes('g_marketDataSeconds'), 'Dedicated EA must not retain unused legacy asset-profile or synthetic-candle state');
 assert.ok(legacyEa.includes('#property version   "8.1"'), 'Legacy Girassol EA must retain its original downloadable source/version');
 assert.ok(ea.includes('priceActionUseAIReview'), 'EA must transmit the selected Price Action mode to the server');
