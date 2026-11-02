@@ -385,6 +385,31 @@ double CalculatePriceActionRiskLot(double entryPrice, double stopLoss)
    return volume;
 }
 
+double RecoverInitialPositionRisk(long positionIdentifier, double openPrice)
+{
+   if (positionIdentifier <= 0 || openPrice <= 0.0 || !HistorySelectByPosition(positionIdentifier)) return 0.0;
+   datetime earliestEntry = 0;
+   double originalStop = 0.0;
+   for (int i = 0; i < HistoryDealsTotal(); i++)
+   {
+      ulong deal = HistoryDealGetTicket(i);
+      if (deal == 0) continue;
+      if (HistoryDealGetInteger(deal, DEAL_MAGIC) != MagicNumber) continue;
+      if (HistoryDealGetString(deal, DEAL_SYMBOL) != g_symbol) continue;
+      ENUM_DEAL_ENTRY entry = (ENUM_DEAL_ENTRY)HistoryDealGetInteger(deal, DEAL_ENTRY);
+      if (entry != DEAL_ENTRY_IN && entry != DEAL_ENTRY_INOUT) continue;
+      ulong orderTicket = (ulong)HistoryDealGetInteger(deal, DEAL_ORDER);
+      double orderStop = HistoryOrderGetDouble(orderTicket, ORDER_SL);
+      datetime dealTime = (datetime)HistoryDealGetInteger(deal, DEAL_TIME);
+      if (orderStop > 0.0 && (earliestEntry == 0 || dealTime < earliestEntry))
+      {
+         earliestEntry = dealTime;
+         originalStop = orderStop;
+      }
+   }
+   return originalStop > 0.0 ? MathAbs(openPrice - originalStop) : 0.0;
+}
+
 double RecoverInitialPositionVolume(long positionIdentifier)
 {
    if (positionIdentifier <= 0 || !HistorySelectByPosition(positionIdentifier)) return 0.0;
@@ -410,11 +435,12 @@ void PersistPriceActionPositionState()
       if (posInfo.Magic() != MagicNumber || posInfo.Symbol() != g_symbol) continue;
       ulong ticket = posInfo.Ticket();
       double initialRisk = MathAbs(posInfo.PriceOpen() - posInfo.StopLoss());
-      if (initialRisk <= 0.0) continue;
       string riskKey = PriceActionStateKey("InvistaPA_R", (long)ticket);
       string volumeKey = PriceActionStateKey("InvistaPA_V", (long)ticket);
+      if (initialRisk <= 0.0)
+         initialRisk = RecoverInitialPositionRisk(posInfo.Identifier(), posInfo.PriceOpen());
       double recoveredInitialVolume = RecoverInitialPositionVolume(posInfo.Identifier());
-      if (!GlobalVariableCheck(riskKey)) GlobalVariableSet(riskKey, initialRisk);
+      if (initialRisk > 0.0 && !GlobalVariableCheck(riskKey)) GlobalVariableSet(riskKey, initialRisk);
       if (!GlobalVariableCheck(volumeKey))
          GlobalVariableSet(volumeKey, recoveredInitialVolume > 0.0 ? recoveredInitialVolume : posInfo.Volume());
    }
@@ -788,7 +814,11 @@ void MonitorOpenPositions()
           string riskKey = PriceActionStateKey("InvistaPA_R", (long)ticket);
           string volumeKey = PriceActionStateKey("InvistaPA_V", (long)ticket);
           string partialKey = PriceActionStateKey("InvistaPA_TP1", (long)ticket);
-          double initialRisk = GlobalVariableCheck(riskKey) ? GlobalVariableGet(riskKey) : 0.0;
+          double initialRisk = GlobalVariableCheck(riskKey) ? GlobalVariableGet(riskKey)
+             : RecoverInitialPositionRisk(posInfo.Identifier(), openPrice);
+          if (initialRisk <= 0.0 && ((posType == "BUY" && sl < openPrice) || (posType == "SELL" && sl > openPrice)))
+             initialRisk = MathAbs(openPrice - sl);
+          if (initialRisk > 0.0 && !GlobalVariableCheck(riskKey)) GlobalVariableSet(riskKey, initialRisk);
           double recoveredInitialVolume = RecoverInitialPositionVolume(posInfo.Identifier());
           double initialVolume = GlobalVariableCheck(volumeKey) ? GlobalVariableGet(volumeKey)
              : (recoveredInitialVolume > 0.0 ? recoveredInitialVolume : posInfo.Volume());
