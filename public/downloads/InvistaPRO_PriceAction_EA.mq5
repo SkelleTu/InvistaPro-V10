@@ -924,12 +924,23 @@ void OnInitHeartbeat() {
 }
 
 void CleanupOldDealGuards() {
-   string prefix="PA_DEAL_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_";
+   string account=(string)AccountInfoInteger(ACCOUNT_LOGIN);
+   string prefix="PA_DEAL_"+account+"_";
+   string closedPrefix="PA_CLOSED_"+account+"_";
    for(int i=GlobalVariablesTotal()-1;i>=0;i--) {
       string name=GlobalVariableName(i);
-      if(StringFind(name,prefix)!=0) continue;
-      if(TimeCurrent()-(datetime)GlobalVariableGet(name)>30*24*60*60)
-         GlobalVariableDel(name);
+      if(StringFind(name,prefix)==0) {
+         if(TimeCurrent()-(datetime)GlobalVariableGet(name)>30*24*60*60)
+            GlobalVariableDel(name);
+         continue;
+      }
+      if(StringFind(name,closedPrefix)==0) {
+         if(TimeCurrent()-(datetime)GlobalVariableGet(name)>90*24*60*60) {
+            string positionId=StringSubstr(name,StringLen(closedPrefix));
+            GlobalVariableDel("PA_CLOSED_PNL_"+account+"_"+positionId);
+            GlobalVariableDel(name);
+         }
+      }
    }
 }
 
