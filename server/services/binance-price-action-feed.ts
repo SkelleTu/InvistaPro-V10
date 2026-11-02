@@ -17,7 +17,9 @@ export interface BinanceCandle {
   closed: boolean;
 }
 
-export interface BinancePriceTick { symbol: string; price: number; quantity: number; eventTime: number; }\n\nexport interface BinanceSnapshot {
+export interface BinancePriceTick { symbol: string; price: number; quantity: number; eventTime: number; }
+
+export interface BinanceSnapshot {
   market: BinanceMarket;
   symbol: string;
   generatedAt: number;
@@ -66,7 +68,8 @@ function parseStreamKline(k: any): BinanceCandle | null {
 export class BinancePriceActionFeed {
   private sockets: WebSocket[] = [];
   private readonly candles = new Map<string, BinanceCandle[]>();
-  private readonly listeners = new Set<CandleListener>();\n  private readonly tickListeners = new Set<(tick: BinancePriceTick) => void>();
+  private readonly listeners = new Set<CandleListener>();
+  private readonly tickListeners = new Set<(tick: BinancePriceTick) => void>();
   private stopped = true;
   private lastMessageAt = 0;
   private reconnectTimer: NodeJS.Timeout | null = null;
@@ -119,7 +122,10 @@ export class BinancePriceActionFeed {
     if (!this.candles.size) throw new Error('Load and validate initial Binance history before starting streams');
     if (!this.stopped) return;
     this.stopped = false;
-    const streams = this.symbols.flatMap(symbol => [\n      ...PRICE_ACTION_INTERVALS.map(interval => symbol.toLowerCase() + '@kline_' + interval),\n      symbol.toLowerCase() + '@trade',\n    ]);
+    const streams = this.symbols.flatMap(symbol => [
+      ...PRICE_ACTION_INTERVALS.map(interval => symbol.toLowerCase() + '@kline_' + interval),
+      symbol.toLowerCase() + '@trade',
+    ]);
     this.connectStreams(streams);
   }
 
@@ -135,6 +141,14 @@ export class BinancePriceActionFeed {
         const envelope = JSON.parse(raw.toString());
         const data = envelope?.data;
         const symbol = String(data?.s ?? '').toUpperCase();
+        if (data?.e === 'trade') {
+          const price = Number(data.p), quantity = Number(data.q), eventTime = Number(data.T ?? data.E);
+          if (this.symbols.includes(symbol) && Number.isFinite(price) && price > 0 && Number.isFinite(quantity) && quantity >= 0 && Number.isFinite(eventTime)) {
+            const tick = { symbol, price, quantity, eventTime };
+            for (const listener of this.tickListeners) listener(tick);
+          }
+          return;
+        }
         const interval = data?.k?.i as BinanceInterval;
         if (!this.symbols.includes(symbol) || !PRICE_ACTION_INTERVALS.includes(interval)) return;
         const candle = parseStreamKline(data.k);
@@ -164,7 +178,12 @@ export class BinancePriceActionFeed {
     });
   }
 
-  onPriceTick(listener: (tick: BinancePriceTick) => void): () => void {\n    this.tickListeners.add(listener);\n    return () => this.tickListeners.delete(listener);\n  }\n\n  getSnapshot(symbol: string, now = Date.now()): BinanceSnapshot {
+  onPriceTick(listener: (tick: BinancePriceTick) => void): () => void {
+    this.tickListeners.add(listener);
+    return () => this.tickListeners.delete(listener);
+  }
+
+  getSnapshot(symbol: string, now = Date.now()): BinanceSnapshot {
     const normalized = symbol.toUpperCase();
     if (!this.symbols.includes(normalized)) throw new Error('Symbol is not enabled in this feed');
     const frames = {} as Record<BinanceInterval, BinanceCandle[]>;
