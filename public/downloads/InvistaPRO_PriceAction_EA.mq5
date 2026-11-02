@@ -482,6 +482,43 @@ double ReconstructDayStartEquity(datetime dayStart) {
       }
       if(firstDeal==0 || firstDeal<dayStart) return 0;
    }
+
+   // Also detect positions that were already closed after midnight. Looking
+   // only at currently open positions misses overnight trades closed at 01:00.
+   datetime historyFrom=dayStart-90*24*60*60;
+   if(historyFrom<0) historyFrom=0;
+   if(!HistorySelect(historyFrom,TimeCurrent())) return 0;
+   ulong seenPositionIds[];
+   int historyCount=HistoryDealsTotal();
+   for(int i=0;i<historyCount;i++) {
+      ulong deal=HistoryDealGetTicket(i);
+      if(deal==0) continue;
+      ulong identifier=(ulong)HistoryDealGetInteger(deal,DEAL_POSITION_ID);
+      if(identifier==0) continue;
+      bool seen=false;
+      for(int j=0;j<ArraySize(seenPositionIds);j++)
+         if(seenPositionIds[j]==identifier) { seen=true; break; }
+      if(!seen) {
+         int n=ArraySize(seenPositionIds);
+         ArrayResize(seenPositionIds,n+1);
+         seenPositionIds[n]=identifier;
+      }
+   }
+   for(int i=0;i<ArraySize(seenPositionIds);i++) {
+      if(!HistorySelectByPosition(seenPositionIds[i])) return 0;
+      datetime firstDeal=0,lastExit=0;
+      for(int j=0;j<HistoryDealsTotal();j++) {
+         ulong deal=HistoryDealGetTicket(j);
+         if(deal==0) continue;
+         datetime dealTime=(datetime)HistoryDealGetInteger(deal,DEAL_TIME);
+         if(firstDeal==0 || dealTime<firstDeal) firstDeal=dealTime;
+         long entry=(long)HistoryDealGetInteger(deal,DEAL_ENTRY);
+         if(entry==DEAL_ENTRY_OUT || entry==DEAL_ENTRY_OUT_BY)
+            if(dealTime>lastExit) lastExit=dealTime;
+      }
+      if(firstDeal>0 && firstDeal<dayStart && (lastExit==0 || lastExit>=dayStart))
+         return 0; // midnight floating equity cannot be reconstructed exactly
+   }
    if(!HistorySelect(dayStart,TimeCurrent())) return 0;
    double realized=0;
    for(int i=0;i<HistoryDealsTotal();i++) {
