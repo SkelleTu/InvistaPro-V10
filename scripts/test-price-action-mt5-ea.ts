@@ -115,6 +115,7 @@ assert.ok(ea.includes('bool ReconcilePriceActionHistory(datetime serverDayStart)
 assert.ok(ea.includes('HistorySelect(historyFrom,TimeCurrent())'), 'Trade reconciliation must scan broker history after terminal restarts');
 assert.ok(ea.includes('GlobalVariableSet(trackKey,1.0)'), 'Recovered open Price Action positions must restore their tracking marker');
 assert.ok(ea.includes('if(!HistorySelectByPosition(positionId)) return false'), 'Unavailable position history must fail closed during ledger reconciliation');
+assert.ok(ea.includes('if(closeAt<=0) return false'), 'A closed position without a confirmed exit deal must block new entries until history synchronizes');
 
 assert.ok(ea.includes('!GlobalVariableCheck(closedKey) || !GlobalVariableCheck(closedPnlKey)'), 'Interrupted closed-position ledger writes must be repaired from deal history');
 
