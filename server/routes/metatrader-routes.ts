@@ -2468,7 +2468,7 @@ router.get('/download-price-action-ea', mt5DashboardAccess, async (req: Request,
     let content = fs.readFileSync(eaPath, 'utf-8');
     if (!content.includes('#property version   "1.0"') ||
         !content.includes('/api/mt5/price-action/review') ||
-        !content.includes('InpRequireAIApproval')) {
+        !content.includes('RequestAIReview')) {
       return res.status(503).json({ ok: false, code: 'PRICE_ACTION_EA_NOT_CURRENT', error: 'O EA Price Action não passou na validação de versão.' });
     }
     const escapeMql = (value: string) => value.split('\\').join('\\\\').split('"').join('\\"').replace(/[\r\n]/g, '');
