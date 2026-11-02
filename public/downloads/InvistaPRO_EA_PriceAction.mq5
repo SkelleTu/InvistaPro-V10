@@ -31,15 +31,12 @@ input int      SignalSeconds    = 5;           // Intervalo de busca de sinal (s
 input int      MagicNumber      = 20261102;    // Número mágico
 input bool     AutoReconnect    = true;        // Reconexão automática de URL
 input int      MaxReconnectTries= 5;           // Tentativas máximas de reconexão
-const int      IndicatorBars = 5; // Compatibilidade interna; sem leitura de indicadores no EA novo
-const int      CandleCount = 200; // Compatibilidade interna; candles enviados por timeframe
 input double   PriceActionRiskPercent = 1.0; // Risco por trade: 1% padrão, máximo 2%
 input int      MaxDeviationPoints = 20; // Slippage máximo por ordem, em pontos do símbolo
 input int      MaxPositions = 1; // Uma posição por símbolo
 input int      WarmupSeconds = 120; // Aquecimento sem operar
 input bool     CloseAtEndOfBrasiliaSession = true; // Não carregar day trades para o dia seguinte
 
-// Compatibilidade com funções legadas mantidas sem execução no EA Price Action.
 const ENUM_AI_CONTROL_MODE AIControlMode = AI_FULL;
 const double ManualLotSize = 0.01;
 const int ManualStopLoss = 0;
@@ -67,35 +64,12 @@ datetime g_lastMonitor    = 0;
 int      g_monitorSeconds = 2;
 datetime g_warmupUntil    = 0;
 datetime g_lastWarmupPrint= 0;
-datetime g_lastMarketData = 0;  // controle do envio de candles para Girassol Sintético
-int      g_marketDataSeconds = 10; // envia candles a cada 10s para o Girassol Sintético
 
-// Perfil do ativo
-string   g_assetFamily    = "";
-string   g_assetTrend     = "";
-string   g_assetVolClass  = "";
-double   g_assetRsiOversold  = 30.0;
-double   g_assetRsiOverbought= 70.0;
-bool     g_assetProfileLoaded = false;
 
 CTrade         trade;
 CPositionInfo  posInfo;
 
-//--- Estrutura para indicadores detectados
-struct IndicatorInfo
-{
-   string name;
-   string nameLower;
-   int    handle;
-   int    subwindow;
-   int    totalBuffers;
-   bool   isGirassol;
-   bool   isFibonacci;
-};
-
-IndicatorInfo g_indicators[];
-int           g_indicatorCount = 0;
-
+// Indicator scanning is intentionally absent from this dedicated EA.
 //+------------------------------------------------------------------+
 //| Inicialização                                                     |
 //+------------------------------------------------------------------+
@@ -201,21 +175,6 @@ void OnTimer()
 }
 
 //+------------------------------------------------------------------+
-//| Busca perfil do ativo Deriv                                       |
-//+------------------------------------------------------------------+
-//+------------------------------------------------------------------+
-//| Escaneia TODOS os indicadores no gráfico com diagnóstico amplo   |
-//+------------------------------------------------------------------+
-//+------------------------------------------------------------------+
-//| Lê buffers brutos de todos os indicadores                         |
-//+------------------------------------------------------------------+
-//+------------------------------------------------------------------+
-//| Lê sinais estruturados do Girassol (3 níveis) e AutoFibonacci    |
-//+------------------------------------------------------------------+
-//+------------------------------------------------------------------+
-//| Constrói JSON de buffers brutos de um indicador                   |
-//+------------------------------------------------------------------+
-//+------------------------------------------------------------------+
 //| Constrói JSON de candles                                          |
 //+------------------------------------------------------------------+
 string BuildCandlesJson(MqlRates &rates[], int count)
@@ -264,7 +223,6 @@ void OnTick()
          TryReconnect();
    }
 
-   // EA Price Action é independente do canal de candles/Girassol legado.
 
    // ── Monitor de posições abertas ────────────────────────────────────────
    datetime localMonitorNow = TimeLocal();
@@ -294,9 +252,6 @@ void OnTick()
    }
 }
 
-//+------------------------------------------------------------------+
-//| Envia candles para o servidor calcular Girassol Sintético         |
-//+------------------------------------------------------------------+
 //+------------------------------------------------------------------+
 //| Busca e processa sinal com indicadores reais                      |
 //+------------------------------------------------------------------+
@@ -607,7 +562,6 @@ void FetchAndProcessSignal()
    string assetTrend    = ExtractJsonString(resp, "assetTrend");
    string assetVolClass = ExtractJsonString(resp, "assetVolClass");
    string reason        = ExtractJsonString(resp, "reason");
-   string girassolBias  = ExtractJsonString(resp, "girassolBias");
 
    // ── Aplicação do Modo de Controle da IA ──────────────────────────────
    if (!IsPriceActionEnabled() && AIControlMode == AI_MANUAL)
@@ -745,7 +699,6 @@ void FetchAndProcessSignal()
 
    Print("📡 SINAL v1.0: ", action, " | ", g_symbol, " | Confiança: ", confidence, "%");
    if (assetFamily  != "") Print("   Ativo: ", assetFamily, " | ", assetTrend, " | Vol: ", assetVolClass);
-   if (girassolBias != "") Print("   Girassol: ", girassolBias);
    if (slTpSource   != "") Print("   SL/TP via: ", slTpSource);
    Print("   SL: ", NormalizeDouble(stopLoss, ManagedSymbolDigits()), " | TP: ", NormalizeDouble(takeProfit, ManagedSymbolDigits()));
    Print("   Indicadores no gráfico: ", g_indicatorCount);
