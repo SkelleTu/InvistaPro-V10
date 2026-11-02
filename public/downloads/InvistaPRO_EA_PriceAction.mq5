@@ -498,17 +498,10 @@ void FetchAndProcessSignal()
       res = WebRequest("POST", url, headers, 10000, postData, result, responseHeaders);
    }
 
-   // Never fall back to the legacy GET route: it does not carry the required MTF context.
-   if ((res == 404 || res == -1) && !IsPriceActionEnabled())
+   // The dedicated EA requires the MTF endpoint; never fall back to legacy signal routes.
+   if (res == 404)
    {
-      url = g_serverUrl + "/api/metatrader/signal?symbol=" + g_symbol;
-      if (g_apiToken != "") url += "&token=" + g_apiToken;
-      char emptyData[];
-      res = WebRequest("GET", url, headers, 5000, emptyData, result, responseHeaders);
-   }
-   else if ((res == 404 || res == -1) && IsPriceActionEnabled())
-   {
-      Print("⛔ Price Action: endpoint multi-timeframe indisponível; fallback legado bloqueado.");
+      Print("⛔ Price Action: endpoint multi-timeframe indisponível; entrada bloqueada.");
       return;
    }
 
@@ -557,14 +550,14 @@ void FetchAndProcessSignal()
       if (action == "BUY")
       {
          double entry = ask;
-         if (stopLoss > 0 && (entry - stopLoss) < minDist) { if (IsPriceActionEnabled()) { Print("⛔ Price Action: distância mínima do broker exigiria alargar o stop; sinal cancelado."); return; } stopLoss = NormalizeDouble(entry - minDist, ManagedSymbolDigits()); }
-         if (takeProfit > 0 && (takeProfit - entry) < minDist) { if (IsPriceActionEnabled()) { Print("⛔ Price Action: TP abaixo da distância mínima do broker; sinal cancelado."); return; } takeProfit = NormalizeDouble(entry + minDist, ManagedSymbolDigits()); }
+         if (stopLoss <= 0 || (entry - stopLoss) < minDist) { Print("⛔ Price Action: stop de compra incompatível com a distância mínima do broker; sinal cancelado."); return; }
+         if (takeProfit <= 0 || (takeProfit - entry) < minDist) { Print("⛔ Price Action: alvo de compra incompatível com a distância mínima do broker; sinal cancelado."); return; }
       }
       else if (action == "SELL")
       {
          double entry = bid;
-         if (stopLoss > 0 && (stopLoss - entry) < minDist) { if (IsPriceActionEnabled()) { Print("⛔ Price Action: distância mínima do broker exigiria alargar o stop; sinal cancelado."); return; } stopLoss = NormalizeDouble(entry + minDist, ManagedSymbolDigits()); }
-         if (takeProfit > 0 && (entry - takeProfit) < minDist) { if (IsPriceActionEnabled()) { Print("⛔ Price Action: TP abaixo da distância mínima do broker; sinal cancelado."); return; } takeProfit = NormalizeDouble(entry - minDist, ManagedSymbolDigits()); }
+         if (stopLoss <= 0 || (stopLoss - entry) < minDist) { Print("⛔ Price Action: stop de venda incompatível com a distância mínima do broker; sinal cancelado."); return; }
+         if (takeProfit <= 0 || (entry - takeProfit) < minDist) { Print("⛔ Price Action: alvo de venda incompatível com a distância mínima do broker; sinal cancelado."); return; }
       }
    }
 
