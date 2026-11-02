@@ -65,7 +65,7 @@ jobs:
 
           $compile = Start-Process -FilePath $editor.FullName -ArgumentList @("/compile:`"$target`"", "/log") -Wait -PassThru
           Start-Sleep -Seconds 3
-          $log = "$target.log"
+          $log = [IO.Path]::ChangeExtension($target, ".log")
           if (!(Test-Path $log)) {
             throw "MetaEditor did not produce a compiler log. Process exit: $($compile.ExitCode)."
           }
