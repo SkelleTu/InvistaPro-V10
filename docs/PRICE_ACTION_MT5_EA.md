@@ -34,7 +34,7 @@ The EA does not let AI create an entry or bypass local risk gates.
 - Default daily equity drawdown ceiling: 3%, reset on the Brasília calendar day regardless of broker server timezone.
 - Break-even at +1R; one 50% partial at +1.5R; structural trailing from +2R.
 - AI position reviews run on a material move (0.5 M15 ATR) or a 15-minute heartbeat. AI may HOLD, request one partial, tighten a stop or request a close. It cannot widen a stop.
-- Initial R distance and daily circuit-breaker state are persisted in MT5 terminal Global Variables; an atomic terminal-global lock serializes entries across chart instances sharing the same account and magic number.
+- Initial R distance and daily circuit-breaker state are persisted in MT5 terminal Global Variables; an atomic terminal-global lock and deal-event deduplication share daily limits across Price Action chart instances on the same MT5 account, even when their magic numbers differ.
 - If the EA is attached mid-day, it reconstructs the day's starting balance from deal history; if a position was carried across midnight or history is incomplete, new entries fail closed.
 
 ## Cost configuration
