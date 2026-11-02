@@ -761,12 +761,28 @@ bool ExecuteSetup(Setup &s) {
    return executed;
 }
 
+bool HasSymbolExposureOrPendingOrder() {
+   if(PositionSelect(_Symbol)) return true;
+   for(int i=OrdersTotal()-1;i>=0;i--) {
+      ulong orderTicket=OrderGetTicket(i);
+      if(orderTicket==0) continue;
+      if(OrderGetString(ORDER_SYMBOL)==_Symbol) return true;
+   }
+   return false;
+}
+
 bool ExecuteSetupLocked(Setup &s) {
    // Fail closed when terminal, account, script, or connection disallows trading.
    if(!TerminalInfoInteger(TERMINAL_CONNECTED) ||
       !TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) ||
       !MQLInfoInteger(MQL_TRADE_ALLOWED) ||
       !AccountInfoInteger(ACCOUNT_TRADE_ALLOWED)) return false;
+   // Recheck exposure inside the account-wide entry lock. The earlier OnTick
+   // check is only advisory and cannot prevent two charts racing the same setup.
+   if(HasSymbolExposureOrPendingOrder()) {
+      Print("Entrada bloqueada: já existe posição ou ordem pendente neste símbolo.");
+      return false;
+   }
    if(!SpreadAllowed() || !DailyRiskAllowed()) return false;
    long tradeMode=SymbolInfoInteger(_Symbol,SYMBOL_TRADE_MODE);
    if(tradeMode==SYMBOL_TRADE_MODE_DISABLED || tradeMode==SYMBOL_TRADE_MODE_CLOSEONLY) return false;
@@ -1322,7 +1338,7 @@ void OnTimer() {
 void OnTick() {
    ManageOpenPosition();
    if(!IsNewBar(PERIOD_M5,g_lastM5Bar)) return;
-   if(!DailyRiskAllowed() || !SpreadAllowed() || PositionSelect(_Symbol)) return;
+   if(!DailyRiskAllowed() || !SpreadAllowed() || HasSymbolExposureOrPendingOrder()) return;
    if(!TrendDataReady(PERIOD_H4) || !TrendDataReady(PERIOD_H1) || !TrendDataReady(PERIOD_M15)) { g_approvedPatternTime=0; return; }
    int t4=Trend(PERIOD_H4),t1=Trend(PERIOD_H1),t15=Trend(PERIOD_M15);
    bool rangeMode=(t4==0 && t1==0 && t15==0);
