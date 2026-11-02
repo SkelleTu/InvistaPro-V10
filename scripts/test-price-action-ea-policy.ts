@@ -41,7 +41,7 @@ assert.ok(ea.includes('breakeven +1R'), 'EA must manage deterministic breakeven 
 assert.ok(ea.includes('parcial de 50% realizada em +1,5R'), 'EA must manage the 50% partial at +1.5R');
 assert.ok(ea.includes('CountManagedPositions() < MaxPositions'), 'Unrelated/manual positions must not block this EA instance');
 assert.ok(ea.includes('if (signalId != "") g_pendingSignalId = signalId;'), 'Failed order attempts must not permanently consume the signal ID');
-assert.ok(ea.includes('ManagedSymbolDigits()'), 'Stops must use the selected symbol precision, including Symbol_Override');
+assert.ok(ea.includes('g_symbol      = _Symbol;') && !ea.includes('Symbol_Override') && ea.includes('ManagedSymbolDigits()'), 'EA must operate only the installed chart symbol and use that symbol precision');
 assert.ok(!ea.includes('trade.Buy(lotSize,  g_symbol, 0, 0, 0'), 'EA must not fall back to an unprotected BUY');
 assert.ok(!ea.includes('trade.Sell(lotSize, g_symbol, 0, 0, 0'), 'EA must not fall back to an unprotected SELL');
 
