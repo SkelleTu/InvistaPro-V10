@@ -51,6 +51,9 @@ assert.ok(ea.includes('Baseline de equity diário não pode ser reconstruído'),
 assert.ok(ea.includes('InpMaxLosingTradesPerDay = 3'), 'Three losing trades must stop entries for the day');
 assert.ok(ea.includes('g_losingTradesToday>=InpMaxLosingTradesPerDay'), 'Daily losing-trade circuit breaker must be enforced');
 assert.ok(ea.includes('DEAL_POSITION_ID'), 'Partial exit PnL must be aggregated by position before counting losses');
+assert.ok(ea.includes('GlobalVariableTemp(key)'), 'Shared lock initialization must not overwrite another chart lock');
+assert.ok(ea.includes('GlobalVariableSetOnCondition(key,0.0,g_dailyLockToken)'), 'A chart must release only the lock token it owns');
+assert.ok(ea.includes('g_dailyLockToken=token'), 'Shared execution lock must retain an ownership token');
 assert.ok(ea.includes('PA_TRACK_'), 'Account-wide loss accounting must track Price Action positions independent of chart magic number');
 assert.ok(ea.includes('StringFind(dealComment,"InvistaPRO PA")>=0'), 'Price Action entry tracking must identify the EA order comment');
 assert.ok(ea.includes('DEAL_COMMISSION)+HistoryDealGetDouble(trans.deal,DEAL_FEE)'), 'Net trade PnL must include entry and exit commissions/fees');
