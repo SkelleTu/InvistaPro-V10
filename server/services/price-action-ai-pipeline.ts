@@ -10,7 +10,6 @@ import {
 import {
   PriceActionAiCoordinator,
   type AiEntryReview,
-  type PriceActionAiProvider,
 } from './price-action-ai-coordinator';
 
 export type PipelineState = 'AI_REVIEW' | 'WAITING_AI' | 'WAITING_TRIGGER' | 'ENTRY_APPROVED' | 'HOLD';
@@ -40,7 +39,6 @@ export class PriceActionAiPipeline {
 
   constructor(
     private readonly coordinator: PriceActionAiCoordinator,
-    private readonly provider: PriceActionAiProvider,
   ) {}
 
   async evaluate(
