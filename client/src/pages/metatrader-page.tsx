@@ -554,9 +554,13 @@ export default function MetaTraderPage() {
                     : 'Aguardando EA'}
               </span>
             </div>
-            <Button onClick={downloadEA} data-testid="button-download-ea" className="gap-2">
+            <Button onClick={downloadEA} data-testid="button-download-ea" className="gap-2" variant="outline">
               <Download className="h-4 w-4" />
-              Baixar EA v8.0
+              EA Girassol legado v8.1
+            </Button>
+            <Button onClick={downloadPriceActionEA} data-testid="button-download-price-action-ea" className="gap-2">
+              <Download className="h-4 w-4" />
+              Baixar EA Price Action v1.0
             </Button>
           </div>
         </div>
@@ -2496,9 +2500,13 @@ export default function MetaTraderPage() {
                     </Button>
                   </div>
                 </div>
-                <Button onClick={downloadEA} className="w-full gap-2" data-testid="button-download-ea-config">
+                <Button onClick={downloadEA} variant="outline" className="w-full gap-2" data-testid="button-download-ea-config">
                   <Download className="h-4 w-4" />
-                  ⬇ Baixar InvistaPRO EA v8.0
+                  Baixar EA Girassol legado v8.1
+                </Button>
+                <Button onClick={downloadPriceActionEA} className="w-full gap-2 mt-2" data-testid="button-download-price-action-ea-config">
+                  <Download className="h-4 w-4" />
+                  Baixar EA Price Action v1.0
                 </Button>
               </CardContent>
             </Card>
