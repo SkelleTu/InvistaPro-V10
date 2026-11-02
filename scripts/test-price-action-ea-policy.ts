@@ -32,6 +32,7 @@ assert.ok(ea.includes('DEAL_COMMISSION') && ea.includes('DEAL_SWAP') && ea.inclu
 assert.ok(ea.includes('if (positionId > 0 && !IsPositionIdentifierOpen(positionId)) ReportClosedPosition(positionId)') && ea.includes('exitVolume += volume') && ea.includes('netProfit += HistoryDealGetDouble(deal, DEAL_PROFIT)'), 'Partial exits must aggregate into one final position result and count only after the broker position is fully closed');
 assert.ok(ea.includes('CountSymbolPositions() == 0'), 'EA must not merge a new strategy order into an existing same-symbol position');
 assert.ok(ea.includes('CalculatePriceActionSwingStop'), 'Open positions must trail only by confirmed M5 swing structure');
+assert.ok(ea.includes('SYMBOL_TRADE_FREEZE_LEVEL') && ea.includes('MathMax(stopsLevel, freezeLevel)'), 'Swing trailing must respect the broker freeze level as well as minimum stop distance');
 assert.ok(ea.includes('SymbolSelect(g_symbol, true)'), 'EA must select and validate the actual chart/override symbol before operating');
 assert.ok(ea.includes('SetTypeFillingBySymbol(g_symbol)'), 'EA must use the broker-supported filling policy');
 assert.ok(ea.includes('SYMBOL_TRADE_TICK_SIZE') && ea.includes('NormalizeManagedPrice(stopLoss') && ea.includes('NormalizeManagedPrice(takeProfit'), 'SL/TP and trailing prices must align to the broker symbol tick size, not only decimal digits');
