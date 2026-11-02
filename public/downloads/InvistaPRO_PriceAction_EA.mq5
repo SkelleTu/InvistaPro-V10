@@ -776,7 +776,8 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,const MqlTradeRequest &
    // One terminal-global guard makes every chart instance account-wide and idempotent,
    // even when users assign different magic numbers to different Price Action charts.
    string dealGuard="PA_DEAL_"+account+"_"+(string)trans.deal;
-   if(!GlobalVariableCheck(dealGuard)) GlobalVariableSet(dealGuard,0.0);
+   // Atomic create-if-absent; do not reset a guard another chart may have claimed.
+   if(!GlobalVariableTemp(dealGuard) && !GlobalVariableCheck(dealGuard)) return;
    if(!GlobalVariableSetOnCondition(dealGuard,(double)TimeCurrent(),0.0)) return;
 
    // Include opening commission/fees as well as every partial/final closing deal.
