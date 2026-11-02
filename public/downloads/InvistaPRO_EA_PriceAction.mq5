@@ -41,6 +41,7 @@ input int      MaxReconnectTries= 5;           // Tentativas máximas de reconex
 const int      IndicatorBars = 5; // Compatibilidade interna; sem leitura de indicadores no EA novo
 const int      CandleCount = 200; // Compatibilidade interna; candles enviados por timeframe
 input double   PriceActionRiskPercent = 1.0; // Risco por trade: 1% padrão, máximo 2%
+input int      MaxDeviationPoints = 20; // Slippage máximo por ordem, em pontos do símbolo
 input int      MaxPositions = 1; // Uma posição por símbolo
 input int      WarmupSeconds = 120; // Aquecimento sem operar
 input bool     CloseAtEndOfBrasiliaSession = true; // Não carregar day trades para o dia seguinte
@@ -127,7 +128,7 @@ int OnInit()
 
    trade.SetExpertMagicNumber(MagicNumber);
    trade.SetTypeFillingBySymbol(g_symbol);
-   trade.SetDeviationInPoints(20);
+   trade.SetDeviationInPoints(MaxDeviationPoints);
    // Timer keeps connectivity checks alive even when the chart receives no ticks.
    EventSetTimer(1);
 
@@ -908,7 +909,7 @@ bool ClosePriceActionPartial(ulong ticket, double volume, string positionType)
    request.symbol = g_symbol;
    request.volume = volume;
    request.magic = MagicNumber;
-   request.deviation = 20;
+   request.deviation = MaxDeviationPoints;
    request.type = (positionType == "BUY") ? ORDER_TYPE_SELL : ORDER_TYPE_BUY;
    request.price = (positionType == "BUY")
       ? SymbolInfoDouble(g_symbol, SYMBOL_BID)
@@ -1138,12 +1139,13 @@ void FetchAndProcessSignal()
        double rewardDistance = (action == "BUY") ? takeProfit - entry : entry - takeProfit;
        double pointSize = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
        double currentSpread = ask - bid;
-       double estimatedRoundTripCost = currentSpread * 2.0;
+       double estimatedRoundTripCost = currentSpread * 2.0 + (double)MaxDeviationPoints * pointSize * 2.0;
        double netReward = rewardDistance - estimatedRoundTripCost;
        double totalRiskWithCosts = riskDistance + estimatedRoundTripCost;
        double executableRiskReward = totalRiskWithCosts > 0.0 ? netReward / totalRiskWithCosts : 0.0;
        if (riskDistance <= 0 || rewardDistance <= 0 || entry <= 0 || pointSize <= 0
-           || currentSpread <= 0 || riskDistance / entry > 0.015 || executableRiskReward < 2.0)
+           || currentSpread <= 0 || MaxDeviationPoints < 0 || MaxDeviationPoints > 1000
+           || riskDistance / entry > 0.015 || executableRiskReward < 2.0)
        {
           Print("⛔ Price Action recusado: stop inválido, stop acima de 1,5% ou R:R líquido inferior a 1:2 após spread.");
           return;
