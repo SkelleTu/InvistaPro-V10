@@ -67,6 +67,9 @@ assert.ok(ea.includes('GlobalVariablesFlush();') && ea.includes('GlobalVariableS
 
 assert.ok(ea.includes('GlobalVariableSet(trackKey,1.0)'), 'Confirmed fills must be registered before releasing the shared daily lock');
 assert.ok(ea.includes('if(reservedAt>=serverDayStart && reservedAt<=TimeCurrent()) tradesToday++'), 'Daily trade cap must include accepted orders awaiting a deal callback');
+assert.ok(ea.includes('if(RebuildDailyLossCountersFromLedger()) PersistDailyState();'), 'Trade reservations and confirmed cancellations must immediately reconcile the shared daily cap');
+assert.ok(ea.includes('trade.ResultRetcode()==TRADE_RETCODE_PLACED && fillDealForRisk==0'), 'Unfilled asynchronous market orders must be canceled or remain reserved instead of being treated as filled');
+
 assert.ok(ea.includes('GlobalVariableDel("PA_RESERVE_"+account+"_"+(string)orderId)'), 'Broker-history reconciliation must release filled-order reservations');
 
 assert.ok(ea.includes('!g_dailyLedgerReady || HasPendingDealEvents()'), 'Daily risk gate must fail closed while the trade ledger is pending');
