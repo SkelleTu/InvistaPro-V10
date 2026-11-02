@@ -109,7 +109,6 @@ int OnInit()
    g_lastHeartbeat   = now;
    g_lastMonitor     = TimeLocal();
    g_lastWarmupPrint = now;
-   g_lastMarketData  = now;
 
    if (WarmupSeconds > 0)
       g_warmupUntil = now + WarmupSeconds;
@@ -508,7 +507,7 @@ void FetchAndProcessSignal()
    body += "\"priceActionUseAIReview\":false,";
    body += "\"indicatorSignals\":"  + structuredSignals             + ",";
    body += "\"indicatorBuffers\":"  + allBuffers                    + ",";
-   body += "\"indicatorCount\":"    + IntegerToString(g_indicatorCount) + ",";
+   body += "\"indicatorCount\":0,";
    body += "\"eaVersion\":\"1.0\"";
    if (g_apiToken != "") body += ",\"token\":\"" + g_apiToken + "\"";
    body += "}";
@@ -711,7 +710,6 @@ void FetchAndProcessSignal()
    if (assetFamily  != "") Print("   Ativo: ", assetFamily, " | ", assetTrend, " | Vol: ", assetVolClass);
    if (slTpSource   != "") Print("   SL/TP via: ", slTpSource);
    Print("   SL: ", NormalizeDouble(stopLoss, ManagedSymbolDigits()), " | TP: ", NormalizeDouble(takeProfit, ManagedSymbolDigits()));
-   Print("   Indicadores no gráfico: ", g_indicatorCount);
    if (reason != "") Print("   Razão: ", StringSubstr(reason, 0, 150));
    Print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
