@@ -17,7 +17,7 @@ assert.ok(!ea.includes('g_assetProfileLoaded') && !ea.includes('g_marketDataSeco
 assert.ok(legacyEa.includes('#property version   "8.1"'), 'Legacy Girassol EA must retain its original downloadable source/version');
 assert.ok(ea.includes('priceActionUseAIReview'), 'EA must transmit the selected Price Action mode to the server');
 assert.ok(ea.includes('requestAccountType'), 'EA must transmit its actual terminal account mode on each signal request');
-assert.ok(ea.includes('if (IsPriceActionEnabled())'), 'Dedicated Price Action EA must not invoke the legacy AI position monitor');
+assert.ok(ea.includes('if (IsPriceActionEnabled() && sl > 0 && tp > 0)'), 'Open-position management must use the dedicated deterministic Price Action controls only when broker SL/TP protection exists');
 assert.ok(ea.includes('CalculatePriceActionRiskLot'), 'EA must size Price Action orders from equity and structural stop');
 assert.ok(ea.includes('OrderCalcProfit(orderType, g_symbol, 1.0, entryPrice, stopLoss, oneLotProfit)'), 'Risk sizing must use broker contract economics in account currency');
 assert.ok(ea.includes('OrderCalcMargin(orderType, g_symbol, volume, entryPrice, requiredMargin)'), 'Risk sizing must reject insufficient margin');
