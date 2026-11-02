@@ -782,6 +782,65 @@ double CalculatePriceActionRiskLot(double entryPrice, double stopLoss)
    return volume;
 }
 
+void PersistPriceActionPositionState()
+{
+   for (int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      if (!posInfo.SelectByIndex(i)) continue;
+      if (posInfo.Magic() != MagicNumber || posInfo.Symbol() != g_symbol) continue;
+      ulong ticket = posInfo.Ticket();
+      double initialRisk = MathAbs(posInfo.PriceOpen() - posInfo.StopLoss());
+      if (initialRisk <= 0.0) continue;
+      string riskKey = "InvistaPA_R_" + IntegerToString((long)ticket);
+      if (!GlobalVariableCheck(riskKey)) GlobalVariableSet(riskKey, initialRisk);
+   }
+}
+
+// Swing trailing uses only fully confirmed M5 pivots and can only tighten protection.
+double CalculatePriceActionSwingStop(string positionType, double currentStop)
+{
+   MqlRates rates[];
+   int copied = CopyRates(g_symbol, PERIOD_M5, 1, 40, rates);
+   if (copied < 10) return 0.0;
+   double ranges = 0.0;
+   int rangeCount = 0;
+   for (int i = MathMax(1, copied - 15); i < copied; i++)
+   {
+      ranges += MathMax(rates[i].high - rates[i].low,
+                        MathMax(MathAbs(rates[i].high - rates[i-1].close),
+                                MathAbs(rates[i].low - rates[i-1].close)));
+      rangeCount++;
+   }
+   if (rangeCount <= 0) return 0.0;
+   double buffer = (ranges / rangeCount) * 0.10;
+   double point = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
+   long stopsLevel = SymbolInfoInteger(g_symbol, SYMBOL_TRADE_STOPS_LEVEL);
+   double minimumDistance = MathMax((double)stopsLevel * point, point * 2.0);
+
+   for (int i = copied - 3; i >= 2; i--)
+   {
+      if (positionType == "BUY")
+      {
+         bool pivot = rates[i].low < rates[i-1].low && rates[i].low < rates[i-2].low
+                   && rates[i].low <= rates[i+1].low && rates[i].low <= rates[i+2].low;
+         if (!pivot) continue;
+         double candidate = NormalizeDouble(rates[i].low - buffer, ManagedSymbolDigits());
+         double bid = SymbolInfoDouble(g_symbol, SYMBOL_BID);
+         if (candidate > currentStop && candidate < bid - minimumDistance) return candidate;
+      }
+      else
+      {
+         bool pivot = rates[i].high > rates[i-1].high && rates[i].high > rates[i-2].high
+                   && rates[i].high >= rates[i+1].high && rates[i].high >= rates[i+2].high;
+         if (!pivot) continue;
+         double candidate = NormalizeDouble(rates[i].high + buffer, ManagedSymbolDigits());
+         double ask = SymbolInfoDouble(g_symbol, SYMBOL_ASK);
+         if (candidate < currentStop && candidate > ask + minimumDistance) return candidate;
+      }
+   }
+   return 0.0;
+}
+
 bool ClosePriceActionPartial(ulong ticket, double volume, string positionType)
 {
    long marginMode = AccountInfoInteger(ACCOUNT_MARGIN_MODE);
@@ -1129,6 +1188,7 @@ void FetchAndProcessSignal()
             " | Volume confirmado: ", DoubleToString(lotSize, 8),
             " | SL: ", NormalizeDouble(stopLoss, _Digits),
             " | TP: ", NormalizeDouble(takeProfit, _Digits));
+      PersistPriceActionPositionState();
       ConfirmTradeOpen(signalId, (int)trade.ResultOrder(), action, lotSize, stopLoss, takeProfit);
    }
    else
@@ -1217,6 +1277,22 @@ void MonitorOpenPositions()
                 {
                    GlobalVariableSet(partialKey, -1.0);
                    Print("ℹ️ Price Action: lote mínimo do broker impede parcial de 50%; posição segue protegida pelo SL/TP.");
+                }
+             }
+             if (favorableMove >= initialRisk * 1.5)
+             {
+                double swingStop = CalculatePriceActionSwingStop(posType, sl);
+                if (swingStop > 0.0)
+                {
+                   bool swingSent = trade.PositionModify(ticket, swingStop, tp);
+                   uint swingRetcode = trade.ResultRetcode();
+                   if (swingSent && swingRetcode == TRADE_RETCODE_DONE)
+                   {
+                      sl = swingStop;
+                      Print("📈 Price Action: trailing por pivô M5 confirmado. Ticket=", ticket, " SL=", DoubleToString(sl, ManagedSymbolDigits()));
+                   }
+                   else
+                      Print("⛔ Price Action: trailing por swing recusado; ticket=", ticket, " retcode=", swingRetcode);
                 }
              }
           }
