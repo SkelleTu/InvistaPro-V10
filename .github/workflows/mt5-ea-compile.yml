@@ -58,7 +58,23 @@ jobs:
           }
           $installRoot = $editor.Directory.FullName
           $source = Join-Path $env:GITHUB_WORKSPACE "public/downloads/InvistaPRO_PriceAction_EA.mq5"
-          $experts = Join-Path $installRoot "MQL5\Experts"
+          $dataRoot = Join-Path $env:APPDATA "MetaQuotes\Terminal"
+          $terminalData = Get-ChildItem -Path $dataRoot -Directory -ErrorAction SilentlyContinue |
+            Where-Object { Test-Path (Join-Path $_.FullName "MQL5") } |
+            Select-Object -First 1
+          if (!$terminalData) {
+            throw "MetaTrader terminal data folder was not created."
+          }
+          $includeSource = Join-Path $installRoot "MQL5\Include"
+          if (!(Test-Path (Join-Path $includeSource "Trade\Trade.mqh"))) {
+            throw "MetaTrader installation is missing its standard MQL5 Trade library."
+          }
+          $includeTarget = Join-Path $terminalData.FullName "MQL5\Include"
+          if ($includeSource -ne $includeTarget) {
+            New-Item -ItemType Directory -Force -Path $includeTarget | Out-Null
+            Copy-Item (Join-Path $includeSource "*") $includeTarget -Recurse -Force
+          }
+          $experts = Join-Path $terminalData.FullName "MQL5\Experts"
           New-Item -ItemType Directory -Force -Path $experts | Out-Null
           $target = Join-Path $experts "InvistaPRO_PriceAction_EA.mq5"
           Copy-Item $source $target -Force
