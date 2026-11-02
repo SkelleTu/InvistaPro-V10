@@ -460,6 +460,30 @@ export default function MetaTraderPage() {
     }
   };
 
+  const downloadPriceActionEA = async () => {
+    try {
+      const response = await fetch("/api/mt5/download-price-action-ea", { method: "GET", credentials: "same-origin", headers: { Accept: "text/plain" } });
+      if (!response.ok) {
+        let message = `O servidor recusou o download do Price Action EA (HTTP ${response.status}).`;
+        try { const payload = await response.json(); message = payload.error || payload.message || message; } catch {}
+        throw new Error(message);
+      }
+      const contentType = (response.headers.get("content-type") || "").toLowerCase();
+      if (!contentType.includes("text/plain")) throw new Error("A resposta não é um arquivo EA válido.");
+      const blob = await response.blob();
+      if (!blob.size) throw new Error("O servidor retornou um arquivo vazio.");
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = "InvistaPRO_PriceAction_EA.mq5";
+      document.body.appendChild(link); link.click(); link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+      toast({ title: "InvistaPRO Price Action EA baixado", description: "EA independente e neutro em relação à corretora. Instale em MQL5/Experts, compile no MetaEditor e teste primeiro em conta DEMO.", duration: 8000 });
+    } catch (error: any) {
+      toast({ title: "Falha no download do Price Action EA", description: error?.message || "Não foi possível preparar o arquivo.", variant: "destructive" });
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background p-4 md:p-6">
       <div className="max-w-7xl mx-auto space-y-6">
@@ -550,6 +574,10 @@ export default function MetaTraderPage() {
             <Button onClick={downloadEA} data-testid="button-download-ea" className="gap-2">
               <Download className="h-4 w-4" />
               Baixar EA v8.0
+            </Button>
+            <Button onClick={downloadPriceActionEA} data-testid="button-download-price-action-ea" variant="outline" className="gap-2">
+              <Download className="h-4 w-4" />
+              Baixar Price Action EA v1.0
             </Button>
           </div>
         </div>
