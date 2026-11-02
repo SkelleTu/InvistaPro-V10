@@ -673,8 +673,8 @@ void FetchAndProcessSignal()
       }
       Print("✅ Ordem executada: ", action, " | Ticket: ", trade.ResultOrder(),
             " | Volume confirmado: ", DoubleToString(lotSize, 8),
-            " | SL: ", NormalizeDouble(stopLoss, ManagedSymbolDigits()),
-            " | TP: ", NormalizeDouble(takeProfit, ManagedSymbolDigits()));
+            " | SL: ", NormalizeManagedPrice(stopLoss, action == "SELL"),
+            " | TP: ", NormalizeManagedPrice(takeProfit, action == "BUY"));
       PersistPriceActionPositionState();
       long positionIdentifier = GetManagedPositionIdentifier();
       if (positionIdentifier > 0)
