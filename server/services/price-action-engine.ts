@@ -199,14 +199,44 @@ function orderBlockRetest(candles: Candle[], side: TradeSide): Zone | null {
   }
   return null;
 }
+function findClusteredStructureZone(candles: Candle[], side: TradeSide): (Zone & { reactions: number; center: number }) | null {
+  const confirmed = candles.slice(0, -2);
+  const pivots = findPivots(confirmed);
+  const levels = (side === 'BUY' ? pivots.lows : pivots.highs).slice(-12);
+  const volatility = atr(candles, 14);
+  if (!(volatility > 0) || levels.length < 2) return null;
+  const tolerance = volatility * 0.35;
+  const current = candles[candles.length - 1].close;
+  let best: { members: Pivot[]; distance: number } | null = null;
+  for (const seed of levels) {
+    const members = levels.filter(level => Math.abs(level.price - seed.price) <= tolerance);
+    if (members.length < 2) continue;
+    const center = average(members.map(member => member.price));
+    const distance = Math.abs(current - center);
+    if (!best || members.length > best.members.length || (members.length === best.members.length && distance < best.distance)) {
+      best = { members, distance };
+    }
+  }
+  if (!best || best.distance > volatility * 0.9) return null;
+  const center = average(best.members.map(member => member.price));
+  return {
+    low: center - tolerance,
+    high: center + tolerance,
+    index: Math.max(...best.members.map(member => member.index)),
+    reactions: best.members.length,
+    center,
+  };
+}
+
 function nearStructureZone(candles: Candle[], side: TradeSide): boolean {
-  const pivots = findPivots(candles.slice(0, -2));
-  const pivot = side === 'BUY' ? pivots.lows[pivots.lows.length - 1] : pivots.highs[pivots.highs.length - 1];
-  if (!pivot) return false;
   const volatility = atr(candles, 14);
   if (!(volatility > 0)) return false;
   const current = candles[candles.length - 1].close;
-  return Math.abs(current - pivot.price) <= volatility * 0.75;
+  const cluster = findClusteredStructureZone(candles, side);
+  if (cluster) return current >= cluster.low - volatility * 0.2 && current <= cluster.high + volatility * 0.2;
+  const pivots = findPivots(candles.slice(0, -2));
+  const pivot = side === 'BUY' ? pivots.lows[pivots.lows.length - 1] : pivots.highs[pivots.highs.length - 1];
+  return !!pivot && Math.abs(current - pivot.price) <= volatility * 0.75;
 }
 function nearestOpposingBarrier(candles: Candle[], side: TradeSide, entry: number): number | null {
   const pivots = findPivots(candles.slice(0, -2));
@@ -297,6 +327,8 @@ export function evaluatePriceActionSetup(
     const bos = breakOfStructure(m15, side) || breakOfStructure(entryFrame, side);
     const choch = changeOfCharacter(m15, side) || changeOfCharacter(entryFrame, side);
     const obZone = orderBlockRetest(m15, side) ?? orderBlockRetest(entryFrame, side);
+    const m15Cluster = findClusteredStructureZone(m15, side);
+    const entryCluster = findClusteredStructureZone(entryFrame, side);
     const zoneNear = nearStructureZone(m15, side) || nearStructureZone(entryFrame, side) || !!fvgZone || !!obZone || sweep;
     const priorVolumes = entryFrame.slice(-21, -1).map(candle => candle.volume);
     const baselineVolume = average(priorVolumes);
@@ -312,6 +344,9 @@ export function evaluatePriceActionSetup(
     features.orderBlockLow = obZone?.low ?? null;
     features.orderBlockHigh = obZone?.high ?? null;
     features.zoneNear = zoneNear;
+    features.supportResistanceClusterReactions = Math.max(m15Cluster?.reactions ?? 0, entryCluster?.reactions ?? 0);
+    features.supportResistanceZoneLow = m15Cluster?.low ?? entryCluster?.low ?? null;
+    features.supportResistanceZoneHigh = m15Cluster?.high ?? entryCluster?.high ?? null;
     features.volumeRatio = baselineVolume > 0 ? latestVolume / baselineVolume : null;
     checks.volume = volumeOk;
     checks.structure_confirmation = !!fvgZone || sweep || bos || choch || !!obZone;
