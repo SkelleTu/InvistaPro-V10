@@ -22,6 +22,7 @@ import { isAllowedProductionSymbol } from '../services/production-symbol-policy'
 import { getMt5ProductionBlock } from '../services/mt5-production-policy';
 import { consensusCache } from '../services/consensus-cache';
 import { evaluatePriceActionSetup, type Candle } from '../services/price-action-engine';
+import { huggingFaceAI } from '../services/huggingface-ai';
 import { assessMt5RiskLimit, buildTrustedPriceActionContext, getHighImpactNewsStatus, isAllowedBrasiliaTradingSession } from '../services/price-action-context';
 
 
@@ -2348,6 +2349,160 @@ router.get('/brazil-news', async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+
+/**
+ * Broker-neutral MT5 Price Action AI review.
+ * Receives closed OHLCV candles from the selected chart, never places orders.
+ * EA token is validated before any model request.
+ */
+router.post('/price-action/review', mt5EaTokenAccess, async (req: Request, res: Response) => {
+  try {
+    const symbol = String(req.body?.symbol ?? '').trim().toUpperCase();
+    const direction = String(req.body?.direction ?? '').trim().toUpperCase();
+    const phase = String(req.body?.phase ?? 'ENTRY').trim().toUpperCase();
+    const frames = req.body?.frames;
+    if (!symbol || symbol.length > 64 || symbol.split('').some(char => char.charCodeAt(0) < 32) ||
+        !['BUY', 'SELL'].includes(direction) || !['ENTRY', 'POSITION'].includes(phase)) {
+      return res.status(400).json({ decision: 'REJECT', reason: 'Símbolo, fase ou direção inválidos.' });
+    }
+    const required = ['H4', 'H1', 'M15', 'M5', 'M1'];
+    const timeframeSeconds: Record<string, number> = { H4: 14400, H1: 3600, M15: 900, M5: 300, M1: 60 };
+    const brokerOffset = Number(req.body?.context?.brokerUtcOffsetSeconds);
+    if (!Number.isFinite(brokerOffset) || Math.abs(brokerOffset) > 14 * 3600) {
+      return res.status(400).json({ decision: 'HOLD', reason: 'Fuso horário do servidor MT5 inválido.' });
+    }
+    const brokerNow = Math.floor(Date.now() / 1000) + brokerOffset;
+    for (const tf of required) {
+      const candles = frames?.[tf];
+      if (!Array.isArray(candles) || candles.length < 30 || candles.length > 200) {
+        return res.status(400).json({ decision: 'REJECT', reason: 'Histórico insuficiente ou excessivo em ' + tf });
+      }
+      let previous = 0;
+      for (const candle of candles) {
+        const values = ['time', 'open', 'high', 'low', 'close', 'volume'].map(k => Number(candle?.[k]));
+        if (values.some(v => !Number.isFinite(v)) || values[1] <= 0 || values[2] < Math.max(values[1], values[4]) ||
+            values[3] > Math.min(values[1], values[4]) || values[2] < values[3] || values[5] < 0 ||
+            values[0] <= previous) {
+          return res.status(400).json({ decision: 'REJECT', reason: 'OHLCV inválido ou fora de ordem em ' + tf });
+        }
+        previous = values[0];
+      }
+      const latestTime = Number(candles[candles.length - 1]?.time);
+      const ageSeconds = brokerNow - latestTime;
+      if (!Number.isFinite(latestTime) || ageSeconds < 0 || ageSeconds > timeframeSeconds[tf] * 3) {
+        return res.status(409).json({
+          decision: 'HOLD',
+          reason: 'Candle ' + tf + ' desatualizado. Entrada/gestão por IA bloqueada.',
+        });
+      }
+    }
+    const newsStatus = await getHighImpactNewsStatus();
+    if (!newsStatus.valid || newsStatus.blocked) {
+      return res.json(phase === 'ENTRY'
+        ? { decision: 'REJECT', direction, confidence: 0, reason: 'Janela de notícia de alto impacto ativa ou fonte indisponível.' }
+        : { action: 'HOLD', confidence: 0, reasoning: 'Notícia de alto impacto ou fonte indisponível; gestão permanece nos stops protetivos locais.' });
+    }
+    const position = phase === 'POSITION' ? {
+      direction,
+      currentPrice: Number(req.body?.currentPrice),
+      currentStop: Number(req.body?.currentStop),
+      takeProfit: Number(req.body?.takeProfit),
+      lastMaterialEventAt: Number(req.body?.lastMaterialEventAt ?? Date.now()),
+    } : null;
+    if (phase === 'POSITION' && (!Number.isFinite(position?.currentPrice) || !Number.isFinite(position?.currentStop) ||
+        !Number.isFinite(position?.takeProfit))) {
+      return res.status(400).json({ action: 'HOLD', confidence: 0, reasoning: 'Estado de posição inválido.' });
+    }
+    const review = await huggingFaceAI.reviewPriceActionSnapshot(symbol, phase as 'ENTRY' | 'POSITION', {
+      generatedAt: Date.now(),
+      frames,
+      context: { ...(req.body?.context ?? {}), brokerNeutral: true, source: 'MetaTrader 5 chart', direction },
+      early: phase === 'ENTRY' ? {
+        side: direction,
+        triggerLevel: Number(req.body?.triggerPrice),
+        invalidationLevel: Number(req.body?.invalidationPrice),
+        patternTime: Number(req.body?.patternTime),
+      } : undefined,
+      position,
+    });
+    if (phase === 'POSITION') {
+      return res.json({
+        action: review.action ?? 'HOLD',
+        confidence: review.confidence ?? 0,
+        reasoning: review.reasoning ?? 'Análise incompleta; manter proteção local.',
+        proposedStop: review.proposedStop,
+        closeReason: review.closeReason,
+      });
+    }
+    if (review.decision !== 'APPROVE' || review.direction !== direction) {
+      return res.json({ decision: 'REJECT', direction, confidence: review.confidence, reasoning: review.reasoning, risks: review.risks });
+    }
+    return res.json({ decision: 'APPROVE', direction, confidence: review.confidence, reasoning: review.reasoning, risks: review.risks });
+  } catch (error: any) {
+    console.error('[MT5 Price Action AI] review failed:', error?.message ?? error);
+    return res.status(503).json(req.body?.phase === 'POSITION'
+      ? { action: 'HOLD', confidence: 0, reasoning: 'IA indisponível. Stops locais continuam ativos.' }
+      : { decision: 'HOLD', reason: 'IA indisponível ou análise incompleta. Entrada bloqueada.' });
+  }
+});
+
+
+/** Authenticated heartbeat for the independent broker-neutral EA. Telemetry only. */
+router.post('/price-action/heartbeat', mt5EaTokenAccess, (req: Request, res: Response) => {
+  const symbol = String(req.body?.symbol ?? '').trim();
+  if (!symbol || symbol.length > 64 || symbol.split('').some(char => char.charCodeAt(0) < 32)) {
+    return res.status(400).json({ ok: false, error: 'Símbolo inválido.' });
+  }
+  return res.json({ ok: true, symbol, receivedAt: Date.now(), execution: 'not_requested' });
+});
+
+/** Dedicated broker-neutral Price Action EA download. Girassol download is untouched. */
+router.get('/download-price-action-ea', mt5DashboardAccess, async (req: Request, res: Response) => {
+  try {
+    let config = metaTraderBridge.getConfig();
+    let token = String(config.apiToken ?? '').trim();
+    if (!token) {
+      token = randomBytes(32).toString('hex');
+      metaTraderBridge.updateConfig({ apiToken: token });
+      config = metaTraderBridge.getConfig();
+    }
+    await metaTraderBridge.flushDurableConfig();
+    const host = String(req.get('host') ?? '').trim();
+    let serverUrl = process.env.NODE_ENV === 'production'
+      ? (String(process.env.MT5_PUBLIC_BASE_URL ?? '').trim() || String(process.env.RENDER_EXTERNAL_URL ?? '').trim() || (host ? 'https://' + host : ''))
+      : (String(process.env.REPLIT_DEV_DOMAIN ?? '').trim()
+          ? 'https://' + String(process.env.REPLIT_DEV_DOMAIN).trim()
+          : req.protocol + '://' + host);
+    while (serverUrl.endsWith('/')) serverUrl = serverUrl.slice(0, -1);
+    if (!serverUrl) return res.status(500).json({ error: 'URL pública do servidor indisponível.' });
+    const eaPath = path.join(process.cwd(), 'public', 'downloads', 'InvistaPRO_PriceAction_EA.mq5');
+    let content = fs.readFileSync(eaPath, 'utf-8');
+    if (!content.includes('#property version   "1.0"') ||
+        !content.includes('/api/mt5/price-action/review') ||
+        !content.includes('RequestAIReview')) {
+      return res.status(503).json({ ok: false, code: 'PRICE_ACTION_EA_NOT_CURRENT', error: 'O EA Price Action não passou na validação de versão.' });
+    }
+    const escapeMql = (value: string) => value.split('\\').join('\\\\').split('"').join('\\"').replace(/[\r\n]/g, '');
+    const inject = (name: string, value: string) => {
+      const prefix = 'input string ' + name + ' = "';
+      const pos = content.indexOf(prefix);
+      if (pos < 0) throw new Error('Parâmetro ausente no EA: ' + name);
+      const lineEnd = content.indexOf(';', pos);
+      if (lineEnd < 0) throw new Error('Parâmetro inválido no EA: ' + name);
+      content = content.slice(0, pos) + prefix + escapeMql(value) + '"' + content.slice(lineEnd);
+    };
+    inject('InpServerURL', serverUrl);
+    inject('InpApiToken', token);
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="InvistaPRO_PriceAction_EA.mq5"');
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+    res.send(content);
+  } catch (error: any) {
+    console.error('[PriceActionEA] download failed:', error?.message ?? error);
+    res.status(500).json({ error: 'Não foi possível preparar o EA Price Action.' });
   }
 });
 

@@ -131,6 +131,78 @@ function liquiditySweep(c: Candle[], side: TradeSide): boolean {
   const priorLow = Math.min(...recent.map(x => x.low));
   return side === 'BUY' ? last.low < priorLow && last.close > priorLow : last.high > priorHigh && last.close < priorHigh;
 }
+export interface PriceActionPreTrigger {
+  side: TradeSide;
+  triggerLevel: number;
+  invalidationLevel: number;
+  patternTime: number;
+  referencePrice: number;
+  reasons: string[];
+}
+
+/**
+ * Early warning only: identifies a closed-candle setup before its final
+ * microstructure breakout. It never returns an executable entry signal.
+ * Uses the same trend, zone, pinbar and volume conventions as the main engine.
+ */
+export function detectPriceActionPreTrigger(
+  frames: Partial<Record<Timeframe, Candle[]>>,
+): PriceActionPreTrigger | null {
+  const h4 = frames.H4, h1 = frames.H1, m15 = frames.M15;
+  const entry = validCandles(frames.M5) ? frames.M5 : frames.M1;
+  if (!validCandles(h4) || !validCandles(h1) || !validCandles(m15) || !validCandles(entry)) return null;
+  const ordered = [h4, h1, m15, entry].every(series =>
+    series.every((c, i) => i === 0 || c.time > series[i - 1].time));
+  if (!ordered) return null;
+
+  const h4Trend = trend(h4), h1Trend = trend(h1);
+  if (h4Trend === 'range' || h4Trend !== h1Trend) return null;
+  const side: TradeSide = h4Trend === 'bullish' ? 'BUY' : 'SELL';
+
+  const prior = entry[entry.length - 3];
+  const pattern = entry[entry.length - 2];
+  const latest = entry[entry.length - 1];
+  const range = Math.max(pattern.high - pattern.low, 1e-12);
+  const body = Math.abs(pattern.close - pattern.open);
+  const lowerWick = Math.min(pattern.open, pattern.close) - pattern.low;
+  const upperWick = pattern.high - Math.max(pattern.open, pattern.close);
+  const bullEngulf = pattern.close > pattern.open && prior.close < prior.open &&
+    pattern.open <= prior.close && pattern.close >= prior.open;
+  const bearEngulf = pattern.close < pattern.open && prior.close > prior.open &&
+    pattern.open >= prior.close && pattern.close <= prior.open;
+  const bullPin = lowerWick / range >= 0.55 && pattern.close > pattern.open && body / range >= 0.12;
+  const bearPin = upperWick / range >= 0.55 && pattern.close < pattern.open && body / range >= 0.12;
+  const inside = pattern.high < prior.high && pattern.low > prior.low;
+  const patternValid = side === 'BUY' ? bullEngulf || bullPin || inside : bearEngulf || bearPin || inside;
+  if (!patternValid) return null;
+
+  // The final breakout has not happened yet. If it already happened, the full
+  // entry evaluator, not this early-warning path, owns the candidate.
+  const triggerLevel = side === 'BUY' ? pattern.high : pattern.low;
+  const alreadyTriggered = side === 'BUY' ? latest.close >= triggerLevel : latest.close <= triggerLevel;
+  if (alreadyTriggered) return null;
+  if (!nearStructureZone(m15, side) && orderBlockZone(m15, side) === null) return null;
+
+  const baseline = entry.slice(-22, -2).map(c => c.volume);
+  const averageVolume = average(baseline);
+  if (!(averageVolume > 0) || pattern.volume < averageVolume) return null;
+
+  return {
+    side,
+    triggerLevel,
+    invalidationLevel: side === 'BUY' ? pattern.low : pattern.high,
+    patternTime: pattern.time,
+    referencePrice: latest.close,
+    reasons: [
+      'Tendências H4/H1 alinhadas',
+      'Preço próximo de zona estrutural M15',
+      'Padrão de candle fechado em formação',
+      'Volume do padrão acima da média das 20 velas anteriores',
+      'Rompimento final ainda não confirmado',
+    ],
+  };
+}
+
 export function evaluatePriceActionSetup(
   frames: Partial<Record<Timeframe, Candle[]>>,
   context: MarketContext = {},

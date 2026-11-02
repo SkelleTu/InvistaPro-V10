@@ -1,0 +1,113 @@
+name: MT5 Price Action EA Compile
+
+on:
+  push:
+    branches:
+      - feature/price-action-ai-btc-layered
+    paths:
+      - "public/downloads/InvistaPRO_PriceAction_EA.mq5"
+      - ".github/workflows/mt5-ea-compile.yml"
+  pull_request:
+    paths:
+      - "public/downloads/InvistaPRO_PriceAction_EA.mq5"
+      - ".github/workflows/mt5-ea-compile.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: mt5-ea-compile-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  compile-mql5:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download official MetaTrader 5 installer
+        shell: pwsh
+        run: |
+          $installer = Join-Path $env:RUNNER_TEMP "mt5setup.exe"
+          Invoke-WebRequest -Uri "https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe" -OutFile $installer
+          if (!(Test-Path $installer) -or (Get-Item $installer).Length -lt 1MB) {
+            throw "Official MetaTrader 5 installer download is incomplete."
+          }
+
+      - name: Install MetaTrader 5 and compile EA
+        shell: pwsh
+        run: |
+          $installer = Join-Path $env:RUNNER_TEMP "mt5setup.exe"
+          $install = Start-Process -FilePath $installer -ArgumentList "/auto" -Wait -PassThru
+          if ($install.ExitCode -ne 0) {
+            Write-Warning "MetaTrader bootstrapper returned exit code $($install.ExitCode); checking whether its terminal installation completed."
+          }
+          Start-Sleep -Seconds 8
+          $roots = @(
+            "C:\Program Files\MetaTrader 5",
+            "C:\Program Files (x86)\MetaTrader 5",
+            (Join-Path $env:APPDATA "MetaQuotes\Terminal")
+          ) | Where-Object { Test-Path $_ }
+          $editor = Get-ChildItem -Path $roots -Filter "metaeditor64.exe" -File -Recurse -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if (!$editor) {
+            Write-Host "MetaTrader install diagnostics:"
+            Get-ChildItem -Path $roots -Directory -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
+            Get-ChildItem -Path "C:\Program Files","C:\Program Files (x86)" -Directory -ErrorAction SilentlyContinue |
+              Where-Object { $_.Name -match "MetaTrader|MetaQuotes" } | Select-Object -ExpandProperty FullName
+            throw "MetaEditor 64-bit was not found after installation."
+          }
+          $installRoot = $editor.Directory.FullName
+          $source = Join-Path $env:GITHUB_WORKSPACE "public/downloads/InvistaPRO_PriceAction_EA.mq5"
+          $dataRoot = Join-Path $env:APPDATA "MetaQuotes\Terminal"
+          $terminalData = Get-ChildItem -Path $dataRoot -Directory -ErrorAction SilentlyContinue |
+            Where-Object { Test-Path (Join-Path $_.FullName "MQL5") } |
+            Select-Object -First 1
+          if (!$terminalData) {
+            throw "MetaTrader terminal data folder was not created."
+          }
+          $includeSource = Join-Path $installRoot "MQL5\Include"
+          if (!(Test-Path (Join-Path $includeSource "Trade\Trade.mqh"))) {
+            throw "MetaTrader installation is missing its standard MQL5 Trade library."
+          }
+          $includeTarget = Join-Path $terminalData.FullName "MQL5\Include"
+          if ($includeSource -ne $includeTarget) {
+            New-Item -ItemType Directory -Force -Path $includeTarget | Out-Null
+            Copy-Item (Join-Path $includeSource "*") $includeTarget -Recurse -Force
+          }
+          $experts = Join-Path $terminalData.FullName "MQL5\Experts"
+          New-Item -ItemType Directory -Force -Path $experts | Out-Null
+          $target = Join-Path $experts "InvistaPRO_PriceAction_EA.mq5"
+          Copy-Item $source $target -Force
+
+          $compile = Start-Process -FilePath $editor.FullName -ArgumentList @("/compile:`"$target`"", "/log") -Wait -PassThru
+          Start-Sleep -Seconds 3
+          $log = [IO.Path]::ChangeExtension($target, ".log")
+          if (!(Test-Path $log)) {
+            throw "MetaEditor did not produce a compiler log. Process exit: $($compile.ExitCode)."
+          }
+          $report = Get-Content $log -Raw
+          Write-Host $report
+          if (!(Test-Path ([IO.Path]::ChangeExtension($target, ".ex5")))) {
+            throw "MetaEditor did not produce the EX5 artifact."
+          }
+          if ($report -notmatch "(?im)\b0 errors?,\s*0 warnings?\b") {
+            throw "MQL5 compile did not report zero errors and zero warnings."
+          }
+          $artifactDir = Join-Path $env:GITHUB_WORKSPACE "mt5-compile-artifacts"
+          New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
+          Copy-Item $log (Join-Path $artifactDir "InvistaPRO_PriceAction_EA.log") -Force
+          Copy-Item ([IO.Path]::ChangeExtension($target, ".ex5")) (Join-Path $artifactDir "InvistaPRO_PriceAction_EA.ex5") -Force
+
+      - name: Upload compiler log and EX5 artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: invistapro-price-action-mt5-compile
+          path: |
+            mt5-compile-artifacts/*
+          if-no-files-found: warn
+          retention-days: 14

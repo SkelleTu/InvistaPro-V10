@@ -460,6 +460,30 @@ export default function MetaTraderPage() {
     }
   };
 
+  const downloadPriceActionEA = async () => {
+    try {
+      const response = await fetch("/api/mt5/download-price-action-ea", { method: "GET", credentials: "same-origin", headers: { Accept: "text/plain" } });
+      if (!response.ok) {
+        let message = `O servidor recusou o download do Price Action EA (HTTP ${response.status}).`;
+        try { const payload = await response.json(); message = payload.error || payload.message || message; } catch {}
+        throw new Error(message);
+      }
+      const contentType = (response.headers.get("content-type") || "").toLowerCase();
+      if (!contentType.includes("text/plain")) throw new Error("A resposta não é um arquivo EA válido.");
+      const blob = await response.blob();
+      if (!blob.size) throw new Error("O servidor retornou um arquivo vazio.");
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = "InvistaPRO_PriceAction_EA.mq5";
+      document.body.appendChild(link); link.click(); link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+      toast({ title: "InvistaPRO Price Action EA baixado", description: "EA independente e neutro em relação à corretora. Instale em MQL5/Experts, compile no MetaEditor e teste primeiro em conta DEMO.", duration: 8000 });
+    } catch (error: any) {
+      toast({ title: "Falha no download do Price Action EA", description: error?.message || "Não foi possível preparar o arquivo.", variant: "destructive" });
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background p-4 md:p-6">
       <div className="max-w-7xl mx-auto space-y-6">
@@ -550,6 +574,10 @@ export default function MetaTraderPage() {
             <Button onClick={downloadEA} data-testid="button-download-ea" className="gap-2">
               <Download className="h-4 w-4" />
               Baixar EA v8.0
+            </Button>
+            <Button onClick={downloadPriceActionEA} data-testid="button-download-price-action-ea" variant="outline" className="gap-2">
+              <Download className="h-4 w-4" />
+              Baixar Price Action EA v1.0
             </Button>
           </div>
         </div>
@@ -2430,19 +2458,19 @@ export default function MetaTraderPage() {
                   Expert Advisor (EA)
                 </CardTitle>
                 <CardDescription>
-                  Baixe e instale o EA no MetaTrader 4 ou 5
+                  Girassol e Price Action são EAs independentes. O Price Action v1.0 é exclusivo do MetaTrader 5.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="bg-muted rounded-lg p-4 space-y-2">
                   <p className="font-medium flex items-center gap-2"><Info className="h-4 w-4 text-blue-500" /> Como instalar:</p>
                   <ol className="text-sm text-muted-foreground space-y-1 list-decimal list-inside">
-                    <li>Clique em "Baixar EA" abaixo</li>
+                    <li>Escolha o botão do EA desejado. O Price Action v1.0 é separado do Girassol.</li>
                     <li>No MetaTrader: <strong>Arquivo → Abrir pasta de dados → MQL5/Experts</strong></li>
                     <li>Cole o arquivo <code>.mq5</code> na pasta</li>
                     <li>No MetaTrader: clique em <strong>Compilar (F7)</strong> no MetaEditor</li>
-                    <li>Arraste o EA para qualquer gráfico e habilite o <strong>AlgoTrading</strong></li>
-                    <li>Configure a URL do servidor nos parâmetros do EA</li>
+                    <li>No Price Action, abra um gráfico do Bitcoin, arraste o EA para ele e habilite o <strong>AlgoTrading</strong>. O símbolo é obtido do próprio gráfico.</li>
+                    <li>Em Ferramentas → Opções → Expert Advisors, autorize WebRequest para a URL da plataforma. O download já injeta URL e token no Price Action EA.</li>
                   </ol>
                 </div>
                 <div className="space-y-1">

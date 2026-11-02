@@ -265,6 +265,121 @@ export class HuggingFaceAIService {
     }
   }
 
+  /**
+   * Price Action review path: sends real multi-timeframe OHLCV snapshots to
+   * every configured external model. Unlike the legacy Deriv analyzer, this
+   * path never converts candles into synthetic ticks and never fabricates a
+   * fallback vote. Missing model responses fail closed.
+   */
+  async reviewPriceActionSnapshot(
+    symbol: string,
+    phase: 'ENTRY' | 'POSITION',
+    snapshot: unknown,
+  ): Promise<any> {
+    if (!this.isConfigured || !this.apiKey || this.apiKey === 'missing-key') {
+      throw new Error('Price Action AI unavailable: Hugging Face inference is not configured');
+    }
+    if (!symbol || symbol.length > 64 || symbol.split('').some(char => char.charCodeAt(0) < 32)) {
+      throw new Error('Invalid chart symbol for Price Action review');
+    }
+
+    const raw = snapshot && typeof snapshot === 'object' ? snapshot as Record<string, any> : {};
+    const rawFrames = raw.frames && typeof raw.frames === 'object' ? raw.frames : {};
+    const frames: Record<string, unknown> = {};
+    for (const timeframe of ['H4', 'H1', 'M15', 'M5', 'M1']) {
+      const candles = rawFrames[timeframe];
+      if (!Array.isArray(candles) || candles.length < 30) {
+        throw new Error('Insufficient ' + timeframe + ' candles for AI review');
+      }
+      frames[timeframe] = candles.slice(-60).map((c: any) => ({
+        time: Number(c.time), open: Number(c.open), high: Number(c.high),
+        low: Number(c.low), close: Number(c.close), volume: Number(c.volume),
+      }));
+    }
+    const payload = {
+      symbol: symbol.toUpperCase(),
+      phase,
+      generatedAt: Number(raw.generatedAt ?? Date.now()),
+      frames,
+      strategyContext: raw.context ?? {},
+      candidate: raw.early ?? raw.candidate ?? null,
+      position: raw.position ?? null,
+    };
+    const serialized = JSON.stringify(payload);
+    if (serialized.length > 45_000) throw new Error('Price Action AI snapshot exceeds safe context limit');
+
+    const systemPrompt = phase === 'ENTRY'
+      ? 'Você é um comitê independente de analistas quantitativos de cripto. Refaça a análise completa usando somente o snapshot OHLCV e o contexto fornecido. Avalie H4/H1/M15/M5/M1, estrutura, zonas, liquidez, BOS/CHoCH, FVG, Order Blocks, volume, custos, notícias, sessão e risco. Não invente dados ausentes. Pré-gatilho não é entrada: aprove somente se a direção estiver clara e o cenário for válido; caso contrário use WATCH ou REJECT. Responda apenas JSON.'
+      : 'Você é um comitê independente de gestão de risco de uma posição cripto aberta. Reavalie estrutura, zonas, liquidez, volume, volatilidade, notícias, custos e invalidação usando somente o snapshot. Escolha HOLD, TAKE_PARTIAL, MOVE_STOP ou CLOSE. Nunca proponha aumentar risco ou afastar stop. CLOSE exige motivo. MOVE_STOP exige proposedStop numérico. Responda apenas JSON.';
+    const userPrompt = phase === 'ENTRY'
+      ? 'Retorne JSON: {"decision":"APPROVE|REJECT|WATCH","direction":"BUY|SELL|NONE","confidence":0-100,"reasoning":"...","risks":["..."],"invalidationConditions":["..."]}. Snapshot: ' + serialized
+      : 'Retorne JSON: {"action":"HOLD|TAKE_PARTIAL|MOVE_STOP|CLOSE","confidence":0-100,"reasoning":"...","proposedStop":number|null,"closeReason":"..."} . Snapshot: ' + serialized;
+
+    const responses = await Promise.allSettled(this.activeModels.map(async model => {
+      const response = await axios.post(
+        `${this.baseURL}/v1/chat/completions`,
+        { model: model.id, messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ], temperature: 0.1, max_tokens: 700, stream: false },
+        { headers: { Authorization: `Bearer ${this.apiKey}`, 'Content-Type': 'application/json' }, timeout: 25_000 },
+      );
+      const content = String(response.data?.choices?.[0]?.message?.content ?? '').trim();
+      const start = content.indexOf('{'), end = content.lastIndexOf('}');
+      if (start < 0 || end <= start) throw new Error(model.name + ' returned no JSON');
+      const parsed = JSON.parse(content.slice(start, end + 1));
+      const confidence = Number(parsed.confidence);
+      if (!Number.isFinite(confidence) || confidence < 0 || confidence > 100) throw new Error(model.name + ' returned invalid confidence');
+      return { model: model.name, parsed, confidence: confidence / 100 };
+    }));
+    const valid = responses.filter((r): r is PromiseFulfilledResult<{ model: string; parsed: any; confidence: number }> => r.status === 'fulfilled').map(r => r.value);
+    if (valid.length !== this.activeModels.length) {
+      const failed = responses.filter(r => r.status === 'rejected').length;
+      throw new Error('Price Action AI ensemble incomplete: ' + failed + ' model(s) unavailable');
+    }
+    const confidence = valid.reduce((sum, item) => sum + item.confidence, 0) / valid.length;
+    const reasoning = valid.map(item => item.model + ': ' + String(item.parsed.reasoning ?? '').slice(0, 400)).join(' | ');
+
+    if (phase === 'ENTRY') {
+      const decisions = valid.map(item => String(item.parsed.decision ?? '').toUpperCase());
+      const directions = valid.map(item => String(item.parsed.direction ?? '').toUpperCase());
+      const unanimous = decisions.every(d => d === 'APPROVE') &&
+        directions.every(d => d === 'BUY' || d === 'SELL') &&
+        directions.every(d => d === directions[0]);
+      const risks = valid.flatMap(item => Array.isArray(item.parsed.risks)
+        ? item.parsed.risks.filter((v: unknown) => typeof v === 'string').slice(0, 8) : []);
+      const invalidationConditions = valid.flatMap(item => Array.isArray(item.parsed.invalidationConditions)
+        ? item.parsed.invalidationConditions.filter((v: unknown) => typeof v === 'string').slice(0, 8) : []);
+      return {
+        decision: unanimous && confidence >= 0.8 ? 'APPROVE' : 'WATCH',
+        direction: unanimous ? directions[0] : undefined,
+        confidence,
+        reasoning,
+        risks,
+        invalidationConditions,
+      };
+    }
+
+    const actions = valid.map(item => String(item.parsed.action ?? '').toUpperCase());
+    const unanimous = actions.every(a => ['HOLD', 'TAKE_PARTIAL', 'MOVE_STOP', 'CLOSE'].includes(a)) &&
+      actions.every(a => a === actions[0]);
+    if (!unanimous) return { action: 'HOLD', confidence, reasoning: 'Divergência entre modelos. ' + reasoning };
+    const action = actions[0] as 'HOLD' | 'TAKE_PARTIAL' | 'MOVE_STOP' | 'CLOSE';
+    if (action === 'MOVE_STOP') {
+      const stops = valid.map(item => Number(item.parsed.proposedStop)).filter(Number.isFinite);
+      if (stops.length !== valid.length) return { action: 'HOLD', confidence, reasoning: 'Modelos não forneceram stops válidos. ' + reasoning };
+      const side = String(raw.position?.direction ?? '').toUpperCase();
+      const conservativeStop = side === 'BUY' ? Math.max(...stops) : side === 'SELL' ? Math.min(...stops) : stops[0];
+      return { action, confidence, reasoning, proposedStop: conservativeStop };
+    }
+    if (action === 'CLOSE') {
+      const reasons = valid.map(item => String(item.parsed.closeReason ?? '').trim()).filter(Boolean);
+      if (reasons.length !== valid.length) return { action: 'HOLD', confidence, reasoning: 'Fechamento sem justificativa unânime. ' + reasoning };
+      return { action, confidence, reasoning, closeReason: reasons.join(' | ') };
+    }
+    return { action, confidence, reasoning };
+  }
+
   async analyzeMarketData(tickData: DerivTickData[], symbol: string, userId?: string, externalContext?: ExternalMarketContext): Promise<AIConsensus> {
     // SHORT-CIRCUIT: Se API não configurada, usar fallback imediatamente
     if (!this.isConfigured) {
