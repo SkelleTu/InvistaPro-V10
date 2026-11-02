@@ -780,11 +780,12 @@ bool ExecuteSetupLocked(Setup &s) {
                      ? 2.0*(executionQuote.ask-executionQuote.bid)+
                        fillPrice*InpEstimatedRoundTripCostPercent/100.0 : 0.0;
    double actualWeightedReward=0.75*actualRisk+0.5*MathAbs(s.target-fillPrice)-actualCost;
+   double actualStopPercent=fillPrice>0 ? actualRisk/fillPrice*100.0 : 1.0e9;
+   double actualNetRR=(actualRisk+actualCost)>0 ? actualWeightedReward/(actualRisk+actualCost) : 0.0;
    bool unsafeExecution=fillPrice<=0 || maxSlippage<=0 || !executionQuoteValid ||
       actualRisk<=0 || actualRisk+actualCost<=0 ||
       MathAbs(fillPrice-s.entry)>maxSlippage ||
-      actualRisk/fillPrice*100.0>InpMaxStopPercent ||
-      actualWeightedReward/(actualRisk+actualCost)<InpMinimumRR;
+      actualStopPercent>InpMaxStopPercent || actualNetRR<InpMinimumRR;
    if(unsafeExecution) {
       Print("Slippage acima do limite ou preço de execução inválido. Tentando zerar a posição imediatamente.");
       // Close only the position created by this exact execution deal.
