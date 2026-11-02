@@ -1,4 +1,5 @@
 import WebSocket from 'ws';
+import type { Candle, Timeframe } from './price-action-engine';
 
 export const PRICE_ACTION_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'] as const;
 export const PRICE_ACTION_INTERVALS = ['1m', '5m', '15m', '1h', '4h'] as const;
@@ -67,6 +68,8 @@ export class BinancePriceActionFeed {
   private readonly listeners = new Set<CandleListener>();
   private stopped = true;
   private lastMessageAt = 0;
+  private reconnectTimer: NodeJS.Timeout | null = null;
+  private reconnectAttempts = 0;
 
   constructor(
     private readonly market: BinanceMarket,
@@ -117,9 +120,15 @@ export class BinancePriceActionFeed {
     this.stopped = false;
     const streams = this.symbols.flatMap(symbol =>
       PRICE_ACTION_INTERVALS.map(interval => symbol.toLowerCase() + '@kline_' + interval));
+    this.connectStreams(streams);
+  }
+
+  private connectStreams(streams: string[]): void {
+    if (this.stopped) return;
     const url = WS_BASE[this.market] + '?streams=' + streams.join('/');
     const socket = new WebSocket(url);
     this.sockets.push(socket);
+    socket.on('open', () => { this.reconnectAttempts = 0; });
     socket.on('message', raw => {
       this.lastMessageAt = Date.now();
       try {
@@ -142,7 +151,17 @@ export class BinancePriceActionFeed {
       }
     });
     socket.on('error', () => { this.lastMessageAt = 0; });
-    socket.on('close', () => { this.lastMessageAt = 0; });
+    socket.on('close', () => {
+      this.lastMessageAt = 0;
+      this.sockets = this.sockets.filter(item => item !== socket);
+      if (this.stopped || this.reconnectTimer) return;
+      const delay = Math.min(30_000, 1_000 * (2 ** Math.min(this.reconnectAttempts, 5)));
+      this.reconnectAttempts++;
+      this.reconnectTimer = setTimeout(() => {
+        this.reconnectTimer = null;
+        this.connectStreams(streams);
+      }, delay);
+    });
   }
 
   getSnapshot(symbol: string, now = Date.now()): BinanceSnapshot {
@@ -165,6 +184,19 @@ export class BinancePriceActionFeed {
     return { market: this.market, symbol: normalized, generatedAt: now, frames, stale: issues.length > 0, issues };
   }
 
+  getStrategyFrames(symbol: string): Partial<Record<Timeframe, Candle[]>> {
+    const snapshot = this.getSnapshot(symbol);
+    if (snapshot.stale) return {};
+    const map: Record<Timeframe, BinanceInterval> = { H4: '4h', H1: '1h', M15: '15m', M5: '5m', M1: '1m' };
+    const frames: Partial<Record<Timeframe, Candle[]>> = {};
+    for (const [timeframe, interval] of Object.entries(map) as Array<[Timeframe, BinanceInterval]>) {
+      frames[timeframe] = snapshot.frames[interval].map(c => ({
+        time: c.openTime, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume,
+      }));
+    }
+    return frames;
+  }
+
   getConnectionStatus(): { connected: boolean; lastMessageAt: number; market: BinanceMarket } {
     const connected = !this.stopped && this.sockets.some(s => s.readyState === WebSocket.OPEN) &&
       this.lastMessageAt > 0 && Date.now() - this.lastMessageAt <= 30_000;
@@ -173,6 +205,8 @@ export class BinancePriceActionFeed {
 
   stop(): void {
     this.stopped = true;
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
     for (const socket of this.sockets) {
       try { socket.close(); } catch { /* best-effort socket cleanup */ }
     }
