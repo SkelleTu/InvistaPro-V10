@@ -184,7 +184,7 @@ bool RequestAIReview(int side,double trigger,double invalidation,datetime patter
    body+="\"invalidationPrice\":"+DoubleToString(invalidation,_Digits)+",\"patternTime\":"+(string)(long)patternTime+",";
    MqlTick marketTick; if(!SymbolInfoTick(_Symbol,marketTick)) return false;
    body+="\"context\":{\"spread\":"+DoubleToString(marketTick.ask-marketTick.bid,_Digits)+",";
-   body+="\"riskPercent\":"+DoubleToString(InpRiskPercent,2)+",\"maxStopPercent\":"+DoubleToString(InpMaxStopPercent,2)+",";
+   body+="\"riskPercent\":"+DoubleToString(InpRiskPercent,2)+",\"maxStopPercent\":"+DoubleToString(InpMaxStopPercent,2)+",\"marketRegime\":\""+(Trend(PERIOD_H4)==0?"RANGE":"TREND")+"\",");
    body+="\"estimatedRoundTripCostPercent\":"+DoubleToString(InpEstimatedRoundTripCostPercent,3)+",";
    body+="\"accountEquity\":"+DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY),2)+",";
    body+="\"freeMargin\":"+DoubleToString(AccountInfoDouble(ACCOUNT_MARGIN_FREE),2)+",";
@@ -565,12 +565,14 @@ void OnTick() {
    ManageOpenPosition();
    if(!IsNewBar(PERIOD_M5,g_lastM5Bar)) return;
    if(!DailyRiskAllowed() || !SpreadAllowed() || PositionSelect(_Symbol)) return;
-   int t4=Trend(PERIOD_H4),t1=Trend(PERIOD_H1);
-   if(t4==0 || t4!=t1) { g_approvedPatternTime=0; return; }
+   int t4=Trend(PERIOD_H4),t1=Trend(PERIOD_H1),t15=Trend(PERIOD_M15);
+   bool rangeMode=(t4==0 && t1==0 && t15==0);
+   if(t4!=t1 || (t4==0 && !rangeMode)) { g_approvedPatternTime=0; return; }
 
    // Approved setup is checked first on the next closed candle.
    if(g_approvedPatternTime>0) {
-      if(t4!=g_approvedSide) { g_approvedPatternTime=0; return; }
+      if(t4!=0 && t4!=g_approvedSide) { g_approvedPatternTime=0; return; }
+      if(t4==0 && !rangeMode) { g_approvedPatternTime=0; return; }
       MqlRates confirm[];
       if(!GetRates(PERIOD_M5,2,confirm)) { g_approvedPatternTime=0; return; }
       bool invalidated=g_approvedSide==1 ? confirm[0].low<g_approvedInvalidation
@@ -596,7 +598,7 @@ void OnTick() {
    }
 
    int side=0; double trigger=0,invalidation=0; datetime pt=0;
-   if(!Pattern(PERIOD_M5,side,trigger,invalidation,pt) || side!=t4) return;
+   if(!Pattern(PERIOD_M5,side,trigger,invalidation,pt) || (t4!=0 && side!=t4)) return;
    MqlTick tick; if(!SymbolInfoTick(_Symbol,tick)) return;
    double ref=side==1 ? tick.ask : tick.bid;
    if(!NearM15Zone(side,ref) || !RelativeVolume(PERIOD_M5)) return;
