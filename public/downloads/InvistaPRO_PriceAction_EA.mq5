@@ -1238,13 +1238,16 @@ int OnInit() {
       PersistDailyState();
    trade.SetExpertMagicNumber(InpMagic);
    g_lastM5Bar=iTime(_Symbol,PERIOD_M5,0);
-   EventSetTimer(1);
+   if(!EventSetTimer(1)) {
+      Print("Não foi possível iniciar o timer de proteção e reconciliação. EA bloqueado.");
+      return INIT_FAILED;
+   }
    Print("InvistaPRO Price Action EA v1.0 iniciado. Broker-neutral | Simbolo do grafico: ",_Symbol);
    Print("Estratégia independente do provedor de cotações. Timeframes: H4/H1/M15/M5/M1.");
    return INIT_SUCCEEDED;
 }
 
-void OnDeinit(const int reason) { EventKillTimer(); }
+void OnDeinit(const int reason) { EventKillTimer(); GlobalVariablesFlush(); }
 
 void OnTimer() {
    DailyRiskAllowed(); // refresh Brasília day and shared counters before processing queued deals
