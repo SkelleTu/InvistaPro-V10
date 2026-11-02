@@ -278,13 +278,37 @@ void ReviewOpenPositionAI() {
    }
 }
 
+string DailyStatePrefix() {
+   return "PA_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+(string)InpMagic+"_"+TimeToString(g_dayStart,TIME_DATE);
+}
+void PersistDailyState() {
+   string key=DailyStatePrefix();
+   GlobalVariableSet(key+"_T",(double)g_tradesToday);
+   GlobalVariableSet(key+"_L",(double)g_consecutiveLosses);
+   GlobalVariableSet(key+"_P",(double)g_pauseUntil);
+   GlobalVariableSet(key+"_E",g_dayStartEquity);
+}
+bool PositionIdentifierOpen(ulong identifier) {
+   for(int i=PositionsTotal()-1;i>=0;i--) {
+      ulong ticket=PositionGetTicket(i);
+      if(ticket==0) continue;
+      if((ulong)PositionGetInteger(POSITION_IDENTIFIER)==identifier) return true;
+   }
+   return false;
+}
+
 bool DailyRiskAllowed() {
    datetime now=TimeCurrent();
    MqlDateTime d; TimeToStruct(now,d); d.hour=0; d.min=0; d.sec=0;
    datetime start=StructToTime(d);
    if(start!=g_dayStart) {
-      g_dayStart=start; g_dayStartEquity=AccountInfoDouble(ACCOUNT_EQUITY);
-      g_tradesToday=0; g_consecutiveLosses=0; g_pauseUntil=0;
+      g_dayStart=start;
+      string key=DailyStatePrefix();
+      g_tradesToday=GlobalVariableCheck(key+"_T") ? (int)GlobalVariableGet(key+"_T") : 0;
+      g_consecutiveLosses=GlobalVariableCheck(key+"_L") ? (int)GlobalVariableGet(key+"_L") : 0;
+      g_pauseUntil=GlobalVariableCheck(key+"_P") ? (datetime)GlobalVariableGet(key+"_P") : 0;
+      g_dayStartEquity=GlobalVariableCheck(key+"_E") ? GlobalVariableGet(key+"_E") : AccountInfoDouble(ACCOUNT_EQUITY);
+      PersistDailyState();
    }
    if(TimeCurrent()<g_pauseUntil || g_tradesToday>=InpMaxTradesPerDay) return false;
    if(g_dayStartEquity<=0) return false;
@@ -365,6 +389,7 @@ bool ExecuteSetup(Setup &s) {
       return false;
    }
    g_tradesToday++;
+   PersistDailyState();
    Print("Price Action executado: ",s.side==1?"BUY":"SELL"," ",_Symbol," volume=",volume,
          " SL=",s.stop," TP=",s.target," RR=",DoubleToString(s.rr,2));
    return true;
@@ -423,10 +448,24 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,const MqlTradeRequest &
    if(trans.type!=TRADE_TRANSACTION_DEAL_ADD || trans.deal==0) return;
    if(!HistoryDealSelect(trans.deal)) return;
    if((long)HistoryDealGetInteger(trans.deal,DEAL_MAGIC)!=InpMagic) return;
-   if((long)HistoryDealGetInteger(trans.deal,DEAL_ENTRY)!=DEAL_ENTRY_OUT) return;
-   double pnl=HistoryDealGetDouble(trans.deal,DEAL_PROFIT)+HistoryDealGetDouble(trans.deal,DEAL_SWAP)+HistoryDealGetDouble(trans.deal,DEAL_COMMISSION);
-   if(pnl<0) { g_consecutiveLosses++; if(g_consecutiveLosses>=InpMaxConsecutiveLosses) g_pauseUntil=TimeCurrent()+InpPauseMinutesAfterLosses*60; }
-   else if(pnl>0) g_consecutiveLosses=0;
+   long entry=(long)HistoryDealGetInteger(trans.deal,DEAL_ENTRY);
+   if(entry!=DEAL_ENTRY_OUT && entry!=DEAL_ENTRY_OUT_BY) return;
+   ulong positionId=(ulong)HistoryDealGetInteger(trans.deal,DEAL_POSITION_ID);
+   string pnlKey="PA_PNL_"+(string)positionId;
+   double cumulative=GlobalVariableCheck(pnlKey) ? GlobalVariableGet(pnlKey) : 0.0;
+   cumulative+=HistoryDealGetDouble(trans.deal,DEAL_PROFIT)+HistoryDealGetDouble(trans.deal,DEAL_SWAP)+
+               HistoryDealGetDouble(trans.deal,DEAL_COMMISSION)+HistoryDealGetDouble(trans.deal,DEAL_FEE);
+   GlobalVariableSet(pnlKey,cumulative);
+   // Partial exits are aggregated; only count the trade after its position is fully closed.
+   if(!PositionIdentifierOpen(positionId)) {
+      if(cumulative<0) {
+         g_consecutiveLosses++;
+         if(g_consecutiveLosses>=InpMaxConsecutiveLosses)
+            g_pauseUntil=TimeCurrent()+InpPauseMinutesAfterLosses*60;
+      } else if(cumulative>0) g_consecutiveLosses=0;
+      GlobalVariableDel(pnlKey);
+      PersistDailyState();
+   }
 }
 
 void OnInitHeartbeat() {
