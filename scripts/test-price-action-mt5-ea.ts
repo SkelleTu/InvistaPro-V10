@@ -64,7 +64,7 @@ assert.ok(ea.includes('DailyRiskAllowed(); // initialize the daily key before an
 assert.ok(ea.includes('GlobalVariableSetOnCondition'), 'Concurrent chart instances must serialize entry attempts with an atomic risk lock');
 assert.ok(ea.includes('PendingDealPrefix()'), 'Trade callbacks must persist pending accounting work for restart recovery');
 assert.ok(ea.includes('trade.PositionModify(positionTicket,'), 'Ticket-based position protection must be used across charts');
-assert.ok(ea.includes('GlobalVariableSetOnCondition(dealGuard,(double)TimeCurrent(),0.0)'), 'Persistent deal accounting guard must be atomically claimed under the shared daily lock');
+assert.ok(ea.includes('GlobalVariableGet(dealGuard)!=0.0'), 'Persistent deal guard must skip only events already fully processed');
 assert.ok(ea.includes('CleanupOldDealGuards'), 'Deal deduplication guards must be periodically cleaned up');
 assert.ok(ea.includes('return "PA_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+TimeToString(g_dayStart,TIME_DATE);'), 'Daily risk state must be shared across Price Action chart instances on the same account');
 assert.ok(ea.includes('DailyRiskAllowed() || !AcquireDailyLock()'), 'Entry must acquire the shared daily risk lock before sending an order');
