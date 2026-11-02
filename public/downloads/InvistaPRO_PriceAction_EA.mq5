@@ -197,7 +197,6 @@ string JsonString(string body,string key) {
 
 bool RequestAIReview(int side,double trigger,double invalidation,datetime patternTime) {
    if(!AllFramesFresh()) return false;
-   if(!AllFramesFresh()) return;
    string h4=FrameJSON(PERIOD_H4),h1=FrameJSON(PERIOD_H1),m15=FrameJSON(PERIOD_M15),
           m5=FrameJSON(PERIOD_M5),m1=FrameJSON(PERIOD_M1);
    if(h4=="" || h1=="" || m15=="" || m5=="" || m1=="") { return false; }
@@ -264,6 +263,7 @@ void ReviewOpenPositionAI() {
    g_lastPositionAIReview=TimeCurrent();
    g_lastPositionAIReference=currentPrice;
 
+   if(!AllFramesFresh()) return;
    string h4=FrameJSON(PERIOD_H4),h1=FrameJSON(PERIOD_H1),m15=FrameJSON(PERIOD_M15),
           m5=FrameJSON(PERIOD_M5),m1=FrameJSON(PERIOD_M1);
    if(h4=="" || h1=="" || m15=="" || m5=="" || m1=="") return;
