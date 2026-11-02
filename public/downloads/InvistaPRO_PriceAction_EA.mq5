@@ -609,14 +609,19 @@ double RiskVolume(int side,double entry,double stop) {
    double riskMoney=AccountInfoDouble(ACCOUNT_EQUITY)*InpRiskPercent/100.0;
    double pnl=0;
    ENUM_ORDER_TYPE type=side==1 ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
-   if(!OrderCalcProfit(type,_Symbol,1.0,entry,stop,pnl)) return 0;
-   double lossPerLot=MathAbs(pnl);
    MqlTick quote;
    if(!SymbolInfoTick(_Symbol,quote)) return 0;
-   double feePrice=entry*InpEstimatedRoundTripCostPercent/100.0+2.0*(quote.ask-quote.bid);
-   double feeExit=side==1 ? entry-feePrice : entry+feePrice;
+   double slippageBuffer=InpMaxSlippagePoints>0 ? InpMaxSlippagePoints*_Point : ATR(PERIOD_M15)*0.10;
+   if(slippageBuffer<=0) return 0;
+   // Size against the worst permitted adverse fill, not the optimistic quote.
+   double sizingEntry=side==1 ? entry+slippageBuffer : entry-slippageBuffer;
+   if(sizingEntry<=0 || (side==1 && sizingEntry<=stop) || (side==-1 && sizingEntry>=stop)) return 0;
+   if(!OrderCalcProfit(type,_Symbol,1.0,sizingEntry,stop,pnl)) return 0;
+   double lossPerLot=MathAbs(pnl);
+   double feePrice=sizingEntry*InpEstimatedRoundTripCostPercent/100.0+2.0*(quote.ask-quote.bid);
+   double feeExit=side==1 ? sizingEntry-feePrice : sizingEntry+feePrice;
    double feePnl=0;
-   if(!OrderCalcProfit(type,_Symbol,1.0,entry,feeExit,feePnl)) return 0;
+   if(!OrderCalcProfit(type,_Symbol,1.0,sizingEntry,feeExit,feePnl)) return 0;
    lossPerLot+=MathAbs(feePnl);
    if(lossPerLot<=0) return 0;
    return NormalizeVolume(riskMoney/lossPerLot);
@@ -767,7 +772,16 @@ bool ExecuteSetupLocked(Setup &s) {
    }
    double fillPrice=trade.ResultPrice();
    double maxSlippage=InpMaxSlippagePoints>0 ? InpMaxSlippagePoints*_Point : ATR(PERIOD_M15)*0.10;
-   if(fillPrice<=0 || maxSlippage<=0 || MathAbs(fillPrice-s.entry)>maxSlippage) {
+   MqlTick executionQuote; if(!SymbolInfoTick(_Symbol,executionQuote)) executionQuote.ask=executionQuote.bid=0;
+   double actualRisk=fillPrice>0 ? MathAbs(fillPrice-s.stop) : 0.0;
+   double actualCost=fillPrice>0 ? 2.0*(executionQuote.ask-executionQuote.bid)+
+                     fillPrice*InpEstimatedRoundTripCostPercent/100.0 : 0.0;
+   double actualWeightedReward=0.75*actualRisk+0.5*MathAbs(s.target-fillPrice)-actualCost;
+   bool unsafeExecution=fillPrice<=0 || maxSlippage<=0 ||
+      MathAbs(fillPrice-s.entry)>maxSlippage ||
+      actualRisk/fillPrice*100.0>InpMaxStopPercent ||
+      actualWeightedReward/(actualRisk+actualCost)<InpMinimumRR;
+   if(unsafeExecution) {
       Print("Slippage acima do limite ou preço de execução inválido. Tentando zerar a posição imediatamente.");
       // Close only the position created by this exact execution deal.
       ulong fillDeal=trade.ResultDeal();
