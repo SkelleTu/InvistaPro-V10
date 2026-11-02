@@ -768,52 +768,99 @@ void ManageOpenPosition() {
    }
 }
 
+string PendingDealPrefix() {
+   return "PA_PENDING_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_";
+}
+
+void ProcessPendingDeals() {
+   string prefix=PendingDealPrefix();
+   // Pending deal markers are persistent, so a terminal restart cannot silently
+   // discard a trade-accounting event that arrived before shutdown.
+   for(int i=GlobalVariablesTotal()-1;i>=0;i--) {
+      string pendingName=GlobalVariableName(i);
+      if(StringFind(pendingName,prefix)!=0) continue;
+      ulong deal=(ulong)StringToInteger(StringSubstr(pendingName,StringLen(prefix)));
+      if(deal==0) { GlobalVariableDel(pendingName); continue; }
+      if(!HistoryDealSelect(deal)) continue;
+      long entry=(long)HistoryDealGetInteger(deal,DEAL_ENTRY);
+      ulong positionId=(ulong)HistoryDealGetInteger(deal,DEAL_POSITION_ID);
+      if(positionId==0) { GlobalVariableDel(pendingName); continue; }
+      string account=(string)AccountInfoInteger(ACCOUNT_LOGIN);
+      string trackKey="PA_TRACK_"+account+"_"+(string)positionId;
+      string comment=HistoryDealGetString(deal,DEAL_COMMENT);
+      bool isEntry=entry==DEAL_ENTRY_IN && StringFind(comment,"InvistaPRO PA")>=0;
+      bool isExit=(entry==DEAL_ENTRY_OUT || entry==DEAL_ENTRY_OUT_BY) && GlobalVariableCheck(trackKey);
+      if(!isEntry && !isExit) { GlobalVariableDel(pendingName); continue; }
+
+      if(!AcquireDailyLock()) continue; // keep pending marker; timer retries
+      // Re-read shared state only after acquiring the account/day lock.
+      string dayKey=DailyStatePrefix();
+      if(GlobalVariableCheck(dayKey+"_T")) g_tradesToday=(int)GlobalVariableGet(dayKey+"_T");
+      if(GlobalVariableCheck(dayKey+"_L")) g_consecutiveLosses=(int)GlobalVariableGet(dayKey+"_L");
+      if(GlobalVariableCheck(dayKey+"_D")) g_losingTradesToday=(int)GlobalVariableGet(dayKey+"_D");
+      if(GlobalVariableCheck(dayKey+"_P")) g_pauseUntil=(datetime)GlobalVariableGet(dayKey+"_P");
+      if(GlobalVariableCheck(dayKey+"_E")) g_dayStartEquity=GlobalVariableGet(dayKey+"_E");
+
+      // The permanent deal guard survives terminal restarts. The account/day
+      // lock serializes creation, so no chart can race its initialization.
+      string dealGuard="PA_DEAL_"+account+"_"+(string)deal;
+      if(!GlobalVariableCheck(dealGuard)) GlobalVariableSet(dealGuard,0.0);
+      if(!GlobalVariableSetOnCondition(dealGuard,(double)TimeCurrent(),0.0)) {
+         GlobalVariableDel(pendingName);
+         ReleaseDailyLock();
+         continue;
+      }
+
+      if(isEntry) {
+         GlobalVariableSet(trackKey,1.0);
+      } else if(!PositionIdentifierOpen(positionId)) {
+         string closedKey="PA_CLOSED_"+account+"_"+(string)positionId;
+         if(!GlobalVariableCheck(closedKey)) {
+            // Reconstruct the entire position result from history, not from the
+            // order in which partial-exit callbacks happen to be processed.
+            double totalPnl=0;
+            if(HistorySelectByPosition(positionId)) {
+               for(int j=0;j<HistoryDealsTotal();j++) {
+                  ulong positionDeal=HistoryDealGetTicket(j);
+                  if(positionDeal==0) continue;
+                  totalPnl+=HistoryDealGetDouble(positionDeal,DEAL_PROFIT)+
+                            HistoryDealGetDouble(positionDeal,DEAL_SWAP)+
+                            HistoryDealGetDouble(positionDeal,DEAL_COMMISSION)+
+                            HistoryDealGetDouble(positionDeal,DEAL_FEE);
+               }
+               GlobalVariableSet(closedKey,(double)TimeCurrent());
+               if(totalPnl<0) {
+                  g_losingTradesToday++;
+                  g_consecutiveLosses++;
+                  if(g_consecutiveLosses>=InpMaxConsecutiveLosses)
+                     g_pauseUntil=TimeCurrent()+InpPauseMinutesAfterLosses*60;
+               } else if(totalPnl>0) {
+                  g_consecutiveLosses=0;
+               }
+               GlobalVariableDel(trackKey);
+               GlobalVariableDel(PartialKey(positionId));
+               GlobalVariableDel("PA_RISK_"+account+"_"+(string)positionId);
+               PersistDailyState();
+            } else {
+               // History may not be synchronized yet. Retry without consuming
+               // the event guard, otherwise a loss could disappear silently.
+               GlobalVariableDel(dealGuard);
+               ReleaseDailyLock();
+               continue;
+            }
+         }
+      }
+      GlobalVariableDel(pendingName);
+      ReleaseDailyLock();
+   }
+}
+
 void OnTradeTransaction(const MqlTradeTransaction &trans,const MqlTradeRequest &request,const MqlTradeResult &result) {
    if(trans.type!=TRADE_TRANSACTION_DEAL_ADD || trans.deal==0) return;
-   if(!HistoryDealSelect(trans.deal)) return;
-   long entry=(long)HistoryDealGetInteger(trans.deal,DEAL_ENTRY);
-   ulong positionId=(ulong)HistoryDealGetInteger(trans.deal,DEAL_POSITION_ID);
-   if(positionId==0) return;
-   string account=(string)AccountInfoInteger(ACCOUNT_LOGIN);
-   string trackKey="PA_TRACK_"+account+"_"+(string)positionId;
-   string dealComment=HistoryDealGetString(trans.deal,DEAL_COMMENT);
-   bool isPriceActionEntry=entry==DEAL_ENTRY_IN && StringFind(dealComment,"InvistaPRO PA")>=0;
-   bool isTrackedExit=(entry==DEAL_ENTRY_OUT || entry==DEAL_ENTRY_OUT_BY) && GlobalVariableCheck(trackKey);
-   if(!isPriceActionEntry && !isTrackedExit) return;
-
-   // One terminal-global guard makes every chart instance account-wide and idempotent,
-   // even when users assign different magic numbers to different Price Action charts.
-   string dealGuard="PA_DEAL_"+account+"_"+(string)trans.deal;
-   // Atomic create-if-absent; do not reset a guard another chart may have claimed.
-   if(!GlobalVariableTemp(dealGuard) && !GlobalVariableCheck(dealGuard)) return;
-   if(!GlobalVariableSetOnCondition(dealGuard,(double)TimeCurrent(),0.0)) return;
-
-   // Include opening commission/fees as well as every partial/final closing deal.
-   // A position is counted only after it is completely closed.
-   string pnlKey="PA_PNL_"+account+"_"+(string)positionId;
-   double cumulative=GlobalVariableCheck(pnlKey) ? GlobalVariableGet(pnlKey) : 0.0;
-   cumulative+=HistoryDealGetDouble(trans.deal,DEAL_PROFIT)+HistoryDealGetDouble(trans.deal,DEAL_SWAP)+
-               HistoryDealGetDouble(trans.deal,DEAL_COMMISSION)+HistoryDealGetDouble(trans.deal,DEAL_FEE);
-   GlobalVariableSet(pnlKey,cumulative);
-
-   if(isPriceActionEntry) {
-      GlobalVariableSet(trackKey,1.0);
-      return;
-   }
-
-   if(!PositionIdentifierOpen(positionId)) {
-      if(cumulative<0) {
-         g_losingTradesToday++;
-         g_consecutiveLosses++;
-         if(g_consecutiveLosses>=InpMaxConsecutiveLosses)
-            g_pauseUntil=TimeCurrent()+InpPauseMinutesAfterLosses*60;
-      } else if(cumulative>0) g_consecutiveLosses=0;
-      GlobalVariableDel(pnlKey);
-      GlobalVariableDel(trackKey);
-      GlobalVariableDel(PartialKey(positionId));
-      GlobalVariableDel("PA_RISK_"+account+"_"+(string)positionId);
-      PersistDailyState();
-   }
+   // Queue first; the timer processes under one account-wide lock and retries
+   // if history or the lock is temporarily unavailable.
+   string pending=PendingDealPrefix()+(string)trans.deal;
+   GlobalVariableSet(pending,(double)TimeCurrent());
 }
 void OnInitHeartbeat() {
    if(InpHeartbeatSeconds<=0 || TimeCurrent()-g_lastHeartbeat<InpHeartbeatSeconds) return;
@@ -844,6 +891,7 @@ int OnInit() {
    }
    if(!SymbolSelect(_Symbol,true)) return INIT_FAILED;
    CleanupOldDealGuards();
+   DailyRiskAllowed(); // initialize the daily key before any transaction callback can persist state
    trade.SetExpertMagicNumber(InpMagic);
    g_lastM5Bar=iTime(_Symbol,PERIOD_M5,0);
    EventSetTimer(1);
@@ -855,6 +903,8 @@ int OnInit() {
 void OnDeinit(const int reason) { EventKillTimer(); }
 
 void OnTimer() {
+   DailyRiskAllowed(); // refresh Brasília day and shared counters before processing queued deals
+   ProcessPendingDeals();
    OnInitHeartbeat();
    ManageOpenPosition();
    ReviewOpenPositionAI();
