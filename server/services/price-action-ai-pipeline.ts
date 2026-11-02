@@ -1,4 +1,5 @@
-import { invistaPriceActionAiProvider } from './price-action-ai-provider';\nimport {
+import { invistaPriceActionAiProvider } from './price-action-ai-provider';
+import {
   detectPriceActionPreTrigger,
   evaluatePriceActionSetup,
   validateAIEntryReview,
@@ -110,4 +111,7 @@ export class PriceActionAiPipeline {
     };
   }
 }
-\n/** Shared strategy instances; importing this module does not start market feeds or trading. */\nexport const priceActionAiCoordinator = new PriceActionAiCoordinator(invistaPriceActionAiProvider);\nexport const priceActionAiPipeline = new PriceActionAiPipeline(priceActionAiCoordinator);\n
+
+/** Shared strategy instances; importing this module does not start market feeds or trading. */
+export const priceActionAiCoordinator = new PriceActionAiCoordinator(invistaPriceActionAiProvider);
+export const priceActionAiPipeline = new PriceActionAiPipeline(priceActionAiCoordinator);
