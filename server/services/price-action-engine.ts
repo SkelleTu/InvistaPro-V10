@@ -217,6 +217,30 @@ function nearestOpposingBarrier(candles: Candle[], side: TradeSide, entry: numbe
   return side === 'BUY' ? Math.min(...candidates) : Math.max(...candidates);
 }
 
+export function arePriceActionFramesFresh(
+  frames: Partial<Record<Timeframe, Candle[]>>,
+  now = Date.now(),
+): boolean {
+  const secondsByTimeframe: Record<Timeframe, number> = { H4: 14_400, H1: 3_600, M15: 900, M5: 300, M1: 60 };
+  for (const timeframe of ['H4', 'H1', 'M15'] as const) {
+    const values = frames[timeframe];
+    if (!validCandles(values)) return false;
+    const rawTime = values[values.length - 1].time;
+    const timestampMs = rawTime < 10_000_000_000 ? rawTime * 1000 : rawTime;
+    const ageMs = now - timestampMs;
+    if (ageMs < -30_000 || ageMs > secondsByTimeframe[timeframe] * 2_000 + 120_000) return false;
+  }
+  const entryFrames = (['M5', 'M1'] as const).filter(timeframe => validCandles(frames[timeframe]));
+  if (!entryFrames.length) return false;
+  return entryFrames.some(timeframe => {
+    const values = frames[timeframe]!;
+    const rawTime = values[values.length - 1].time;
+    const timestampMs = rawTime < 10_000_000_000 ? rawTime * 1000 : rawTime;
+    const ageMs = now - timestampMs;
+    return ageMs >= -30_000 && ageMs <= secondsByTimeframe[timeframe] * 2_000 + 60_000;
+  });
+}
+
 function hold(reasons: string[], checks: Record<string, boolean>, features: PriceActionSetup['features']): PriceActionSetup {
   return { action: 'HOLD', approved: false, reasons, checks, features };
 }
