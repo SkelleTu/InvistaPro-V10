@@ -324,9 +324,19 @@ double JsonNumber(string body,string key) {
 }
 
 void ReviewOpenPositionAI() {
-   if(!PositionSelect(_Symbol)) return;
-   if((long)PositionGetInteger(POSITION_MAGIC)!=InpMagic) return;
-   ulong ticket=(ulong)PositionGetInteger(POSITION_IDENTIFIER);
+   // Resolve the exact managed position ticket; symbol selection is ambiguous on hedging accounts.
+   ulong positionTicket=0;
+   for(int i=PositionsTotal()-1;i>=0;i--) {
+      ulong candidate=PositionGetTicket(i);
+      if(candidate==0 || !PositionSelectByTicket(candidate)) continue;
+      if(PositionGetString(POSITION_SYMBOL)==_Symbol &&
+         (long)PositionGetInteger(POSITION_MAGIC)==InpMagic) {
+         positionTicket=candidate;
+         break;
+      }
+   }
+   if(positionTicket==0 || !PositionSelectByTicket(positionTicket)) return;
+   ulong identifier=(ulong)PositionGetInteger(POSITION_IDENTIFIER);
    long type=PositionGetInteger(POSITION_TYPE);
    int side=type==POSITION_TYPE_BUY ? 1 : -1;
    double currentStop=PositionGetDouble(POSITION_SL);
@@ -334,14 +344,13 @@ void ReviewOpenPositionAI() {
    MqlTick tick; if(!SymbolInfoTick(_Symbol,tick)) return;
    double currentPrice=side==1 ? tick.bid : tick.ask;
    double atr=ATR(PERIOD_M15);
-   bool newPosition=ticket!=g_lastPositionTicket;
+   bool newPosition=identifier!=g_lastPositionTicket;
    bool material=newPosition || g_lastPositionAIReference<=0 ||
       (atr>0 && MathAbs(currentPrice-g_lastPositionAIReference)>=atr*0.5);
    bool heartbeat=(TimeCurrent()-g_lastPositionAIReview)>=900;
    if(!material && !heartbeat) return;
 
-   // Rate-limit before the network call; a failed model request must not create a retry storm.
-   g_lastPositionTicket=ticket;
+   g_lastPositionTicket=identifier;
    g_lastPositionAIReview=TimeCurrent();
    g_lastPositionAIReference=currentPrice;
 
@@ -367,8 +376,10 @@ void ReviewOpenPositionAI() {
    string response=CharArrayToString(result,0,-1,CP_UTF8);
    double confidence=JsonNumber(response,"confidence");
    if(confidence<0.80 || confidence>1.0) return;
-   // The position may have changed or closed while the AI request was in flight.
-   if(!PositionSelect(_Symbol) || (ulong)PositionGetInteger(POSITION_IDENTIFIER)!=ticket ||
+   // Re-select the exact ticket after network latency; never act on a replacement position.
+   if(!PositionSelectByTicket(positionTicket) ||
+      (ulong)PositionGetInteger(POSITION_IDENTIFIER)!=identifier ||
+      PositionGetString(POSITION_SYMBOL)!=_Symbol ||
       (long)PositionGetInteger(POSITION_MAGIC)!=InpMagic) return;
    MqlTick latestTick; if(!SymbolInfoTick(_Symbol,latestTick)) return;
    currentStop=PositionGetDouble(POSITION_SL);
@@ -385,21 +396,22 @@ void ReviewOpenPositionAI() {
       bool brokerDistance=side==1 ? currentPrice-proposed>=minStop*_Point
                                   : proposed-currentPrice>=minStop*_Point;
       if(tighter && brokerDistance && proposed>0) {
-         if(trade.PositionModify(_Symbol,proposed,takeProfit) && TradeRequestSucceeded())
+         if(trade.PositionModify(positionTicket,proposed,takeProfit) && TradeRequestSucceeded())
             Print("IA apertou stop protetivo. Stop nunca e ampliado.");
       }
    } else if(action=="TAKE_PARTIAL") {
-      string key=PartialKey(ticket);
-      if(!GlobalVariableCheck(key) && PositionSelect(_Symbol)) {
+      string key=PartialKey(identifier);
+      if(!GlobalVariableCheck(key) && PositionSelectByTicket(positionTicket)) {
          double volume=PositionGetDouble(POSITION_VOLUME);
          double partial=NormalizeVolume(volume*0.5);
-         if(partial>0 && partial<volume && ClosePartialPosition(side,partial,volume))
+         if(partial>0 && partial<volume && ClosePartialPosition(positionTicket,side,partial,volume))
             GlobalVariableSet(key,1.0);
       }
    } else if(action=="CLOSE") {
       string reason=JsonString(response,"closeReason");
-      if(StringLen(reason)>0 && PositionSelect(_Symbol))
-         if(trade.PositionClose(_Symbol) && TradeRequestSucceeded()) Print("IA recomendou encerramento: ",reason);
+      if(StringLen(reason)>0 && PositionSelectByTicket(positionTicket))
+         if(trade.PositionClose(positionTicket) && TradeRequestSucceeded())
+            Print("IA recomendou encerramento: ",reason);
    }
 }
 
@@ -664,12 +676,14 @@ bool TradeRequestSucceeded() {
 
 string PartialKey(ulong ticket) { return "PA_PARTIAL_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+(string)ticket; }
 
-bool ClosePartialPosition(int side,double closeVolume,double currentVolume) {
+bool ClosePartialPosition(ulong positionTicket,int side,double closeVolume,double currentVolume) {
    if(closeVolume<=0 || closeVolume>=currentVolume) return false;
+   if(!PositionSelectByTicket(positionTicket) ||
+      PositionGetString(POSITION_SYMBOL)!=_Symbol) return false;
    ENUM_ACCOUNT_MARGIN_MODE mode=(ENUM_ACCOUNT_MARGIN_MODE)AccountInfoInteger(ACCOUNT_MARGIN_MODE);
    bool requested=false;
    if(mode==ACCOUNT_MARGIN_MODE_RETAIL_HEDGING) {
-      requested=trade.PositionClosePartial(_Symbol,closeVolume);
+      requested=trade.PositionClosePartial(positionTicket,closeVolume);
    } else {
       // Netting/exchange accounts reduce the existing net position with an opposite deal.
       requested=side==1
@@ -680,45 +694,55 @@ bool ClosePartialPosition(int side,double closeVolume,double currentVolume) {
 }
 
 void ManageOpenPosition() {
-   if(!PositionSelect(_Symbol)) return;
-   if((long)PositionGetInteger(POSITION_MAGIC)!=InpMagic) return;
-   ulong ticket=(ulong)PositionGetInteger(POSITION_IDENTIFIER);
-   long type=PositionGetInteger(POSITION_TYPE);
-   int side=type==POSITION_TYPE_BUY ? 1 : -1;
-   double open=PositionGetDouble(POSITION_PRICE_OPEN);
-   double stop=PositionGetDouble(POSITION_SL);
-   double target=PositionGetDouble(POSITION_TP);
-   double volume=PositionGetDouble(POSITION_VOLUME);
-   MqlTick tick; if(!SymbolInfoTick(_Symbol,tick)) return;
-   double price=side==1 ? tick.bid : tick.ask;
-   string riskKey="PA_RISK_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+(string)ticket;
-   double risk=GlobalVariableCheck(riskKey) ? GlobalVariableGet(riskKey) : MathAbs(open-stop);
-   if(risk<=0) return;
-   if(!GlobalVariableCheck(riskKey)) GlobalVariableSet(riskKey,risk);
-   double rNow=(side==1 ? price-open : open-price)/risk;
-   if(rNow>=1.0) {
-      double be=NormalizeDouble(open,_Digits);
-      bool tighter=side==1 ? be>stop : stop==0 || be<stop;
-      if(tighter && trade.PositionModify(_Symbol,be,target) && TradeRequestSucceeded())
-         Print("Stop movido para break-even em +1R.");
-   }
-   string partialKey=PartialKey(ticket);
-   if(rNow>=1.5 && !GlobalVariableCheck(partialKey) &&
-      volume>SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN)*1.5) {
-      double closeVol=NormalizeVolume(volume*0.5);
-      if(closeVol>0 && closeVol<volume && ClosePartialPosition(side,closeVol,volume))
-         GlobalVariableSet(partialKey,1.0);
-   }
-   // Trailing only tightens behind confirmed closed M15 swing points.
-   if(rNow>=2.0) {
-      MqlRates r[];
-      if(GetRates(PERIOD_M15,8,r)) {
-         double candidate=side==1 ? r[1].low : r[1].high;
-         for(int i=2;i<6;i++) candidate=side==1 ? MathMin(candidate,r[i].low) : MathMax(candidate,r[i].high);
-         candidate=NormalizeDouble(candidate,_Digits);
-         bool tighter=side==1 ? candidate>stop && candidate<price : candidate<stop && candidate>price;
-         if(tighter && trade.PositionModify(_Symbol,candidate,target) && TradeRequestSucceeded())
-            Print("Trailing stop estrutural apertado.");
+   // Iterate tickets so every matching EA position is managed on hedging accounts.
+   for(int i=PositionsTotal()-1;i>=0;i--) {
+      ulong positionTicket=PositionGetTicket(i);
+      if(positionTicket==0 || !PositionSelectByTicket(positionTicket)) continue;
+      if(PositionGetString(POSITION_SYMBOL)!=_Symbol ||
+         (long)PositionGetInteger(POSITION_MAGIC)!=InpMagic) continue;
+      ulong identifier=(ulong)PositionGetInteger(POSITION_IDENTIFIER);
+      long type=PositionGetInteger(POSITION_TYPE);
+      int side=type==POSITION_TYPE_BUY ? 1 : -1;
+      double open=PositionGetDouble(POSITION_PRICE_OPEN);
+      double stop=PositionGetDouble(POSITION_SL);
+      double target=PositionGetDouble(POSITION_TP);
+      double volume=PositionGetDouble(POSITION_VOLUME);
+      MqlTick tick; if(!SymbolInfoTick(_Symbol,tick)) continue;
+      double price=side==1 ? tick.bid : tick.ask;
+      string riskKey="PA_RISK_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+(string)identifier;
+      double risk=GlobalVariableCheck(riskKey) ? GlobalVariableGet(riskKey) : MathAbs(open-stop);
+      if(risk<=0) continue;
+      if(!GlobalVariableCheck(riskKey)) GlobalVariableSet(riskKey,risk);
+      double rNow=(side==1 ? price-open : open-price)/risk;
+      if(rNow>=1.0) {
+         double be=NormalizeDouble(open,_Digits);
+         bool tighter=side==1 ? be>stop : stop==0 || be<stop;
+         if(tighter && trade.PositionModify(positionTicket,be,target) && TradeRequestSucceeded()) {
+            Print("Stop movido para break-even em +1R.");
+            if(!PositionSelectByTicket(positionTicket)) continue;
+            stop=PositionGetDouble(POSITION_SL);
+         }
+      }
+      string partialKey=PartialKey(identifier);
+      if(rNow>=1.5 && !GlobalVariableCheck(partialKey) &&
+         volume>SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN)*1.5) {
+         double closeVol=NormalizeVolume(volume*0.5);
+         if(closeVol>0 && closeVol<volume &&
+            ClosePartialPosition(positionTicket,side,closeVol,volume))
+            GlobalVariableSet(partialKey,1.0);
+      }
+      if(rNow>=2.0 && PositionSelectByTicket(positionTicket)) {
+         MqlRates r[];
+         if(GetRates(PERIOD_M15,8,r)) {
+            double candidate=side==1 ? r[1].low : r[1].high;
+            for(int j=2;j<6;j++) candidate=side==1 ? MathMin(candidate,r[j].low) : MathMax(candidate,r[j].high);
+            candidate=NormalizeDouble(candidate,_Digits);
+            stop=PositionGetDouble(POSITION_SL);
+            target=PositionGetDouble(POSITION_TP);
+            bool tighter=side==1 ? candidate>stop && candidate<price : candidate<stop && candidate>price;
+            if(tighter && trade.PositionModify(positionTicket,candidate,target) && TradeRequestSucceeded())
+               Print("Trailing stop estrutural apertado.");
+         }
       }
    }
 }
