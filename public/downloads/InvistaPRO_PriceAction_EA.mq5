@@ -1093,6 +1093,7 @@ bool ReconcilePriceActionHistory(datetime serverDayStart) {
             if(dealTime>closeAt) closeAt=dealTime;
          }
       }
+      if(closeAt<=0) return false; // closed position without a confirmed exit deal: history is incomplete
       if(closeAt>0) {
          string closedKey="PA_CLOSED_"+account+"_"+(string)positionId;
          string pnlKey="PA_CLOSED_PNL_"+account+"_"+(string)positionId;
