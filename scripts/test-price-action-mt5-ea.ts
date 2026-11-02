@@ -58,6 +58,8 @@ assert.ok(!ea.includes('Symbol_Override'), 'EA must use the chart symbol, not a 
 assert.ok(route.includes("router.post('/price-action/review'"), 'Server must expose the protected broker-neutral AI review');
 assert.ok(route.includes("router.post('/price-action/heartbeat'"), 'Server must expose the authenticated telemetry heartbeat');
 assert.ok(route.includes('getHighImpactNewsStatus'), 'AI review must fail closed during high-impact news windows');
+assert.ok(route.includes('ageSeconds > timeframeSeconds[tf] * 3'), 'Server must reject stale MT5 candles independently of the EA client check');
+assert.ok(ea.includes('brokerUtcOffsetSeconds'), 'EA must send broker time offset for server-side candle freshness validation');
 assert.ok(route.includes("router.get('/download-price-action-ea'"), 'Server must expose a separate Price Action EA download');
 assert.ok(route.includes('mt5EaTokenAccess'), 'AI review must require the EA token');
 assert.ok(route.includes('InvistaPRO_PriceAction_EA.mq5'), 'Download must serve the independent source file');
