@@ -29,16 +29,6 @@ input int      MaxPositions = 1; // Uma posição por símbolo
 input int      WarmupSeconds = 120; // Aquecimento sem operar
 input bool     CloseAtEndOfBrasiliaSession = true; // Não carregar day trades para o dia seguinte
 
-const ENUM_AI_CONTROL_MODE AIControlMode = AI_FULL;
-const double ManualLotSize = 0.01;
-const int ManualStopLoss = 0;
-const int ManualTakeProfit = 0;
-const bool AI_Lote = true;
-const bool AI_StopLoss = true;
-const bool AI_TakeProfit = true;
-const bool AI_Entrada = true;
-const bool AI_Saida = true;
-
 //--- Variáveis globais
 string   g_serverUrl      = "";
 string   g_discoverUrl    = "";
@@ -579,8 +569,6 @@ void FetchAndProcessSignal()
    }
 
    Print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    bool isPriceActionInstrument = IsPriceActionEnabled();
-    if (isPriceActionInstrument)
     {
        double entry = (action == "BUY") ? ask : bid;
        if (action != "BUY" && action != "SELL")
@@ -656,55 +644,6 @@ void FetchAndProcessSignal()
    success = requestOk && (tradeRetcode == TRADE_RETCODE_DONE || tradeRetcode == TRADE_RETCODE_DONE_PARTIAL)
              && trade.ResultDeal() > 0;
 
-   // Retry invalid stops only for non-Price-Action legacy instruments.
-   if (!success && tradeRetcode == 10016 && !isPriceActionInstrument)
-   {
-      Print("⚠️ Stops inválidos (10016) — recalculando...");
-      double askNow   = SymbolInfoDouble(g_symbol, SYMBOL_ASK);
-      double bidNow   = SymbolInfoDouble(g_symbol, SYMBOL_BID);
-      double pointNow = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
-      long   stopsLvl = SymbolInfoInteger(g_symbol, SYMBOL_TRADE_STOPS_LEVEL);
-      double safeDist = MathMax((double)stopsLvl * pointNow * 3.0, (askNow - bidNow) * 10.0);
-
-      string symUp = g_symbol;
-      StringToUpper(symUp);
-      if (StringFind(symUp, "JUMP") >= 0 && askNow > 1000)
-      {
-         double pct = 0.10;
-         if (StringFind(symUp, "100") >= 0) pct = 0.15;
-         else if (StringFind(symUp, "75") >= 0) pct = 0.13;
-         else if (StringFind(symUp, "50") >= 0) pct = 0.10;
-         safeDist = MathMax(safeDist, askNow * pct);
-      }
-
-      double slRetry = 0, tpRetry = 0;
-      if (action == "BUY")
-      {
-         slRetry = NormalizeDouble(askNow - safeDist, ManagedSymbolDigits());
-         tpRetry = NormalizeDouble(askNow + safeDist, ManagedSymbolDigits());
-         requestOk = trade.Buy(lotSize, g_symbol, 0, slRetry, tpRetry, "InvistaPRO_" + signalId);
-         tradeRetcode = trade.ResultRetcode();
-         success = requestOk && (tradeRetcode == TRADE_RETCODE_DONE || tradeRetcode == TRADE_RETCODE_DONE_PARTIAL)
-                   && trade.ResultDeal() > 0;
-      }
-      else
-      {
-         slRetry = NormalizeDouble(bidNow + safeDist, ManagedSymbolDigits());
-         tpRetry = NormalizeDouble(bidNow - safeDist, ManagedSymbolDigits());
-         requestOk = trade.Sell(lotSize, g_symbol, 0, slRetry, tpRetry, "InvistaPRO_" + signalId);
-         tradeRetcode = trade.ResultRetcode();
-         success = requestOk && (tradeRetcode == TRADE_RETCODE_DONE || tradeRetcode == TRADE_RETCODE_DONE_PARTIAL)
-                   && trade.ResultDeal() > 0;
-      }
-
-      if (!success)
-      {
-         Print("⛔ Retry falhou. Ordem cancelada; nunca abrir sem SL/TP de proteção.");
-         // A ordem permanece recusada se o broker não aceitar os stops protetivos.
-         
-         
-      }
-   }
 
    if (success)
    {
