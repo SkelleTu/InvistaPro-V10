@@ -365,31 +365,44 @@ void OnTick() {
    if(!DailyRiskAllowed() || !SpreadAllowed() || PositionSelect(_Symbol)) return;
    int t4=Trend(PERIOD_H4),t1=Trend(PERIOD_H1);
    if(t4==0 || t4!=t1) { g_approvedPatternTime=0; return; }
-   int side=0; double trigger=0,invalidation=0; datetime pt=0;
-   if(!Pattern(PERIOD_M5,side,trigger,invalidation,pt) || side!=t4) {
-      if(Pattern(PERIOD_M1,side,trigger,invalidation,pt) && side==t4) {}
-      else return;
+
+   // Approved setup is checked first on the next closed candle.
+   if(g_approvedPatternTime>0) {
+      if(t4!=g_approvedSide) { g_approvedPatternTime=0; return; }
+      MqlRates confirm[];
+      if(!GetRates(PERIOD_M5,2,confirm)) { g_approvedPatternTime=0; return; }
+      bool invalidated=g_approvedSide==1 ? confirm[0].low<g_approvedInvalidation
+                                         : confirm[0].high>g_approvedInvalidation;
+      if(invalidated) { g_approvedPatternTime=0; return; }
+      bool broken=g_approvedSide==1 ? confirm[0].close>g_approvedTrigger
+                                    : confirm[0].close<g_approvedTrigger;
+      if(!broken) return;
+      MqlTick current;
+      if(!SymbolInfoTick(_Symbol,current)) return;
+      double reference=g_approvedSide==1 ? current.ask : current.bid;
+      if(!NearM15Zone(g_approvedSide,reference) || !RelativeVolume(PERIOD_M5)) {
+         g_approvedPatternTime=0; return;
+      }
+      Setup approvedSetup;
+      if(!BuildSetup(g_approvedSide,g_approvedTrigger,approvedSetup)) {
+         g_approvedPatternTime=0; return;
+      }
+      approvedSetup.patternTime=g_approvedPatternTime;
+      g_approvedPatternTime=0;
+      ExecuteSetup(approvedSetup);
+      return;
    }
+
+   int side=0; double trigger=0,invalidation=0; datetime pt=0;
+   if(!Pattern(PERIOD_M5,side,trigger,invalidation,pt) || side!=t4) return;
    MqlTick tick; if(!SymbolInfoTick(_Symbol,tick)) return;
    double ref=side==1 ? tick.ask : tick.bid;
    if(!NearM15Zone(side,ref) || !RelativeVolume(PERIOD_M5)) return;
-   if(g_approvedPatternTime!=pt || g_approvedSide!=side) {
-      if(!RequestAIReview(side,trigger,invalidation,pt)) {
-         Print("Pre-gatilho sem aprovacao IA. Nenhuma entrada.");
-         return;
-      }
-      g_approvedPatternTime=pt; g_approvedSide=side;
-      g_approvedTrigger=trigger; g_approvedInvalidation=invalidation;
-      Print("Pre-gatilho aprovado. Aguardando rompimento fechado.");
+   if(!RequestAIReview(side,trigger,invalidation,pt)) {
+      Print("Pre-gatilho sem aprovacao IA. Nenhuma entrada.");
       return;
    }
-   MqlRates confirm[];
-   if(!GetRates(PERIOD_M5,2,confirm)) return;
-   bool broken=side==1 ? confirm[0].close>g_approvedTrigger : confirm[0].close<g_approvedTrigger;
-   if(!broken) return;
-   Setup setup;
-   if(!BuildSetup(side,g_approvedTrigger,setup)) { g_approvedPatternTime=0; return; }
-   setup.patternTime=pt;
-   g_approvedPatternTime=0;
-   ExecuteSetup(setup);
+   g_approvedPatternTime=pt; g_approvedSide=side;
+   g_approvedTrigger=trigger; g_approvedInvalidation=invalidation;
+   Print("Pre-gatilho aprovado. Aguardando rompimento fechado.");
 }
