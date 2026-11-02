@@ -633,6 +633,11 @@ bool ExecuteSetup(Setup &s) {
 }
 
 bool ExecuteSetupLocked(Setup &s) {
+   // Fail closed when terminal, account, script, or connection disallows trading.
+   if(!TerminalInfoInteger(TERMINAL_CONNECTED) ||
+      !TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) ||
+      !MQLInfoInteger(MQL_TRADE_ALLOWED) ||
+      !AccountInfoInteger(ACCOUNT_TRADE_ALLOWED)) return false;
    if(!SpreadAllowed() || !DailyRiskAllowed()) return false;
    long tradeMode=SymbolInfoInteger(_Symbol,SYMBOL_TRADE_MODE);
    if(tradeMode==SYMBOL_TRADE_MODE_DISABLED || tradeMode==SYMBOL_TRADE_MODE_CLOSEONLY) return false;
