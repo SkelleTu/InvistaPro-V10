@@ -403,9 +403,14 @@ export default function MetaTraderPage() {
     });
   };
 
-  const downloadEA = async () => {
+  const downloadEAFile = async (
+    endpoint: string,
+    filename: string,
+    successTitle: string,
+    successDescription: string,
+  ) => {
     try {
-      const response = await fetch('/api/mt5/download-ea', {
+      const response = await fetch(endpoint, {
         method: 'GET',
         credentials: 'same-origin',
         headers: { Accept: 'text/plain' },
@@ -419,38 +424,26 @@ export default function MetaTraderPage() {
         } catch {
           // Keep the HTTP status message when the server did not return JSON.
         }
-        toast({
-          title: 'Não foi possível baixar o EA',
-          description: message,
-          variant: 'destructive',
-        });
+        toast({ title: 'Não foi possível baixar o EA', description: message, variant: 'destructive' });
         return;
       }
 
       const contentType = (response.headers.get('content-type') || '').toLowerCase();
       if (!contentType.includes('text/plain')) {
-        throw new Error('A resposta do servidor não parece ser o arquivo EA. Confirme que sua sessão está autenticada e tente novamente.');
+        throw new Error('A resposta do servidor não parece ser um arquivo EA válido. Confirme sua sessão e tente novamente.');
       }
-
       const blob = await response.blob();
-      if (blob.size === 0) {
-        throw new Error('O servidor retornou um arquivo vazio.');
-      }
+      if (blob.size === 0) throw new Error('O servidor retornou um arquivo vazio.');
 
       const objectUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = objectUrl;
-      link.download = 'InvistaPRO_EA.mq5';
+      link.download = filename;
       document.body.appendChild(link);
       link.click();
       link.remove();
       window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
-
-      toast({
-        title: '✅ InvistaPRO EA v8.0 baixado!',
-        description: 'IMPORTANTE: Substitua o EA anterior por este novo arquivo. Copie para MQL5/Experts → Compilar (F7) → Arraste ao gráfico e habilite AlgoTrading. A URL do servidor já está pré-configurada.',
-        duration: 8000,
-      });
+      toast({ title: successTitle, description: successDescription, duration: 9000 });
     } catch (error: any) {
       toast({
         title: 'Falha no download do EA',
@@ -459,6 +452,20 @@ export default function MetaTraderPage() {
       });
     }
   };
+
+  const downloadEA = () => downloadEAFile(
+    '/api/mt5/download-ea',
+    'InvistaPRO_EA.mq5',
+    'EA Girassol legado v8.1 baixado',
+    'Este é o EA legado com a integração Girassol/Fibonacci. Mantenha-o separado do novo EA Price Action.',
+  );
+
+  const downloadPriceActionEA = () => downloadEAFile(
+    '/api/mt5/download-ea-price-action',
+    'InvistaPRO_EA_PriceAction.mq5',
+    'EA Price Action v1.0 baixado',
+    'Este é o EA novo da estratégia do sócio. Copie para MQL5/Experts, compile no MetaEditor (F7), instale no gráfico do ativo desejado e habilite AlgoTrading. Não requer o indicador Girassol.',
+  );
 
   return (
     <div className="min-h-screen bg-background p-4 md:p-6">
