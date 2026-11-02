@@ -396,6 +396,17 @@ bool BuildSetup(int side,double trigger,Setup &s) {
    double reward=MathAbs(target-entry)-cost;
    double netRisk=risk+cost;
    if(reward<=0 || reward/netRisk<InpMinimumRR) return false;
+   // Do not aim a 2R target straight into the nearest confirmed opposing M15 pivot.
+   double barrier=0;
+   for(int i=2;i<15;i++) {
+      bool pivotHigh=r[i].high>r[i-1].high && r[i].high>r[i-2].high &&
+                     r[i].high>=r[i+1].high && r[i].high>=r[i+2].high;
+      bool pivotLow=r[i].low<r[i-1].low && r[i].low<r[i-2].low &&
+                    r[i].low<=r[i+1].low && r[i].low<=r[i+2].low;
+      if(side==1 && pivotHigh && r[i].high>entry && (barrier==0 || r[i].high<barrier)) barrier=r[i].high;
+      if(side==-1 && pivotLow && r[i].low<entry && (barrier==0 || r[i].low>barrier)) barrier=r[i].low;
+   }
+   if(barrier>0 && (side==1 ? barrier<=target+cost : barrier>=target-cost)) return false;
    int stops=(int)SymbolInfoInteger(_Symbol,SYMBOL_TRADE_STOPS_LEVEL);
    int freeze=(int)SymbolInfoInteger(_Symbol,SYMBOL_TRADE_FREEZE_LEVEL);
    double minDistance=MathMax(stops,freeze)*_Point;
