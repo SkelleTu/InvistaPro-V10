@@ -321,7 +321,7 @@ void ReviewOpenPositionAI() {
 }
 
 string DailyStatePrefix() {
-   return "PA_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+(string)InpMagic+"_"+TimeToString(g_dayStart,TIME_DATE);
+   return "PA_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+TimeToString(g_dayStart,TIME_DATE);
 }
 void PersistDailyState() {
    string key=DailyStatePrefix();
@@ -569,7 +569,7 @@ bool TradeRequestSucceeded() {
    return code==TRADE_RETCODE_DONE || code==TRADE_RETCODE_PLACED || code==TRADE_RETCODE_DONE_PARTIAL;
 }
 
-string PartialKey(ulong ticket) { return "PA_PARTIAL_"+(string)ticket; }
+string PartialKey(ulong ticket) { return "PA_PARTIAL_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+(string)ticket; }
 
 bool ClosePartialPosition(int side,double closeVolume,double currentVolume) {
    if(closeVolume<=0 || closeVolume>=currentVolume) return false;
@@ -598,7 +598,7 @@ void ManageOpenPosition() {
    double volume=PositionGetDouble(POSITION_VOLUME);
    MqlTick tick; if(!SymbolInfoTick(_Symbol,tick)) return;
    double price=side==1 ? tick.bid : tick.ask;
-   string riskKey="PA_RISK_"+(string)ticket;
+   string riskKey="PA_RISK_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+(string)ticket;
    double risk=GlobalVariableCheck(riskKey) ? GlobalVariableGet(riskKey) : MathAbs(open-stop);
    if(risk<=0) return;
    if(!GlobalVariableCheck(riskKey)) GlobalVariableSet(riskKey,risk);
@@ -634,10 +634,12 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,const MqlTradeRequest &
    if(trans.type!=TRADE_TRANSACTION_DEAL_ADD || trans.deal==0) return;
    if(!HistoryDealSelect(trans.deal)) return;
    if((long)HistoryDealGetInteger(trans.deal,DEAL_MAGIC)!=InpMagic) return;
+   string dealGuard="PA_DEAL_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+(string)trans.deal;
+   if(!GlobalVariableTemp(dealGuard)) return;
    long entry=(long)HistoryDealGetInteger(trans.deal,DEAL_ENTRY);
    if(entry!=DEAL_ENTRY_OUT && entry!=DEAL_ENTRY_OUT_BY) return;
    ulong positionId=(ulong)HistoryDealGetInteger(trans.deal,DEAL_POSITION_ID);
-   string pnlKey="PA_PNL_"+(string)positionId;
+   string pnlKey="PA_PNL_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+(string)positionId;
    double cumulative=GlobalVariableCheck(pnlKey) ? GlobalVariableGet(pnlKey) : 0.0;
    cumulative+=HistoryDealGetDouble(trans.deal,DEAL_PROFIT)+HistoryDealGetDouble(trans.deal,DEAL_SWAP)+
                HistoryDealGetDouble(trans.deal,DEAL_COMMISSION)+HistoryDealGetDouble(trans.deal,DEAL_FEE);
@@ -652,7 +654,7 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,const MqlTradeRequest &
       } else if(cumulative>0) g_consecutiveLosses=0;
       GlobalVariableDel(pnlKey);
       GlobalVariableDel(PartialKey(positionId));
-      GlobalVariableDel("PA_RISK_"+(string)positionId);
+      GlobalVariableDel("PA_RISK_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+(string)positionId);
       PersistDailyState();
    }
 }
