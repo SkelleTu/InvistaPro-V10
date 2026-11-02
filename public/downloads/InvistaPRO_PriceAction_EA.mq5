@@ -383,7 +383,12 @@ bool BuildSetup(int side,double trigger,Setup &s) {
    double minDistance=MathMax(stops,freeze)*_Point;
    if(MathAbs(entry-stop)<minDistance || MathAbs(target-entry)<minDistance) return false;
    s.side=side; s.entry=entry; s.stop=NormalizeTradePrice(stop,side,true);
-   s.target=NormalizeTradePrice(target,side,false); s.rr=reward/netRisk;
+   s.target=NormalizeTradePrice(target,side,false);
+   double finalRisk=MathAbs(entry-s.stop);
+   double finalReward=MathAbs(s.target-entry)-cost;
+   if(finalRisk<=0 || finalRisk/entry*100.0>InpMaxStopPercent ||
+      finalReward/(finalRisk+cost)<InpMinimumRR) return false;
+   s.rr=finalReward/(finalRisk+cost);
    return true;
 }
 
