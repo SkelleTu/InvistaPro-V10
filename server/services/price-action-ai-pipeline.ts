@@ -60,6 +60,10 @@ export class PriceActionAiPipeline {
       if (!patternStillPresent || invalidated) this.approved.delete(symbol);
     }
 
+    if (previous && early && early.patternTime !== previous.patternTime) {
+      this.approved.delete(symbol);
+    }
+
     const active = this.approved.get(symbol);
     if (active) {
       const setup = evaluatePriceActionSetup(frames, context);
