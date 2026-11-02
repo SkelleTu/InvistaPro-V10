@@ -844,12 +844,83 @@ string PendingDealPrefix() {
    return "PA_PENDING_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_";
 }
 
+bool ReconcilePriceActionHistory(datetime serverDayStart) {
+   string account=(string)AccountInfoInteger(ACCOUNT_LOGIN);
+   datetime historyFrom=TimeCurrent()-90*24*60*60;
+   if(historyFrom<0) historyFrom=0;
+   if(!HistorySelect(historyFrom,TimeCurrent())) return false;
+
+   ulong positionIds[];
+   datetime entryTimes[];
+   int deals=HistoryDealsTotal();
+   for(int i=0;i<deals;i++) {
+      ulong deal=HistoryDealGetTicket(i);
+      if(deal==0 || (long)HistoryDealGetInteger(deal,DEAL_ENTRY)!=DEAL_ENTRY_IN) continue;
+      ulong magic=(ulong)HistoryDealGetInteger(deal,DEAL_MAGIC);
+      string comment=HistoryDealGetString(deal,DEAL_COMMENT);
+      if(magic!=(ulong)InpMagic && StringFind(comment,"InvistaPRO PA")<0) continue;
+      ulong positionId=(ulong)HistoryDealGetInteger(deal,DEAL_POSITION_ID);
+      if(positionId==0) continue;
+      datetime entryAt=(datetime)HistoryDealGetInteger(deal,DEAL_TIME);
+      int found=-1;
+      for(int j=0;j<ArraySize(positionIds);j++)
+         if(positionIds[j]==positionId) { found=j; break; }
+      if(found<0) {
+         int n=ArraySize(positionIds);
+         ArrayResize(positionIds,n+1); ArrayResize(entryTimes,n+1);
+         positionIds[n]=positionId; entryTimes[n]=entryAt;
+      } else if(entryAt<entryTimes[found]) {
+         entryTimes[found]=entryAt;
+      }
+   }
+
+   for(int i=0;i<ArraySize(positionIds);i++) {
+      ulong positionId=positionIds[i];
+      string entryKey="PA_ENTRY_"+account+"_"+(string)positionId;
+      string trackKey="PA_TRACK_"+account+"_"+(string)positionId;
+      if(!GlobalVariableCheck(entryKey))
+         GlobalVariableSet(entryKey,(double)entryTimes[i]);
+
+      if(PositionIdentifierOpen(positionId)) {
+         GlobalVariableSet(trackKey,1.0);
+         if(entryTimes[i]>=serverDayStart) PersistPositionRisk(positionId);
+         continue;
+      }
+
+      if(!HistorySelectByPosition(positionId)) return false;
+      double totalPnl=0;
+      datetime closeAt=0;
+      for(int j=0;j<HistoryDealsTotal();j++) {
+         ulong positionDeal=HistoryDealGetTicket(j);
+         if(positionDeal==0) continue;
+         totalPnl+=HistoryDealGetDouble(positionDeal,DEAL_PROFIT)+
+                   HistoryDealGetDouble(positionDeal,DEAL_SWAP)+
+                   HistoryDealGetDouble(positionDeal,DEAL_COMMISSION)+
+                   HistoryDealGetDouble(positionDeal,DEAL_FEE);
+         long dealEntry=(long)HistoryDealGetInteger(positionDeal,DEAL_ENTRY);
+         if(dealEntry==DEAL_ENTRY_OUT || dealEntry==DEAL_ENTRY_OUT_BY) {
+            datetime dealTime=(datetime)HistoryDealGetInteger(positionDeal,DEAL_TIME);
+            if(dealTime>closeAt) closeAt=dealTime;
+         }
+      }
+      if(closeAt>0) {
+         string closedKey="PA_CLOSED_"+account+"_"+(string)positionId;
+         string pnlKey="PA_CLOSED_PNL_"+account+"_"+(string)positionId;
+         GlobalVariableSet(pnlKey,totalPnl);
+         if(!GlobalVariableCheck(closedKey))
+            GlobalVariableSet(closedKey,(double)closeAt);
+      }
+   }
+   return true;
+}
+
 bool RebuildDailyLossCountersFromLedger() {
    g_dailyLedgerReady=false;
    datetime nowBrt=TimeGMT()-3*60*60;
    MqlDateTime d; TimeToStruct(nowBrt,d); d.hour=0; d.min=0; d.sec=0;
    datetime brtStart=StructToTime(d);
    datetime serverDayStart=brtStart+(TimeTradeServer()-TimeGMT());
+   if(!ReconcilePriceActionHistory(serverDayStart)) return false;
    string prefix="PA_CLOSED_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_";
    datetime closeTimes[];
    double pnls[];
