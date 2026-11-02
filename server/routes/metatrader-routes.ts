@@ -2369,6 +2369,12 @@ router.post('/price-action/review', mt5EaTokenAccess, async (req: Request, res: 
       return res.status(400).json({ decision: 'REJECT', reason: 'Símbolo, fase ou direção inválidos.' });
     }
     const required = ['H4', 'H1', 'M15', 'M5', 'M1'];
+    const timeframeSeconds: Record<string, number> = { H4: 14400, H1: 3600, M15: 900, M5: 300, M1: 60 };
+    const brokerOffset = Number(req.body?.context?.brokerUtcOffsetSeconds);
+    if (!Number.isFinite(brokerOffset) || Math.abs(brokerOffset) > 14 * 3600) {
+      return res.status(400).json({ decision: 'HOLD', reason: 'Fuso horário do servidor MT5 inválido.' });
+    }
+    const brokerNow = Math.floor(Date.now() / 1000) + brokerOffset;
     for (const tf of required) {
       const candles = frames?.[tf];
       if (!Array.isArray(candles) || candles.length < 30 || candles.length > 200) {
@@ -2383,6 +2389,14 @@ router.post('/price-action/review', mt5EaTokenAccess, async (req: Request, res: 
           return res.status(400).json({ decision: 'REJECT', reason: 'OHLCV inválido ou fora de ordem em ' + tf });
         }
         previous = values[0];
+      }
+      const latestTime = Number(candles[candles.length - 1]?.time);
+      const ageSeconds = brokerNow - latestTime;
+      if (!Number.isFinite(latestTime) || ageSeconds < 0 || ageSeconds > timeframeSeconds[tf] * 3) {
+        return res.status(409).json({
+          decision: 'HOLD',
+          reason: 'Candle ' + tf + ' desatualizado. Entrada/gestão por IA bloqueada.',
+        });
       }
     }
     const newsStatus = await getHighImpactNewsStatus();
