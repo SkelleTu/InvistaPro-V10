@@ -1099,6 +1099,9 @@ bool ReconcilePriceActionHistory(datetime serverDayStart) {
          GlobalVariableSet(pnlKey,totalPnl);
          if(!GlobalVariableCheck(closedKey))
             GlobalVariableSet(closedKey,(double)closeAt);
+         GlobalVariableDel(trackKey);
+         GlobalVariableDel(PartialKey(positionId));
+         GlobalVariableDel("PA_RISK_"+account+"_"+(string)positionId);
       }
    }
    return true;
