@@ -45,6 +45,17 @@ assert.ok(ea.includes('PA partial reduction'), 'Partial exits must reduce nettin
 assert.ok(ea.includes('GlobalVariableCheck(partialKey)'), 'The deterministic partial exit must happen at most once per position');
 assert.ok(ea.includes('ReviewOpenPositionAI'), 'Open positions must receive event-driven AI reviews');
 assert.ok(ea.includes('POSITION_IDENTIFIER)!=identifier'), 'Stale AI responses must not modify a replaced position');
+assert.ok(ea.includes('bool PersistPositionRisk(ulong identifier)'), 'Original structural risk must be persisted independently of a moved stop');
+assert.ok(ea.includes('PersistPositionRisk(filledPositionId)'), 'Initial risk must be captured immediately after an entry fill');
+assert.ok(ea.includes('stop<=0'), 'A managed position without a protective stop must trigger fail-safe handling');
+assert.ok(ea.includes('MathAbs(beforeVolume-currentVolume)>step*0.5'), 'Partial reductions must reject stale position-volume snapshots');
+assert.ok(ea.includes('beforeVolume-closeVolume<minVolume-step*0.25'), 'Netting partial reductions must preserve the broker minimum remaining volume');
+assert.ok(ea.includes('bool samePosition='), 'Netting partial reductions must verify the same position identifier after execution');
+assert.ok(ea.includes('bool reduced=afterVolume>0 && afterVolume<beforeVolume-step*0.25'), 'Netting partial reductions must verify that volume actually decreased');
+assert.ok(ea.includes('bool HasPendingDealEvents()'), 'Unreconciled trade events must block new entries');
+assert.ok(ea.includes('!g_dailyLedgerReady || HasPendingDealEvents()'), 'Daily risk gate must fail closed while the trade ledger is pending');
+assert.ok(ea.includes('headers,5000,data,result,responseHeaders)'), 'Position AI review must not block local protection for 25 seconds');
+
 assert.ok(ea.includes('SYMBOL_TRADE_FREEZE_LEVEL'), 'AI stop tightening must respect broker freeze distance');
 assert.ok(ea.includes('TimeCurrent()-g_lastPositionAIReview)>=900'), 'AI position review must have a bounded 15-minute heartbeat');
 assert.ok(ea.includes('InpEstimatedRoundTripCostPercent'), 'Net RR and sizing must account for broker-specific costs');
