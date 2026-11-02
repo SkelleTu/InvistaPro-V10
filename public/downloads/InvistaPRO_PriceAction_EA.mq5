@@ -156,6 +156,20 @@ bool RelativeVolume(ENUM_TIMEFRAMES tf) {
    return avg>0 && (double)r[0].tick_volume>=avg;
 }
 
+bool LatestClosedCandleFresh(ENUM_TIMEFRAMES tf) {
+   MqlRates latest[];
+   if(!GetRates(tf,1,latest)) return false;
+   int seconds=PeriodSeconds(tf);
+   if(seconds<=0) return false;
+   long age=(long)TimeCurrent()-(long)latest[0].time;
+   return age>=0 && age<=seconds*3;
+}
+bool AllFramesFresh() {
+   return LatestClosedCandleFresh(PERIOD_H4) && LatestClosedCandleFresh(PERIOD_H1) &&
+          LatestClosedCandleFresh(PERIOD_M15) && LatestClosedCandleFresh(PERIOD_M5) &&
+          LatestClosedCandleFresh(PERIOD_M1);
+}
+
 string FrameJSON(ENUM_TIMEFRAMES tf) {
    MqlRates r[];
    if(!GetRates(tf,60,r)) return "";
@@ -182,6 +196,8 @@ string JsonString(string body,string key) {
 }
 
 bool RequestAIReview(int side,double trigger,double invalidation,datetime patternTime) {
+   if(!AllFramesFresh()) return false;
+   if(!AllFramesFresh()) return;
    string h4=FrameJSON(PERIOD_H4),h1=FrameJSON(PERIOD_H1),m15=FrameJSON(PERIOD_M15),
           m5=FrameJSON(PERIOD_M5),m1=FrameJSON(PERIOD_M1);
    if(h4=="" || h1=="" || m15=="" || m5=="" || m1=="") { return false; }
