@@ -2417,11 +2417,12 @@ router.get('/download-price-action-ea', mt5DashboardAccess, async (req: Request,
     }
     await metaTraderBridge.flushDurableConfig();
     const host = String(req.get('host') ?? '').trim();
-    const serverUrl = (process.env.NODE_ENV === 'production'
-      ? (String(process.env.MT5_PUBLIC_BASE_URL ?? '').trim() || String(process.env.RENDER_EXTERNAL_URL ?? '').trim() || (host ? `https://${host}` : ''))
+    let serverUrl = process.env.NODE_ENV === 'production'
+      ? (String(process.env.MT5_PUBLIC_BASE_URL ?? '').trim() || String(process.env.RENDER_EXTERNAL_URL ?? '').trim() || (host ? 'https://' + host : ''))
       : (String(process.env.REPLIT_DEV_DOMAIN ?? '').trim()
-          ? `https://${String(process.env.REPLIT_DEV_DOMAIN).trim()}`
-          : `${req.protocol}://${host}`)).replace(/\\/+$/, '');
+          ? 'https://' + String(process.env.REPLIT_DEV_DOMAIN).trim()
+          : req.protocol + '://' + host);
+    while (serverUrl.endsWith('/')) serverUrl = serverUrl.slice(0, -1);
     if (!serverUrl) return res.status(500).json({ error: 'URL pública do servidor indisponível.' });
     const eaPath = path.join(process.cwd(), 'public', 'downloads', 'InvistaPRO_PriceAction_EA.mq5');
     let content = fs.readFileSync(eaPath, 'utf-8');
@@ -2430,9 +2431,17 @@ router.get('/download-price-action-ea', mt5DashboardAccess, async (req: Request,
         !content.includes('InpRequireAIApproval')) {
       return res.status(503).json({ ok: false, code: 'PRICE_ACTION_EA_NOT_CURRENT', error: 'O EA Price Action não passou na validação de versão.' });
     }
-    const escapeMql = (value: string) => value.replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\\"').replace(/[\\r\\n]/g, '');
-    content = content.replace(/input\\s+string\\s+InpServerURL\\s*=\\s*"[^"]*";/, `input string InpServerURL = "${escapeMql(serverUrl)}";`);
-    content = content.replace(/input\\s+string\\s+InpApiToken\\s*=\\s*"[^"]*";/, `input string InpApiToken = "${escapeMql(token)}";`);
+    const escapeMql = (value: string) => value.split('\\').join('\\\\').split('"').join('\\"').replace(/[\r\n]/g, '');
+    const inject = (name: string, value: string) => {
+      const prefix = 'input string ' + name + ' = "';
+      const pos = content.indexOf(prefix);
+      if (pos < 0) throw new Error('Parâmetro ausente no EA: ' + name);
+      const lineEnd = content.indexOf(';', pos);
+      if (lineEnd < 0) throw new Error('Parâmetro inválido no EA: ' + name);
+      content = content.slice(0, pos) + prefix + escapeMql(value) + '"' + content.slice(lineEnd);
+    };
+    inject('InpServerURL', serverUrl);
+    inject('InpApiToken', token);
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="InvistaPRO_PriceAction_EA.mq5"');
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
