@@ -51,6 +51,8 @@ assert.ok(ea.includes('stop<=0'), 'A managed position without a protective stop 
 assert.ok(ea.includes('MathAbs(beforeVolume-currentVolume)>step*0.5'), 'Partial reductions must reject stale position-volume snapshots');
 assert.ok(ea.includes('beforeVolume-closeVolume<minVolume-step*0.25'), 'Netting partial reductions must preserve the broker minimum remaining volume');
 assert.ok(ea.includes('bool samePosition='), 'Netting partial reductions must verify the same position identifier after execution');
+assert.ok(ea.includes('if(trade.ResultRetcode()==TRADE_RETCODE_PLACED) return trade.ResultOrder()>0'), 'Accepted asynchronous netting partial orders must not be submitted twice');
+
 assert.ok(ea.includes('bool reduced=afterVolume>0 && afterVolume<beforeVolume-step*0.25'), 'Netting partial reductions must verify that volume actually decreased');
 assert.ok(ea.includes('bool HasPendingDealEvents()'), 'Unreconciled trade events must block new entries');
 assert.ok(ea.includes('PA_RESERVE_'), 'Accepted orders without immediate deal callbacks must reserve a daily trade slot');
