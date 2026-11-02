@@ -567,8 +567,11 @@ bool BuildSetup(int side,double trigger,Setup &s) {
    if((side==1 && stop>=entry) || (side==-1 && stop<=entry)) return false;
    double risk=MathAbs(entry-stop);
    if(risk<=0 || risk/entry*100.0>InpMaxStopPercent) return false;
-   double target=side==1 ? entry+risk*InpMinimumRR : entry-risk*InpMinimumRR;
    double cost=2.0*(tick.ask-tick.bid)+entry*InpEstimatedRoundTripCostPercent/100.0;
+   // Solve for the target distance required to achieve the configured NET RR:
+   // (rewardDistance - cost) / (risk + cost) >= InpMinimumRR.
+   double requiredRewardDistance=risk*InpMinimumRR+cost*(InpMinimumRR+1.0);
+   double target=side==1 ? entry+requiredRewardDistance : entry-requiredRewardDistance;
    double reward=MathAbs(target-entry)-cost;
    double netRisk=risk+cost;
    if(reward<=0 || reward/netRisk<InpMinimumRR) return false;
