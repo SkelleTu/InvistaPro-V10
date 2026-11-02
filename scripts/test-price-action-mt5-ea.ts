@@ -25,6 +25,11 @@ assert.ok(ea.includes('InpMinimumRR<2.0'), 'EA must enforce minimum net reward/r
 assert.ok(ea.includes('OrderCalcProfit'), 'Position size must use account-currency loss per lot');
 assert.ok(ea.includes('SYMBOL_VOLUME_STEP') && ea.includes('SYMBOL_VOLUME_MIN') && ea.includes('SYMBOL_VOLUME_MAX'), 'Volume must respect broker contract steps and limits');
 assert.ok(ea.includes('TRADE_RETCODE_DONE'), 'EA must validate execution return code');
+assert.ok(ea.includes('PositionSelectByTicket(positionTicket)'), 'Position management must reselect the exact MT5 position ticket');
+assert.ok(ea.includes('trade.PositionModify(positionTicket,'), 'Protective stop changes must target the exact position ticket');
+assert.ok(ea.includes('trade.PositionClose(positionTicket)'), 'Position closes must target the exact position ticket');
+assert.ok(ea.includes('trade.PositionClosePartial(positionTicket,closeVolume)'), 'Hedging partial closes must target the exact position ticket');
+assert.ok(ea.includes('DEAL_POSITION_ID'), 'Slippage emergency close must resolve the position created by the exact fill deal');
 assert.ok(ea.includes('PositionModify'), 'EA must manage protective stops');
 assert.ok(ea.includes('PositionClosePartial'), 'EA must support partial exit');
 assert.ok(ea.includes('ClosePartialPosition'), 'Partial exits must be abstracted for account margin mode');
