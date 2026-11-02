@@ -55,7 +55,7 @@ const makeBullStructure = (seconds: number, withTrigger = false): Candle[] => {
  };
  for (let swing = 0; swing < 6; swing++) {
   const low = base + swing * 3;
-  const high = base + 50 + swing * 3;
+  const high = base + 100 + swing * 3;
   push(low + 1, low + 2, low, low + 1);
   push(low + 2, low + 8, low + 1, low + 7);
   push(low + 7, high - 1, low + 6, high - 2);
