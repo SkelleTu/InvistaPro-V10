@@ -119,6 +119,8 @@ assert.ok(ea.includes('if(!HistorySelectByPosition(positionId)) return false'), 
 assert.ok(ea.includes('!GlobalVariableCheck(closedKey) || !GlobalVariableCheck(closedPnlKey)'), 'Interrupted closed-position ledger writes must be repaired from deal history');
 
 assert.ok(ea.includes('PA_CLOSED_PNL_'), 'Closed-position PnL must be persisted separately for restart-safe reconciliation');
+assert.ok(ea.includes('GlobalVariableDel(trackKey)'), 'Restart reconciliation must remove stale tracking state for positions confirmed closed in history');
+
 assert.ok(ea.includes('closeTimes[j]<closeTimes[i]'), 'Consecutive losses must be reconstructed in chronological order');
 assert.ok(ea.includes('GlobalVariableDel("PA_CLOSED_PNL_"+account+"_"+positionId)'), 'Old closed-position PnL ledger entries must be cleaned up with their timestamps');
 
