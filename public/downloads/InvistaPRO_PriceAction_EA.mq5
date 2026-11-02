@@ -768,8 +768,10 @@ bool ExecuteSetupLocked(Setup &s) {
    }
    if(!entryRecorded) {
       ulong acceptedOrder=trade.ResultOrder();
-      if(acceptedOrder>0)
+      if(acceptedOrder>0) {
          GlobalVariableSet("PA_RESERVE_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+(string)acceptedOrder,(double)TimeCurrent());
+         GlobalVariablesFlush();
+      }
    }
    double fillPrice=trade.ResultPrice();
    double maxSlippage=InpMaxSlippagePoints>0 ? InpMaxSlippagePoints*_Point : ATR(PERIOD_M15)*0.10;
