@@ -8,12 +8,14 @@ Status: design baseline only. Not approved for live trading.
 - [ ] Full pivot-confirmed structure scanner, zone lifecycle and data-freshness orchestration.
 - [ ] Cheap deterministic pre-trigger scanner; no AI call without a candidate.
 - [x] AI review coordinator contract with per-symbol cooldown, in-flight deduplication and fail-closed behavior.
-- [ ] Adapter that sends the complete Binance multi-timeframe snapshot to the existing Invista PRO AI ensemble.
+- [x] Provider adapter calls the existing Invista PRO multi-model ensemble with original OHLCV candles and structured strategy context; missing model response fails closed.
+- [ ] Wire runtime into supervised worker and provide complete context/position adapters.
 - [x] Pipeline contract connects pre-trigger approval to the final deterministic gate; no order is sent by the pipeline.
 - [ ] Final deterministic gates rerun after AI approval; AI cannot create signals or override risk.
 - [ ] DEMO/testnet-only execution adapter with idempotency and reconciliation.
 - [ ] Exchange-side protective stop confirmed before considering a position protected.
-- [ ] Event-driven AI monitoring for open positions, with heartbeat fallback.
+- [x] Runtime port for event-driven position reviews through the AI coordinator.
+- [ ] Connect real exchange position stream, material-event detector and bounded heartbeat scheduler.
 - [ ] AI stop changes may tighten only; hard risk limits and emergency exits remain deterministic.
 - [ ] Backtest, out-of-sample, replay, fault-injection and DEMO evidence before any live enablement.
 - [ ] Preserve existing Girassol EA and its download route unchanged.
