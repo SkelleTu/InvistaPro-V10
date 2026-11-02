@@ -15,7 +15,7 @@ Status: design baseline only. Not approved for live trading.
 - [ ] Final deterministic gates rerun after AI approval; AI cannot create signals or override risk.
 - [ ] DEMO/testnet-only execution adapter with idempotency and reconciliation.
 - [ ] Exchange-side protective stop confirmed before considering a position protected.
-- [x] Runtime port for event-driven position reviews through the AI coordinator.
+- [x] Runtime port for event-driven position reviews through the AI coordinator, fed by Binance trade ticks rather than waiting only for candle closes.
 - [ ] Connect real exchange position stream, material-event detector and bounded heartbeat scheduler.
 - [ ] AI stop changes may tighten only; hard risk limits and emergency exits remain deterministic.
 - [ ] Backtest, out-of-sample, replay, fault-injection and DEMO evidence before any live enablement.
