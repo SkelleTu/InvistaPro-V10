@@ -772,12 +772,16 @@ bool ExecuteSetupLocked(Setup &s) {
    }
    double fillPrice=trade.ResultPrice();
    double maxSlippage=InpMaxSlippagePoints>0 ? InpMaxSlippagePoints*_Point : ATR(PERIOD_M15)*0.10;
-   MqlTick executionQuote; if(!SymbolInfoTick(_Symbol,executionQuote)) executionQuote.ask=executionQuote.bid=0;
+   MqlTick executionQuote;
+   bool executionQuoteValid=SymbolInfoTick(_Symbol,executionQuote) &&
+                            executionQuote.ask>executionQuote.bid && executionQuote.bid>0;
    double actualRisk=fillPrice>0 ? MathAbs(fillPrice-s.stop) : 0.0;
-   double actualCost=fillPrice>0 ? 2.0*(executionQuote.ask-executionQuote.bid)+
-                     fillPrice*InpEstimatedRoundTripCostPercent/100.0 : 0.0;
+   double actualCost=fillPrice>0 && executionQuoteValid
+                     ? 2.0*(executionQuote.ask-executionQuote.bid)+
+                       fillPrice*InpEstimatedRoundTripCostPercent/100.0 : 0.0;
    double actualWeightedReward=0.75*actualRisk+0.5*MathAbs(s.target-fillPrice)-actualCost;
-   bool unsafeExecution=fillPrice<=0 || maxSlippage<=0 ||
+   bool unsafeExecution=fillPrice<=0 || maxSlippage<=0 || !executionQuoteValid ||
+      actualRisk<=0 || actualRisk+actualCost<=0 ||
       MathAbs(fillPrice-s.entry)>maxSlippage ||
       actualRisk/fillPrice*100.0>InpMaxStopPercent ||
       actualWeightedReward/(actualRisk+actualCost)<InpMinimumRR;
