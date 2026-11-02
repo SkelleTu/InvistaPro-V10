@@ -482,7 +482,7 @@ bool ClosePriceActionPartial(ulong ticket, double volume, string positionType)
 
 void FetchAndProcessSignal()
 {
-   // O EA novo envia somente candles OHLC multi-timeframe; não lê Girassol nem buffers legados.
+   // Send only closed OHLC candles from the five strategy timeframes.
    string structuredSignals = "{}";
    string allBuffers = "{}";
    string candlesJson = "[]";
@@ -490,7 +490,7 @@ void FetchAndProcessSignal()
    double ask = SymbolInfoDouble(g_symbol, SYMBOL_ASK);
    double bid = SymbolInfoDouble(g_symbol, SYMBOL_BID);
 
-   // ── Endpoint principal: signal-with-indicators (v8.0) ────────────────
+   // Dedicated Price Action endpoint; the deterministic engine owns the decision.
    string url     = g_serverUrl + "/api/metatrader/signal-with-indicators";
    string headers = "Content-Type: application/json\r\n";
 
@@ -519,15 +519,14 @@ void FetchAndProcessSignal()
 
    int res = WebRequest("POST", url, headers, 10000, postData, result, responseHeaders);
 
-   // ── Fallback 1: endpoint alternativo /api/mt5/signal-with-indicators ──
+   // Secondary Price Action endpoint for compatible MT5 route deployments.
    if (res == 404 || res == -1)
    {
       url = g_serverUrl + "/api/mt5/signal-with-indicators";
       res = WebRequest("POST", url, headers, 10000, postData, result, responseHeaders);
    }
 
-   // Legacy GET is forbidden for crypto strategy symbols: it lacks full MTF context
-   // and could bypass the deterministic Price Action gate.
+   // Never fall back to the legacy GET route: it does not carry the required MTF context.
    if ((res == 404 || res == -1) && !IsPriceActionEnabled())
    {
       url = g_serverUrl + "/api/metatrader/signal?symbol=" + g_symbol;
@@ -1381,11 +1380,3 @@ double ExtractJsonDouble(string json, string key)
    return StringToDouble(raw);
 }
 
-double ExtractJsonDoubleInObject(string json, string objKey, string fieldKey)
-{
-   string search = "\"" + objKey + "\":{";
-   int objPos = StringFind(json, search);
-   if (objPos < 0) return 0.0;
-   string sub = StringSubstr(json, objPos, 300);
-   return ExtractJsonDouble(sub, fieldKey);
-}
