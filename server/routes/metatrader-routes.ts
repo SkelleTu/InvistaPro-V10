@@ -2362,9 +2362,11 @@ router.post('/price-action/review', mt5EaTokenAccess, async (req: Request, res: 
   try {
     const symbol = String(req.body?.symbol ?? '').trim().toUpperCase();
     const direction = String(req.body?.direction ?? '').trim().toUpperCase();
+    const phase = String(req.body?.phase ?? 'ENTRY').trim().toUpperCase();
     const frames = req.body?.frames;
-    if (!symbol || symbol.length > 64 || symbol.split('').some(char => char.charCodeAt(0) < 32) || !['BUY', 'SELL'].includes(direction)) {
-      return res.status(400).json({ decision: 'REJECT', reason: 'Símbolo ou direção inválidos.' });
+    if (!symbol || symbol.length > 64 || symbol.split('').some(char => char.charCodeAt(0) < 32) ||
+        !['BUY', 'SELL'].includes(direction) || !['ENTRY', 'POSITION'].includes(phase)) {
+      return res.status(400).json({ decision: 'REJECT', reason: 'Símbolo, fase ou direção inválidos.' });
     }
     const required = ['H4', 'H1', 'M15', 'M5', 'M1'];
     for (const tf of required) {
@@ -2385,26 +2387,51 @@ router.post('/price-action/review', mt5EaTokenAccess, async (req: Request, res: 
     }
     const newsStatus = await getHighImpactNewsStatus();
     if (!newsStatus.valid || newsStatus.blocked) {
-      return res.json({ decision: 'REJECT', direction, confidence: 0, reason: 'Janela de notícia de alto impacto ativa ou fonte de notícias indisponível.' });
+      return res.json(phase === 'ENTRY'
+        ? { decision: 'REJECT', direction, confidence: 0, reason: 'Janela de notícia de alto impacto ativa ou fonte indisponível.' }
+        : { action: 'HOLD', confidence: 0, reasoning: 'Notícia de alto impacto ou fonte indisponível; gestão permanece nos stops protetivos locais.' });
     }
-    const review = await huggingFaceAI.reviewPriceActionSnapshot(symbol, 'ENTRY', {
+    const position = phase === 'POSITION' ? {
+      direction,
+      currentPrice: Number(req.body?.currentPrice),
+      currentStop: Number(req.body?.currentStop),
+      takeProfit: Number(req.body?.takeProfit),
+      lastMaterialEventAt: Number(req.body?.lastMaterialEventAt ?? Date.now()),
+    } : null;
+    if (phase === 'POSITION' && (!Number.isFinite(position?.currentPrice) || !Number.isFinite(position?.currentStop) ||
+        !Number.isFinite(position?.takeProfit))) {
+      return res.status(400).json({ action: 'HOLD', confidence: 0, reasoning: 'Estado de posição inválido.' });
+    }
+    const review = await huggingFaceAI.reviewPriceActionSnapshot(symbol, phase as 'ENTRY' | 'POSITION', {
       generatedAt: Date.now(),
       frames,
       context: { brokerNeutral: true, source: 'MetaTrader 5 chart', direction },
-      early: {
+      early: phase === 'ENTRY' ? {
         side: direction,
         triggerLevel: Number(req.body?.triggerPrice),
         invalidationLevel: Number(req.body?.invalidationPrice),
         patternTime: Number(req.body?.patternTime),
-      },
+      } : undefined,
+      position,
     });
+    if (phase === 'POSITION') {
+      return res.json({
+        action: review.action ?? 'HOLD',
+        confidence: review.confidence ?? 0,
+        reasoning: review.reasoning ?? 'Análise incompleta; manter proteção local.',
+        proposedStop: review.proposedStop,
+        closeReason: review.closeReason,
+      });
+    }
     if (review.decision !== 'APPROVE' || review.direction !== direction) {
       return res.json({ decision: 'REJECT', direction, confidence: review.confidence, reasoning: review.reasoning, risks: review.risks });
     }
     return res.json({ decision: 'APPROVE', direction, confidence: review.confidence, reasoning: review.reasoning, risks: review.risks });
   } catch (error: any) {
     console.error('[MT5 Price Action AI] review failed:', error?.message ?? error);
-    return res.status(503).json({ decision: 'HOLD', reason: 'IA indisponível ou análise incompleta. Entrada bloqueada.' });
+    return res.status(503).json(req.body?.phase === 'POSITION'
+      ? { action: 'HOLD', confidence: 0, reasoning: 'IA indisponível. Stops locais continuam ativos.' }
+      : { decision: 'HOLD', reason: 'IA indisponível ou análise incompleta. Entrada bloqueada.' });
   }
 });
 
