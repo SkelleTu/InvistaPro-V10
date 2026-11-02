@@ -79,6 +79,8 @@ assert.ok(ea.includes('GlobalVariableSetOnCondition(key,0.0,g_dailyLockToken)'),
 assert.ok(ea.includes('g_dailyLockToken=token'), 'Shared execution lock must retain an ownership token');
 assert.ok(ea.includes('PA_TRACK_'), 'Account-wide loss accounting must track Price Action positions independent of chart magic number');
 assert.ok(ea.includes('StringFind(comment,"InvistaPRO PA")>=0'), 'Price Action entry tracking must identify the EA order comment');
+assert.ok(ea.includes('dealMagic==(ulong)InpMagic'), 'Price Action entry tracking must use the configured MT5 magic number as its primary identity');
+
 assert.ok(ea.includes('DEAL_COMMISSION)+\n                            HistoryDealGetDouble(positionDeal,DEAL_FEE)'), 'Net trade PnL must include every deal commission and fee for the position');
 assert.ok(ea.includes('InpRiskPercent<1.0 || InpRiskPercent>2.0'), 'EA risk input must stay within the documented 1%-2% range');
 assert.ok(ea.includes('if(!IsDemoAccount())'), 'This validation build must block non-DEMO accounts');
