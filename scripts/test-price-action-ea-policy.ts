@@ -44,6 +44,7 @@ assert.ok(ea.includes('#property version   "1.0"'), 'Dedicated Price Action EA m
 assert.ok(ea.includes('bool IsPriceActionEnabled()'), 'Price Action must be available on any chart symbol, with eligibility decided by validated market data and execution conditions');
 assert.ok(ea.split('\n').filter((line) => line.includes('eaVersion')).every((line) => line.includes('1.0')), 'All signal payloads must report the dedicated Price Action EA version');
 assert.ok(ea.includes('CopyRates(g_symbol, timeframe, 1, count, rates)'), 'Strategy must exclude the still-forming candle');
+assert.ok(ea.includes('BrokerTimeToUtc(rates[i].time)') && ea.includes('BrokerTimeToUtc((datetime)HistoryDealGetInteger(deal, DEAL_TIME))'), 'Broker-local candle and deal times must be normalized to UTC for freshness and Brasilia daily limits');
 assert.ok(ea.includes('trade.ResultDeal() > 0'), 'EA must confirm broker execution instead of trusting local request validation');
 
 const route = readFileSync(new URL('../server/routes/metatrader-routes.ts', import.meta.url), 'utf8');
