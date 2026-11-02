@@ -1134,11 +1134,19 @@ void FetchAndProcessSignal()
        }
        double riskDistance = (action == "BUY") ? entry - stopLoss : stopLoss - entry;
        double rewardDistance = (action == "BUY") ? takeProfit - entry : entry - takeProfit;
-       if (riskDistance <= 0 || rewardDistance <= 0 || riskDistance / entry > 0.015 || rewardDistance / riskDistance < 2.0)
+       double pointSize = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
+       double currentSpread = ask - bid;
+       double estimatedRoundTripCost = currentSpread * 2.0;
+       double netReward = rewardDistance - estimatedRoundTripCost;
+       double totalRiskWithCosts = riskDistance + estimatedRoundTripCost;
+       double executableRiskReward = totalRiskWithCosts > 0.0 ? netReward / totalRiskWithCosts : 0.0;
+       if (riskDistance <= 0 || rewardDistance <= 0 || entry <= 0 || pointSize <= 0
+           || currentSpread <= 0 || riskDistance / entry > 0.015 || executableRiskReward < 2.0)
        {
-          Print("⛔ Price Action recusado: stop inválido, stop acima de 1,5% ou R:R abaixo de 1:2 no preço executável.");
+          Print("⛔ Price Action recusado: stop inválido, stop acima de 1,5% ou R:R líquido inferior a 1:2 após spread.");
           return;
        }
+       Print("   R:R líquido após spread: ", DoubleToString(executableRiskReward, 2));
        lotSize = CalculatePriceActionRiskLot(entry, stopLoss);
        if (lotSize <= 0)
        {
@@ -1292,7 +1300,7 @@ void MonitorOpenPositions()
       double profit    = posInfo.Profit();
  
        // Deterministic Price Action management: breakeven at +1R and 50% partial at +1.5R.
-       // These controls run locally and never depend on AI availability.
+       // These controls run locally and never depend on AI availability. During news blocks, existing positions keep their broker-side SL/TP; the server blocks only new entries.
        if (IsPriceActionEnabled() && sl > 0 && tp > 0)
        {
           string riskKey = PriceActionStateKey("InvistaPA_R", (long)ticket);
