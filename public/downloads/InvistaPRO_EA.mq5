@@ -71,6 +71,7 @@ datetime g_lastSignal     = 0;
 int      g_failCount      = 0;
 bool     g_isDiscovering  = false;
 string   g_pendingSignalId= "";
+datetime g_lastClosedTradeSync = 0;
 datetime g_lastMonitor    = 0;
 int      g_monitorSeconds = 2;
 datetime g_warmupUntil    = 0;
@@ -632,6 +633,13 @@ void OnTick()
 {
    datetime now = TimeCurrent();
 
+   // Reconcile closed trades from terminal history so temporary HTTP outages do not lose daily risk accounting.
+   if (now - g_lastClosedTradeSync >= 30)
+   {
+      g_lastClosedTradeSync = now;
+      SyncClosedTradeReports();
+   }
+
    // ── Heartbeat ────────────────────────────────────────────────────────
    if (now - g_lastHeartbeat >= HeartbeatSeconds)
    {
@@ -657,7 +665,7 @@ void OnTick()
    }
 
    // ── Busca de sinal ────────────────────────────────────────────────────
-   if (CountManagedPositions() < MaxPositions && (now - g_lastSignal >= SignalSeconds))
+   if (CountManagedPositions() < MaxPositions && CountSymbolPositions() == 0 && (now - g_lastSignal >= SignalSeconds))
    {
       g_lastSignal = now;
 
@@ -721,6 +729,28 @@ int CountManagedPositions()
       managed++;
    }
    return managed;
+}
+
+int CountSymbolPositions()
+{
+   int count = 0;
+   for (int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      if (!posInfo.SelectByIndex(i)) continue;
+      if (posInfo.Symbol() == g_symbol) count++;
+   }
+   return count;
+}
+
+long GetManagedPositionIdentifier()
+{
+   for (int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      if (!posInfo.SelectByIndex(i)) continue;
+      if (posInfo.Magic() != MagicNumber || posInfo.Symbol() != g_symbol) continue;
+      return (long)PositionGetInteger(POSITION_IDENTIFIER);
+   }
+   return 0;
 }
 
 int ManagedSymbolDigits()
@@ -1189,7 +1219,9 @@ void FetchAndProcessSignal()
             " | SL: ", NormalizeDouble(stopLoss, _Digits),
             " | TP: ", NormalizeDouble(takeProfit, _Digits));
       PersistPriceActionPositionState();
-      ConfirmTradeOpen(signalId, (int)trade.ResultOrder(), action, lotSize, stopLoss, takeProfit);
+      long positionIdentifier = GetManagedPositionIdentifier();
+      if (positionIdentifier <= 0) positionIdentifier = (long)trade.ResultOrder();
+      ConfirmTradeOpen(signalId, positionIdentifier, action, lotSize, stopLoss, takeProfit, trade.ResultPrice());
    }
    else
       Print("❌ Falha definitiva: ", trade.ResultRetcode(), " / ", GetLastError());
@@ -1428,11 +1460,161 @@ bool SendHeartbeat()
 //+------------------------------------------------------------------+
 //| Confirma abertura de trade                                        |
 //+------------------------------------------------------------------+
-void ConfirmTradeOpen(string signalId, int ticket, string type, double lots, double sl, double tp)
+
+bool IsPositionIdentifierOpen(ulong positionId)
+{
+   for (int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      if (!posInfo.SelectByIndex(i)) continue;
+      if ((ulong)PositionGetInteger(POSITION_IDENTIFIER) == positionId) return true;
+   }
+   return false;
+}
+
+bool ReportClosedPosition(ulong positionId)
+{
+   if (positionId == 0 || IsPositionIdentifierOpen(positionId)) return false;
+   string closedKey = "InvistaPA_CLOSED_" + IntegerToString((long)positionId);
+   if (GlobalVariableCheck(closedKey)) return true;
+   if (!HistorySelectByPosition(positionId)) return false;
+
+   double entryVolume = 0.0, entryValue = 0.0;
+   double exitVolume = 0.0, exitValue = 0.0;
+   double netProfit = 0.0;
+   datetime openTime = 0, closeTime = 0;
+   string symbol = "", signalId = "", positionType = "";
+   long closeReason = DEAL_REASON_CLIENT;
+
+   int total = HistoryDealsTotal();
+   for (int i = 0; i < total; i++)
+   {
+      ulong deal = HistoryDealGetTicket(i);
+      if (deal == 0) continue;
+      if ((long)HistoryDealGetInteger(deal, DEAL_MAGIC) != MagicNumber) continue;
+      string dealSymbol = HistoryDealGetString(deal, DEAL_SYMBOL);
+      if (dealSymbol != g_symbol) continue;
+
+      long entry = HistoryDealGetInteger(deal, DEAL_ENTRY);
+      double volume = HistoryDealGetDouble(deal, DEAL_VOLUME);
+      double price = HistoryDealGetDouble(deal, DEAL_PRICE);
+      datetime dealTime = (datetime)HistoryDealGetInteger(deal, DEAL_TIME);
+      if (entry == DEAL_ENTRY_IN)
+      {
+         entryVolume += volume;
+         entryValue += price * volume;
+         if (openTime == 0 || dealTime < openTime) openTime = dealTime;
+         if (symbol == "") symbol = dealSymbol;
+         long dealType = HistoryDealGetInteger(deal, DEAL_TYPE);
+         positionType = dealType == DEAL_TYPE_BUY ? "BUY" : dealType == DEAL_TYPE_SELL ? "SELL" : positionType;
+         string comment = HistoryDealGetString(deal, DEAL_COMMENT);
+         int prefix = StringFind(comment, "InvistaPRO_");
+         if (prefix >= 0) signalId = StringSubstr(comment, prefix + StringLen("InvistaPRO_"));
+      }
+      else if (entry == DEAL_ENTRY_OUT || entry == DEAL_ENTRY_OUT_BY || entry == DEAL_ENTRY_INOUT)
+      {
+         exitVolume += volume;
+         exitValue += price * volume;
+         netProfit += HistoryDealGetDouble(deal, DEAL_PROFIT)
+                    + HistoryDealGetDouble(deal, DEAL_COMMISSION)
+                    + HistoryDealGetDouble(deal, DEAL_SWAP)
+                    + HistoryDealGetDouble(deal, DEAL_FEE);
+         if (dealTime >= closeTime)
+         {
+            closeTime = dealTime;
+            closeReason = HistoryDealGetInteger(deal, DEAL_REASON);
+         }
+         if (symbol == "") symbol = dealSymbol;
+      }
+   }
+
+   if (entryVolume <= 0.0 || exitVolume <= 0.0 || openTime <= 0 || closeTime <= 0
+       || symbol == "" || (positionType != "BUY" && positionType != "SELL")) return false;
+
+   double openPrice = entryValue / entryVolume;
+   double closePrice = exitValue / exitVolume;
+   string reason = "MANUAL";
+   if (closeReason == DEAL_REASON_SL) reason = "STOP_LOSS";
+   else if (closeReason == DEAL_REASON_TP) reason = "TAKE_PROFIT";
+   else if (closeReason == DEAL_REASON_SO) reason = "STOP_OUT";
+
+   string body = "{";
+   body += "\"ticket\":" + IntegerToString((long)positionId) + ",";
+   body += "\"signalId\":\"" + signalId + "\",";
+   body += "\"symbol\":\"" + symbol + "\",";
+   body += "\"type\":\"" + positionType + "\",";
+   body += "\"lots\":" + DoubleToString(entryVolume, 8) + ",";
+   body += "\"openPrice\":" + DoubleToString(openPrice, ManagedSymbolDigits()) + ",";
+   body += "\"closePrice\":" + DoubleToString(closePrice, ManagedSymbolDigits()) + ",";
+   body += "\"profit\":" + DoubleToString(netProfit, 2) + ",";
+   body += "\"pips\":0,";
+   body += "\"openTime\":" + IntegerToString((long)openTime * 1000) + ",";
+   body += "\"closeTime\":" + IntegerToString((long)closeTime * 1000) + ",";
+   body += "\"closeReason\":\"" + reason + "\"";
+   if (g_apiToken != "") body += ",\"token\":\"" + g_apiToken + "\"";
+   body += "}";
+
+   string url = g_serverUrl + "/api/metatrader/trade/close";
+   string headers = "Content-Type: application/json\r\n";
+   char postData[], result[];
+   StringToCharArray(body, postData, 0, StringLen(body));
+   string responseHeaders;
+   int response = WebRequest("POST", url, headers, 7000, postData, result, responseHeaders);
+   if (response == 200)
+   {
+      GlobalVariableSet(closedKey, 1.0);
+      Print("📚 Fechamento sincronizado com o servidor. PositionId=", positionId,
+            " P&L líquido=", DoubleToString(netProfit, 2));
+      return true;
+   }
+   Print("⚠️ Falha ao sincronizar fechamento; será tentado novamente. PositionId=", positionId,
+         " HTTP=", response);
+   return false;
+}
+
+void SyncClosedTradeReports()
+{
+   datetime from = TimeCurrent() - 90 * 86400;
+   if (!HistorySelect(from, TimeCurrent())) return;
+   ulong positionIds[];
+   int total = HistoryDealsTotal();
+   for (int i = 0; i < total; i++)
+   {
+      ulong deal = HistoryDealGetTicket(i);
+      if (deal == 0 || (long)HistoryDealGetInteger(deal, DEAL_MAGIC) != MagicNumber) continue;
+      long entry = HistoryDealGetInteger(deal, DEAL_ENTRY);
+      if (entry != DEAL_ENTRY_OUT && entry != DEAL_ENTRY_OUT_BY && entry != DEAL_ENTRY_INOUT) continue;
+      ulong positionId = (ulong)HistoryDealGetInteger(deal, DEAL_POSITION_ID);
+      if (positionId == 0 || IsPositionIdentifierOpen(positionId)) continue;
+      string key = "InvistaPA_CLOSED_" + IntegerToString((long)positionId);
+      if (GlobalVariableCheck(key)) continue;
+      bool exists = false;
+      for (int j = 0; j < ArraySize(positionIds); j++) if (positionIds[j] == positionId) { exists = true; break; }
+      if (!exists)
+      {
+         int size = ArraySize(positionIds);
+         ArrayResize(positionIds, size + 1);
+         positionIds[size] = positionId;
+      }
+   }
+   for (int i = 0; i < ArraySize(positionIds); i++) ReportClosedPosition(positionIds[i]);
+}
+
+void OnTradeTransaction(const MqlTradeTransaction &trans, const MqlTradeRequest &request, const MqlTradeResult &result)
+{
+   if (trans.type != TRADE_TRANSACTION_DEAL_ADD || trans.deal == 0) return;
+   if (!HistoryDealSelect(trans.deal)) return;
+   if ((long)HistoryDealGetInteger(trans.deal, DEAL_MAGIC) != MagicNumber) return;
+   long entry = HistoryDealGetInteger(trans.deal, DEAL_ENTRY);
+   if (entry != DEAL_ENTRY_OUT && entry != DEAL_ENTRY_OUT_BY && entry != DEAL_ENTRY_INOUT) return;
+   ulong positionId = (ulong)HistoryDealGetInteger(trans.deal, DEAL_POSITION_ID);
+   if (positionId > 0 && !IsPositionIdentifierOpen(positionId)) ReportClosedPosition(positionId);
+}
+
+void ConfirmTradeOpen(string signalId, long ticket, string type, double lots, double sl, double tp, double executedPrice)
 {
    string url     = g_serverUrl + "/api/metatrader/trade/open";
    string headers = "Content-Type: application/json\r\n";
-   double openPrice = (type == "BUY") ? SymbolInfoDouble(g_symbol, SYMBOL_ASK) : SymbolInfoDouble(g_symbol, SYMBOL_BID);
+   double openPrice = executedPrice > 0 ? executedPrice : ((type == "BUY") ? SymbolInfoDouble(g_symbol, SYMBOL_ASK) : SymbolInfoDouble(g_symbol, SYMBOL_BID));
    string body = "{";
    body += "\"ticket\":"       + IntegerToString(ticket)          + ",";
    body += "\"symbol\":\""     + g_symbol                        + "\",";
@@ -1441,7 +1623,7 @@ void ConfirmTradeOpen(string signalId, int ticket, string type, double lots, dou
    body += "\"openPrice\":"    + DoubleToString(openPrice, _Digits) + ",";
    body += "\"stopLoss\":"     + DoubleToString(sl, _Digits)     + ",";
    body += "\"takeProfit\":"   + DoubleToString(tp, _Digits)     + ",";
-   body += "\"openTime\":"     + IntegerToString(TimeCurrent())  + ",";
+   body += "\"openTime\":"     + IntegerToString((long)TimeCurrent() * 1000)  + ",";
    body += "\"signalId\":\""   + signalId                        + "\"";
    if (g_apiToken != "") body += ",\"token\":\"" + g_apiToken + "\"";
    body += "}";
