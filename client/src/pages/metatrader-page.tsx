@@ -2458,19 +2458,19 @@ export default function MetaTraderPage() {
                   Expert Advisor (EA)
                 </CardTitle>
                 <CardDescription>
-                  Baixe e instale o EA no MetaTrader 4 ou 5
+                  Girassol e Price Action são EAs independentes. O Price Action v1.0 é exclusivo do MetaTrader 5.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="bg-muted rounded-lg p-4 space-y-2">
                   <p className="font-medium flex items-center gap-2"><Info className="h-4 w-4 text-blue-500" /> Como instalar:</p>
                   <ol className="text-sm text-muted-foreground space-y-1 list-decimal list-inside">
-                    <li>Clique em "Baixar EA" abaixo</li>
+                    <li>Escolha o botão do EA desejado. O Price Action v1.0 é separado do Girassol.</li>
                     <li>No MetaTrader: <strong>Arquivo → Abrir pasta de dados → MQL5/Experts</strong></li>
                     <li>Cole o arquivo <code>.mq5</code> na pasta</li>
                     <li>No MetaTrader: clique em <strong>Compilar (F7)</strong> no MetaEditor</li>
-                    <li>Arraste o EA para qualquer gráfico e habilite o <strong>AlgoTrading</strong></li>
-                    <li>Configure a URL do servidor nos parâmetros do EA</li>
+                    <li>No Price Action, abra um gráfico do Bitcoin, arraste o EA para ele e habilite o <strong>AlgoTrading</strong>. O símbolo é obtido do próprio gráfico.</li>
+                    <li>Em Ferramentas → Opções → Expert Advisors, autorize WebRequest para a URL da plataforma. O download já injeta URL e token no Price Action EA.</li>
                   </ol>
                 </div>
                 <div className="space-y-1">
