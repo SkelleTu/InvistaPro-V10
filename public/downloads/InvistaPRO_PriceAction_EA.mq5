@@ -786,9 +786,18 @@ void ManageOpenPosition() {
       MqlTick tick; if(!SymbolInfoTick(_Symbol,tick)) continue;
       double price=side==1 ? tick.bid : tick.ask;
       string riskKey="PA_RISK_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+(string)identifier;
-      double risk=GlobalVariableCheck(riskKey) ? GlobalVariableGet(riskKey) : MathAbs(open-stop);
+      if(stop<=0) {
+         Print("ALERTA: posição Price Action sem stop-loss. Tentando encerrar por segurança.");
+         if(trade.PositionClose(positionTicket) && TradeRequestSucceeded())
+            Print("Posição sem stop-loss encerrada.");
+         continue;
+      }
+      if(!GlobalVariableCheck(riskKey) && !PersistPositionRisk(identifier)) {
+         Print("Risco estrutural original não pôde ser persistido. Gestão da posição bloqueada para revisão.");
+         continue;
+      }
+      double risk=GlobalVariableCheck(riskKey) ? GlobalVariableGet(riskKey) : 0.0;
       if(risk<=0) continue;
-      if(!GlobalVariableCheck(riskKey)) GlobalVariableSet(riskKey,risk);
       double rNow=(side==1 ? price-open : open-price)/risk;
       if(rNow>=1.0) {
          double be=NormalizeDouble(open,_Digits);
@@ -929,6 +938,7 @@ void ProcessPendingDeals() {
 
       if(isEntry) {
          GlobalVariableSet(trackKey,1.0);
+         PersistPositionRisk(positionId);
          string entryKey="PA_ENTRY_"+account+"_"+(string)positionId;
          if(!GlobalVariableCheck(entryKey)) GlobalVariableSet(entryKey,(double)HistoryDealGetInteger(deal,DEAL_TIME));
          if(!RebuildDailyLossCountersFromLedger()) {
