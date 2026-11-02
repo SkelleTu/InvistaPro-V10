@@ -108,6 +108,11 @@ int           g_indicatorCount = 0;
 //+------------------------------------------------------------------+
 int OnInit()
 {
+   if (MaxDeviationPoints < 0 || MaxDeviationPoints > 1000)
+   {
+      Print("⛔ MaxDeviationPoints inválido; configure um valor entre 0 e 1000.");
+      return INIT_PARAMETERS_INCORRECT;
+   }
    g_serverUrl   = ServerURL;
    g_discoverUrl = DiscoveryBlobURL;
    g_symbol      = (Symbol_Override != "") ? Symbol_Override : _Symbol;
