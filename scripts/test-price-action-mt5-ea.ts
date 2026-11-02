@@ -40,6 +40,11 @@ assert.ok(ea.includes('TRADE_RETCODE_DONE'), 'EA must validate execution return 
 assert.ok(ea.includes('PositionSelectByTicket(positionTicket)'), 'Position management must reselect the exact MT5 position ticket');
 assert.ok(ea.includes('trade.PositionModify(positionTicket,'), 'Protective stop changes must target the exact position ticket');
 assert.ok(ea.includes('trade.PositionClose(positionTicket)'), 'Position closes must target the exact position ticket');
+assert.ok(ea.includes('bool AcquirePositionManagementLock()'), 'Position management must be serialized across charts sharing the same symbol and magic');
+assert.ok(ea.includes('if(!AcquirePositionManagementLock()) return;'), 'Local stop and partial management must acquire the shared management lock');
+assert.ok(ea.includes('ReleasePositionManagementLock();'), 'Position management locks must be released after every management cycle');
+assert.ok(ea.includes('Serialize management across charts only after the network response returns.'), 'AI network latency must not hold the local position-management lock');
+
 assert.ok(ea.includes('trade.PositionClosePartial(positionTicket,closeVolume)'), 'Hedging partial closes must target the exact position ticket');
 assert.ok(ea.includes('DEAL_POSITION_ID'), 'Slippage emergency close must resolve the position created by the exact fill deal');
 assert.ok(ea.includes('PositionModify'), 'EA must manage protective stops');
