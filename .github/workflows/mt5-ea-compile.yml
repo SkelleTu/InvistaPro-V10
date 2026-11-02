@@ -39,12 +39,19 @@ jobs:
           $installer = Join-Path $env:RUNNER_TEMP "mt5setup.exe"
           $install = Start-Process -FilePath $installer -ArgumentList "/auto" -Wait -PassThru
           if ($install.ExitCode -ne 0) {
-            throw "MetaTrader 5 installer exited with code $($install.ExitCode)."
+            Write-Warning "MetaTrader bootstrapper returned exit code $($install.ExitCode); checking whether its terminal installation completed."
           }
-          $roots = @("C:\Program Files", "C:\Program Files (x86)")
-          $editor = Get-ChildItem -Path $roots -Filter "metaeditor64.exe" -File -Recurse -ErrorAction SilentlyContinue |
-            Select-Object -First 1
+          $roots = @("C:\Program Files", "C:\Program Files (x86)", $env:APPDATA, $env:LOCALAPPDATA)
+          $editor = $null
+          for ($attempt = 0; $attempt -lt 6 -and !$editor; $attempt++) {
+            $editor = Get-ChildItem -Path $roots -Filter "metaeditor64.exe" -File -Recurse -ErrorAction SilentlyContinue |
+              Select-Object -First 1
+            if (!$editor) { Start-Sleep -Seconds 5 }
+          }
           if (!$editor) {
+            Write-Host "MetaTrader install diagnostics:"
+            Get-ChildItem -Path $env:APPDATA -Directory -ErrorAction SilentlyContinue |
+              Where-Object { $_.Name -match "MetaQuotes|MetaTrader" } | Select-Object -ExpandProperty FullName
             throw "MetaEditor 64-bit was not found after installation."
           }
           $installRoot = $editor.Directory.FullName
