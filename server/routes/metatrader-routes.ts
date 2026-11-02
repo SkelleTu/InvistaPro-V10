@@ -2363,7 +2363,7 @@ router.post('/price-action/review', mt5EaTokenAccess, async (req: Request, res: 
     const symbol = String(req.body?.symbol ?? '').trim().toUpperCase();
     const direction = String(req.body?.direction ?? '').trim().toUpperCase();
     const frames = req.body?.frames;
-    if (!symbol || symbol.length > 64 || /[\\u0000-\\u001F]/.test(symbol) || !['BUY', 'SELL'].includes(direction)) {
+    if (!symbol || symbol.length > 64 || symbol.split('').some(char => char.charCodeAt(0) < 32) || !['BUY', 'SELL'].includes(direction)) {
       return res.status(400).json({ decision: 'REJECT', reason: 'Símbolo ou direção inválidos.' });
     }
     const required = ['H4', 'H1', 'M15', 'M5', 'M1'];
