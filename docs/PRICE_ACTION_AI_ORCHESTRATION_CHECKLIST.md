@@ -31,7 +31,8 @@ The primary deliverable is a broker-neutral MetaTrader 5 EA. It reads the select
 - [ ] Test restart/reconnect with open positions, partial fills, order rejection, failed stop modification, market closure and lost responses.
 - [ ] Reconcile terminal positions and trade history after reconnect/restart; verify no duplicate entry after ambiguous execution.
 - [x] Basic range regime detection requires H4/H1/M15 range alignment and permits setups only at M15 extremes; targets are rejected when blocked by a confirmed opposing pivot.
-- [ ] Complete deterministic definitions and tests for liquidity sweeps, FVG, Order Blocks, BOS/CHoCH and persistent zone lifecycle.
+- [x] Basic M15 liquidity-sweep, FVG, Order Block and BOS confluence flags are calculated and supplied to the AI review.
+- [ ] Complete quantitative confirmation/invalidation rules, CHoCH handling and persistent zone lifecycle with dedicated tests.
 - [ ] Backtest, out-of-sample, replay, fault-injection and DEMO forward evidence.
 - [ ] Validate reconstructed drawdown baseline against broker history with deposits/withdrawals and carried positions; verify shared account-wide risk across different magic numbers and separate MT5 terminals.
 
