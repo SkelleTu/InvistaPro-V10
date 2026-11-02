@@ -369,7 +369,13 @@ export function evaluatePriceActionSetup(
     const costs = context.estimatedRoundTripCost ?? Number.NaN;
     const costsValid = finite(costs) && costs >= 0;
     const minimumTargetDistance = costsValid ? risk * 2.1 + costs * 3.1 : Number.POSITIVE_INFINITY;
-    const barrier = nearestOpposingBarrier(m15, side, entry) ?? nearestOpposingBarrier(entryFrame, side, entry);
+    const opposingBarriers = [
+      nearestOpposingBarrier(m15, side, entry),
+      nearestOpposingBarrier(entryFrame, side, entry),
+    ].filter((value): value is number => value !== null);
+    const barrier = opposingBarriers.length
+      ? (side === 'BUY' ? Math.min(...opposingBarriers) : Math.max(...opposingBarriers))
+      : null;
     const barrierRoom = barrier === null ? Number.POSITIVE_INFINITY : Math.abs(barrier - entry);
     const targetDistance = Math.min(minimumTargetDistance, barrierRoom - volatility * 0.1);
     const target = side === 'BUY' ? entry + targetDistance : entry - targetDistance;
