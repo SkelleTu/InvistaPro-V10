@@ -402,7 +402,14 @@ void ReviewOpenPositionAI() {
       }
    } else if(action=="TAKE_PARTIAL") {
       string key=PartialKey(identifier);
-      if(!GlobalVariableCheck(key) && PositionSelectByTicket(positionTicket)) {
+      string riskKey="PA_RISK_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+(string)identifier;
+      if(!GlobalVariableCheck(riskKey)) PersistPositionRisk(identifier);
+      double originalRisk=GlobalVariableCheck(riskKey) ? GlobalVariableGet(riskKey) : 0.0;
+      double entryPrice=PositionGetDouble(POSITION_PRICE_OPEN);
+      double realizedR=originalRisk>0 ? (side==1 ? currentPrice-entryPrice : entryPrice-currentPrice)/originalRisk : 0.0;
+      // AI may request a partial, but the fixed 50% scale-out is not allowed
+      // before +1.5R; otherwise the planned net reward/risk is diluted.
+      if(realizedR>=1.5 && !GlobalVariableCheck(key) && PositionSelectByTicket(positionTicket)) {
          double volume=PositionGetDouble(POSITION_VOLUME);
          double partial=NormalizeVolume(volume*0.5);
          if(partial>0 && partial<volume && ClosePartialPosition(positionTicket,side,partial,volume))
@@ -602,13 +609,14 @@ bool BuildSetup(int side,double trigger,Setup &s) {
    double risk=MathAbs(entry-stop);
    if(risk<=0 || risk/entry*100.0>InpMaxStopPercent) return false;
    double cost=2.0*(tick.ask-tick.bid)+entry*InpEstimatedRoundTripCostPercent/100.0;
-   // Solve for the target distance required to achieve the configured NET RR:
-   // (rewardDistance - cost) / (risk + cost) >= InpMinimumRR.
-   double requiredRewardDistance=risk*InpMinimumRR+cost*(InpMinimumRR+1.0);
+   // Half the position is planned to close at +1.5R. Solve the remaining
+   // target so the weighted result still meets the configured NET RR:
+   // (0.5*1.5R + 0.5*targetDistance - cost) / (risk + cost) >= minimumRR.
+   double requiredRewardDistance=2.0*((InpMinimumRR-0.75)*risk+(InpMinimumRR+1.0)*cost);
    double target=side==1 ? entry+requiredRewardDistance : entry-requiredRewardDistance;
-   double reward=MathAbs(target-entry)-cost;
+   double weightedReward=0.75*risk+0.5*MathAbs(target-entry)-cost;
    double netRisk=risk+cost;
-   if(reward<=0 || reward/netRisk<InpMinimumRR) return false;
+   if(weightedReward<=0 || weightedReward/netRisk<InpMinimumRR) return false;
    // Do not aim a 2R target straight into the nearest confirmed opposing M15 pivot.
    double barrier=0;
    for(int i=2;i<15;i++) {
@@ -627,7 +635,7 @@ bool BuildSetup(int side,double trigger,Setup &s) {
    s.side=side; s.entry=entry; s.stop=NormalizeTradePrice(stop,side,true);
    s.target=NormalizeTradePrice(target,side,false);
    double finalRisk=MathAbs(entry-s.stop);
-   double finalReward=MathAbs(s.target-entry)-cost;
+   double finalReward=0.75*finalRisk+0.5*MathAbs(s.target-entry)-cost;
    if(finalRisk<=0 || finalRisk/entry*100.0>InpMaxStopPercent ||
       finalReward/(finalRisk+cost)<InpMinimumRR) return false;
    s.rr=finalReward/(finalRisk+cost);
