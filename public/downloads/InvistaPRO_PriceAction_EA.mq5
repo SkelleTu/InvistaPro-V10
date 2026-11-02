@@ -695,14 +695,31 @@ bool ExecuteSetupLocked(Setup &s) {
       Print("Ordem rejeitada: ",trade.ResultRetcode()," ",trade.ResultRetcodeDescription());
       return false;
    }
-   // Count every accepted order response before slippage checks; ambiguous fills stay fail-closed.
-   // Filled entry deals are counted once by the durable PA_ENTRY ledger.
-   // Persist the original structural risk immediately after the fill.
-   // It must survive break-even/trailing changes and terminal restarts.
+   // Register a confirmed fill before releasing the shared daily lock. A
+   // reservation covers accepted PLACED responses whose deal callback is delayed.
    ulong fillDealForRisk=trade.ResultDeal();
+   bool entryRecorded=false;
    if(fillDealForRisk>0 && HistoryDealSelect(fillDealForRisk)) {
       ulong filledPositionId=(ulong)HistoryDealGetInteger(fillDealForRisk,DEAL_POSITION_ID);
-      if(filledPositionId>0) PersistPositionRisk(filledPositionId);
+      if(filledPositionId>0) {
+         string account=(string)AccountInfoInteger(ACCOUNT_LOGIN);
+         string trackKey="PA_TRACK_"+account+"_"+(string)filledPositionId;
+         string entryKey="PA_ENTRY_"+account+"_"+(string)filledPositionId;
+         GlobalVariableSet(trackKey,1.0);
+         if(!GlobalVariableCheck(entryKey))
+            GlobalVariableSet(entryKey,(double)HistoryDealGetInteger(fillDealForRisk,DEAL_TIME));
+         PersistPositionRisk(filledPositionId);
+         ulong orderId=(ulong)HistoryDealGetInteger(fillDealForRisk,DEAL_ORDER);
+         if(orderId>0) GlobalVariableDel("PA_RESERVE_"+account+"_"+(string)orderId);
+         entryRecorded=true;
+         if(RebuildDailyLossCountersFromLedger()) PersistDailyState();
+         else Print("ALERTA: entrada executada, mas o ledger diário não foi reconciliado. Novas entradas bloqueadas.");
+      }
+   }
+   if(!entryRecorded) {
+      ulong acceptedOrder=trade.ResultOrder();
+      if(acceptedOrder>0)
+         GlobalVariableSet("PA_RESERVE_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+(string)acceptedOrder,(double)TimeCurrent());
    }
    double fillPrice=trade.ResultPrice();
    double maxSlippage=InpMaxSlippagePoints>0 ? InpMaxSlippagePoints*_Point : ATR(PERIOD_M15)*0.10;
@@ -862,6 +879,9 @@ bool ReconcilePriceActionHistory(datetime serverDayStart) {
       ulong positionId=(ulong)HistoryDealGetInteger(deal,DEAL_POSITION_ID);
       if(positionId==0) continue;
       datetime entryAt=(datetime)HistoryDealGetInteger(deal,DEAL_TIME);
+      ulong orderId=(ulong)HistoryDealGetInteger(deal,DEAL_ORDER);
+      if(orderId>0)
+         GlobalVariableDel("PA_RESERVE_"+account+"_"+(string)orderId);
       int found=-1;
       for(int j=0;j<ArraySize(positionIds);j++)
          if(positionIds[j]==positionId) { found=j; break; }
@@ -926,11 +946,17 @@ bool RebuildDailyLossCountersFromLedger() {
    double pnls[];
    int tradesToday=0;
    string entryPrefix="PA_ENTRY_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_";
+   string reservePrefix="PA_RESERVE_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_";
    for(int i=GlobalVariablesTotal()-1;i>=0;i--) {
       string name=GlobalVariableName(i);
       if(StringFind(name,entryPrefix)==0) {
          datetime entryAt=(datetime)GlobalVariableGet(name);
          if(entryAt>=serverDayStart && entryAt<=TimeCurrent()) tradesToday++;
+         continue;
+      }
+      if(StringFind(name,reservePrefix)==0) {
+         datetime reservedAt=(datetime)GlobalVariableGet(name);
+         if(reservedAt>=serverDayStart && reservedAt<=TimeCurrent()) tradesToday++;
          continue;
       }
       if(StringFind(name,prefix)!=0) continue;
