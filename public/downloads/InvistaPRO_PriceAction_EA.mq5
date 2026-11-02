@@ -360,7 +360,9 @@ double RiskVolume(int side,double entry,double stop) {
    ENUM_ORDER_TYPE type=side==1 ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
    if(!OrderCalcProfit(type,_Symbol,1.0,entry,stop,pnl)) return 0;
    double lossPerLot=MathAbs(pnl);
-   double feePrice=entry*InpEstimatedRoundTripCostPercent/100.0;
+   MqlTick quote;
+   if(!SymbolInfoTick(_Symbol,quote)) return 0;
+   double feePrice=entry*InpEstimatedRoundTripCostPercent/100.0+2.0*(quote.ask-quote.bid);
    double feeExit=side==1 ? entry-feePrice : entry+feePrice;
    double feePnl=0;
    if(!OrderCalcProfit(type,_Symbol,1.0,entry,feeExit,feePnl)) return 0;
