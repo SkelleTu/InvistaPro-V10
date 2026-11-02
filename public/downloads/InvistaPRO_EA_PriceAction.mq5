@@ -23,6 +23,7 @@ input int      MagicNumber      = 20261102;    // Número mágico
 input bool     AutoReconnect    = true;        // Reconexão automática de URL
 input int      MaxReconnectTries= 5;           // Tentativas máximas de reconexão
 input double   PriceActionRiskPercent = 1.0; // Risco por trade: 1% padrão, máximo 2%
+input double   EstimatedRoundTripCommissionPerLot = 0.0; // Comissão total ida+volta por lote, na moeda da conta; 0 somente para conta sem comissão
 input int      MaxDeviationPoints = 20; // Slippage máximo por ordem, em pontos do símbolo
 input int      MaxPositions = 1; // Uma posição por símbolo
 input int      WarmupSeconds = 120; // Aquecimento sem operar
@@ -56,7 +57,7 @@ CPositionInfo  posInfo;
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   if (MaxDeviationPoints < 0 || MaxDeviationPoints > 1000)
+   if (MaxDeviationPoints < 0 || MaxDeviationPoints > 1000 || EstimatedRoundTripCommissionPerLot < 0.0)
    {
       Print("⛔ MaxDeviationPoints inválido; configure um valor entre 0 e 1000.");
       return INIT_PARAMETERS_INCORRECT;
@@ -297,6 +298,22 @@ double NormalizeManagedPrice(double price, bool roundUp)
    return NormalizeDouble(aligned, ManagedSymbolDigits());
 }
 
+double CommissionPriceDistance(ENUM_ORDER_TYPE orderType, double entryPrice)
+{
+   if (EstimatedRoundTripCommissionPerLot < 0.0 || entryPrice <= 0.0) return -1.0;
+   if (EstimatedRoundTripCommissionPerLot == 0.0) return 0.0;
+   double tickSize = SymbolInfoDouble(g_symbol, SYMBOL_TRADE_TICK_SIZE);
+   if (tickSize <= 0.0) tickSize = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
+   if (tickSize <= 0.0) return -1.0;
+   double adverseExit = orderType == ORDER_TYPE_BUY ? entryPrice - tickSize : entryPrice + tickSize;
+   double tickProfit = 0.0;
+   if (adverseExit <= 0.0 || !OrderCalcProfit(orderType, g_symbol, 1.0, entryPrice, adverseExit, tickProfit))
+      return -1.0;
+   double tickValue = MathAbs(tickProfit);
+   if (tickValue <= 0.0) return -1.0;
+   return (EstimatedRoundTripCommissionPerLot / tickValue) * tickSize;
+}
+
 datetime BrokerTimeToUtc(datetime brokerTime)
 {
    long brokerUtcOffsetSeconds = (long)TimeCurrent() - (long)TimeGMT();
@@ -343,8 +360,8 @@ double CalculatePriceActionRiskLot(double entryPrice, double stopLoss)
    // If the broker cannot calculate the contract, fail closed instead of guessing.
    if (!OrderCalcProfit(orderType, g_symbol, 1.0, entryPrice, stopLoss, oneLotProfit))
       return 0.0;
-   double lossPerLot = MathAbs(oneLotProfit);
-   if (lossPerLot <= 0.0) return 0.0;
+   double lossPerLot = MathAbs(oneLotProfit) + EstimatedRoundTripCommissionPerLot;
+   if (lossPerLot <= 0.0 || EstimatedRoundTripCommissionPerLot < 0.0) return 0.0;
 
    // Keep 10% of the configured risk budget as execution-friction reserve.
    double riskCash = equity * PriceActionRiskPercent / 100.0 * 0.90;
@@ -604,7 +621,15 @@ void FetchAndProcessSignal()
        double rewardDistance = (action == "BUY") ? takeProfit - entry : entry - takeProfit;
        double pointSize = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
        double currentSpread = ask - bid;
-       double estimatedRoundTripCost = currentSpread * 2.0 + (double)MaxDeviationPoints * pointSize * 2.0;
+       ENUM_ORDER_TYPE costOrderType = action == "BUY" ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+       double commissionPriceDistance = CommissionPriceDistance(costOrderType, entry);
+       if (commissionPriceDistance < 0.0)
+       {
+          Print("⛔ Price Action recusado: não foi possível converter a comissão configurada para custo de preço.");
+          return;
+       }
+       double estimatedRoundTripCost = currentSpread * 2.0
+          + (double)MaxDeviationPoints * pointSize * 2.0 + commissionPriceDistance;
        double netReward = rewardDistance - estimatedRoundTripCost;
        double totalRiskWithCosts = riskDistance + estimatedRoundTripCost;
        double executableRiskReward = totalRiskWithCosts > 0.0 ? netReward / totalRiskWithCosts : 0.0;
