@@ -434,6 +434,7 @@ void PersistDailyState() {
    GlobalVariableSet(key+"_D",(double)g_losingTradesToday);
    GlobalVariableSet(key+"_P",(double)g_pauseUntil);
    GlobalVariableSet(key+"_E",g_dayStartEquity);
+   GlobalVariablesFlush(); // force daily risk state to disk before a terminal/power interruption
 }
 bool PositionIdentifierOpen(ulong identifier) {
    for(int i=PositionsTotal()-1;i>=0;i--) {
@@ -1158,6 +1159,7 @@ void ProcessPendingDeals() {
       }
       GlobalVariableSet(dealGuard,(double)TimeCurrent());
       GlobalVariableDel(pendingName);
+      GlobalVariablesFlush(); // commit accounting guard and pending-marker deletion together
       ReleaseDailyLock();
    }
 }
@@ -1168,6 +1170,7 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,const MqlTradeRequest &
    // if history or the lock is temporarily unavailable.
    string pending=PendingDealPrefix()+(string)trans.deal;
    GlobalVariableSet(pending,(double)TimeCurrent());
+   GlobalVariablesFlush(); // transaction callback must survive an abrupt terminal restart
 }
 void OnInitHeartbeat() {
    if(InpHeartbeatSeconds<=0 || TimeCurrent()-g_lastHeartbeat<InpHeartbeatSeconds) return;
