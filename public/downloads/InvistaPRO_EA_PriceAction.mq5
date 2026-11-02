@@ -182,14 +182,13 @@ void OnDeinit(const int reason)
 void OnTimer()
 {
    datetime serverNow = TimeCurrent();
-   if (serverNow - g_lastClosedTradeSync >= 30)
+   datetime localNow = TimeLocal();
+   if (localNow - g_lastClosedTradeSync >= 30)
    {
-      g_lastClosedTradeSync = serverNow;
+      g_lastClosedTradeSync = localNow;
       SyncClosedTradeReports();
       SyncOpenPositionReports();
    }
-
-   datetime localNow = TimeLocal();
    if (HeartbeatSeconds > 0 && (g_lastTimerHeartbeat == 0 || localNow - g_lastTimerHeartbeat >= HeartbeatSeconds))
    {
       g_lastTimerHeartbeat = localNow;
