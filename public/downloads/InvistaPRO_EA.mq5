@@ -116,7 +116,21 @@ int OnInit()
    g_apiToken    = ApiToken;
    g_failCount   = 0;
 
+   if (g_symbol == "" || !SymbolSelect(g_symbol, true))
+   {
+      Print("⛔ Símbolo MT5 indisponível ou não selecionável: ", g_symbol);
+      return INIT_FAILED;
+   }
+   long symbolTradeMode = SymbolInfoInteger(g_symbol, SYMBOL_TRADE_MODE);
+   if (symbolTradeMode == SYMBOL_TRADE_MODE_DISABLED)
+   {
+      Print("⛔ O broker marcou o símbolo como indisponível para negociação: ", g_symbol);
+      return INIT_FAILED;
+   }
+
    trade.SetExpertMagicNumber(MagicNumber);
+   trade.SetTypeFillingBySymbol(g_symbol);
+   trade.SetDeviationInPoints(20);
    // Timer keeps connectivity checks alive even when the chart receives no ticks.
    EventSetTimer(1);
 
@@ -132,7 +146,7 @@ int OnInit()
    else
       g_warmupUntil = now;
 
-   Print("🚀 InvistaPRO EA v8.0 iniciado | Símbolo: ", g_symbol);
+   Print("🚀 InvistaPRO EA v8.2 iniciado | Símbolo: ", g_symbol);
    Print("   → URL: ", g_serverUrl);
    Print("   → CandleCount: ", CandleCount, " | IndicatorBars: ", IndicatorBars);
    if (WarmupSeconds > 0)
@@ -353,7 +367,7 @@ string ReadAllIndicatorBuffers()
                if (buf[v] >= 1e20 || buf[v] <= -1e20)
                   json += "null";
                else
-                  json += DoubleToString(buf[v], _Digits);
+                  json += DoubleToString(buf[v], ManagedSymbolDigits());
             }
          }
          json += "]}";
@@ -436,16 +450,16 @@ string ReadStructuredIndicatorSignals()
                      if (bufB[v] == 0.0) continue;
                      if (!firstEntry) levelsJson += ",";
                      firstEntry = false;
-                     levelsJson += "{\"bar\":" + IntegerToString(v) + ",\"value\":" + DoubleToString(bufB[v], _Digits) + ",\"direction\":\"buy\",\"color\":\"blue\"}";
+                     levelsJson += "{\"bar\":" + IntegerToString(v) + ",\"value\":" + DoubleToString(bufB[v], ManagedSymbolDigits()) + ",\"direction\":\"buy\",\"color\":\"blue\"}";
                      if (!firstBuy) allBuyJson += ",";
                      firstBuy = false;
-                     allBuyJson += "{\"level\":\"" + levelNames[lvl] + "\",\"bar\":" + IntegerToString(v) + ",\"value\":" + DoubleToString(bufB[v], _Digits) + "}";
+                     allBuyJson += "{\"level\":\"" + levelNames[lvl] + "\",\"bar\":" + IntegerToString(v) + ",\"value\":" + DoubleToString(bufB[v], ManagedSymbolDigits()) + "}";
                      if (v == 0 && ask > 0)
                      {
                         string srType = (bufB[v] < ask) ? "support" : "resistance";
                         if (!firstSR) srLevels += ",";
                         firstSR = false;
-                        srLevels += "{\"type\":\"" + srType + "\",\"price\":" + DoubleToString(bufB[v], _Digits) + ",\"level\":\"" + levelNames[lvl] + "\",\"direction\":\"buy\",\"buffer\":" + IntegerToString(bufBuy) + "}";
+                        srLevels += "{\"type\":\"" + srType + "\",\"price\":" + DoubleToString(bufB[v], ManagedSymbolDigits()) + ",\"level\":\"" + levelNames[lvl] + "\",\"direction\":\"buy\",\"buffer\":" + IntegerToString(bufBuy) + "}";
                      }
                   }
                }
@@ -468,16 +482,16 @@ string ReadStructuredIndicatorSignals()
                      if (bufS[v] == 0.0) continue;
                      if (!firstEntry) levelsJson += ",";
                      firstEntry = false;
-                     levelsJson += "{\"bar\":" + IntegerToString(v) + ",\"value\":" + DoubleToString(bufS[v], _Digits) + ",\"direction\":\"sell\",\"color\":\"red\"}";
+                     levelsJson += "{\"bar\":" + IntegerToString(v) + ",\"value\":" + DoubleToString(bufS[v], ManagedSymbolDigits()) + ",\"direction\":\"sell\",\"color\":\"red\"}";
                      if (!firstSell) allSellJson += ",";
                      firstSell = false;
-                     allSellJson += "{\"level\":\"" + levelNames[lvl] + "\",\"bar\":" + IntegerToString(v) + ",\"value\":" + DoubleToString(bufS[v], _Digits) + "}";
+                     allSellJson += "{\"level\":\"" + levelNames[lvl] + "\",\"bar\":" + IntegerToString(v) + ",\"value\":" + DoubleToString(bufS[v], ManagedSymbolDigits()) + "}";
                      if (v == 0 && ask > 0)
                      {
                         string srType = (bufS[v] < ask) ? "support" : "resistance";
                         if (!firstSR) srLevels += ",";
                         firstSR = false;
-                        srLevels += "{\"type\":\"" + srType + "\",\"price\":" + DoubleToString(bufS[v], _Digits) + ",\"level\":\"" + levelNames[lvl] + "\",\"direction\":\"sell\",\"buffer\":" + IntegerToString(bufSell) + "}";
+                        srLevels += "{\"type\":\"" + srType + "\",\"price\":" + DoubleToString(bufS[v], ManagedSymbolDigits()) + ",\"level\":\"" + levelNames[lvl] + "\",\"direction\":\"sell\",\"buffer\":" + IntegerToString(bufSell) + "}";
                      }
                   }
                }
@@ -538,7 +552,7 @@ string ReadStructuredIndicatorSignals()
 
             string levelName = (b < ArraySize(fibNames)) ? fibNames[b] : ("L" + IntegerToString(b));
             json += "{\"level\":\"" + levelName + "\",";
-            json += "\"price\":" + DoubleToString(buf[0], _Digits) + ",";
+            json += "\"price\":" + DoubleToString(buf[0], ManagedSymbolDigits()) + ",";
             json += "\"buffer\":" + IntegerToString(b) + "}";
          }
          json += "]},";
@@ -572,7 +586,7 @@ string BuildRawBuffersJson(int indicatorIdx, int bars)
          {
             if (v > 0) json += ",";
             if (buf[v] >= 1e20 || buf[v] <= -1e20) json += "null";
-            else json += DoubleToString(buf[v], _Digits);
+            else json += DoubleToString(buf[v], ManagedSymbolDigits());
          }
       }
       json += "]";
@@ -592,10 +606,10 @@ string BuildCandlesJson(MqlRates &rates[], int count)
       if (i > 0) json += ",";
       json += "{";
       json += "\"time\":"   + IntegerToString(rates[i].time)          + ",";
-      json += "\"open\":"   + DoubleToString(rates[i].open,  _Digits) + ",";
-      json += "\"high\":"   + DoubleToString(rates[i].high,  _Digits) + ",";
-      json += "\"low\":"    + DoubleToString(rates[i].low,   _Digits) + ",";
-      json += "\"close\":"  + DoubleToString(rates[i].close, _Digits) + ",";
+      json += "\"open\":"   + DoubleToString(rates[i].open,  ManagedSymbolDigits()) + ",";
+      json += "\"high\":"   + DoubleToString(rates[i].high,  ManagedSymbolDigits()) + ",";
+      json += "\"low\":"    + DoubleToString(rates[i].low,   ManagedSymbolDigits()) + ",";
+      json += "\"close\":"  + DoubleToString(rates[i].close, ManagedSymbolDigits()) + ",";
       json += "\"volume\":" + IntegerToString(rates[i].tick_volume);
       json += "}";
    }
@@ -933,8 +947,8 @@ void FetchAndProcessSignal()
    string body = "{";
    body += "\"accountType\":\"" + requestAccountType + "\",";
    body += "\"symbol\":\""          + g_symbol                     + "\",";
-   body += "\"ask\":"               + DoubleToString(ask, _Digits)  + ",";
-   body += "\"bid\":"               + DoubleToString(bid, _Digits)  + ",";
+   body += "\"ask\":"               + DoubleToString(ask, ManagedSymbolDigits())  + ",";
+   body += "\"bid\":"               + DoubleToString(bid, ManagedSymbolDigits())  + ",";
    body += "\"candles\":"           + candlesJson                   + ",";
    body += "\"timeframes\":"       + BuildMultiTimeframeJson()     + ",";
    body += "\"priceActionUseAIReview\":" + (PriceActionUseAIReview ? "true" : "false") + ",";
@@ -1018,14 +1032,14 @@ void FetchAndProcessSignal()
       if (action == "BUY")
       {
          double entry = SymbolInfoDouble(g_symbol, SYMBOL_ASK);
-         if (stopLoss   > 0) stopLoss   = NormalizeDouble(entry - stopLoss,   _Digits);
-         if (takeProfit > 0) takeProfit = NormalizeDouble(entry + takeProfit, _Digits);
+         if (stopLoss   > 0) stopLoss   = NormalizeDouble(entry - stopLoss,   ManagedSymbolDigits());
+         if (takeProfit > 0) takeProfit = NormalizeDouble(entry + takeProfit, ManagedSymbolDigits());
       }
       else if (action == "SELL")
       {
          double entry = SymbolInfoDouble(g_symbol, SYMBOL_BID);
-         if (stopLoss   > 0) stopLoss   = NormalizeDouble(entry + stopLoss,   _Digits);
-         if (takeProfit > 0) takeProfit = NormalizeDouble(entry - takeProfit, _Digits);
+         if (stopLoss   > 0) stopLoss   = NormalizeDouble(entry + stopLoss,   ManagedSymbolDigits());
+         if (takeProfit > 0) takeProfit = NormalizeDouble(entry - takeProfit, ManagedSymbolDigits());
       }
    }
    else if (AIControlMode == AI_PARTIAL)
@@ -1042,8 +1056,8 @@ void FetchAndProcessSignal()
          double rawSL = (ManualStopLoss > 0) ? ManualStopLoss * point : 0;
          if (rawSL > 0)
          {
-            if (action == "BUY")  stopLoss = NormalizeDouble(SymbolInfoDouble(g_symbol, SYMBOL_ASK) - rawSL, _Digits);
-            else                   stopLoss = NormalizeDouble(SymbolInfoDouble(g_symbol, SYMBOL_BID) + rawSL, _Digits);
+            if (action == "BUY")  stopLoss = NormalizeDouble(SymbolInfoDouble(g_symbol, SYMBOL_ASK) - rawSL, ManagedSymbolDigits());
+            else                   stopLoss = NormalizeDouble(SymbolInfoDouble(g_symbol, SYMBOL_BID) + rawSL, ManagedSymbolDigits());
          }
          else stopLoss = 0;
       }
@@ -1052,8 +1066,8 @@ void FetchAndProcessSignal()
          double rawTP = (ManualTakeProfit > 0) ? ManualTakeProfit * point : 0;
          if (rawTP > 0)
          {
-            if (action == "BUY")  takeProfit = NormalizeDouble(SymbolInfoDouble(g_symbol, SYMBOL_ASK) + rawTP, _Digits);
-            else                   takeProfit = NormalizeDouble(SymbolInfoDouble(g_symbol, SYMBOL_BID) - rawTP, _Digits);
+            if (action == "BUY")  takeProfit = NormalizeDouble(SymbolInfoDouble(g_symbol, SYMBOL_ASK) + rawTP, ManagedSymbolDigits());
+            else                   takeProfit = NormalizeDouble(SymbolInfoDouble(g_symbol, SYMBOL_BID) - rawTP, ManagedSymbolDigits());
          }
          else takeProfit = 0;
       }
@@ -1091,14 +1105,14 @@ void FetchAndProcessSignal()
       if (action == "BUY")
       {
          double entry = ask;
-         if (stopLoss > 0 && (entry - stopLoss) < minDist) { if (IsPriceActionEnabled()) { Print("⛔ Price Action: distância mínima do broker exigiria alargar o stop; sinal cancelado."); return; } stopLoss = NormalizeDouble(entry - minDist, _Digits); }
-         if (takeProfit > 0 && (takeProfit - entry) < minDist) { if (IsPriceActionEnabled()) { Print("⛔ Price Action: TP abaixo da distância mínima do broker; sinal cancelado."); return; } takeProfit = NormalizeDouble(entry + minDist, _Digits); }
+         if (stopLoss > 0 && (entry - stopLoss) < minDist) { if (IsPriceActionEnabled()) { Print("⛔ Price Action: distância mínima do broker exigiria alargar o stop; sinal cancelado."); return; } stopLoss = NormalizeDouble(entry - minDist, ManagedSymbolDigits()); }
+         if (takeProfit > 0 && (takeProfit - entry) < minDist) { if (IsPriceActionEnabled()) { Print("⛔ Price Action: TP abaixo da distância mínima do broker; sinal cancelado."); return; } takeProfit = NormalizeDouble(entry + minDist, ManagedSymbolDigits()); }
       }
       else if (action == "SELL")
       {
          double entry = bid;
-         if (stopLoss > 0 && (stopLoss - entry) < minDist) { if (IsPriceActionEnabled()) { Print("⛔ Price Action: distância mínima do broker exigiria alargar o stop; sinal cancelado."); return; } stopLoss = NormalizeDouble(entry + minDist, _Digits); }
-         if (takeProfit > 0 && (entry - takeProfit) < minDist) { if (IsPriceActionEnabled()) { Print("⛔ Price Action: TP abaixo da distância mínima do broker; sinal cancelado."); return; } takeProfit = NormalizeDouble(entry - minDist, _Digits); }
+         if (stopLoss > 0 && (stopLoss - entry) < minDist) { if (IsPriceActionEnabled()) { Print("⛔ Price Action: distância mínima do broker exigiria alargar o stop; sinal cancelado."); return; } stopLoss = NormalizeDouble(entry + minDist, ManagedSymbolDigits()); }
+         if (takeProfit > 0 && (entry - takeProfit) < minDist) { if (IsPriceActionEnabled()) { Print("⛔ Price Action: TP abaixo da distância mínima do broker; sinal cancelado."); return; } takeProfit = NormalizeDouble(entry - minDist, ManagedSymbolDigits()); }
       }
    }
 
@@ -1132,11 +1146,11 @@ void FetchAndProcessSignal()
        }
     }
 
-   Print("📡 SINAL v8.0: ", action, " | ", g_symbol, " | Confiança: ", confidence, "%");
+   Print("📡 SINAL v8.2: ", action, " | ", g_symbol, " | Confiança: ", confidence, "%");
    if (assetFamily  != "") Print("   Ativo: ", assetFamily, " | ", assetTrend, " | Vol: ", assetVolClass);
    if (girassolBias != "") Print("   Girassol: ", girassolBias);
    if (slTpSource   != "") Print("   SL/TP via: ", slTpSource);
-   Print("   SL: ", NormalizeDouble(stopLoss, _Digits), " | TP: ", NormalizeDouble(takeProfit, _Digits));
+   Print("   SL: ", NormalizeDouble(stopLoss, ManagedSymbolDigits()), " | TP: ", NormalizeDouble(takeProfit, ManagedSymbolDigits()));
    Print("   Indicadores no gráfico: ", g_indicatorCount);
    if (reason != "") Print("   Razão: ", StringSubstr(reason, 0, 150));
    Print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
@@ -1178,8 +1192,8 @@ void FetchAndProcessSignal()
       double slRetry = 0, tpRetry = 0;
       if (action == "BUY")
       {
-         slRetry = NormalizeDouble(askNow - safeDist, _Digits);
-         tpRetry = NormalizeDouble(askNow + safeDist, _Digits);
+         slRetry = NormalizeDouble(askNow - safeDist, ManagedSymbolDigits());
+         tpRetry = NormalizeDouble(askNow + safeDist, ManagedSymbolDigits());
          requestOk = trade.Buy(lotSize, g_symbol, 0, slRetry, tpRetry, "InvistaPRO_" + signalId);
          tradeRetcode = trade.ResultRetcode();
          success = requestOk && (tradeRetcode == TRADE_RETCODE_DONE || tradeRetcode == TRADE_RETCODE_DONE_PARTIAL)
@@ -1187,8 +1201,8 @@ void FetchAndProcessSignal()
       }
       else
       {
-         slRetry = NormalizeDouble(bidNow + safeDist, _Digits);
-         tpRetry = NormalizeDouble(bidNow - safeDist, _Digits);
+         slRetry = NormalizeDouble(bidNow + safeDist, ManagedSymbolDigits());
+         tpRetry = NormalizeDouble(bidNow - safeDist, ManagedSymbolDigits());
          requestOk = trade.Sell(lotSize, g_symbol, 0, slRetry, tpRetry, "InvistaPRO_" + signalId);
          tradeRetcode = trade.ResultRetcode();
          success = requestOk && (tradeRetcode == TRADE_RETCODE_DONE || tradeRetcode == TRADE_RETCODE_DONE_PARTIAL)
@@ -1216,8 +1230,8 @@ void FetchAndProcessSignal()
       }
       Print("✅ Ordem executada: ", action, " | Ticket: ", trade.ResultOrder(),
             " | Volume confirmado: ", DoubleToString(lotSize, 8),
-            " | SL: ", NormalizeDouble(stopLoss, _Digits),
-            " | TP: ", NormalizeDouble(takeProfit, _Digits));
+            " | SL: ", NormalizeDouble(stopLoss, ManagedSymbolDigits()),
+            " | TP: ", NormalizeDouble(takeProfit, ManagedSymbolDigits()));
       PersistPriceActionPositionState();
       long positionIdentifier = GetManagedPositionIdentifier();
       if (positionIdentifier <= 0) positionIdentifier = (long)trade.ResultOrder();
@@ -1261,7 +1275,7 @@ void MonitorOpenPositions()
           string riskKey = "InvistaPA_R_" + IntegerToString((long)ticket);
           string partialKey = "InvistaPA_TP1_" + IntegerToString((long)ticket);
           double initialRisk = GlobalVariableCheck(riskKey) ? GlobalVariableGet(riskKey) : 0.0;
-          if (initialRisk <= 0.0 && MathAbs(openPrice - sl) > _Point * 2.0)
+          if (initialRisk <= 0.0 && MathAbs(openPrice - sl) > SymbolInfoDouble(g_symbol, SYMBOL_POINT) * 2.0)
           {
              initialRisk = MathAbs(openPrice - sl);
              GlobalVariableSet(riskKey, initialRisk);
@@ -1339,10 +1353,10 @@ void MonitorOpenPositions()
       posJson += "\"symbol\":\""      + g_symbol                           + "\",";
       posJson += "\"type\":\""        + posType                             + "\",";
       posJson += "\"lots\":"          + DoubleToString(posInfo.Volume(), 2) + ",";
-      posJson += "\"openPrice\":"     + DoubleToString(openPrice, _Digits)  + ",";
-      posJson += "\"currentPrice\":"  + DoubleToString(curPrice, _Digits)   + ",";
-      posJson += "\"stopLoss\":"      + DoubleToString(sl, _Digits)         + ",";
-      posJson += "\"takeProfit\":"    + DoubleToString(tp, _Digits)         + ",";
+      posJson += "\"openPrice\":"     + DoubleToString(openPrice, ManagedSymbolDigits())  + ",";
+      posJson += "\"currentPrice\":"  + DoubleToString(curPrice, ManagedSymbolDigits())   + ",";
+      posJson += "\"stopLoss\":"      + DoubleToString(sl, ManagedSymbolDigits())         + ",";
+      posJson += "\"takeProfit\":"    + DoubleToString(tp, ManagedSymbolDigits())         + ",";
       posJson += "\"profit\":"        + DoubleToString(profit, 2)           + ",";
       posJson += "\"openTime\":"      + IntegerToString((long)posInfo.Time()) + ",";
       posJson += "\"signalId\":\""    + posType + "_" + IntegerToString(ticket) + "\"";
@@ -1620,9 +1634,9 @@ void ConfirmTradeOpen(string signalId, long ticket, string type, double lots, do
    body += "\"symbol\":\""     + g_symbol                        + "\",";
    body += "\"type\":\""       + type                            + "\",";
    body += "\"lots\":"         + DoubleToString(lots, 2)         + ",";
-   body += "\"openPrice\":"    + DoubleToString(openPrice, _Digits) + ",";
-   body += "\"stopLoss\":"     + DoubleToString(sl, _Digits)     + ",";
-   body += "\"takeProfit\":"   + DoubleToString(tp, _Digits)     + ",";
+   body += "\"openPrice\":"    + DoubleToString(openPrice, ManagedSymbolDigits()) + ",";
+   body += "\"stopLoss\":"     + DoubleToString(sl, ManagedSymbolDigits())     + ",";
+   body += "\"takeProfit\":"   + DoubleToString(tp, ManagedSymbolDigits())     + ",";
    body += "\"openTime\":"     + IntegerToString((long)TimeCurrent() * 1000)  + ",";
    body += "\"signalId\":\""   + signalId                        + "\"";
    if (g_apiToken != "") body += ",\"token\":\"" + g_apiToken + "\"";
