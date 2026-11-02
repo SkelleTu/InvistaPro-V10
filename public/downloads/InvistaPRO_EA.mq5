@@ -772,6 +772,12 @@ int ManagedSymbolDigits()
    return (int)SymbolInfoInteger(g_symbol, SYMBOL_DIGITS);
 }
 
+string PriceActionStateKey(string prefix, long identifier)
+{
+   return prefix + "_" + IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN))
+          + "_" + IntegerToString(identifier);
+}
+
 // Derive volume precision from the broker-supported volume step.
 int VolumeDigitsFromStep()
 {
@@ -835,7 +841,7 @@ void PersistPriceActionPositionState()
       ulong ticket = posInfo.Ticket();
       double initialRisk = MathAbs(posInfo.PriceOpen() - posInfo.StopLoss());
       if (initialRisk <= 0.0) continue;
-      string riskKey = "InvistaPA_R_" + IntegerToString((long)ticket);
+      string riskKey = PriceActionStateKey("InvistaPA_R", (long)ticket);
       if (!GlobalVariableCheck(riskKey)) GlobalVariableSet(riskKey, initialRisk);
    }
 }
@@ -1272,8 +1278,8 @@ void MonitorOpenPositions()
        // These controls run locally and never depend on AI availability.
        if (IsPriceActionEnabled() && sl > 0 && tp > 0)
        {
-          string riskKey = "InvistaPA_R_" + IntegerToString((long)ticket);
-          string partialKey = "InvistaPA_TP1_" + IntegerToString((long)ticket);
+          string riskKey = PriceActionStateKey("InvistaPA_R", (long)ticket);
+          string partialKey = PriceActionStateKey("InvistaPA_TP1", (long)ticket);
           double initialRisk = GlobalVariableCheck(riskKey) ? GlobalVariableGet(riskKey) : 0.0;
           if (initialRisk <= 0.0 && MathAbs(openPrice - sl) > SymbolInfoDouble(g_symbol, SYMBOL_POINT) * 2.0)
           {
@@ -1488,7 +1494,7 @@ bool IsPositionIdentifierOpen(ulong positionId)
 bool ReportClosedPosition(ulong positionId)
 {
    if (positionId == 0 || IsPositionIdentifierOpen(positionId)) return false;
-   string closedKey = "InvistaPA_CLOSED_" + IntegerToString((long)positionId);
+   string closedKey = PriceActionStateKey("InvistaPA_CLOSED", (long)positionId);
    if (GlobalVariableCheck(closedKey)) return true;
    if (!HistorySelectByPosition(positionId)) return false;
 
@@ -1599,7 +1605,7 @@ void SyncClosedTradeReports()
       if (entry != DEAL_ENTRY_OUT && entry != DEAL_ENTRY_OUT_BY && entry != DEAL_ENTRY_INOUT) continue;
       ulong positionId = (ulong)HistoryDealGetInteger(deal, DEAL_POSITION_ID);
       if (positionId == 0 || IsPositionIdentifierOpen(positionId)) continue;
-      string key = "InvistaPA_CLOSED_" + IntegerToString((long)positionId);
+      string key = PriceActionStateKey("InvistaPA_CLOSED", (long)positionId);
       if (GlobalVariableCheck(key)) continue;
       bool exists = false;
       for (int j = 0; j < ArraySize(positionIds); j++) if (positionIds[j] == positionId) { exists = true; break; }
