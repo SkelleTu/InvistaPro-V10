@@ -40,6 +40,7 @@ double g_dayStartEquity = 0;
 int g_tradesToday = 0;
 int g_consecutiveLosses = 0;
 int g_losingTradesToday = 0;
+bool g_dailyLedgerReady = false;
 datetime g_approvedPatternTime = 0;
 int g_approvedSide = 0; // 1 buy, -1 sell
 double g_approvedTrigger = 0;
@@ -466,6 +467,8 @@ double ReconstructDayStartEquity(datetime dayStart) {
    return baseline>0 ? baseline : 0;
 }
 
+bool RebuildDailyLossCountersFromLedger();
+
 bool DailyRiskAllowed() {
    // Daily limits use Brasília calendar day, independent of broker server timezone.
    datetime nowBrt=TimeGMT()-3*60*60;
@@ -495,7 +498,7 @@ bool DailyRiskAllowed() {
       if(GlobalVariableCheck(key+"_E")) g_dayStartEquity=GlobalVariableGet(key+"_E");
    }
    if(TimeCurrent()<g_pauseUntil || g_tradesToday>=InpMaxTradesPerDay || g_losingTradesToday>=InpMaxLosingTradesPerDay) return false;
-   if(g_dayStartEquity<=0) return false;
+   if(g_dayStartEquity<=0 || !g_dailyLedgerReady) return false;
    double dd=(g_dayStartEquity-AccountInfoDouble(ACCOUNT_EQUITY))/g_dayStartEquity*100.0;
    return dd<InpDailyLossLimitPercent && g_consecutiveLosses<InpMaxConsecutiveLosses;
 }
@@ -662,8 +665,7 @@ bool ExecuteSetupLocked(Setup &s) {
       return false;
    }
    // Count every accepted order response before slippage checks; ambiguous fills stay fail-closed.
-   g_tradesToday++;
-   PersistDailyState();
+   // Filled entry deals are counted once by the durable PA_ENTRY ledger.
    double fillPrice=trade.ResultPrice();
    double maxSlippage=InpMaxSlippagePoints>0 ? InpMaxSlippagePoints*_Point : ATR(PERIOD_M15)*0.10;
    if(fillPrice<=0 || maxSlippage<=0 || MathAbs(fillPrice-s.entry)>maxSlippage) {
@@ -780,8 +782,15 @@ bool RebuildDailyLossCountersFromLedger() {
    string prefix="PA_CLOSED_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_";
    datetime closeTimes[];
    double pnls[];
+   int tradesToday=0;
+   string entryPrefix="PA_ENTRY_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_";
    for(int i=GlobalVariablesTotal()-1;i>=0;i--) {
       string name=GlobalVariableName(i);
+      if(StringFind(name,entryPrefix)==0) {
+         datetime entryAt=(datetime)GlobalVariableGet(name);
+         if(entryAt>=serverDayStart && entryAt<=TimeCurrent()) tradesToday++;
+         continue;
+      }
       if(StringFind(name,prefix)!=0) continue;
       datetime closedAt=(datetime)GlobalVariableGet(name);
       if(closedAt<serverDayStart || closedAt>TimeCurrent()) continue;
@@ -801,6 +810,7 @@ bool RebuildDailyLossCountersFromLedger() {
          }
       }
    }
+   g_tradesToday=tradesToday;
    g_losingTradesToday=0;
    g_consecutiveLosses=0;
    g_pauseUntil=0;
@@ -814,6 +824,7 @@ bool RebuildDailyLossCountersFromLedger() {
          g_consecutiveLosses=0;
       }
    }
+   g_dailyLedgerReady=true;
    return true;
 }
 
@@ -864,6 +875,13 @@ void ProcessPendingDeals() {
 
       if(isEntry) {
          GlobalVariableSet(trackKey,1.0);
+         string entryKey="PA_ENTRY_"+account+"_"+(string)positionId;
+         if(!GlobalVariableCheck(entryKey)) GlobalVariableSet(entryKey,(double)TimeCurrent());
+         if(!RebuildDailyLossCountersFromLedger()) {
+            ReleaseDailyLock();
+            continue;
+         }
+         PersistDailyState();
       } else if(!PositionIdentifierOpen(positionId)) {
          string closedKey="PA_CLOSED_"+account+"_"+(string)positionId;
          string closedPnlKey="PA_CLOSED_PNL_"+account+"_"+(string)positionId;
@@ -898,6 +916,7 @@ void ProcessPendingDeals() {
          GlobalVariableDel(trackKey);
          GlobalVariableDel(PartialKey(positionId));
          GlobalVariableDel("PA_RISK_"+account+"_"+(string)positionId);
+         GlobalVariableDel(entryKey); // the durable PA_ENTRY ledger remains for daily trade reconstruction
          PersistDailyState();
       }
       GlobalVariableSet(dealGuard,(double)TimeCurrent());
@@ -954,6 +973,10 @@ int OnInit() {
    if(!SymbolSelect(_Symbol,true)) return INIT_FAILED;
    CleanupOldDealGuards();
    DailyRiskAllowed(); // initialize the daily key before any transaction callback can persist state
+   if(!RebuildDailyLossCountersFromLedger())
+      Print("Ledger diário ainda não foi reconciliado; novas entradas permanecerão bloqueadas.");
+   else
+      PersistDailyState();
    trade.SetExpertMagicNumber(InpMagic);
    g_lastM5Bar=iTime(_Symbol,PERIOD_M5,0);
    EventSetTimer(1);
