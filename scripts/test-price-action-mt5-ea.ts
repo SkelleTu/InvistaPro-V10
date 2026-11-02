@@ -120,6 +120,9 @@ assert.ok(ea.includes('GlobalVariableDel("PA_CLOSED_PNL_"+account+"_"+positionId
 assert.ok(ea.includes('DailyRiskAllowed(); // initialize the daily key before any transaction callback can persist state'), 'Daily state must initialize during EA startup');
 
 assert.ok(ea.includes('GlobalVariableSetOnCondition'), 'Concurrent chart instances must serialize entry attempts with an atomic risk lock');
+assert.ok(ea.includes('bool HasSymbolExposureOrPendingOrder()'), 'The EA must detect both open positions and pending orders on its chart symbol');
+assert.ok(ea.includes('if(HasSymbolExposureOrPendingOrder())'), 'Duplicate entry attempts must be rechecked inside the shared account-wide entry lock');
+
 assert.ok(ea.includes('PendingDealPrefix()'), 'Trade callbacks must persist pending accounting work for restart recovery');
 assert.ok(ea.includes('trade.PositionModify(positionTicket,'), 'Ticket-based position protection must be used across charts');
 assert.ok(ea.includes('GlobalVariableGet(dealGuard)!=0.0'), 'Persistent deal guard must skip only events already fully processed');
