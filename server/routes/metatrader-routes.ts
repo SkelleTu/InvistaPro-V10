@@ -2405,6 +2405,15 @@ router.post('/price-action/review', mt5EaTokenAccess, async (req: Request, res: 
 });
 
 
+/** Authenticated heartbeat for the independent broker-neutral EA. Telemetry only. */
+router.post('/price-action/heartbeat', mt5EaTokenAccess, (req: Request, res: Response) => {
+  const symbol = String(req.body?.symbol ?? '').trim();
+  if (!symbol || symbol.length > 64 || symbol.split('').some(char => char.charCodeAt(0) < 32)) {
+    return res.status(400).json({ ok: false, error: 'Símbolo inválido.' });
+  }
+  return res.json({ ok: true, symbol, receivedAt: Date.now(), execution: 'not_requested' });
+});
+
 /** Dedicated broker-neutral Price Action EA download. Girassol download is untouched. */
 router.get('/download-price-action-ea', mt5DashboardAccess, async (req: Request, res: Response) => {
   try {
