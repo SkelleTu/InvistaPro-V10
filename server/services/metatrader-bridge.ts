@@ -1664,7 +1664,7 @@ class MetaTraderBridge extends EventEmitter {
       else this.status.dailyLoss += Math.abs(trade.profit);
       if (trade.profit > breakevenTolerance) this.status.dailyWins++;
       else if (trade.profit < -breakevenTolerance) this.status.dailyLosses++;
-      else this.status.dailyBreakeven++;
+      else this.status.dailyBreakeven = (this.status.dailyBreakeven ?? 0) + 1;
     }
     const classifiedTrades = this.status.dailyWins + this.status.dailyLosses;
     this.status.winRate = classifiedTrades > 0 ? (this.status.dailyWins / classifiedTrades) * 100 : 0;
