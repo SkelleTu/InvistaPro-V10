@@ -93,6 +93,10 @@ assert.ok((approvedSetup.riskReward ?? 0) >= 2, 'Approved setup must retain at l
 
 assert.equal(arePriceActionFramesFresh({ ...freshFrames, H4: freshFrame(14_400).map((c, i, a) => ({ ...c, time: i === a.length - 1 ? Math.floor(now / 1000) - 24 * 3600 : c.time })) }, now), false, 'A stale H4 candle must block the setup');
 assert.equal(arePriceActionFramesFresh({ H4: freshFrames.H4, H1: freshFrames.H1, M15: freshFrames.M15 }, now), false, 'Missing M5 and M1 data must block freshness validation');
+assert.equal(arePriceActionFramesFresh({
+ ...freshFrames,
+ M5: freshFrame(300).map((c, i, a) => ({ ...c, time: i === a.length - 1 ? Math.floor(now / 1000) - 3600 : c.time })),
+}, now), false, 'A stale supplied M5 frame must not be bypassed by fresh M1 candles');
 const duplicateTime = freshFrame(300);
 duplicateTime[duplicateTime.length - 1].time = duplicateTime[duplicateTime.length - 2].time;
 assert.equal(evaluatePriceActionSetup({ H4: freshFrames.H4, H1: freshFrames.H1, M15: freshFrames.M15, M5: duplicateTime }).approved, false, 'Duplicate/out-of-order candle timestamps must be rejected');
