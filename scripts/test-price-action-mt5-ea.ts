@@ -37,6 +37,8 @@ assert.ok(ea.includes('InpMaxSlippagePoints'), 'EA must expose a broker-configur
 assert.ok(ea.includes('trade.ResultPrice()'), 'EA must validate the actual execution price after fill');
 assert.ok(ea.includes('SYMBOL_TRADE_TICK_SIZE'), 'Prices must align to broker tick size');
 assert.ok(ea.includes('PersistDailyState'), 'Daily circuit-breaker state must persist across EA restarts');
+assert.ok(ea.includes('ReconstructDayStartEquity'), 'Daily drawdown baseline must be reconstructed from history or fail closed');
+assert.ok(ea.includes('Baseline de equity diário não pode ser reconstruído'), 'Uncertain daily drawdown baseline must block new entries');
 assert.ok(ea.includes('InpMaxLosingTradesPerDay = 3'), 'Three losing trades must stop entries for the day');
 assert.ok(ea.includes('g_losingTradesToday>=InpMaxLosingTradesPerDay'), 'Daily losing-trade circuit breaker must be enforced');
 assert.ok(ea.includes('DEAL_POSITION_ID'), 'Partial exit PnL must be aggregated by position before counting losses');
