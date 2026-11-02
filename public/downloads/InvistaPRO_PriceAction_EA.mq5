@@ -181,6 +181,13 @@ bool RequestAIReview(int side,double trigger,double invalidation,datetime patter
    string body="{\"token\":\""+InpApiToken+"\",\"symbol\":\""+_Symbol+"\",\"phase\":\"ENTRY\",";
    body+="\"direction\":\""+direction+"\",\"triggerPrice\":"+DoubleToString(trigger,_Digits)+",";
    body+="\"invalidationPrice\":"+DoubleToString(invalidation,_Digits)+",\"patternTime\":"+(string)(long)patternTime+",";
+   MqlTick marketTick; if(!SymbolInfoTick(_Symbol,marketTick)) return false;
+   body+="\"context\":{\"spread\":"+DoubleToString(marketTick.ask-marketTick.bid,_Digits)+",";
+   body+="\"riskPercent\":"+DoubleToString(InpRiskPercent,2)+",\"maxStopPercent\":"+DoubleToString(InpMaxStopPercent,2)+",";
+   body+="\"estimatedRoundTripCostPercent\":"+DoubleToString(InpEstimatedRoundTripCostPercent,3)+",";
+   body+="\"accountEquity\":"+DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY),2)+",";
+   body+="\"freeMargin\":"+DoubleToString(AccountInfoDouble(ACCOUNT_MARGIN_FREE),2)+",";
+   body+="\"tradesToday\":"+(string)g_tradesToday+",\"consecutiveLosses\":"+(string)g_consecutiveLosses+"},";
    body+="\"frames\":{\"H4\":"+h4+",\"H1\":"+h1+",\"M15\":"+m15+",\"M5\":"+m5+",\"M1\":"+m1+"}}";
    char data[],result[];
    string headers="Content-Type: application/json\r\n";
