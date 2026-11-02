@@ -460,6 +460,51 @@ export default function MetaTraderPage() {
     }
   };
 
+  const downloadAuraEA = async () => {
+    try {
+      const response = await fetch('/downloads/InvistaPRO_V10_Aura_MT5_v1_50.mq5', {
+        method: 'GET',
+        credentials: 'same-origin',
+        headers: { Accept: 'text/plain, application/octet-stream' },
+      });
+      if (!response.ok) {
+        throw new Error(`O servidor não disponibilizou o InvistaPRO V10 Aura (HTTP ${response.status}).`);
+      }
+
+      const blob = await response.blob();
+      if (blob.size < 1000) {
+        throw new Error('O arquivo Aura retornado está vazio ou incompleto.');
+      }
+      const source = await blob.text();
+      if (!source.includes('#property version   "1.50"') ||
+          !source.includes('InvistaPRO V10 Aura - Price Action EA for MetaTrader 5')) {
+        throw new Error('O arquivo recebido não corresponde ao InvistaPRO V10 Aura v1.50.');
+      }
+
+      const verifiedBlob = new Blob([source], { type: 'text/plain;charset=utf-8' });
+      const objectUrl = URL.createObjectURL(verifiedBlob);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = 'InvistaPRO_V10_Aura_MT5_v1_50.mq5';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+
+      toast({
+        title: 'InvistaPRO V10 Aura v1.50 baixado!',
+        description: 'EA autônomo de Price Action. Instale em MQL5/Experts, compile no MetaEditor (F7) e teste primeiro em conta DEMO.',
+        duration: 8000,
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Falha no download do Aura',
+        description: error?.message || 'Não foi possível acessar o arquivo do EA Aura.',
+        variant: 'destructive',
+      });
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background p-4 md:p-6">
       <div className="max-w-7xl mx-auto space-y-6">
@@ -549,7 +594,11 @@ export default function MetaTraderPage() {
             </div>
             <Button onClick={downloadEA} data-testid="button-download-ea" className="gap-2">
               <Download className="h-4 w-4" />
-              Baixar EA v8.0
+              EA tradicional v8.1
+            </Button>
+            <Button onClick={downloadAuraEA} data-testid="button-download-aura-ea" className="gap-2" variant="outline">
+              <Download className="h-4 w-4" />
+              V10 Aura v1.50
             </Button>
           </div>
         </div>
@@ -2489,10 +2538,9 @@ export default function MetaTraderPage() {
                     </Button>
                   </div>
                 </div>
-                <Button onClick={downloadEA} className="w-full gap-2" data-testid="button-download-ea-config">
-                  <Download className="h-4 w-4" />
-                  ⬇ Baixar InvistaPRO EA v8.0
-                </Button>
+                <p className="text-xs text-muted-foreground">
+                  Use os dois botões no topo da página: o tradicional mantém a integração com IA; o V10 Aura baixa o EA autônomo de Price Action.
+                </p>
               </CardContent>
             </Card>
           </TabsContent>
