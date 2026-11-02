@@ -442,8 +442,10 @@ void ManageOpenPosition() {
    double volume=PositionGetDouble(POSITION_VOLUME);
    MqlTick tick; if(!SymbolInfoTick(_Symbol,tick)) return;
    double price=side==1 ? tick.bid : tick.ask;
-   double risk=MathAbs(open-stop);
+   string riskKey="PA_RISK_"+(string)ticket;
+   double risk=GlobalVariableCheck(riskKey) ? GlobalVariableGet(riskKey) : MathAbs(open-stop);
    if(risk<=0) return;
+   if(!GlobalVariableCheck(riskKey)) GlobalVariableSet(riskKey,risk);
    double rNow=(side==1 ? price-open : open-price)/risk;
    if(rNow>=1.0) {
       double be=NormalizeDouble(open,_Digits);
@@ -492,6 +494,8 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,const MqlTradeRequest &
             g_pauseUntil=TimeCurrent()+InpPauseMinutesAfterLosses*60;
       } else if(cumulative>0) g_consecutiveLosses=0;
       GlobalVariableDel(pnlKey);
+      GlobalVariableDel(PartialKey(positionId));
+      GlobalVariableDel("PA_RISK_"+(string)positionId);
       PersistDailyState();
    }
 }
