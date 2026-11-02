@@ -248,6 +248,10 @@ void ReviewOpenPositionAI() {
    body+="\"direction\":\""+direction+"\",\"currentPrice\":"+DoubleToString(currentPrice,_Digits)+",";
    body+="\"currentStop\":"+DoubleToString(currentStop,_Digits)+",\"takeProfit\":"+DoubleToString(takeProfit,_Digits)+",";
    body+="\"lastMaterialEventAt\":"+(string)(long)TimeCurrent()+",";
+   body+="\"context\":{\"spread\":"+DoubleToString(tick.ask-tick.bid,_Digits)+",";
+   body+="\"estimatedRoundTripCostPercent\":"+DoubleToString(InpEstimatedRoundTripCostPercent,3)+",";
+   body+="\"accountEquity\":"+DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY),2)+",";
+   body+="\"freeMargin\":"+DoubleToString(AccountInfoDouble(ACCOUNT_MARGIN_FREE),2)+"},";
    body+="\"frames\":{\"H4\":"+h4+",\"H1\":"+h1+",\"M15\":"+m15+",\"M5\":"+m5+",\"M1\":"+m1+"}}";
    char data[],result[]; StringToCharArray(body,data,0,StringLen(body),CP_UTF8);
    string headers="Content-Type: application/json\r\n",responseHeaders;
