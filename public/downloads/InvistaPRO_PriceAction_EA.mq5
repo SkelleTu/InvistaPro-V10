@@ -323,6 +323,16 @@ bool SpreadAllowed() {
    return cap>0 && (t.ask-t.bid)<=cap;
 }
 
+double NormalizeTradePrice(double price,int side,bool isStop) {
+   double tickSize=SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_SIZE);
+   if(tickSize<=0) tickSize=_Point;
+   double units=price/tickSize;
+   // Round protective stop away from market and target in the favorable direction.
+   if(isStop) units=(side==1 ? MathFloor(units) : MathCeil(units));
+   else units=(side==1 ? MathCeil(units) : MathFloor(units));
+   return NormalizeDouble(units*tickSize,_Digits);
+}
+
 double NormalizeVolume(double volume) {
    double step=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_STEP);
    double minv=SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN);
@@ -369,16 +379,29 @@ bool BuildSetup(int side,double trigger,Setup &s) {
    double netRisk=risk+cost;
    if(reward<=0 || reward/netRisk<InpMinimumRR) return false;
    int stops=(int)SymbolInfoInteger(_Symbol,SYMBOL_TRADE_STOPS_LEVEL);
-   if(MathAbs(entry-stop)<stops*_Point || MathAbs(target-entry)<stops*_Point) return false;
-   s.side=side; s.entry=entry; s.stop=NormalizeDouble(stop,_Digits);
-   s.target=NormalizeDouble(target,_Digits); s.rr=reward/netRisk;
+   int freeze=(int)SymbolInfoInteger(_Symbol,SYMBOL_TRADE_FREEZE_LEVEL);
+   double minDistance=MathMax(stops,freeze)*_Point;
+   if(MathAbs(entry-stop)<minDistance || MathAbs(target-entry)<minDistance) return false;
+   s.side=side; s.entry=entry; s.stop=NormalizeTradePrice(stop,side,true);
+   s.target=NormalizeTradePrice(target,side,false); s.rr=reward/netRisk;
    return true;
 }
 
 bool ExecuteSetup(Setup &s) {
    if(!SpreadAllowed() || !DailyRiskAllowed()) return false;
+   long tradeMode=SymbolInfoInteger(_Symbol,SYMBOL_TRADE_MODE);
+   if(tradeMode==SYMBOL_TRADE_MODE_DISABLED || tradeMode==SYMBOL_TRADE_MODE_CLOSEONLY) return false;
+   if(s.side==1 && tradeMode==SYMBOL_TRADE_MODE_SHORTONLY) return false;
+   if(s.side==-1 && tradeMode==SYMBOL_TRADE_MODE_LONGONLY) return false;
    double volume=RiskVolume(s.side,s.entry,s.stop);
    if(volume<=0) { Print("Lote abaixo do minimo ou risco nao calculavel. Entrada bloqueada."); return false; }
+   ENUM_ORDER_TYPE orderType=s.side==1 ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+   double requiredMargin=0;
+   if(!OrderCalcMargin(orderType,_Symbol,volume,s.entry,requiredMargin) ||
+      requiredMargin<=0 || requiredMargin>AccountInfoDouble(ACCOUNT_MARGIN_FREE)) {
+      Print("Margem insuficiente ou nao calculavel. Entrada bloqueada.");
+      return false;
+   }
    trade.SetExpertMagicNumber(InpMagic);
    trade.SetDeviationInPoints(InpDeviationPoints);
    trade.SetTypeFillingBySymbol(_Symbol);
