@@ -772,6 +772,51 @@ string PendingDealPrefix() {
    return "PA_PENDING_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_";
 }
 
+bool RebuildDailyLossCountersFromLedger() {
+   datetime nowBrt=TimeGMT()-3*60*60;
+   MqlDateTime d; TimeToStruct(nowBrt,d); d.hour=0; d.min=0; d.sec=0;
+   datetime brtStart=StructToTime(d);
+   datetime serverDayStart=brtStart+(TimeTradeServer()-TimeGMT());
+   string prefix="PA_CLOSED_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_";
+   datetime closeTimes[];
+   double pnls[];
+   for(int i=GlobalVariablesTotal()-1;i>=0;i--) {
+      string name=GlobalVariableName(i);
+      if(StringFind(name,prefix)!=0) continue;
+      datetime closedAt=(datetime)GlobalVariableGet(name);
+      if(closedAt<serverDayStart || closedAt>TimeCurrent()) continue;
+      string positionId=StringSubstr(name,StringLen(prefix));
+      string pnlKey="PA_CLOSED_PNL_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+positionId;
+      if(!GlobalVariableCheck(pnlKey)) return false;
+      int n=ArraySize(closeTimes);
+      ArrayResize(closeTimes,n+1); ArrayResize(pnls,n+1);
+      closeTimes[n]=closedAt; pnls[n]=GlobalVariableGet(pnlKey);
+   }
+   // Sort the small daily ledger chronologically to reconstruct consecutive losses.
+   for(int i=0;i<ArraySize(closeTimes);i++) {
+      for(int j=i+1;j<ArraySize(closeTimes);j++) {
+         if(closeTimes[j]<closeTimes[i]) {
+            datetime t=closeTimes[i]; closeTimes[i]=closeTimes[j]; closeTimes[j]=t;
+            double p=pnls[i]; pnls[i]=pnls[j]; pnls[j]=p;
+         }
+      }
+   }
+   g_losingTradesToday=0;
+   g_consecutiveLosses=0;
+   g_pauseUntil=0;
+   for(int i=0;i<ArraySize(pnls);i++) {
+      if(pnls[i]<0) {
+         g_losingTradesToday++;
+         g_consecutiveLosses++;
+         if(g_consecutiveLosses>=InpMaxConsecutiveLosses)
+            g_pauseUntil=closeTimes[i]+InpPauseMinutesAfterLosses*60;
+      } else if(pnls[i]>0) {
+         g_consecutiveLosses=0;
+      }
+   }
+   return true;
+}
+
 void ProcessPendingDeals() {
    string prefix=PendingDealPrefix();
    // Pending deal markers are persistent, so a terminal restart cannot silently
@@ -821,6 +866,7 @@ void ProcessPendingDeals() {
          GlobalVariableSet(trackKey,1.0);
       } else if(!PositionIdentifierOpen(positionId)) {
          string closedKey="PA_CLOSED_"+account+"_"+(string)positionId;
+         string closedPnlKey="PA_CLOSED_PNL_"+account+"_"+(string)positionId;
          if(!GlobalVariableCheck(closedKey)) {
             // Reconstruct the entire position result from history, not from the
             // order in which partial-exit callbacks happen to be processed.
@@ -834,26 +880,25 @@ void ProcessPendingDeals() {
                             HistoryDealGetDouble(positionDeal,DEAL_COMMISSION)+
                             HistoryDealGetDouble(positionDeal,DEAL_FEE);
                }
+               // Persist the PnL first, then the close timestamp. A pending event
+               // can resume safely if the terminal stops between these writes.
+               GlobalVariableSet(closedPnlKey,totalPnl);
                GlobalVariableSet(closedKey,(double)TimeCurrent());
-               if(totalPnl<0) {
-                  g_losingTradesToday++;
-                  g_consecutiveLosses++;
-                  if(g_consecutiveLosses>=InpMaxConsecutiveLosses)
-                     g_pauseUntil=TimeCurrent()+InpPauseMinutesAfterLosses*60;
-               } else if(totalPnl>0) {
-                  g_consecutiveLosses=0;
-               }
-               GlobalVariableDel(trackKey);
-               GlobalVariableDel(PartialKey(positionId));
-               GlobalVariableDel("PA_RISK_"+account+"_"+(string)positionId);
-               PersistDailyState();
             } else {
-               // History may not be synchronized yet. Retry without consuming
-               // the event guard, otherwise a loss could disappear silently.
                ReleaseDailyLock();
                continue;
             }
          }
+         // Rebuild from the durable position ledger instead of incrementing
+         // local counters. Replaying an interrupted callback cannot double-count.
+         if(!RebuildDailyLossCountersFromLedger()) {
+            ReleaseDailyLock();
+            continue;
+         }
+         GlobalVariableDel(trackKey);
+         GlobalVariableDel(PartialKey(positionId));
+         GlobalVariableDel("PA_RISK_"+account+"_"+(string)positionId);
+         PersistDailyState();
       }
       GlobalVariableSet(dealGuard,(double)TimeCurrent());
       GlobalVariableDel(pendingName);
