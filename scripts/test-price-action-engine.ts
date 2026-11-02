@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { evaluatePriceActionSetup, validateAIEntryReview, validateAIStopAdjustment, type Candle } from '../server/services/price-action-engine';
+import { arePriceActionFramesFresh, evaluatePriceActionSetup, validateAIEntryReview, validateAIStopAdjustment, type Candle } from '../server/services/price-action-engine';
 
 const candles = (count: number, start: number, step: number): Candle[] => Array.from({length:count},(_,i)=>{
  const open=start+i*step, close=open+step*0.7;
@@ -35,4 +35,29 @@ assert.equal(validateAIStopAdjustment('BUY',95,94,100),false,'BUY stop may not w
 assert.equal(validateAIStopAdjustment('BUY',95,97,100),true,'BUY stop may tighten protection');
 assert.equal(validateAIStopAdjustment('SELL',105,106,100),false,'SELL stop may not widen risk');
 assert.equal(validateAIStopAdjustment('SELL',105,103,100),true,'SELL stop may tighten protection');
+
+const now = Date.parse('2026-11-02T12:00:00Z');
+const freshFrame = (seconds: number, count = 40): Candle[] => Array.from({ length: count }, (_, index) => {
+ const close = 100 + Math.sin(index / 2) * 0.5;
+ return { time: Math.floor(now / 1000) - seconds * (count - index), open: close - 0.1, high: close + 0.2, low: close - 0.2, close, volume: 100 + index };
+});
+const freshFrames = {
+ H4: freshFrame(14_400), H1: freshFrame(3_600), M15: freshFrame(900),
+ M5: freshFrame(300), M1: freshFrame(60),
+};
+assert.equal(arePriceActionFramesFresh(freshFrames, now), true, 'All closed timeframe candles inside the freshness window should pass');
+assert.equal(arePriceActionFramesFresh({ ...freshFrames, H4: freshFrame(14_400).map((c, i, a) => ({ ...c, time: i === a.length - 1 ? Math.floor(now / 1000) - 24 * 3600 : c.time })) }, now), false, 'A stale H4 candle must block the setup');
+assert.equal(arePriceActionFramesFresh({ H4: freshFrames.H4, H1: freshFrames.H1, M15: freshFrames.M15 }, now), false, 'Missing M5 and M1 data must block freshness validation');
+const duplicateTime = freshFrame(300);
+duplicateTime[duplicateTime.length - 1].time = duplicateTime[duplicateTime.length - 2].time;
+assert.equal(evaluatePriceActionSetup({ H4: freshFrames.H4, H1: freshFrames.H1, M15: freshFrames.M15, M5: duplicateTime }).approved, false, 'Duplicate/out-of-order candle timestamps must be rejected');
+
+const approvedFixture = {
+ action: 'BUY' as const, approved: true, reasons: [], checks: {}, entry: 100, stopLoss: 99, takeProfit: 102,
+ riskReward: 2, features: {},
+};
+assert.equal(validateAIEntryReview(approvedFixture, { decision: 'approved', direction: 'BUY', confidence: 0.8 }).approved, true, 'AI can approve a valid setup only with matching direction and >=70% confidence');
+assert.equal(validateAIEntryReview(approvedFixture, { decision: 'approved', direction: 'SELL', confidence: 0.99 }).approved, false, 'AI cannot reverse a deterministic setup');
+assert.equal(validateAIEntryReview(approvedFixture, { decision: 'approved', direction: 'BUY', confidence: 70 }).approved, false, 'AI confidence must be normalized to a 0-1 fraction');
+
 console.log('Price Action engine policy tests passed.');
