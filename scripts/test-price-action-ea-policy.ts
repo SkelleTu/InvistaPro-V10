@@ -9,6 +9,8 @@ assert.ok(ea.includes('strategyMode\\":\\"PRICE_ACTION'), 'Dedicated EA must exp
 assert.ok(ea.includes('priceActionUseAIReview\\":false'), 'Dedicated EA must run the deterministic strategy without legacy AI/Girassol review');
 assert.ok(!ea.includes('SendMarketDataForSyntheticGirassol();'), 'Dedicated EA must not call the legacy Girassol market-data channel');
 assert.ok(!ea.includes('ScanChartIndicators();'), 'Dedicated EA must not scan legacy chart indicators');
+assert.ok(!ea.includes('SendMarketDataForSyntheticGirassol') && !ea.includes('ReadStructuredIndicatorSignals') && !ea.includes('ScanChartIndicators'), 'Dedicated Price Action EA source must not contain the unused Girassol/Fibonacci indicator pipeline');
+assert.ok(!ea.includes('g_assetProfileLoaded') && !ea.includes('g_marketDataSeconds'), 'Dedicated EA must not retain unused legacy asset-profile or synthetic-candle state');
 assert.ok(legacyEa.includes('#property version   "8.1"'), 'Legacy Girassol EA must retain its original downloadable source/version');
 assert.ok(ea.includes('priceActionUseAIReview'), 'EA must transmit the selected Price Action mode to the server');
 assert.ok(ea.includes('requestAccountType'), 'EA must transmit its actual terminal account mode on each signal request');
