@@ -260,7 +260,8 @@ bool RequestAIReview(int side,double trigger,double invalidation,datetime patter
    body+="\"invalidationPrice\":"+DoubleToString(invalidation,_Digits)+",\"patternTime\":"+(string)(long)patternTime+",";
    MqlTick marketTick; if(!SymbolInfoTick(_Symbol,marketTick)) return false;
    body+="\"context\":{\"spread\":"+DoubleToString(marketTick.ask-marketTick.bid,_Digits)+",";
-   body+="\"riskPercent\":"+DoubleToString(InpRiskPercent,2)+",\"maxStopPercent\":"+DoubleToString(InpMaxStopPercent,2)+",\"marketRegime\":\""+(Trend(PERIOD_H4)==0?"RANGE":"TREND")+"\",";
+   body+="\"brokerUtcOffsetSeconds\":"+(string)(long)(TimeCurrent()-TimeGMT())+",";
+   body+="\"riskPercent\":"+DoubleToString(InpRiskPercent,2)+",\"maxStopPercent\":"+DoubleToString(InpMaxStopPercent,2)+",\"marketRegime\":\""+(Trend(PERIOD_H4)==0?"RANGE":"TREND")+"\",
    body+="\"estimatedRoundTripCostPercent\":"+DoubleToString(InpEstimatedRoundTripCostPercent,3)+",";
    body+="\"accountEquity\":"+DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY),2)+",";
    body+="\"freeMargin\":"+DoubleToString(AccountInfoDouble(ACCOUNT_MARGIN_FREE),2)+",";
@@ -331,7 +332,8 @@ void ReviewOpenPositionAI() {
    body+="\"direction\":\""+direction+"\",\"currentPrice\":"+DoubleToString(currentPrice,_Digits)+",";
    body+="\"currentStop\":"+DoubleToString(currentStop,_Digits)+",\"takeProfit\":"+DoubleToString(takeProfit,_Digits)+",";
    body+="\"lastMaterialEventAt\":"+(string)(long)TimeCurrent()+",";
-   body+="\"context\":{\"spread\":"+DoubleToString(tick.ask-tick.bid,_Digits)+",";
+   body+="\"context\":{\"brokerUtcOffsetSeconds\":"+(string)(long)(TimeCurrent()-TimeGMT())+",";
+   body+="\"spread\":"+DoubleToString(tick.ask-tick.bid,_Digits)+",
    body+="\"estimatedRoundTripCostPercent\":"+DoubleToString(InpEstimatedRoundTripCostPercent,3)+",";
    body+="\"accountEquity\":"+DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY),2)+",";
    body+="\"freeMargin\":"+DoubleToString(AccountInfoDouble(ACCOUNT_MARGIN_FREE),2)+"},";
