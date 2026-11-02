@@ -715,19 +715,35 @@ void ManageOpenPosition() {
 void OnTradeTransaction(const MqlTradeTransaction &trans,const MqlTradeRequest &request,const MqlTradeResult &result) {
    if(trans.type!=TRADE_TRANSACTION_DEAL_ADD || trans.deal==0) return;
    if(!HistoryDealSelect(trans.deal)) return;
-   if((long)HistoryDealGetInteger(trans.deal,DEAL_MAGIC)!=InpMagic) return;
-   string dealGuard="PA_DEAL_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+(string)trans.deal;
+   long entry=(long)HistoryDealGetInteger(trans.deal,DEAL_ENTRY);
+   ulong positionId=(ulong)HistoryDealGetInteger(trans.deal,DEAL_POSITION_ID);
+   if(positionId==0) return;
+   string account=(string)AccountInfoInteger(ACCOUNT_LOGIN);
+   string trackKey="PA_TRACK_"+account+"_"+(string)positionId;
+   string dealComment=HistoryDealGetString(trans.deal,DEAL_COMMENT);
+   bool isPriceActionEntry=entry==DEAL_ENTRY_IN && StringFind(dealComment,"InvistaPRO PA")>=0;
+   bool isTrackedExit=(entry==DEAL_ENTRY_OUT || entry==DEAL_ENTRY_OUT_BY) && GlobalVariableCheck(trackKey);
+   if(!isPriceActionEntry && !isTrackedExit) return;
+
+   // One terminal-global guard makes every chart instance account-wide and idempotent,
+   // even when users assign different magic numbers to different Price Action charts.
+   string dealGuard="PA_DEAL_"+account+"_"+(string)trans.deal;
    if(!GlobalVariableCheck(dealGuard)) GlobalVariableSet(dealGuard,0.0);
    if(!GlobalVariableSetOnCondition(dealGuard,(double)TimeCurrent(),0.0)) return;
-   long entry=(long)HistoryDealGetInteger(trans.deal,DEAL_ENTRY);
-   if(entry!=DEAL_ENTRY_OUT && entry!=DEAL_ENTRY_OUT_BY) return;
-   ulong positionId=(ulong)HistoryDealGetInteger(trans.deal,DEAL_POSITION_ID);
-   string pnlKey="PA_PNL_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+(string)positionId;
+
+   // Include opening commission/fees as well as every partial/final closing deal.
+   // A position is counted only after it is completely closed.
+   string pnlKey="PA_PNL_"+account+"_"+(string)positionId;
    double cumulative=GlobalVariableCheck(pnlKey) ? GlobalVariableGet(pnlKey) : 0.0;
    cumulative+=HistoryDealGetDouble(trans.deal,DEAL_PROFIT)+HistoryDealGetDouble(trans.deal,DEAL_SWAP)+
                HistoryDealGetDouble(trans.deal,DEAL_COMMISSION)+HistoryDealGetDouble(trans.deal,DEAL_FEE);
    GlobalVariableSet(pnlKey,cumulative);
-   // Partial exits are aggregated; only count the trade after its position is fully closed.
+
+   if(isPriceActionEntry) {
+      GlobalVariableSet(trackKey,1.0);
+      return;
+   }
+
    if(!PositionIdentifierOpen(positionId)) {
       if(cumulative<0) {
          g_losingTradesToday++;
@@ -736,12 +752,12 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,const MqlTradeRequest &
             g_pauseUntil=TimeCurrent()+InpPauseMinutesAfterLosses*60;
       } else if(cumulative>0) g_consecutiveLosses=0;
       GlobalVariableDel(pnlKey);
+      GlobalVariableDel(trackKey);
       GlobalVariableDel(PartialKey(positionId));
-      GlobalVariableDel("PA_RISK_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+(string)positionId);
+      GlobalVariableDel("PA_RISK_"+account+"_"+(string)positionId);
       PersistDailyState();
    }
 }
-
 void OnInitHeartbeat() {
    if(InpHeartbeatSeconds<=0 || TimeCurrent()-g_lastHeartbeat<InpHeartbeatSeconds) return;
    g_lastHeartbeat=TimeCurrent();
@@ -763,7 +779,7 @@ void CleanupOldDealGuards() {
 }
 
 int OnInit() {
-   if(InpRiskPercent<=0 || InpRiskPercent>2.0 || InpMaxStopPercent<=0 || InpMaxStopPercent>1.5 || InpMinimumRR<2.0 || InpEstimatedRoundTripCostPercent<0 || InpEstimatedRoundTripCostPercent>2.0 || InpDailyLossLimitPercent<=0 || InpDailyLossLimitPercent>10.0 || InpMaxTradesPerDay<1 || InpMaxTradesPerDay>5 || InpMaxConsecutiveLosses<1 || InpMaxLosingTradesPerDay<1 || InpPauseMinutesAfterLosses<1 || InpMarginReserveMultiplier<1.0 || InpMarginReserveMultiplier>5.0) {
+   if(InpRiskPercent<1.0 || InpRiskPercent>2.0 || InpMaxStopPercent<=0 || InpMaxStopPercent>1.5 || InpMinimumRR<2.0 || InpEstimatedRoundTripCostPercent<0 || InpEstimatedRoundTripCostPercent>2.0 || InpDailyLossLimitPercent<=0 || InpDailyLossLimitPercent>10.0 || InpMaxTradesPerDay<1 || InpMaxTradesPerDay>5 || InpMaxConsecutiveLosses<1 || InpMaxLosingTradesPerDay<1 || InpPauseMinutesAfterLosses<1 || InpMarginReserveMultiplier<1.0 || InpMarginReserveMultiplier>5.0) {
       Print("Configuracao de risco invalida. EA bloqueado."); return INIT_PARAMETERS_INCORRECT;
    }
    if(!IsDemoAccount()) {
