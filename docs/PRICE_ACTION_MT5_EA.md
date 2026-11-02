@@ -35,6 +35,7 @@ The EA does not let AI create an entry or bypass local risk gates.
 - Break-even at +1R; one 50% partial at +1.5R; structural trailing from +2R.
 - AI position reviews run on a material move (0.5 M15 ATR) or a 15-minute heartbeat. AI may HOLD, request one partial, tighten a stop or request a close. It cannot widen a stop.
 - Initial R distance and daily circuit-breaker state are persisted in MT5 terminal Global Variables.
+- If the EA is attached mid-day, it reconstructs the day's starting balance from deal history; if a position was carried across midnight or history is incomplete, new entries fail closed.
 
 ## Cost configuration
 
