@@ -53,10 +53,18 @@ assert.ok(ea.includes('InpMaxSlippagePoints'), 'EA must expose a broker-configur
 assert.ok(ea.includes('trade.ResultPrice()'), 'EA must validate the actual execution price after fill');
 assert.ok(ea.includes('SYMBOL_TRADE_TICK_SIZE'), 'Prices must align to broker tick size');
 assert.ok(ea.includes('PersistDailyState'), 'Daily circuit-breaker state must persist across EA restarts');
+assert.ok(ea.includes('GlobalVariableSet(pending,(double)TimeCurrent())'), 'Trade transaction events must be queued persistently');
+assert.ok(ea.includes('ProcessPendingDeals()'), 'Queued deal accounting must be retried by the timer');
+assert.ok(ea.includes('GlobalVariableSet(dealGuard,0.0)'), 'Persistent deal guards must survive terminal restarts');
+assert.ok(ea.includes('GlobalVariableSet(dealGuard,(double)TimeCurrent())'), 'Deal guard must be committed only after accounting side effects');
+assert.ok(ea.includes('HistorySelectByPosition(positionId)'), 'Final position PnL must be reconstructed from all position deals');
+assert.ok(ea.includes('PA_CLOSED_'), 'Closed-position accounting must be idempotent by position identifier');
+assert.ok(ea.includes('DailyRiskAllowed(); // initialize the daily key before any transaction callback can persist state'), 'Daily state must initialize during EA startup');
+
 assert.ok(ea.includes('GlobalVariableSetOnCondition'), 'Concurrent chart instances must serialize entry attempts with an atomic risk lock');
-assert.ok(ea.includes('GlobalVariableTemp(dealGuard)'), 'Deal guard creation must not overwrite a concurrent chart claim');
+assert.ok(ea.includes('PendingDealPrefix()'), 'Trade callbacks must persist pending accounting work for restart recovery');
 assert.ok(ea.includes('trade.PositionModify(positionTicket,'), 'Ticket-based position protection must be used across charts');
-assert.ok(ea.includes('GlobalVariableSetOnCondition(dealGuard,(double)TimeCurrent(),0.0)'), 'Deal callbacks must be atomically deduplicated across chart instances');
+assert.ok(ea.includes('GlobalVariableSetOnCondition(dealGuard,(double)TimeCurrent(),0.0)'), 'Persistent deal accounting guard must be atomically claimed under the shared daily lock');
 assert.ok(ea.includes('CleanupOldDealGuards'), 'Deal deduplication guards must be periodically cleaned up');
 assert.ok(ea.includes('return "PA_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+TimeToString(g_dayStart,TIME_DATE);'), 'Daily risk state must be shared across Price Action chart instances on the same account');
 assert.ok(ea.includes('DailyRiskAllowed() || !AcquireDailyLock()'), 'Entry must acquire the shared daily risk lock before sending an order');
@@ -70,8 +78,8 @@ assert.ok(ea.includes('GlobalVariableTemp(key)'), 'Shared lock initialization mu
 assert.ok(ea.includes('GlobalVariableSetOnCondition(key,0.0,g_dailyLockToken)'), 'A chart must release only the lock token it owns');
 assert.ok(ea.includes('g_dailyLockToken=token'), 'Shared execution lock must retain an ownership token');
 assert.ok(ea.includes('PA_TRACK_'), 'Account-wide loss accounting must track Price Action positions independent of chart magic number');
-assert.ok(ea.includes('StringFind(dealComment,"InvistaPRO PA")>=0'), 'Price Action entry tracking must identify the EA order comment');
-assert.ok(ea.includes('DEAL_COMMISSION)+HistoryDealGetDouble(trans.deal,DEAL_FEE)'), 'Net trade PnL must include entry and exit commissions/fees');
+assert.ok(ea.includes('StringFind(comment,"InvistaPRO PA")>=0'), 'Price Action entry tracking must identify the EA order comment');
+assert.ok(ea.includes('DEAL_COMMISSION)+\n                            HistoryDealGetDouble(positionDeal,DEAL_FEE)'), 'Net trade PnL must include every deal commission and fee for the position');
 assert.ok(ea.includes('InpRiskPercent<1.0 || InpRiskPercent>2.0'), 'EA risk input must stay within the documented 1%-2% range');
 assert.ok(ea.includes('if(!IsDemoAccount())'), 'This validation build must block non-DEMO accounts');
 assert.ok(!ea.toLowerCase().includes('binance'), 'EA strategy must not depend on Binance');
