@@ -1407,18 +1407,7 @@ void MonitorOpenPositions()
    }
 }
 
-//+------------------------------------------------------------------+
-//| Evento: mudança no gráfico (add/remove de indicadores)           |
-//+------------------------------------------------------------------+
-void OnChartEvent(const int id, const long &lparam, const double &dparam, const string &sparam)
-{
-   if (id == CHARTEVENT_CHART_CHANGE)
-   {
-      Print("🔄 Mudança no gráfico — re-escaneando indicadores...");
-      ScanChartIndicators();
-      FetchAssetProfile();
-   }
-}
+// Chart changes do not trigger legacy indicator scans in the Price Action EA.
 
 //+------------------------------------------------------------------+
 //| Heartbeat                                                         |
