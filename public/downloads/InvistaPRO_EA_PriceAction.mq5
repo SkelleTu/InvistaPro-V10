@@ -38,27 +38,23 @@ input int      SignalSeconds    = 5;           // Intervalo de busca de sinal (s
 input int      MagicNumber      = 20261102;    // Número mágico
 input bool     AutoReconnect    = true;        // Reconexão automática de URL
 input int      MaxReconnectTries= 5;           // Tentativas máximas de reconexão
-input int      IndicatorBars    = 5;           // Quantas barras recentes dos indicadores ler
-input int      CandleCount      = 200;         // Candles para enviar à IA (histórico)
-input double   PriceActionRiskPercent = 1.0; // Risco por trade para Price Action (1% a 2%)
+const int      IndicatorBars = 5; // Compatibilidade interna; sem leitura de indicadores no EA novo
+const int      CandleCount = 200; // Compatibilidade interna; candles enviados por timeframe
+input double   PriceActionRiskPercent = 1.0; // Risco por trade: 1% padrão, máximo 2%
+input int      MaxPositions = 1; // Uma posição por símbolo
+input int      WarmupSeconds = 120; // Aquecimento sem operar
+input bool     CloseAtEndOfBrasiliaSession = true; // Não carregar day trades para o dia seguinte
 
-
-//--- Controle de Autonomia da IA
-input ENUM_AI_CONTROL_MODE AIControlMode = AI_FULL; // Modo de Controle da IA
-
-//--- Parâmetros Manuais
-input double   ManualLotSize    = 0.01;  // Lote (manual)
-input int      ManualStopLoss   = 0;     // Stop Loss em pontos — 0 = desativado (manual)
-input int      ManualTakeProfit = 0;     // Take Profit em pontos — 0 = desativado (manual)
-input int      MaxPositions     = 1;     // Máximo de posições abertas simultâneas
-input int      WarmupSeconds   = 120;   // Período de aquecimento (segundos)
-
-//--- Controle Parcial
-input bool     AI_Lote          = true;  // IA define o tamanho do lote
-input bool     AI_StopLoss      = true;  // IA define o Stop Loss
-input bool     AI_TakeProfit    = true;  // IA define o Take Profit
-input bool     AI_Entrada       = true;  // IA decide quando e se entrar
-input bool     AI_Saida         = true;  // IA decide quando sair
+// Compatibilidade com funções legadas mantidas sem execução no EA Price Action.
+const ENUM_AI_CONTROL_MODE AIControlMode = AI_FULL;
+const double ManualLotSize = 0.01;
+const int ManualStopLoss = 0;
+const int ManualTakeProfit = 0;
+const bool AI_Lote = true;
+const bool AI_StopLoss = true;
+const bool AI_TakeProfit = true;
+const bool AI_Entrada = true;
+const bool AI_Saida = true;
 
 //--- Variáveis globais
 string   g_serverUrl      = "";
@@ -72,6 +68,7 @@ int      g_failCount      = 0;
 bool     g_isDiscovering  = false;
 string   g_pendingSignalId= "";
 datetime g_lastClosedTradeSync = 0;
+datetime g_lastSessionCloseAttempt = 0;
 datetime g_lastMonitor    = 0;
 int      g_monitorSeconds = 2;
 datetime g_warmupUntil    = 0;
@@ -137,7 +134,7 @@ int OnInit()
    datetime now = TimeCurrent();
    g_lastSignal      = now;
    g_lastHeartbeat   = now;
-   g_lastMonitor     = now;
+   g_lastMonitor     = TimeLocal();
    g_lastWarmupPrint = now;
    g_lastMarketData  = now;
 
@@ -148,7 +145,7 @@ int OnInit()
 
    Print("🚀 InvistaPRO EA Price Action v1.0 iniciado | Símbolo: ", g_symbol);
    Print("   → URL: ", g_serverUrl);
-   Print("   → CandleCount: ", CandleCount, " | IndicatorBars: ", IndicatorBars);
+   Print("   → Estratégia: Price Action H4/H1/M15/M5/M1 | Risco: ", DoubleToString(PriceActionRiskPercent, 1), "% | Magic: ", MagicNumber);
    if (WarmupSeconds > 0)
       Print("   ⏳ AQUECIMENTO ATIVO: operações bloqueadas por ", WarmupSeconds, "s");
 
@@ -183,6 +180,11 @@ void OnTimer()
 {
    datetime serverNow = TimeCurrent();
    datetime localNow = TimeLocal();
+   if (CountManagedPositions() > 0 && localNow - g_lastMonitor >= g_monitorSeconds)
+   {
+      g_lastMonitor = localNow;
+      MonitorOpenPositions();
+   }
    if (localNow - g_lastClosedTradeSync >= 30)
    {
       g_lastClosedTradeSync = localNow;
@@ -665,9 +667,10 @@ void OnTick()
    // EA Price Action é independente do canal de candles/Girassol legado.
 
    // ── Monitor de posições abertas ────────────────────────────────────────
-   if (CountManagedPositions() > 0 && (now - g_lastMonitor >= g_monitorSeconds))
+   datetime localMonitorNow = TimeLocal();
+   if (CountManagedPositions() > 0 && (localMonitorNow - g_lastMonitor >= g_monitorSeconds))
    {
-      g_lastMonitor = now;
+      g_lastMonitor = localMonitorNow;
       MonitorOpenPositions();
    }
 
@@ -1244,6 +1247,15 @@ void FetchAndProcessSignal()
 //+------------------------------------------------------------------+
 //| Monitor de posições abertas                                       |
 //+------------------------------------------------------------------+
+bool IsPastBrasiliaSessionEnd()
+{
+   // Brasília remains UTC-3; no seasonal DST adjustment is required.
+   datetime brasiliaNow = TimeGMT() - 3 * 3600;
+   MqlDateTime parts;
+   TimeToStruct(brasiliaNow, parts);
+   return parts.day_of_week == 0 || parts.day_of_week == 6 || parts.hour >= 17;
+}
+
 void MonitorOpenPositions()
 {
    string candlesJson = "[]";
@@ -1257,6 +1269,21 @@ void MonitorOpenPositions()
       if (posInfo.Symbol() != g_symbol)   continue;
 
       ulong  ticket    = posInfo.Ticket();
+      if (CloseAtEndOfBrasiliaSession && IsPastBrasiliaSessionEnd())
+      {
+         datetime localNow = TimeLocal();
+         if (localNow - g_lastSessionCloseAttempt >= 10)
+         {
+            g_lastSessionCloseAttempt = localNow;
+            bool closeSent = trade.PositionClose(ticket);
+            uint closeRetcode = trade.ResultRetcode();
+            if (closeSent && closeRetcode == TRADE_RETCODE_DONE && trade.ResultDeal() > 0)
+               Print("⏰ Price Action: posição encerrada no fim da sessão de Brasília. Ticket=", ticket);
+            else
+               Print("⚠️ Price Action: fechamento de fim de sessão não confirmado; SL/TP permanecem ativos. Ticket=", ticket, " retcode=", closeRetcode);
+         }
+         continue;
+      }
       string posType   = posInfo.PositionType() == POSITION_TYPE_BUY ? "BUY" : "SELL";
       double openPrice = posInfo.PriceOpen();
       double curPrice  = posInfo.PriceCurrent();
