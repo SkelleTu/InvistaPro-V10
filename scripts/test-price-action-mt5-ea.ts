@@ -27,6 +27,8 @@ assert.ok(ea.includes('InpEstimatedRoundTripCostPercent'), 'Net RR and sizing mu
 assert.ok(ea.includes('OrderCalcMargin'), 'Entry must validate available margin');
 assert.ok(ea.includes('SYMBOL_TRADE_TICK_SIZE'), 'Prices must align to broker tick size');
 assert.ok(ea.includes('PersistDailyState'), 'Daily circuit-breaker state must persist across EA restarts');
+assert.ok(ea.includes('InpMaxLosingTradesPerDay = 3'), 'Three losing trades must stop entries for the day');
+assert.ok(ea.includes('g_losingTradesToday>=InpMaxLosingTradesPerDay'), 'Daily losing-trade circuit breaker must be enforced');
 assert.ok(ea.includes('DEAL_POSITION_ID'), 'Partial exit PnL must be aggregated by position before counting losses');
 assert.ok(ea.includes('if(!IsDemoAccount())'), 'This validation build must block non-DEMO accounts');
 assert.ok(!ea.toLowerCase().includes('binance'), 'EA strategy must not depend on Binance');
