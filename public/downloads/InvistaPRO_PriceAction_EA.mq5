@@ -202,6 +202,26 @@ bool HasOrderBlockConfluence(int side,double price) {
    return false;
 }
 
+bool HasChangeOfCharacter(int side) {
+   MqlRates r[];
+   if(!GetRates(PERIOD_M15,40,r)) return false;
+   double highs[2],lows[2];
+   int highCount=0,lowCount=0;
+   for(int i=2;i<32 && (highCount<2 || lowCount<2);i++) {
+      bool pivotHigh=r[i].high>r[i-1].high && r[i].high>r[i-2].high &&
+                     r[i].high>=r[i+1].high && r[i].high>=r[i+2].high;
+      bool pivotLow=r[i].low<r[i-1].low && r[i].low<r[i-2].low &&
+                    r[i].low<=r[i+1].low && r[i].low<=r[i+2].low;
+      if(pivotHigh && highCount<2) highs[highCount++]=r[i].high;
+      if(pivotLow && lowCount<2) lows[lowCount++]=r[i].low;
+   }
+   if(highCount<2 || lowCount<2) return false;
+   bool priorBearish=highs[1]>highs[0] && lows[1]>lows[0];
+   bool priorBullish=highs[1]<highs[0] && lows[1]<lows[0];
+   return side==1 ? priorBearish && r[0].close>highs[0]
+                  : priorBullish && r[0].close<lows[0];
+}
+
 bool HasBreakOfStructure(int side) {
    MqlRates r[];
    if(!GetRates(PERIOD_M15,12,r)) return false;
@@ -270,6 +290,7 @@ bool RequestAIReview(int side,double trigger,double invalidation,datetime patter
    body+="\"fvgConfluence\":"+(HasFVGConfluence(side,confluencePrice)?"true":"false")+",";
    body+="\"orderBlockConfluence\":"+(HasOrderBlockConfluence(side,confluencePrice)?"true":"false")+",";
    body+="\"breakOfStructure\":"+(HasBreakOfStructure(side)?"true":"false")+",";
+   body+="\"changeOfCharacter\":"+(HasChangeOfCharacter(side)?"true":"false")+",";
    body+="\"tradesToday\":"+(string)g_tradesToday+",\"consecutiveLosses\":"+(string)g_consecutiveLosses+"},";
    body+="\"frames\":{\"H4\":"+h4+",\"H1\":"+h1+",\"M15\":"+m15+",\"M5\":"+m5+",\"M1\":"+m1+"}}";
    char data[],result[];
