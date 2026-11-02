@@ -218,6 +218,8 @@ export interface MT5Status {
   dailyLoss: number;
   dailyWins: number;
   dailyLosses: number;
+  dailyTrades?: number;
+  dailyBreakeven?: number;
   winRate: number;
   activeSignal: MT5Signal | null;
   recentTrades: MT5TradeResult[];
@@ -1652,18 +1654,20 @@ class MetaTraderBridge extends EventEmitter {
     this.status.dailyLoss = 0;
     this.status.dailyWins = 0;
     this.status.dailyLosses = 0;
+    this.status.dailyTrades = 0;
+    this.status.dailyBreakeven = 0;
+    const breakevenTolerance = Math.max(1e-8, (this.status.lastBalance || this.status.lastEquity || 1) * 1e-6);
     for (const trade of this.recentTrades) {
       if (this.getBrasiliaDateKey(trade.closeTime) !== today) continue;
-      if (trade.profit > 0) {
-        this.status.dailyProfit += trade.profit;
-        this.status.dailyWins++;
-      } else {
-        this.status.dailyLoss += Math.abs(trade.profit);
-        this.status.dailyLosses++;
-      }
+      this.status.dailyTrades++;
+      if (trade.profit > 0) this.status.dailyProfit += trade.profit;
+      else this.status.dailyLoss += Math.abs(trade.profit);
+      if (trade.profit > breakevenTolerance) this.status.dailyWins++;
+      else if (trade.profit < -breakevenTolerance) this.status.dailyLosses++;
+      else this.status.dailyBreakeven++;
     }
-    const total = this.status.dailyWins + this.status.dailyLosses;
-    this.status.winRate = total > 0 ? (this.status.dailyWins / total) * 100 : 0;
+    const classifiedTrades = this.status.dailyWins + this.status.dailyLosses;
+    this.status.winRate = classifiedTrades > 0 ? (this.status.dailyWins / classifiedTrades) * 100 : 0;
     this.saveBridgeState();
   }
 
@@ -1751,17 +1755,17 @@ class MetaTraderBridge extends EventEmitter {
         for (const t of this.recentTrades) {
           const tradeDate = this.getBrasiliaDateKey(t.closeTime);
           if (tradeDate === today) {
-            if (t.profit > 0) {
-              this.status.dailyProfit += t.profit;
-              this.status.dailyWins++;
-            } else {
-              this.status.dailyLoss += Math.abs(t.profit);
-              this.status.dailyLosses++;
-            }
+            this.status.dailyTrades = (this.status.dailyTrades ?? 0) + 1;
+            if (t.profit > 0) this.status.dailyProfit += t.profit;
+            else this.status.dailyLoss += Math.abs(t.profit);
+            const tolerance = Math.max(1e-8, (this.status.lastBalance || this.status.lastEquity || 1) * 1e-6);
+            if (t.profit > tolerance) this.status.dailyWins++;
+            else if (t.profit < -tolerance) this.status.dailyLosses++;
+            else this.status.dailyBreakeven = (this.status.dailyBreakeven ?? 0) + 1;
           }
         }
-        const total = this.status.dailyWins + this.status.dailyLosses;
-        this.status.winRate = total > 0 ? (this.status.dailyWins / total) * 100 : 0;
+        const classifiedTrades = this.status.dailyWins + this.status.dailyLosses;
+        this.status.winRate = classifiedTrades > 0 ? (this.status.dailyWins / classifiedTrades) * 100 : 0;
       }
 
       // Restore config state
@@ -1945,6 +1949,8 @@ class MetaTraderBridge extends EventEmitter {
       dailyLoss: 0,
       dailyWins: 0,
       dailyLosses: 0,
+      dailyTrades: 0,
+      dailyBreakeven: 0,
       winRate: 0,
       activeSignal: null,
       recentTrades: [],
@@ -2049,6 +2055,8 @@ class MetaTraderBridge extends EventEmitter {
         ['dailyLoss', this.status.dailyLoss],
         ['dailyWins', this.status.dailyWins],
         ['dailyLosses', this.status.dailyLosses],
+        ['dailyTrades', this.status.dailyTrades ?? 0],
+        ['dailyBreakeven', this.status.dailyBreakeven ?? 0],
       ];
       const stmt = sqlite.prepare(`
         INSERT INTO mt5_bridge_state (key, value, updated_at)
@@ -4616,24 +4624,28 @@ class MetaTraderBridge extends EventEmitter {
     if (this.recentTrades.length > 100) this.recentTrades.pop();
     this.saveTradeToDB(result);
 
-    if (result.profit > 0) {
-      this.status.dailyProfit += result.profit;
+    const breakevenTolerance = Math.max(1e-8, (this.status.lastBalance || this.status.lastEquity || 1) * 1e-6);
+    this.status.dailyTrades = (this.status.dailyTrades ?? 0) + 1;
+    if (result.profit > 0) this.status.dailyProfit += result.profit;
+    else this.status.dailyLoss += Math.abs(result.profit);
+
+    if (result.profit > breakevenTolerance) {
       this.status.dailyWins++;
-      this.consecutiveLosses = 0; // Reset ao ganhar
-    } else {
-      this.status.dailyLoss += Math.abs(result.profit);
+      this.consecutiveLosses = 0;
+    } else if (result.profit < -breakevenTolerance) {
       this.status.dailyLosses++;
       this.consecutiveLosses++;
-
-      // Circuit breaker: pausa após perdas consecutivas
       if (this.consecutiveLosses >= this.MAX_CONSECUTIVE_LOSSES) {
         this.circuitBreakerUntil = Date.now() + this.CIRCUIT_BREAKER_MS;
         console.log(`[MT5Bridge] 🛑 Circuit Breaker ativado após ${this.consecutiveLosses} perdas consecutivas — pausa de 1 hora`);
       }
+    } else {
+      this.status.dailyBreakeven = (this.status.dailyBreakeven ?? 0) + 1;
+      this.consecutiveLosses = 0;
     }
 
-    const total = this.status.dailyWins + this.status.dailyLosses;
-    this.status.winRate = total > 0 ? (this.status.dailyWins / total) * 100 : 0;
+    const classifiedTrades = this.status.dailyWins + this.status.dailyLosses;
+    this.status.winRate = classifiedTrades > 0 ? (this.status.dailyWins / classifiedTrades) * 100 : 0;
 
     this.saveBridgeState();
     this.emit('trade_closed', result);
