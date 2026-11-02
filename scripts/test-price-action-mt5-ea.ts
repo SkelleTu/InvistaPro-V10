@@ -53,6 +53,10 @@ assert.ok(ea.includes('ClosePartialPosition'), 'Partial exits must be abstracted
 assert.ok(ea.includes('ACCOUNT_MARGIN_MODE_RETAIL_HEDGING'), 'Partial exits must support hedging accounts');
 assert.ok(ea.includes('PA partial reduction'), 'Partial exits must reduce netting accounts with an opposite deal');
 assert.ok(ea.includes('GlobalVariableCheck(partialKey)'), 'The deterministic partial exit must happen at most once per position');
+assert.ok(ea.includes('bool hasPartialExit=false'), 'Partial-exit state must be reconstructed from broker history after a restart');
+assert.ok(ea.includes('GlobalVariableSet(PartialKey(positionId),1.0)'), 'A recovered partial close must restore the per-position partial guard');
+assert.ok(ea.includes('GlobalVariablesFlush();') && ea.includes('GlobalVariableSet(partialKey,1.0)'), 'Scale-out guards must be flushed immediately after accepted partial closes');
+
 assert.ok(ea.includes('realizedR>=1.5'), 'AI-requested partial exits must not happen before the strategy 1.5R trigger');
 assert.ok(ea.includes('plannedPartialPercent\\":50') && ea.includes('plannedPartialTriggerR\\":1.5'), 'AI context must receive the planned scale-out and 1.5R trigger');
 assert.ok(ea.includes('ReviewOpenPositionAI'), 'Open positions must receive event-driven AI reviews');
