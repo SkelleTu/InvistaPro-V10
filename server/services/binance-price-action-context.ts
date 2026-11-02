@@ -1,6 +1,6 @@
 import type { BinanceMarket } from './binance-price-action-feed';
 import type { MarketContext } from './price-action-engine';
-import { getHighImpactNewsStatus, isAllowedBrasiliaTradingSession } from './price-action-context';
+import { buildTrustedPriceActionContext, getHighImpactNewsStatus, isAllowedBrasiliaTradingSession } from './price-action-context';
 
 export interface PriceActionAccountRiskProvider {
   /** Must account for daily loss, consecutive losses, open risk and confirmed DEMO/testnet account mode. */
@@ -50,9 +50,12 @@ export class BinancePriceActionContextProvider {
       this.riskProvider.isRiskWithinLimits(symbol),
     ]);
 
+    const trusted = buildTrustedPriceActionContext({
+      bid, ask, entryPrice: mid, riskLimitOk, newsBlocked: news.blocked || !news.valid,
+      sessionOpen: isAllowedBrasiliaTradingSession(),
+    });
     return {
-      spread,
-      maxSpread: mid * 0.0005,
+      ...trusted,
       estimatedRoundTripCost,
       highImpactNewsBlocked: news.blocked || !news.valid,
       riskLimitOk: riskLimitOk === true,
