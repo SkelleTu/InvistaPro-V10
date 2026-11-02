@@ -259,21 +259,21 @@ void ReviewOpenPositionAI() {
                            : proposed<=currentStop && proposed>currentPrice;
       if(tighter && proposed>0) {
          proposed=NormalizeDouble(proposed,_Digits);
-         if(trade.PositionModify(_Symbol,proposed,takeProfit))
+         if(trade.PositionModify(_Symbol,proposed,takeProfit) && TradeRequestSucceeded())
             Print("IA apertou stop protetivo. Stop nunca e ampliado.");
       }
    } else if(action=="TAKE_PARTIAL") {
-      string key="PA_PARTIAL_"+(string)ticket;
+      string key=PartialKey(ticket);
       if(!GlobalVariableCheck(key) && PositionSelect(_Symbol)) {
          double volume=PositionGetDouble(POSITION_VOLUME);
          double partial=NormalizeVolume(volume*0.5);
-         if(partial>0 && partial<volume && trade.PositionClosePartial(_Symbol,partial))
+         if(partial>0 && partial<volume && trade.PositionClosePartial(_Symbol,partial) && TradeRequestSucceeded())
             GlobalVariableSet(key,1.0);
       }
    } else if(action=="CLOSE") {
       string reason=JsonString(response,"closeReason");
       if(StringLen(reason)>0 && PositionSelect(_Symbol))
-         if(trade.PositionClose(_Symbol)) Print("IA recomendou encerramento: ",reason);
+         if(trade.PositionClose(_Symbol) && TradeRequestSucceeded()) Print("IA recomendou encerramento: ",reason);
    }
 }
 
@@ -363,9 +363,17 @@ bool ExecuteSetup(Setup &s) {
    return true;
 }
 
+bool TradeRequestSucceeded() {
+   uint code=trade.ResultRetcode();
+   return code==TRADE_RETCODE_DONE || code==TRADE_RETCODE_PLACED || code==TRADE_RETCODE_DONE_PARTIAL;
+}
+
+string PartialKey(ulong ticket) { return "PA_PARTIAL_"+(string)ticket; }
+
 void ManageOpenPosition() {
    if(!PositionSelect(_Symbol)) return;
    if((long)PositionGetInteger(POSITION_MAGIC)!=InpMagic) return;
+   ulong ticket=(ulong)PositionGetInteger(POSITION_TICKET);
    long type=PositionGetInteger(POSITION_TYPE);
    int side=type==POSITION_TYPE_BUY ? 1 : -1;
    double open=PositionGetDouble(POSITION_PRICE_OPEN);
@@ -380,11 +388,15 @@ void ManageOpenPosition() {
    if(rNow>=1.0) {
       double be=NormalizeDouble(open,_Digits);
       bool tighter=side==1 ? be>stop : stop==0 || be<stop;
-      if(tighter) trade.PositionModify(_Symbol,be,target);
+      if(tighter && trade.PositionModify(_Symbol,be,target) && TradeRequestSucceeded())
+         Print("Stop movido para break-even em +1R.");
    }
-   if(rNow>=1.5 && volume>SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN)*1.5) {
+   string partialKey=PartialKey(ticket);
+   if(rNow>=1.5 && !GlobalVariableCheck(partialKey) &&
+      volume>SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN)*1.5) {
       double closeVol=NormalizeVolume(volume*0.5);
-      if(closeVol>0 && closeVol<volume) trade.PositionClosePartial(_Symbol,closeVol);
+      if(closeVol>0 && closeVol<volume && trade.PositionClosePartial(_Symbol,closeVol) && TradeRequestSucceeded())
+         GlobalVariableSet(partialKey,1.0);
    }
    // Trailing only tightens behind confirmed closed M15 swing points.
    if(rNow>=2.0) {
@@ -394,7 +406,8 @@ void ManageOpenPosition() {
          for(int i=2;i<6;i++) candidate=side==1 ? MathMin(candidate,r[i].low) : MathMax(candidate,r[i].high);
          candidate=NormalizeDouble(candidate,_Digits);
          bool tighter=side==1 ? candidate>stop && candidate<price : candidate<stop && candidate>price;
-         if(tighter) trade.PositionModify(_Symbol,candidate,target);
+         if(tighter && trade.PositionModify(_Symbol,candidate,target) && TradeRequestSucceeded())
+            Print("Trailing stop estrutural apertado.");
       }
    }
 }
