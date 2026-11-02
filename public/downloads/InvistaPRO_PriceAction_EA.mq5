@@ -11,7 +11,6 @@
 
 input string InpServerURL = "https://invista-pro-v10-kzlv.onrender.com";
 input string InpApiToken = "";
-input bool   InpRequireAIApproval = true;
 input double InpRiskPercent = 1.0;
 input double InpMaxStopPercent = 1.5;
 input double InpMinimumRR = 2.0;
@@ -24,11 +23,9 @@ input int    InpPauseMinutesAfterLosses = 60;
 input double InpDailyLossLimitPercent = 3.0;
 input int    InpDeviationPoints = 30;
 input int    InpHeartbeatSeconds = 30;
-input bool   InpUseSessionFilter = false; // Crypto trades 24/7; enable only if desired
 
 CTrade trade;
 datetime g_lastM5Bar = 0;
-datetime g_lastM1Bar = 0;
 datetime g_lastHeartbeat = 0;
 datetime g_lastPositionAIReview = 0;
 double g_lastPositionAIReference = 0;
@@ -42,7 +39,6 @@ datetime g_approvedPatternTime = 0;
 int g_approvedSide = 0; // 1 buy, -1 sell
 double g_approvedTrigger = 0;
 double g_approvedInvalidation = 0;
-bool g_aiUnavailable = false;
 
 struct Setup {
    int side;
@@ -176,10 +172,9 @@ string JsonString(string body,string key) {
 }
 
 bool RequestAIReview(int side,double trigger,double invalidation,datetime patternTime) {
-   if(!InpRequireAIApproval) return true;
    string h4=FrameJSON(PERIOD_H4),h1=FrameJSON(PERIOD_H1),m15=FrameJSON(PERIOD_M15),
           m5=FrameJSON(PERIOD_M5),m1=FrameJSON(PERIOD_M1);
-   if(h4=="" || h1=="" || m15=="" || m5=="" || m1=="") { g_aiUnavailable=true; return false; }
+   if(h4=="" || h1=="" || m15=="" || m5=="" || m1=="") { return false; }
    string direction=side==1 ? "BUY" : "SELL";
    string body="{\"token\":\""+InpApiToken+"\",\"symbol\":\""+_Symbol+"\",\"phase\":\"ENTRY\",";
    body+="\"direction\":\""+direction+"\",\"triggerPrice\":"+DoubleToString(trigger,_Digits)+",";
@@ -190,10 +185,9 @@ bool RequestAIReview(int side,double trigger,double invalidation,datetime patter
    StringToCharArray(body,data,0,StringLen(body),CP_UTF8);
    string responseHeaders;
    int code=WebRequest("POST",InpServerURL+"/api/mt5/price-action/review",headers,25000,data,result,responseHeaders);
-   if(code!=200) { g_aiUnavailable=true; Print("Price Action AI indisponivel: HTTP ",code); return false; }
+   if(code!=200) { Print("Price Action AI indisponivel: HTTP ",code); return false; }
    string response=CharArrayToString(result,0,-1,CP_UTF8);
    bool approved=JsonString(response,"decision")=="APPROVE" && JsonString(response,"direction")==direction;
-   g_aiUnavailable=!approved;
    return approved;
 }
 
@@ -216,7 +210,7 @@ double JsonNumber(string body,string key) {
 }
 
 void ReviewOpenPositionAI() {
-   if(!InpRequireAIApproval || !PositionSelect(_Symbol)) return;
+   if(!PositionSelect(_Symbol)) return;
    if((long)PositionGetInteger(POSITION_MAGIC)!=InpMagic) return;
    ulong ticket=(ulong)PositionGetInteger(POSITION_IDENTIFIER);
    long type=PositionGetInteger(POSITION_TYPE);
@@ -520,7 +514,6 @@ int OnInit() {
    if(!SymbolSelect(_Symbol,true)) return INIT_FAILED;
    trade.SetExpertMagicNumber(InpMagic);
    g_lastM5Bar=iTime(_Symbol,PERIOD_M5,0);
-   g_lastM1Bar=iTime(_Symbol,PERIOD_M1,0);
    EventSetTimer(1);
    Print("InvistaPRO Price Action EA v1.0 iniciado. Broker-neutral | Simbolo do grafico: ",_Symbol);
    Print("Estratégia independente do provedor de cotações. Timeframes: H4/H1/M15/M5/M1.");
