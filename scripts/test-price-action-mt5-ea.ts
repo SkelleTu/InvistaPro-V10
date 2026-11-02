@@ -53,6 +53,11 @@ assert.ok(ea.includes('beforeVolume-closeVolume<minVolume-step*0.25'), 'Netting 
 assert.ok(ea.includes('bool samePosition='), 'Netting partial reductions must verify the same position identifier after execution');
 assert.ok(ea.includes('bool reduced=afterVolume>0 && afterVolume<beforeVolume-step*0.25'), 'Netting partial reductions must verify that volume actually decreased');
 assert.ok(ea.includes('bool HasPendingDealEvents()'), 'Unreconciled trade events must block new entries');
+assert.ok(ea.includes('PA_RESERVE_'), 'Accepted orders without immediate deal callbacks must reserve a daily trade slot');
+assert.ok(ea.includes('GlobalVariableSet(trackKey,1.0)'), 'Confirmed fills must be registered before releasing the shared daily lock');
+assert.ok(ea.includes('if(reservedAt>=serverDayStart && reservedAt<=TimeCurrent()) tradesToday++'), 'Daily trade cap must include accepted orders awaiting a deal callback');
+assert.ok(ea.includes('GlobalVariableDel("PA_RESERVE_"+account+"_"+(string)orderId)'), 'Broker-history reconciliation must release filled-order reservations');
+
 assert.ok(ea.includes('!g_dailyLedgerReady || HasPendingDealEvents()'), 'Daily risk gate must fail closed while the trade ledger is pending');
 assert.ok(ea.includes('headers,5000,data,result,responseHeaders)'), 'Position AI review must not block local protection for 25 seconds');
 
