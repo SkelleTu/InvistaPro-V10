@@ -68,4 +68,9 @@ assert.ok(page.includes('button-download-price-action-ea'), 'Dashboard must expo
 assert.ok(page.includes('/api/mt5/download-price-action-ea'), 'Dashboard must use the independent download route');
 assert.ok(ai.includes('reviewPriceActionSnapshot'), 'Price Action AI provider must call the existing ensemble');
 
+assert.ok(ea.includes(String.raw`body+="\"riskPercent\":`), 'Entry AI JSON risk fields must use valid string concatenation');
+assert.ok(ea.includes(String.raw`body+="\"spread\":`), 'Position AI JSON spread field must use valid string concatenation');
+assert.ok(!ea.includes('marketRegime\\\",\n   body+='), 'Market regime JSON string must not contain a broken multiline literal');
+assert.ok(!ea.includes('tick.ask-tick.bid,_Digits)+",\n   body+='), 'Position spread JSON string must not contain a broken multiline literal');
+
 console.log('Broker-neutral Price Action EA static policy checks passed. MetaEditor compilation and DEMO execution remain separate gates.');
