@@ -208,6 +208,17 @@ string BuildTimeframeCandlesJson(ENUM_TIMEFRAMES timeframe, int count)
    return BuildCandlesJson(rates, copied);
 }
 
+string BuildMultiTimeframeJson()
+{
+   string h4 = BuildTimeframeCandlesJson(PERIOD_H4, 80);
+   string h1 = BuildTimeframeCandlesJson(PERIOD_H1, 80);
+   string m15 = BuildTimeframeCandlesJson(PERIOD_M15, 80);
+   string m5 = BuildTimeframeCandlesJson(PERIOD_M5, 120);
+   string m1 = BuildTimeframeCandlesJson(PERIOD_M1, 120);
+   return "{\"H4\":" + h4 + ",\"H1\":" + h1 + ",\"M15\":" + m15 +
+          ",\"M5\":" + m5 + ",\"M1\":" + m1 + "}";
+}
+
 //+------------------------------------------------------------------+
 //| OnTick — lógica principal                                         |
 //+------------------------------------------------------------------+
