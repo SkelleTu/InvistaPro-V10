@@ -285,6 +285,19 @@ int ManagedSymbolDigits()
    return (int)SymbolInfoInteger(g_symbol, SYMBOL_DIGITS);
 }
 
+double NormalizeManagedPrice(double price, bool roundUp)
+{
+   if (price <= 0.0) return 0.0;
+   double tickSize = SymbolInfoDouble(g_symbol, SYMBOL_TRADE_TICK_SIZE);
+   if (tickSize <= 0.0) tickSize = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
+   if (tickSize <= 0.0) return 0.0;
+   double units = price / tickSize;
+   double aligned = roundUp
+      ? MathCeil(units - 1e-10) * tickSize
+      : MathFloor(units + 1e-10) * tickSize;
+   return NormalizeDouble(aligned, ManagedSymbolDigits());
+}
+
 datetime BrokerTimeToUtc(datetime brokerTime)
 {
    long brokerUtcOffsetSeconds = (long)TimeCurrent() - (long)TimeGMT();
@@ -395,7 +408,7 @@ double CalculatePriceActionSwingStop(string positionType, double currentStop)
          bool pivot = rates[i].low < rates[i-1].low && rates[i].low < rates[i-2].low
                    && rates[i].low <= rates[i+1].low && rates[i].low <= rates[i+2].low;
          if (!pivot) continue;
-         double candidate = NormalizeDouble(rates[i].low - buffer, ManagedSymbolDigits());
+         double candidate = NormalizeManagedPrice(rates[i].low - buffer, false);
          double bid = SymbolInfoDouble(g_symbol, SYMBOL_BID);
          if (candidate > currentStop && candidate < bid - minimumDistance) return candidate;
       }
@@ -404,7 +417,7 @@ double CalculatePriceActionSwingStop(string positionType, double currentStop)
          bool pivot = rates[i].high > rates[i-1].high && rates[i].high > rates[i-2].high
                    && rates[i].high >= rates[i+1].high && rates[i].high >= rates[i+2].high;
          if (!pivot) continue;
-         double candidate = NormalizeDouble(rates[i].high + buffer, ManagedSymbolDigits());
+         double candidate = NormalizeManagedPrice(rates[i].high + buffer, true);
          double ask = SymbolInfoDouble(g_symbol, SYMBOL_ASK);
          if (candidate < currentStop && candidate > ask + minimumDistance) return candidate;
       }
@@ -530,6 +543,16 @@ void FetchAndProcessSignal()
    double lotSize    = 0.0;
    double stopLoss   = ExtractJsonDouble(resp, "stopLoss");
    double takeProfit = ExtractJsonDouble(resp, "takeProfit");
+   if (action == "BUY")
+   {
+      stopLoss = NormalizeManagedPrice(stopLoss, false);
+      takeProfit = NormalizeManagedPrice(takeProfit, true);
+   }
+   else if (action == "SELL")
+   {
+      stopLoss = NormalizeManagedPrice(stopLoss, true);
+      takeProfit = NormalizeManagedPrice(takeProfit, false);
+   }
    double confidence = ExtractJsonDouble(resp, "confidence");
 
    string slTpSource    = ExtractJsonString(resp, "slTpSource");
@@ -601,7 +624,7 @@ void FetchAndProcessSignal()
    Print("📡 SINAL v1.0: ", action, " | ", g_symbol, " | Confiança: ", confidence, "%");
    if (assetFamily  != "") Print("   Ativo: ", assetFamily, " | ", assetTrend, " | Vol: ", assetVolClass);
    if (slTpSource   != "") Print("   SL/TP via: ", slTpSource);
-   Print("   SL: ", NormalizeDouble(stopLoss, ManagedSymbolDigits()), " | TP: ", NormalizeDouble(takeProfit, ManagedSymbolDigits()));
+   Print("   SL: ", NormalizeManagedPrice(stopLoss, action == "SELL"), " | TP: ", NormalizeManagedPrice(takeProfit, action == "BUY"));
    if (reason != "") Print("   Razão: ", StringSubstr(reason, 0, 150));
    Print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
@@ -734,7 +757,7 @@ void MonitorOpenPositions()
                                       (posType == "SELL" && sl > openPrice);
                 if (needsBreakeven)
                 {
-                   double breakevenSL = NormalizeDouble(openPrice, ManagedSymbolDigits());
+                   double breakevenSL = NormalizeManagedPrice(openPrice, posType == "SELL");
                    bool modifySent = trade.PositionModify(ticket, breakevenSL, tp);
                    uint modifyRetcode = trade.ResultRetcode();
                    if (modifySent && modifyRetcode == TRADE_RETCODE_DONE)
