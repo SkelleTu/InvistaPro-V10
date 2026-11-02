@@ -72,7 +72,10 @@ const makeBullStructure = (seconds: number, withTrigger = false): Candle[] => {
   push(finalLow + 3.5, finalLow + 8, finalLow - 15, finalLow + 7);
   push(finalLow + 7, finalLow + 11, finalLow + 6.5, finalLow + 9.5, 300);
  }
- return candles;
+ return candles.map((candle, index) => ({
+  ...candle,
+  time: Math.floor(now / 1000) - seconds * (candles.length - index),
+ }));
 };
 const positiveFrames = {
  H4: makeBullStructure(14_400),
