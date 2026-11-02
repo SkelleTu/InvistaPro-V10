@@ -17,7 +17,7 @@ export interface BinanceCandle {
   closed: boolean;
 }
 
-export interface BinanceSnapshot {
+export interface BinancePriceTick { symbol: string; price: number; quantity: number; eventTime: number; }\n\nexport interface BinanceSnapshot {
   market: BinanceMarket;
   symbol: string;
   generatedAt: number;
@@ -66,7 +66,7 @@ function parseStreamKline(k: any): BinanceCandle | null {
 export class BinancePriceActionFeed {
   private sockets: WebSocket[] = [];
   private readonly candles = new Map<string, BinanceCandle[]>();
-  private readonly listeners = new Set<CandleListener>();
+  private readonly listeners = new Set<CandleListener>();\n  private readonly tickListeners = new Set<(tick: BinancePriceTick) => void>();
   private stopped = true;
   private lastMessageAt = 0;
   private reconnectTimer: NodeJS.Timeout | null = null;
@@ -119,8 +119,7 @@ export class BinancePriceActionFeed {
     if (!this.candles.size) throw new Error('Load and validate initial Binance history before starting streams');
     if (!this.stopped) return;
     this.stopped = false;
-    const streams = this.symbols.flatMap(symbol =>
-      PRICE_ACTION_INTERVALS.map(interval => symbol.toLowerCase() + '@kline_' + interval));
+    const streams = this.symbols.flatMap(symbol => [\n      ...PRICE_ACTION_INTERVALS.map(interval => symbol.toLowerCase() + '@kline_' + interval),\n      symbol.toLowerCase() + '@trade',\n    ]);
     this.connectStreams(streams);
   }
 
@@ -165,7 +164,7 @@ export class BinancePriceActionFeed {
     });
   }
 
-  getSnapshot(symbol: string, now = Date.now()): BinanceSnapshot {
+  onPriceTick(listener: (tick: BinancePriceTick) => void): () => void {\n    this.tickListeners.add(listener);\n    return () => this.tickListeners.delete(listener);\n  }\n\n  getSnapshot(symbol: string, now = Date.now()): BinanceSnapshot {
     const normalized = symbol.toUpperCase();
     if (!this.symbols.includes(normalized)) throw new Error('Symbol is not enabled in this feed');
     const frames = {} as Record<BinanceInterval, BinanceCandle[]>;
