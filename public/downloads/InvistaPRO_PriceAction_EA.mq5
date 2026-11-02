@@ -773,6 +773,19 @@ bool ExecuteSetupLocked(Setup &s) {
          GlobalVariablesFlush();
       }
    }
+   if(trade.ResultRetcode()==TRADE_RETCODE_PLACED && fillDealForRisk==0) {
+      ulong pendingOrder=trade.ResultOrder();
+      string reserveKey="PA_RESERVE_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+(string)pendingOrder;
+      if(pendingOrder>0 && trade.OrderDelete(pendingOrder) &&
+         trade.ResultRetcode()==TRADE_RETCODE_DONE) {
+         GlobalVariableDel(reserveKey);
+         GlobalVariablesFlush();
+         Print("Ordem aceita sem preenchimento imediato foi cancelada para preservar os gates de risco.");
+      } else {
+         Print("ALERTA: ordem aceita sem preenchimento imediato; cancelamento não confirmado. Reserva diária mantida e SL/TP enviados ao servidor.");
+      }
+      return false;
+   }
    double fillPrice=trade.ResultPrice();
    double maxSlippage=InpMaxSlippagePoints>0 ? InpMaxSlippagePoints*_Point : ATR(PERIOD_M15)*0.10;
    MqlTick executionQuote;
