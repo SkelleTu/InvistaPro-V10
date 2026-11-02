@@ -9,6 +9,15 @@ assert.ok(ea.includes('priceActionUseAIReview'), 'EA must transmit the selected 
 assert.ok(ea.includes('requestAccountType'), 'EA must transmit its actual terminal account mode on each signal request');
 assert.ok(ea.includes('if (IsPriceActionEnabled() && !PriceActionUseAIReview)'), 'Autonomous mode must not invoke the AI position monitor');
 assert.ok(ea.includes('CalculatePriceActionRiskLot'), 'EA must size Price Action orders from equity and structural stop');
+assert.ok(ea.includes('OrderCalcProfit(orderType, g_symbol, 1.0, entryPrice, stopLoss, oneLotProfit)'), 'Risk sizing must use broker contract economics in account currency');
+assert.ok(ea.includes('OrderCalcMargin(orderType, g_symbol, volume, entryPrice, requiredMargin)'), 'Risk sizing must reject insufficient margin');
+assert.ok(ea.includes('void OnTradeTransaction('), 'EA must reconcile broker deal events for closed-trade accounting');
+assert.ok(ea.includes('SyncClosedTradeReports()'), 'EA must retry closed-trade reporting after temporary HTTP failures');
+assert.ok(ea.includes('DEAL_COMMISSION') && ea.includes('DEAL_SWAP') && ea.includes('DEAL_FEE'), 'Daily risk statistics must use net P&L including trading costs');
+assert.ok(ea.includes('CountSymbolPositions() == 0'), 'EA must not merge a new strategy order into an existing same-symbol position');
+assert.ok(ea.includes('CalculatePriceActionSwingStop'), 'Open positions must trail only by confirmed M5 swing structure');
+assert.ok(ea.includes('SymbolSelect(g_symbol, true)'), 'EA must select and validate the actual chart/override symbol before operating');
+assert.ok(ea.includes('SetTypeFillingBySymbol(g_symbol)'), 'EA must use the broker-supported filling policy');
 assert.ok(ea.includes('riskDistance / entry > 0.015'), 'EA must reject stops wider than 1.5%');
 assert.ok(ea.includes('rewardDistance / riskDistance < 2.0'), 'EA must enforce minimum executable R:R of 1:2');
 assert.ok(ea.includes('breakeven em +1R'), 'EA must manage deterministic breakeven at +1R');
