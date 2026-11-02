@@ -391,6 +391,14 @@ bool DailyRiskAllowed() {
       }
       PersistDailyState();
    }
+   else {
+      string key=DailyStatePrefix();
+      if(GlobalVariableCheck(key+"_T")) g_tradesToday=(int)GlobalVariableGet(key+"_T");
+      if(GlobalVariableCheck(key+"_L")) g_consecutiveLosses=(int)GlobalVariableGet(key+"_L");
+      if(GlobalVariableCheck(key+"_D")) g_losingTradesToday=(int)GlobalVariableGet(key+"_D");
+      if(GlobalVariableCheck(key+"_P")) g_pauseUntil=(datetime)GlobalVariableGet(key+"_P");
+      if(GlobalVariableCheck(key+"_E")) g_dayStartEquity=GlobalVariableGet(key+"_E");
+   }
    if(TimeCurrent()<g_pauseUntil || g_tradesToday>=InpMaxTradesPerDay || g_losingTradesToday>=InpMaxLosingTradesPerDay) return false;
    if(g_dayStartEquity<=0) return false;
    double dd=(g_dayStartEquity-AccountInfoDouble(ACCOUNT_EQUITY))/g_dayStartEquity*100.0;
@@ -494,7 +502,29 @@ bool BuildSetup(int side,double trigger,Setup &s) {
    return true;
 }
 
+string DailyLockKey() { return DailyStatePrefix()+"_LOCK"; }
+
+bool AcquireDailyLock() {
+   string key=DailyLockKey();
+   if(!GlobalVariableCheck(key)) GlobalVariableSet(key,0.0);
+   double observed=GlobalVariableGet(key);
+   datetime now=TimeLocal();
+   if(observed!=0 && now-(datetime)observed<30) return false;
+   return GlobalVariableSetOnCondition(key,(double)now,observed);
+}
+void ReleaseDailyLock() {
+   string key=DailyLockKey();
+   if(GlobalVariableCheck(key)) GlobalVariableSet(key,0.0);
+}
+
 bool ExecuteSetup(Setup &s) {
+   if(!DailyRiskAllowed() || !AcquireDailyLock()) return false;
+   bool executed=ExecuteSetupLocked(s);
+   ReleaseDailyLock();
+   return executed;
+}
+
+bool ExecuteSetupLocked(Setup &s) {
    if(!SpreadAllowed() || !DailyRiskAllowed()) return false;
    long tradeMode=SymbolInfoInteger(_Symbol,SYMBOL_TRADE_MODE);
    if(tradeMode==SYMBOL_TRADE_MODE_DISABLED || tradeMode==SYMBOL_TRADE_MODE_CLOSEONLY) return false;
