@@ -105,7 +105,7 @@ assert.ok(ea.includes('CleanupOldDealGuards'), 'Deal deduplication guards must b
 assert.ok(ea.includes('return "PA_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+TimeToString(g_dayStart,TIME_DATE);'), 'Daily risk state must be shared across Price Action chart instances on the same account');
 assert.ok(ea.includes('DailyRiskAllowed() || !AcquireDailyLock()'), 'Entry must acquire the shared daily risk lock before sending an order');
 assert.ok(ea.includes('ReconstructDayStartEquity'), 'Daily drawdown baseline must be reconstructed from history or fail closed');
-assert.ok(ea.includes('datetime historyFrom=dayStart-90*24*60*60'), 'Daily baseline must inspect recent history for positions closed after crossing midnight');
+assert.ok(ea.includes('if(!HistorySelect(dayStart,TimeCurrent())) return 0;'), 'Daily baseline must inspect today's exits and each affected position full history');
 assert.ok(ea.includes('(lastExit==0 || lastExit>=dayStart)'), 'Overnight exposure must remain fail-closed even after the position is closed');
 
 assert.ok(ea.includes('TimeGMT()-3*60*60'), 'Daily circuit breakers must use the Brasília calendar day, not broker server midnight');
