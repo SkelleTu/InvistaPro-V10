@@ -30,7 +30,8 @@ The primary deliverable is a broker-neutral MetaTrader 5 EA. It reads the select
 - [ ] Verify commission, fees and slippage assumptions against actual DEMO fills and configure cost inputs per broker.
 - [ ] Test restart/reconnect with open positions, partial fills, order rejection, failed stop modification, market closure and lost responses.
 - [ ] Reconcile terminal positions and trade history after reconnect/restart; verify no duplicate entry after ambiguous execution.
-- [ ] Complete deterministic definitions and tests for liquidity sweeps, FVG, Order Blocks, BOS/CHoCH, range-extreme logic and persistent zone lifecycle.
+- [x] Basic range regime detection requires H4/H1/M15 range alignment and permits setups only at M15 extremes; targets are rejected when blocked by a confirmed opposing pivot.
+- [ ] Complete deterministic definitions and tests for liquidity sweeps, FVG, Order Blocks, BOS/CHoCH and persistent zone lifecycle.
 - [ ] Backtest, out-of-sample, replay, fault-injection and DEMO forward evidence.
 - [ ] Review daily drawdown baseline when EA is attached mid-session and shared account-wide risk across multiple charts/magic instances.
 
