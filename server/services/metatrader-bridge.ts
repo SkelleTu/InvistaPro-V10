@@ -1634,9 +1634,10 @@ class MetaTraderBridge extends EventEmitter {
   }
 
   private getBrasiliaDateKey(timestamp = Date.now()): string {
+    const normalizedTimestamp = timestamp > 0 && timestamp < 10_000_000_000 ? timestamp * 1000 : timestamp;
     const parts = new Intl.DateTimeFormat('en-CA', {
       timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit',
-    }).formatToParts(new Date(timestamp));
+    }).formatToParts(new Date(normalizedTimestamp));
     const year = parts.find(part => part.type === 'year')?.value ?? '';
     const month = parts.find(part => part.type === 'month')?.value ?? '';
     const day = parts.find(part => part.type === 'day')?.value ?? '';
@@ -1746,9 +1747,9 @@ class MetaTraderBridge extends EventEmitter {
       if (trades.length > 0) {
         console.log(`[MT5Bridge] 📊 Restaurados ${trades.length} trades recentes do banco de dados`);
         // Recalculate stats from today's trades
-        const today = new Date().toDateString();
+        const today = this.getBrasiliaDateKey();
         for (const t of this.recentTrades) {
-          const tradeDate = new Date(t.closeTime).toDateString();
+          const tradeDate = this.getBrasiliaDateKey(t.closeTime);
           if (tradeDate === today) {
             if (t.profit > 0) {
               this.status.dailyProfit += t.profit;
