@@ -347,10 +347,11 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
     const sym = symbol as string;
     // Crypto strategy symbols must pass the deterministic multi-timeframe gate first.
     // Legacy indicator/AI logic is not allowed to create a bypass around this gate.
-    const normalizedStrategySymbol = sym.toUpperCase().replace(/[^A-Z0-9]/g, '');
-    const isStrategyCrypto = ['BTCUSDT','ETHUSDT','SOLUSDT','BTCUSD','ETHUSD','SOLUSD'].includes(normalizedStrategySymbol);
+    // The EA applies the same deterministic Price Action engine to the chart symbol.
+    // Bitcoin remains the reference calibration asset; eligibility is determined by data and execution gates, not a symbol allowlist.
+    const isPriceActionInstrument = true;
     let priceActionSetup: ReturnType<typeof evaluatePriceActionSetup> | null = null;
-    if (isStrategyCrypto) {
+    if (isPriceActionInstrument) {
       const frames = timeframes && typeof timeframes === 'object' ? timeframes as Partial<Record<'H4'|'H1'|'M15'|'M5'|'M1', Candle[]>> : {};
       // All execution gates are derived on the server. The EA cannot self-assert news clearance,
       // account risk clearance, or a permitted trading session.
@@ -1370,16 +1371,17 @@ router.get('/download-ea', mt5DashboardAccess, async (req: Request, res: Respons
     const eaVersion = content.match(/#property\s+version\s+"([^"]+)"/)?.[1] ?? 'unknown';
     // Fail closed: never serve the legacy generated v2.00 EA when the canonical source is missing/stale.
     const requiredEaMarkers = [
-      '#property version   "8.1"',
+      '#property version   "8.2"',
       'PriceActionRiskPercent = 1.0',
       'PriceActionUseAIReview = true',
       'CopyRates(g_symbol, timeframe, 1, count, rates)',
       'CalculatePriceActionRiskLot',
       'int VolumeDigitsFromStep()',
       'TRADE_RETCODE_DONE_PARTIAL',
+      'bool IsPriceActionEnabled()',
     ];
     const missingEaMarkers = requiredEaMarkers.filter((marker) => !content.includes(marker));
-    if (eaVersion !== '8.1' || missingEaMarkers.length > 0) {
+    if (eaVersion !== '8.2' || missingEaMarkers.length > 0) {
       console.error('[MT5 EA Download] Fonte ausente ou desatualizada; download bloqueado.', {
         eaVersion,
         missingEaMarkers,
