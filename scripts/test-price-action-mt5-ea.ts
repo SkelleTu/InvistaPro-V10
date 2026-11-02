@@ -22,8 +22,8 @@ assert.ok(ea.includes('PeriodSeconds(PERIOD_M5)*3'), 'AI pre-trigger approval mu
 assert.ok(ea.includes('InpRiskPercent>2.0'), 'EA must cap configurable risk at 2%');
 assert.ok(ea.includes('InpMaxStopPercent>1.5'), 'EA must cap stop distance at 1.5%');
 assert.ok(ea.includes('InpMinimumRR<2.0'), 'EA must enforce minimum net reward/risk of 1:2');
-assert.ok(ea.includes('risk*InpMinimumRR+cost*(InpMinimumRR+1.0)'), 'Target distance must solve the net RR equation including entry/exit costs');
-assert.ok(ea.includes('finalReward/(finalRisk+cost)<InpMinimumRR'), 'Normalized target must still pass the final net RR gate');
+assert.ok(ea.includes('2.0*((InpMinimumRR-0.75)*risk+(InpMinimumRR+1.0)*cost)'), 'Target distance must preserve net RR after the planned 50-percent partial at 1.5R');
+assert.ok(ea.includes('0.75*finalRisk+0.5*MathAbs(s.target-entry)-cost'), 'Final net RR must weight the partial exit and remaining target');
 
 assert.ok(ea.includes('OrderCalcProfit'), 'Position size must use account-currency loss per lot');
 assert.ok(ea.includes('SYMBOL_VOLUME_STEP') && ea.includes('SYMBOL_VOLUME_MIN') && ea.includes('SYMBOL_VOLUME_MAX'), 'Volume must respect broker contract steps and limits');
@@ -43,6 +43,7 @@ assert.ok(ea.includes('ClosePartialPosition'), 'Partial exits must be abstracted
 assert.ok(ea.includes('ACCOUNT_MARGIN_MODE_RETAIL_HEDGING'), 'Partial exits must support hedging accounts');
 assert.ok(ea.includes('PA partial reduction'), 'Partial exits must reduce netting accounts with an opposite deal');
 assert.ok(ea.includes('GlobalVariableCheck(partialKey)'), 'The deterministic partial exit must happen at most once per position');
+assert.ok(ea.includes('realizedR>=1.5'), 'AI-requested partial exits must not happen before the strategy 1.5R trigger');
 assert.ok(ea.includes('ReviewOpenPositionAI'), 'Open positions must receive event-driven AI reviews');
 assert.ok(ea.includes('POSITION_IDENTIFIER)!=identifier'), 'Stale AI responses must not modify a replaced position');
 assert.ok(ea.includes('bool PersistPositionRisk(ulong identifier)'), 'Original structural risk must be persisted independently of a moved stop');
