@@ -21,7 +21,6 @@ input int    InpMaxTradesPerDay = 3;
 input int    InpMaxConsecutiveLosses = 2;
 input int    InpPauseMinutesAfterLosses = 60;
 input double InpDailyLossLimitPercent = 3.0;
-input bool   InpAllowLiveAccount = false;
 input int    InpDeviationPoints = 30;
 input int    InpHeartbeatSeconds = 30;
 input bool   InpUseSessionFilter = false; // Crypto trades 24/7; enable only if desired
@@ -340,8 +339,8 @@ int OnInit() {
    if(InpRiskPercent<=0 || InpRiskPercent>2.0 || InpMaxStopPercent<=0 || InpMaxStopPercent>1.5 || InpMinimumRR<2.0) {
       Print("Configuracao de risco invalida. EA bloqueado."); return INIT_PARAMETERS_INCORRECT;
    }
-   if(!InpAllowLiveAccount && !IsDemoAccount()) {
-      Print("Conta REAL bloqueada por padrao. Habilitacao exige alteracao explicita do usuario."); return INIT_FAILED;
+   if(!IsDemoAccount()) {
+      Print("Conta nao-DEMO bloqueada nesta versao de validacao. Use uma conta DEMO MT5."); return INIT_FAILED;
    }
    if(!SymbolSelect(_Symbol,true)) return INIT_FAILED;
    trade.SetExpertMagicNumber(InpMagic);
