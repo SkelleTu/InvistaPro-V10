@@ -15,6 +15,7 @@ input bool   InpRequireAIApproval = true;
 input double InpRiskPercent = 1.0;
 input double InpMaxStopPercent = 1.5;
 input double InpMinimumRR = 2.0;
+input double InpEstimatedRoundTripCostPercent = 0.15; // broker-specific fee + slippage estimate
 input int    InpMagic = 26110201;
 input int    InpMaxSpreadPoints = 0; // 0 = automatic ATR-based spread cap
 input int    InpMaxTradesPerDay = 3;
@@ -315,6 +316,11 @@ double RiskVolume(int side,double entry,double stop) {
    ENUM_ORDER_TYPE type=side==1 ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
    if(!OrderCalcProfit(type,_Symbol,1.0,entry,stop,pnl)) return 0;
    double lossPerLot=MathAbs(pnl);
+   double feePrice=entry*InpEstimatedRoundTripCostPercent/100.0;
+   double feeExit=side==1 ? entry-feePrice : entry+feePrice;
+   double feePnl=0;
+   if(!OrderCalcProfit(type,_Symbol,1.0,entry,feeExit,feePnl)) return 0;
+   lossPerLot+=MathAbs(feePnl);
    if(lossPerLot<=0) return 0;
    return NormalizeVolume(riskMoney/lossPerLot);
 }
@@ -330,10 +336,11 @@ bool BuildSetup(int side,double trigger,Setup &s) {
    double atr=ATR(PERIOD_M15);
    if(atr<=0) return false;
    double stop=side==1 ? swing-atr*0.15 : swing+atr*0.15;
+   if((side==1 && stop>=entry) || (side==-1 && stop<=entry)) return false;
    double risk=MathAbs(entry-stop);
    if(risk<=0 || risk/entry*100.0>InpMaxStopPercent) return false;
    double target=side==1 ? entry+risk*InpMinimumRR : entry-risk*InpMinimumRR;
-   double cost=2.0*(tick.ask-tick.bid);
+   double cost=2.0*(tick.ask-tick.bid)+entry*InpEstimatedRoundTripCostPercent/100.0;
    double reward=MathAbs(target-entry)-cost;
    double netRisk=risk+cost;
    if(reward<=0 || reward/netRisk<InpMinimumRR) return false;
@@ -433,7 +440,7 @@ void OnInitHeartbeat() {
 }
 
 int OnInit() {
-   if(InpRiskPercent<=0 || InpRiskPercent>2.0 || InpMaxStopPercent<=0 || InpMaxStopPercent>1.5 || InpMinimumRR<2.0) {
+   if(InpRiskPercent<=0 || InpRiskPercent>2.0 || InpMaxStopPercent<=0 || InpMaxStopPercent>1.5 || InpMinimumRR<2.0 || InpEstimatedRoundTripCostPercent<0 || InpEstimatedRoundTripCostPercent>2.0) {
       Print("Configuracao de risco invalida. EA bloqueado."); return INIT_PARAMETERS_INCORRECT;
    }
    if(!IsDemoAccount()) {
