@@ -881,7 +881,7 @@ void ProcessPendingDeals() {
       if(isEntry) {
          GlobalVariableSet(trackKey,1.0);
          string entryKey="PA_ENTRY_"+account+"_"+(string)positionId;
-         if(!GlobalVariableCheck(entryKey)) GlobalVariableSet(entryKey,(double)TimeCurrent());
+         if(!GlobalVariableCheck(entryKey)) GlobalVariableSet(entryKey,(double)HistoryDealGetInteger(deal,DEAL_TIME));
          if(!RebuildDailyLossCountersFromLedger()) {
             ReleaseDailyLock();
             continue;
@@ -906,7 +906,7 @@ void ProcessPendingDeals() {
                // Persist the PnL first, then the close timestamp. A pending event
                // can resume safely if the terminal stops between these writes.
                GlobalVariableSet(closedPnlKey,totalPnl);
-               GlobalVariableSet(closedKey,(double)TimeCurrent());
+               GlobalVariableSet(closedKey,(double)HistoryDealGetInteger(deal,DEAL_TIME));
             } else {
                ReleaseDailyLock();
                continue;
