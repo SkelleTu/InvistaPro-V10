@@ -805,7 +805,9 @@ void ProcessPendingDeals() {
       // lock serializes creation, so no chart can race its initialization.
       string dealGuard="PA_DEAL_"+account+"_"+(string)deal;
       if(!GlobalVariableCheck(dealGuard)) GlobalVariableSet(dealGuard,0.0);
-      if(!GlobalVariableSetOnCondition(dealGuard,(double)TimeCurrent(),0.0)) {
+      // A zero-valued guard means a prior attempt was interrupted. Resume it;
+      // a nonzero value means all accounting side effects were committed.
+      if(GlobalVariableGet(dealGuard)!=0.0) {
          GlobalVariableDel(pendingName);
          ReleaseDailyLock();
          continue;
@@ -844,12 +846,12 @@ void ProcessPendingDeals() {
             } else {
                // History may not be synchronized yet. Retry without consuming
                // the event guard, otherwise a loss could disappear silently.
-               GlobalVariableDel(dealGuard);
                ReleaseDailyLock();
                continue;
             }
          }
       }
+      GlobalVariableSet(dealGuard,(double)TimeCurrent());
       GlobalVariableDel(pendingName);
       ReleaseDailyLock();
    }
