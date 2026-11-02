@@ -59,6 +59,7 @@ assert.ok(ea.includes('ReviewOpenPositionAI'), 'Open positions must receive even
 assert.ok(ea.includes('POSITION_IDENTIFIER)!=identifier'), 'Stale AI responses must not modify a replaced position');
 assert.ok(ea.includes('bool PersistPositionRisk(ulong identifier)'), 'Original structural risk must be persisted independently of a moved stop');
 assert.ok(ea.includes('PersistPositionRisk(filledPositionId)'), 'Initial risk must be captured immediately after an entry fill');
+assert.ok(ea.includes('GlobalVariablesFlush(); // persist original risk before any break-even/trailing stop modification'), 'Original stop risk must be durable before a break-even or trailing update');
 assert.ok(ea.includes('stop<=0'), 'A managed position without a protective stop must trigger fail-safe handling');
 assert.ok(ea.includes('MathAbs(beforeVolume-currentVolume)>step*0.5'), 'Partial reductions must reject stale position-volume snapshots');
 assert.ok(ea.includes('beforeVolume-closeVolume<minVolume-step*0.25'), 'Netting partial reductions must preserve the broker minimum remaining volume');
