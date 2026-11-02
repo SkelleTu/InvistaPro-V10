@@ -523,7 +523,7 @@ int OnInit() {
    g_lastM1Bar=iTime(_Symbol,PERIOD_M1,0);
    EventSetTimer(1);
    Print("InvistaPRO Price Action EA v1.0 iniciado. Broker-neutral | Simbolo do grafico: ",_Symbol);
-   Print("Sem dependencia de Binance/Deriv. Timeframes: H4/H1/M15/M5/M1.");
+   Print("Estratégia independente do provedor de cotações. Timeframes: H4/H1/M15/M5/M1.");
    return INIT_SUCCEEDED;
 }
 
