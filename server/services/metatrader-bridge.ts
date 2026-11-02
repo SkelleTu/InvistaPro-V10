@@ -4598,9 +4598,20 @@ class MetaTraderBridge extends EventEmitter {
 
   confirmTradeClose(result: MT5TradeResult): void {
     this.ensureDailyStatsDate();
+    let alreadyRecorded = this.recentTrades.some(trade => trade.ticket === result.ticket);
+    try {
+      const stored = sqlite.prepare('SELECT ticket FROM mt5_trades WHERE ticket = ?').get(result.ticket);
+      alreadyRecorded = alreadyRecorded || Boolean(stored);
+    } catch {
+      // The in-memory ledger still prevents duplicate accounting when SQLite is unavailable.
+    }
     this.openPositions.delete(result.ticket);
     this.removePositionFromDB(result.ticket);
     this.clearPositionContext(result.ticket); // Limpar memória desta posição
+    if (alreadyRecorded) {
+      this.saveBridgeState();
+      return;
+    }
     this.recentTrades.unshift(result);
     if (this.recentTrades.length > 100) this.recentTrades.pop();
     this.saveTradeToDB(result);
