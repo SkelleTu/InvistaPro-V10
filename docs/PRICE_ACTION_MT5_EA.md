@@ -8,7 +8,7 @@ Quotes, candles, contract size, tick size, volume step/minimum/maximum, trade mo
 
 ## Entry process
 
-1. Read closed, fresh candles only from H4, H1, M15, M5 and M1; stale or incomplete chart history blocks AI reviews and entries.
+1. Read closed, fresh candles only from H4, H1, M15, M5 and M1; stale or incomplete chart history blocks AI reviews and entries; the server independently validates candle freshness using the broker's UTC offset.
 2. Require H4/H1 EMA trend alignment; when all H4/H1/M15 classify as range, only allow rejection setups at M15 range extremes, never the middle.
 3. Detect a closed M5 candle pattern and require proximity to an M15 structure extreme.
 4. Require relative tick volume above the prior 20 closed candles and calculate M15 liquidity-sweep, FVG, Order Block and BOS confluence flags for the AI context.
