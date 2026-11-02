@@ -485,9 +485,7 @@ double ReconstructDayStartEquity(datetime dayStart) {
 
    // Also detect positions that were already closed after midnight. Looking
    // only at currently open positions misses overnight trades closed at 01:00.
-   datetime historyFrom=dayStart-90*24*60*60;
-   if(historyFrom<0) historyFrom=0;
-   if(!HistorySelect(historyFrom,TimeCurrent())) return 0;
+   if(!HistorySelect(dayStart,TimeCurrent())) return 0;
    ulong seenPositionIds[];
    int historyCount=HistoryDealsTotal();
    for(int i=0;i<historyCount;i++) {
