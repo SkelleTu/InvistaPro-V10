@@ -27,6 +27,10 @@ assert.ok(ea.includes('finalReward/(finalRisk+cost)<InpMinimumRR'), 'Normalized 
 
 assert.ok(ea.includes('OrderCalcProfit'), 'Position size must use account-currency loss per lot');
 assert.ok(ea.includes('SYMBOL_VOLUME_STEP') && ea.includes('SYMBOL_VOLUME_MIN') && ea.includes('SYMBOL_VOLUME_MAX'), 'Volume must respect broker contract steps and limits');
+assert.ok(ea.includes('TerminalInfoInteger(TERMINAL_CONNECTED)'), 'Disconnected terminal must block new entries');
+assert.ok(ea.includes('TerminalInfoInteger(TERMINAL_TRADE_ALLOWED)'), 'Disabled terminal trading must block new entries');
+assert.ok(ea.includes('MQLInfoInteger(MQL_TRADE_ALLOWED)'), 'Disabled EA trading permission must block new entries');
+assert.ok(ea.includes('AccountInfoInteger(ACCOUNT_TRADE_ALLOWED)'), 'Account trading restrictions must block new entries');
 assert.ok(ea.includes('TRADE_RETCODE_DONE'), 'EA must validate execution return code');
 assert.ok(ea.includes('PositionSelectByTicket(positionTicket)'), 'Position management must reselect the exact MT5 position ticket');
 assert.ok(ea.includes('trade.PositionModify(positionTicket,'), 'Protective stop changes must target the exact position ticket');
