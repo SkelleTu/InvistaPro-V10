@@ -267,6 +267,13 @@ void ReviewOpenPositionAI() {
    string response=CharArrayToString(result,0,-1,CP_UTF8);
    double confidence=JsonNumber(response,"confidence");
    if(confidence<0.80 || confidence>1.0) return;
+   // The position may have changed or closed while the AI request was in flight.
+   if(!PositionSelect(_Symbol) || (ulong)PositionGetInteger(POSITION_IDENTIFIER)!=ticket ||
+      (long)PositionGetInteger(POSITION_MAGIC)!=InpMagic) return;
+   MqlTick latestTick; if(!SymbolInfoTick(_Symbol,latestTick)) return;
+   currentStop=PositionGetDouble(POSITION_SL);
+   takeProfit=PositionGetDouble(POSITION_TP);
+   currentPrice=side==1 ? latestTick.bid : latestTick.ask;
    string action=JsonString(response,"action");
    if(action=="MOVE_STOP") {
       double proposed=JsonNumber(response,"proposedStop");
