@@ -324,6 +324,37 @@ bool PositionIdentifierOpen(ulong identifier) {
    return false;
 }
 
+double ReconstructDayStartEquity(datetime dayStart) {
+   // If a position was carried across midnight, its midnight floating PnL
+   // cannot be reconstructed safely from current MT5 history. Fail closed.
+   for(int i=PositionsTotal()-1;i>=0;i--) {
+      ulong ticket=PositionGetTicket(i);
+      if(ticket==0) return 0;
+      ulong identifier=(ulong)PositionGetInteger(POSITION_IDENTIFIER);
+      if(!HistorySelectByPosition(identifier)) return 0;
+      int count=HistoryDealsTotal();
+      if(count<=0) return 0;
+      datetime firstDeal=0;
+      for(int j=0;j<count;j++) {
+         ulong deal=HistoryDealGetTicket(j);
+         if(deal==0) continue;
+         datetime dealTime=(datetime)HistoryDealGetInteger(deal,DEAL_TIME);
+         if(firstDeal==0 || dealTime<firstDeal) firstDeal=dealTime;
+      }
+      if(firstDeal==0 || firstDeal<dayStart) return 0;
+   }
+   if(!HistorySelect(dayStart,TimeCurrent())) return 0;
+   double realized=0;
+   for(int i=0;i<HistoryDealsTotal();i++) {
+      ulong deal=HistoryDealGetTicket(i);
+      if(deal==0) continue;
+      realized+=HistoryDealGetDouble(deal,DEAL_PROFIT)+HistoryDealGetDouble(deal,DEAL_SWAP)+
+                HistoryDealGetDouble(deal,DEAL_COMMISSION)+HistoryDealGetDouble(deal,DEAL_FEE);
+   }
+   double baseline=AccountInfoDouble(ACCOUNT_BALANCE)-realized;
+   return baseline>0 ? baseline : 0;
+}
+
 bool DailyRiskAllowed() {
    datetime now=TimeCurrent();
    MqlDateTime d; TimeToStruct(now,d); d.hour=0; d.min=0; d.sec=0;
@@ -335,7 +366,11 @@ bool DailyRiskAllowed() {
       g_consecutiveLosses=GlobalVariableCheck(key+"_L") ? (int)GlobalVariableGet(key+"_L") : 0;
       g_losingTradesToday=GlobalVariableCheck(key+"_D") ? (int)GlobalVariableGet(key+"_D") : 0;
       g_pauseUntil=GlobalVariableCheck(key+"_P") ? (datetime)GlobalVariableGet(key+"_P") : 0;
-      g_dayStartEquity=GlobalVariableCheck(key+"_E") ? GlobalVariableGet(key+"_E") : AccountInfoDouble(ACCOUNT_EQUITY);
+      g_dayStartEquity=GlobalVariableCheck(key+"_E") ? GlobalVariableGet(key+"_E") : ReconstructDayStartEquity(start);
+      if(g_dayStartEquity<=0) {
+         Print("Baseline de equity diário não pode ser reconstruído com segurança. Novas entradas bloqueadas.");
+         return false;
+      }
       PersistDailyState();
    }
    if(TimeCurrent()<g_pauseUntil || g_tradesToday>=InpMaxTradesPerDay || g_losingTradesToday>=InpMaxLosingTradesPerDay) return false;
