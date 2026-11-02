@@ -671,6 +671,7 @@ void OnTick() {
 
    // Approved setup is checked first on the next closed candle.
    if(g_approvedPatternTime>0) {
+      if(TimeCurrent()-g_approvedPatternTime>PeriodSeconds(PERIOD_M5)*3) { g_approvedPatternTime=0; return; }
       if(t4!=0 && t4!=g_approvedSide) { g_approvedPatternTime=0; return; }
       if(t4==0 && !rangeMode) { g_approvedPatternTime=0; return; }
       MqlRates confirm[];
