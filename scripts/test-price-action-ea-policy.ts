@@ -18,6 +18,8 @@ assert.ok(ea.includes('OrderCalcProfit(orderType, g_symbol, 1.0, entryPrice, sto
 assert.ok(ea.includes('OrderCalcMargin(orderType, g_symbol, volume, entryPrice, requiredMargin)'), 'Risk sizing must reject insufficient margin');
 assert.ok(ea.includes('void OnTradeTransaction('), 'EA must reconcile broker deal events for closed-trade accounting');
 assert.ok(ea.includes('SyncClosedTradeReports()'), 'EA must retry closed-trade reporting after temporary HTTP failures');
+assert.ok(ea.includes('SyncOpenPositionReports()'), 'EA must reconcile open positions after temporary HTTP failures or terminal restarts');
+assert.ok(ea.includes('InvistaPA_V') && ea.includes('partialAlreadyDone'), 'EA must persist original volume and prevent repeated TP1 partial reductions after reconnects');
 assert.ok(ea.includes('DEAL_COMMISSION') && ea.includes('DEAL_SWAP') && ea.includes('DEAL_FEE'), 'Daily risk statistics must use net P&L including trading costs');
 assert.ok(ea.includes('CountSymbolPositions() == 0'), 'EA must not merge a new strategy order into an existing same-symbol position');
 assert.ok(ea.includes('CalculatePriceActionSwingStop'), 'Open positions must trail only by confirmed M5 swing structure');
