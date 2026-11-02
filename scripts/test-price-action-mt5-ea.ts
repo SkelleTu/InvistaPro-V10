@@ -148,6 +148,7 @@ assert.ok(ea.includes('if(!IsDemoAccount())'), 'This validation build must block
 assert.ok(ea.includes('InpMaxConsecutiveLosses>5'), 'Consecutive-loss circuit breaker must have a bounded configuration');
 assert.ok(ea.includes('InpMaxLosingTradesPerDay>5'), 'Daily losing-trade circuit breaker must have a bounded configuration');
 assert.ok(ea.includes('InpMagic<=0'), 'EA magic number must be a valid positive identifier');
+assert.ok(ea.includes('InpMagic>999999999'), 'Magic number must keep terminal-global lock names within MT5 length limits');
 assert.ok(ea.includes('StringLen(InpApiToken)==0 || StringFind(InpServerURL,"https://")!=0'), 'EA must require an API token and HTTPS before startup');
 
 assert.ok(!ea.toLowerCase().includes('binance'), 'EA strategy must not depend on Binance');
