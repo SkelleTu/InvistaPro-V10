@@ -325,6 +325,41 @@ double JsonNumber(string body,string key) {
    return StringToDouble(StringSubstr(body,p,e-p));
 }
 
+double g_positionManagementToken=0.0;
+
+string PositionManagementLockKey() {
+   string symbol=StringSubstr(_Symbol,0,18);
+   StringReplace(symbol,"/","_");
+   StringReplace(symbol,"\\","_");
+   StringReplace(symbol,":","_");
+   StringReplace(symbol," ","_");
+   return "PA_MGMT_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+(string)InpMagic+"_"+symbol;
+}
+
+bool AcquirePositionManagementLock() {
+   string key=PositionManagementLockKey();
+   if(!GlobalVariableCheck(key) && !GlobalVariableTemp(key) && !GlobalVariableCheck(key))
+      return false;
+   for(int attempt=0;attempt<4;attempt++) {
+      double observed=GlobalVariableGet(key);
+      if(observed!=0.0 && TimeLocal()-(datetime)observed<10) return false;
+      double token=(double)TimeLocal()+
+                   (double)(ChartID()%1000000)/1000000.0+
+                   (double)(GetTickCount()%1000)/1000000000.0;
+      if(GlobalVariableSetOnCondition(key,token,observed)) {
+         g_positionManagementToken=token;
+         return true;
+      }
+   }
+   return false;
+}
+
+void ReleasePositionManagementLock() {
+   if(g_positionManagementToken==0.0) return;
+   GlobalVariableSetOnCondition(PositionManagementLockKey(),0.0,g_positionManagementToken);
+   g_positionManagementToken=0.0;
+}
+
 void ReviewOpenPositionAI() {
    // Resolve the exact managed position ticket; symbol selection is ambiguous on hedging accounts.
    ulong positionTicket=0;
@@ -378,12 +413,21 @@ void ReviewOpenPositionAI() {
    string response=CharArrayToString(result,0,-1,CP_UTF8);
    double confidence=JsonNumber(response,"confidence");
    if(confidence<0.80 || confidence>1.0) return;
+   // Serialize management across charts only after the network response returns.
+   if(!AcquirePositionManagementLock()) return;
    // Re-select the exact ticket after network latency; never act on a replacement position.
    if(!PositionSelectByTicket(positionTicket) ||
       (ulong)PositionGetInteger(POSITION_IDENTIFIER)!=identifier ||
       PositionGetString(POSITION_SYMBOL)!=_Symbol ||
-      (long)PositionGetInteger(POSITION_MAGIC)!=InpMagic) return;
-   MqlTick latestTick; if(!SymbolInfoTick(_Symbol,latestTick)) return;
+      (long)PositionGetInteger(POSITION_MAGIC)!=InpMagic) {
+      ReleasePositionManagementLock();
+      return;
+   }
+   MqlTick latestTick;
+   if(!SymbolInfoTick(_Symbol,latestTick)) {
+      ReleasePositionManagementLock();
+      return;
+   }
    currentStop=PositionGetDouble(POSITION_SL);
    takeProfit=PositionGetDouble(POSITION_TP);
    currentPrice=side==1 ? latestTick.bid : latestTick.ask;
@@ -422,6 +466,7 @@ void ReviewOpenPositionAI() {
          if(trade.PositionClose(positionTicket) && TradeRequestSucceeded())
             Print("IA recomendou encerramento: ",reason);
    }
+   ReleasePositionManagementLock();
 }
 
 string DailyStatePrefix() {
@@ -881,6 +926,7 @@ bool ClosePartialPosition(ulong positionTicket,int side,double closeVolume,doubl
 }
 
 void ManageOpenPosition() {
+   if(!AcquirePositionManagementLock()) return;
    // Iterate tickets so every matching EA position is managed on hedging accounts.
    for(int i=PositionsTotal()-1;i>=0;i--) {
       ulong positionTicket=PositionGetTicket(i);
@@ -941,6 +987,7 @@ void ManageOpenPosition() {
          }
       }
    }
+   ReleasePositionManagementLock();
 }
 
 string PendingDealPrefix() {
