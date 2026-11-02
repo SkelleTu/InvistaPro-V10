@@ -25,6 +25,8 @@ assert.ok(ea.includes('PositionModify'), 'EA must manage protective stops');
 assert.ok(ea.includes('PositionClosePartial'), 'EA must support partial exit');
 assert.ok(ea.includes('GlobalVariableCheck(partialKey)'), 'The deterministic partial exit must happen at most once per position');
 assert.ok(ea.includes('ReviewOpenPositionAI'), 'Open positions must receive event-driven AI reviews');
+assert.ok(ea.includes('POSITION_IDENTIFIER)!=ticket'), 'Stale AI responses must not modify a replaced position');
+assert.ok(ea.includes('SYMBOL_TRADE_FREEZE_LEVEL'), 'AI stop tightening must respect broker freeze distance');
 assert.ok(ea.includes('TimeCurrent()-g_lastPositionAIReview)>=900'), 'AI position review must have a bounded 15-minute heartbeat');
 assert.ok(ea.includes('InpEstimatedRoundTripCostPercent'), 'Net RR and sizing must account for broker-specific costs');
 assert.ok(ea.includes('OrderCalcMargin'), 'Entry must validate available margin');
