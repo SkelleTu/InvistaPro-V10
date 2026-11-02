@@ -36,6 +36,7 @@ assert.ok(ea.includes('riskDistance / entry > 0.015'), 'EA must reject stops wid
 assert.ok(ea.includes('executableRiskReward < 2.0'), 'EA must enforce minimum net executable R:R of 1:2 after spread');
 assert.ok(ea.includes('estimatedRoundTripCost = currentSpread * 2.0'), 'EA must include round-trip spread in executable R:R validation');
 assert.ok(ea.includes('MaxDeviationPoints * pointSize * 2.0') && ea.includes('SetDeviationInPoints(MaxDeviationPoints)'), 'EA must include configured slippage in R:R and broker execution settings');
+assert.ok(ea.includes('EstimatedRoundTripCommissionPerLot') && ea.includes('CommissionPriceDistance(costOrderType, entry)') && ea.includes('MathAbs(oneLotProfit) + EstimatedRoundTripCommissionPerLot'), 'Net R:R and risk sizing must include the broker round-trip commission estimate in account currency');
 assert.ok(ea.includes('CloseAtEndOfBrasiliaSession = true') && ea.includes('IsPastBrasiliaSessionEnd()'), 'EA must enforce day-trade session-end position handling');
 assert.ok(ea.includes('breakeven +1R'), 'EA must manage deterministic breakeven at +1R');
 assert.ok(ea.includes('parcial de 50% realizada em +1,5R'), 'EA must manage the 50% partial at +1.5R');
