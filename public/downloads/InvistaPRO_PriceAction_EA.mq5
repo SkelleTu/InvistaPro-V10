@@ -771,6 +771,7 @@ bool ExecuteSetupLocked(Setup &s) {
       if(acceptedOrder>0) {
          GlobalVariableSet("PA_RESERVE_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+(string)acceptedOrder,(double)TimeCurrent());
          GlobalVariablesFlush();
+         if(RebuildDailyLossCountersFromLedger()) PersistDailyState();
       }
    }
    if(trade.ResultRetcode()==TRADE_RETCODE_PLACED && fillDealForRisk==0) {
@@ -780,6 +781,7 @@ bool ExecuteSetupLocked(Setup &s) {
          trade.ResultRetcode()==TRADE_RETCODE_DONE) {
          GlobalVariableDel(reserveKey);
          GlobalVariablesFlush();
+         if(RebuildDailyLossCountersFromLedger()) PersistDailyState();
          Print("Ordem aceita sem preenchimento imediato foi cancelada para preservar os gates de risco.");
       } else {
          Print("ALERTA: ordem aceita sem preenchimento imediato; cancelamento não confirmado. Reserva diária mantida e SL/TP enviados ao servidor.");
