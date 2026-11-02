@@ -2363,7 +2363,7 @@ router.post('/price-action/review', mt5EaTokenAccess, async (req: Request, res: 
     const symbol = String(req.body?.symbol ?? '').trim().toUpperCase();
     const direction = String(req.body?.direction ?? '').trim().toUpperCase();
     const frames = req.body?.frames;
-    if (!/^[A-Z0-9._-]{1,32}$/.test(symbol) || !['BUY', 'SELL'].includes(direction)) {
+    if (!symbol || symbol.length > 64 || /[\\u0000-\\u001F]/.test(symbol) || !['BUY', 'SELL'].includes(direction)) {
       return res.status(400).json({ decision: 'REJECT', reason: 'Símbolo ou direção inválidos.' });
     }
     const required = ['H4', 'H1', 'M15', 'M5', 'M1'];
@@ -2401,6 +2401,45 @@ router.post('/price-action/review', mt5EaTokenAccess, async (req: Request, res: 
   } catch (error: any) {
     console.error('[MT5 Price Action AI] review failed:', error?.message ?? error);
     return res.status(503).json({ decision: 'HOLD', reason: 'IA indisponível ou análise incompleta. Entrada bloqueada.' });
+  }
+});
+
+
+/** Dedicated broker-neutral Price Action EA download. Girassol download is untouched. */
+router.get('/download-price-action-ea', mt5DashboardAccess, async (req: Request, res: Response) => {
+  try {
+    let config = metaTraderBridge.getConfig();
+    let token = String(config.apiToken ?? '').trim();
+    if (!token) {
+      token = randomBytes(32).toString('hex');
+      metaTraderBridge.updateConfig({ apiToken: token });
+      config = metaTraderBridge.getConfig();
+    }
+    await metaTraderBridge.flushDurableConfig();
+    const host = String(req.get('host') ?? '').trim();
+    const serverUrl = (process.env.NODE_ENV === 'production'
+      ? (String(process.env.MT5_PUBLIC_BASE_URL ?? '').trim() || String(process.env.RENDER_EXTERNAL_URL ?? '').trim() || (host ? `https://${host}` : ''))
+      : (String(process.env.REPLIT_DEV_DOMAIN ?? '').trim()
+          ? `https://${String(process.env.REPLIT_DEV_DOMAIN).trim()}`
+          : `${req.protocol}://${host}`)).replace(/\\/+$/, '');
+    if (!serverUrl) return res.status(500).json({ error: 'URL pública do servidor indisponível.' });
+    const eaPath = path.join(process.cwd(), 'public', 'downloads', 'InvistaPRO_PriceAction_EA.mq5');
+    let content = fs.readFileSync(eaPath, 'utf-8');
+    if (!content.includes('#property version   "1.0"') ||
+        !content.includes('/api/mt5/price-action/review') ||
+        !content.includes('InpRequireAIApproval')) {
+      return res.status(503).json({ ok: false, code: 'PRICE_ACTION_EA_NOT_CURRENT', error: 'O EA Price Action não passou na validação de versão.' });
+    }
+    const escapeMql = (value: string) => value.replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\\"').replace(/[\\r\\n]/g, '');
+    content = content.replace(/input\\s+string\\s+InpServerURL\\s*=\\s*"[^"]*";/, `input string InpServerURL = "${escapeMql(serverUrl)}";`);
+    content = content.replace(/input\\s+string\\s+InpApiToken\\s*=\\s*"[^"]*";/, `input string InpApiToken = "${escapeMql(token)}";`);
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="InvistaPRO_PriceAction_EA.mq5"');
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+    res.send(content);
+  } catch (error: any) {
+    console.error('[PriceActionEA] download failed:', error?.message ?? error);
+    res.status(500).json({ error: 'Não foi possível preparar o EA Price Action.' });
   }
 });
 
