@@ -140,7 +140,7 @@ int OnInit()
    string modeLabel = "";
    if (AIControlMode == AI_MANUAL)
       modeLabel = "MANUAL";
-   else if (AIControlMode == AI_PARTIAL)
+   else if (!IsPriceActionEnabled() && AIControlMode == AI_PARTIAL)
       modeLabel = "PARCIAL";
    else
       modeLabel = "TOTAL (IA controla 100%)";
@@ -747,31 +747,51 @@ double CalculatePriceActionRiskLot(double entryPrice, double stopLoss)
 {
    if (entryPrice <= 0 || stopLoss <= 0 || PriceActionRiskPercent < 1.0 || PriceActionRiskPercent > 2.0)
       return 0.0;
-   double tickSize = SymbolInfoDouble(g_symbol, SYMBOL_TRADE_TICK_SIZE);
-   double tickValue = SymbolInfoDouble(g_symbol, SYMBOL_TRADE_TICK_VALUE_LOSS);
-   if (tickValue <= 0) tickValue = SymbolInfoDouble(g_symbol, SYMBOL_TRADE_TICK_VALUE);
+
    double volumeStep = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_STEP);
    double minVolume = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_MIN);
    double maxVolume = SymbolInfoDouble(g_symbol, SYMBOL_VOLUME_MAX);
-   double distance = MathAbs(entryPrice - stopLoss);
-   if (tickSize <= 0 || tickValue <= 0 || volumeStep <= 0 || minVolume <= 0 || maxVolume <= 0 || distance <= 0)
+   double equity = AccountInfoDouble(ACCOUNT_EQUITY);
+   double freeMargin = AccountInfoDouble(ACCOUNT_MARGIN_FREE);
+   if (volumeStep <= 0 || minVolume <= 0 || maxVolume <= 0 || equity <= 0 || freeMargin <= 0)
       return 0.0;
-   double lossPerLot = (distance / tickSize) * tickValue;
-   double riskCash = AccountInfoDouble(ACCOUNT_EQUITY) * PriceActionRiskPercent / 100.0;
-   if (lossPerLot <= 0 || riskCash <= 0) return 0.0;
+
+   ENUM_ORDER_TYPE orderType = (stopLoss < entryPrice) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+   double oneLotProfit = 0.0;
+   // OrderCalcProfit converts the contract's tick economics into account currency.
+   // If the broker cannot calculate the contract, fail closed instead of guessing.
+   if (!OrderCalcProfit(orderType, g_symbol, 1.0, entryPrice, stopLoss, oneLotProfit))
+      return 0.0;
+   double lossPerLot = MathAbs(oneLotProfit);
+   if (lossPerLot <= 0.0) return 0.0;
+
+   // Keep 10% of the configured risk budget as execution-friction reserve.
+   double riskCash = equity * PriceActionRiskPercent / 100.0 * 0.90;
    double rawVolume = riskCash / lossPerLot;
    double volume = MathFloor(rawVolume / volumeStep) * volumeStep;
    if (volume < minVolume) return 0.0;
-   if (volume > maxVolume) volume = maxVolume;
+   if (volume > maxVolume) volume = MathFloor(maxVolume / volumeStep) * volumeStep;
    int volumeDigits = VolumeDigitsFromStep();
-   return NormalizeDouble(volume, volumeDigits);
+   volume = NormalizeDouble(volume, volumeDigits);
+   if (volume < minVolume || volume <= 0.0) return 0.0;
+
+   double requiredMargin = 0.0;
+   if (!OrderCalcMargin(orderType, g_symbol, volume, entryPrice, requiredMargin)
+       || requiredMargin <= 0.0 || requiredMargin > freeMargin * 0.80)
+      return 0.0;
+   return volume;
 }
 
 bool ClosePriceActionPartial(ulong ticket, double volume, string positionType)
 {
    long marginMode = AccountInfoInteger(ACCOUNT_MARGIN_MODE);
    if (marginMode == ACCOUNT_MARGIN_MODE_RETAIL_HEDGING)
-      return trade.PositionClosePartial(ticket, volume);
+   {
+      bool sent = trade.PositionClosePartial(ticket, volume);
+      uint retcode = trade.ResultRetcode();
+      return sent && (retcode == TRADE_RETCODE_DONE || retcode == TRADE_RETCODE_DONE_PARTIAL)
+             && trade.ResultDeal() > 0;
+   }
 
    // Netting accounts reduce the existing position with an opposite deal.
    MqlTradeRequest request = {};
@@ -799,7 +819,7 @@ bool ClosePriceActionPartial(ulong ticket, double volume, string positionType)
       Print("⛔ Price Action: falha de envio da parcial netting. erro=", GetLastError());
       return false;
    }
-   return result.retcode == TRADE_RETCODE_DONE || result.retcode == TRADE_RETCODE_DONE_PARTIAL;
+   return (result.retcode == TRADE_RETCODE_DONE || result.retcode == TRADE_RETCODE_DONE_PARTIAL) && result.deal > 0 && result.volume > 0;
 }
 
 void FetchAndProcessSignal()
@@ -860,7 +880,7 @@ void FetchAndProcessSignal()
    }
    else if ((res == 404 || res == -1) && IsPriceActionEnabled())
    {
-      Print("⛔ Price Action crypto: endpoint multi-timeframe indisponível; fallback legado bloqueado.");
+      Print("⛔ Price Action: endpoint multi-timeframe indisponível; fallback legado bloqueado.");
       return;
    }
 
@@ -899,7 +919,7 @@ void FetchAndProcessSignal()
    string girassolBias  = ExtractJsonString(resp, "girassolBias");
 
    // ── Aplicação do Modo de Controle da IA ──────────────────────────────
-   if (AIControlMode == AI_MANUAL)
+   if (!IsPriceActionEnabled() && AIControlMode == AI_MANUAL)
    {
       Print("ℹ️ Modo MANUAL: usando parâmetros do usuário");
       lotSize    = ManualLotSize;
@@ -958,17 +978,7 @@ void FetchAndProcessSignal()
 
    if (lotSize <= 0) lotSize = ManualLotSize;
 
-   string symUpper = g_symbol;
-   StringToUpper(symUpper);
-   bool isSpikeIndex = (StringFind(symUpper, "CRASH") >= 0 || StringFind(symUpper, "BOOM") >= 0);
-
-   if (isSpikeIndex)
-   {
-      stopLoss   = 0;
-      takeProfit = 0;
-      Print("ℹ️ Crash/Boom — sem SL/TP fixo (spike index)");
-   }
-   else if (stopLoss > 0 || takeProfit > 0)
+   if (stopLoss > 0 || takeProfit > 0)
    {
       double point      = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
       long   stopsLevel = SymbolInfoInteger(g_symbol, SYMBOL_TRADE_STOPS_LEVEL);
@@ -1004,8 +1014,8 @@ void FetchAndProcessSignal()
    }
 
    Print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    bool isPriceActionCrypto = IsPriceActionEnabled();
-    if (isPriceActionCrypto)
+    bool isPriceActionInstrument = IsPriceActionEnabled();
+    if (isPriceActionInstrument)
     {
        double entry = (action == "BUY") ? ask : bid;
        if (action != "BUY" && action != "SELL")
@@ -1056,7 +1066,7 @@ void FetchAndProcessSignal()
              && trade.ResultDeal() > 0;
 
    // Retry invalid stops only for non-Price-Action legacy instruments.
-   if (!success && tradeRetcode == 10016 && !isPriceActionCrypto)
+   if (!success && tradeRetcode == 10016 && !isPriceActionInstrument)
    {
       Print("⚠️ Stops inválidos (10016) — recalculando...");
       double askNow   = SymbolInfoDouble(g_symbol, SYMBOL_ASK);
@@ -1174,13 +1184,15 @@ void MonitorOpenPositions()
                 if (needsBreakeven)
                 {
                    double breakevenSL = NormalizeDouble(openPrice, ManagedSymbolDigits());
-                   if (trade.PositionModify(ticket, breakevenSL, tp))
+                   bool modifySent = trade.PositionModify(ticket, breakevenSL, tp);
+                   uint modifyRetcode = trade.ResultRetcode();
+                   if (modifySent && modifyRetcode == TRADE_RETCODE_DONE)
                    {
                       sl = breakevenSL;
-                      Print("🛡️ Price Action: stop movido para breakeven em +1R. Ticket=", ticket);
+                      Print("🛡️ Price Action: stop confirmado em breakeven +1R. Ticket=", ticket);
                    }
                    else
-                      Print("⛔ Price Action: falha ao mover stop para breakeven; ticket=", ticket, " retcode=", trade.ResultRetcode());
+                      Print("⛔ Price Action: breakeven não confirmado pelo broker; ticket=", ticket, " retcode=", modifyRetcode);
                 }
              }
              if (favorableMove >= initialRisk * 1.5 && !GlobalVariableCheck(partialKey) && ((posType == "BUY" && sl >= openPrice) || (posType == "SELL" && sl <= openPrice)))
