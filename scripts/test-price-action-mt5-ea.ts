@@ -47,6 +47,8 @@ assert.ok(ea.includes('trade.ResultPrice()'), 'EA must validate the actual execu
 assert.ok(ea.includes('SYMBOL_TRADE_TICK_SIZE'), 'Prices must align to broker tick size');
 assert.ok(ea.includes('PersistDailyState'), 'Daily circuit-breaker state must persist across EA restarts');
 assert.ok(ea.includes('GlobalVariableSetOnCondition'), 'Concurrent chart instances must serialize entry attempts with an atomic risk lock');
+assert.ok(ea.includes('GlobalVariableTemp(dealGuard)'), 'Deal guard creation must not overwrite a concurrent chart claim');
+assert.ok(ea.includes('trade.PositionModify(positionTicket,'), 'Ticket-based position protection must be used across charts');
 assert.ok(ea.includes('GlobalVariableSetOnCondition(dealGuard,(double)TimeCurrent(),0.0)'), 'Deal callbacks must be atomically deduplicated across chart instances');
 assert.ok(ea.includes('CleanupOldDealGuards'), 'Deal deduplication guards must be periodically cleaned up');
 assert.ok(ea.includes('return "PA_"+(string)AccountInfoInteger(ACCOUNT_LOGIN)+"_"+TimeToString(g_dayStart,TIME_DATE);'), 'Daily risk state must be shared across Price Action chart instances on the same account');
