@@ -54,6 +54,7 @@ assert.ok(ea.includes('trade.ResultPrice()'), 'EA must validate the actual execu
 assert.ok(ea.includes('SYMBOL_TRADE_TICK_SIZE'), 'Prices must align to broker tick size');
 assert.ok(ea.includes('PersistDailyState'), 'Daily circuit-breaker state must persist across EA restarts');
 assert.ok(ea.includes('GlobalVariableSet(pending,(double)TimeCurrent())'), 'Trade transaction events must be queued persistently');
+assert.ok(ea.includes('HistoryDealGetInteger(deal,DEAL_TIME)'), 'Daily ledgers must use actual broker deal timestamps');
 assert.ok(ea.includes('ProcessPendingDeals()'), 'Queued deal accounting must be retried by the timer');
 assert.ok(ea.includes('GlobalVariableSet(dealGuard,0.0)'), 'Persistent deal guards must survive terminal restarts');
 assert.ok(ea.includes('GlobalVariableSet(dealGuard,(double)TimeCurrent())'), 'Deal guard must be committed only after accounting side effects');
