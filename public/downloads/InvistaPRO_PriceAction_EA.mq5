@@ -660,8 +660,21 @@ bool ExecuteSetupLocked(Setup &s) {
    double maxSlippage=InpMaxSlippagePoints>0 ? InpMaxSlippagePoints*_Point : ATR(PERIOD_M15)*0.10;
    if(fillPrice<=0 || maxSlippage<=0 || MathAbs(fillPrice-s.entry)>maxSlippage) {
       Print("Slippage acima do limite ou preço de execução inválido. Tentando zerar a posição imediatamente.");
-      if(PositionSelect(_Symbol) && (long)PositionGetInteger(POSITION_MAGIC)==InpMagic)
-         trade.PositionClose(_Symbol);
+      // Close only the position created by this exact execution deal.
+      ulong fillDeal=trade.ResultDeal();
+      if(fillDeal>0 && HistoryDealSelect(fillDeal)) {
+         ulong positionId=(ulong)HistoryDealGetInteger(fillDeal,DEAL_POSITION_ID);
+         for(int i=PositionsTotal()-1;i>=0;i--) {
+            ulong positionTicket=PositionGetTicket(i);
+            if(positionTicket==0 || !PositionSelectByTicket(positionTicket)) continue;
+            if((ulong)PositionGetInteger(POSITION_IDENTIFIER)==positionId &&
+               PositionGetString(POSITION_SYMBOL)==_Symbol &&
+               (long)PositionGetInteger(POSITION_MAGIC)==InpMagic) {
+               trade.PositionClose(positionTicket);
+               break;
+            }
+         }
+      }
       return false;
    }
    Print("Price Action executado: ",s.side==1?"BUY":"SELL"," ",_Symbol," volume=",volume,
