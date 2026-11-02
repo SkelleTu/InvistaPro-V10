@@ -821,7 +821,7 @@ void OnTick() {
    if(!TrendDataReady(PERIOD_H4) || !TrendDataReady(PERIOD_H1) || !TrendDataReady(PERIOD_M15)) { g_approvedPatternTime=0; return; }
    int t4=Trend(PERIOD_H4),t1=Trend(PERIOD_H1),t15=Trend(PERIOD_M15);
    bool rangeMode=(t4==0 && t1==0 && t15==0);
-   if(t4!=t1 || (t4==0 && !rangeMode)) { g_approvedPatternTime=0; return; }
+   if(t4!=t1 || (t4==0 && !rangeMode) || (t4!=0 && t15!=0 && t15!=t4)) { g_approvedPatternTime=0; return; }
 
    // Approved setup is checked first on the next closed candle.
    if(g_approvedPatternTime>0) {
