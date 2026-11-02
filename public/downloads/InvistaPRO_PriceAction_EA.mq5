@@ -356,9 +356,11 @@ double ReconstructDayStartEquity(datetime dayStart) {
 }
 
 bool DailyRiskAllowed() {
-   datetime now=TimeCurrent();
-   MqlDateTime d; TimeToStruct(now,d); d.hour=0; d.min=0; d.sec=0;
+   // Daily limits use Brasília calendar day, independent of broker server timezone.
+   datetime nowBrt=TimeGMT()-3*60*60;
+   MqlDateTime d; TimeToStruct(nowBrt,d); d.hour=0; d.min=0; d.sec=0;
    datetime start=StructToTime(d);
+   datetime serverDayStart=start+(TimeTradeServer()-TimeGMT());
    if(start!=g_dayStart) {
       g_dayStart=start;
       string key=DailyStatePrefix();
@@ -366,7 +368,7 @@ bool DailyRiskAllowed() {
       g_consecutiveLosses=GlobalVariableCheck(key+"_L") ? (int)GlobalVariableGet(key+"_L") : 0;
       g_losingTradesToday=GlobalVariableCheck(key+"_D") ? (int)GlobalVariableGet(key+"_D") : 0;
       g_pauseUntil=GlobalVariableCheck(key+"_P") ? (datetime)GlobalVariableGet(key+"_P") : 0;
-      g_dayStartEquity=GlobalVariableCheck(key+"_E") ? GlobalVariableGet(key+"_E") : ReconstructDayStartEquity(start);
+      g_dayStartEquity=GlobalVariableCheck(key+"_E") ? GlobalVariableGet(key+"_E") : ReconstructDayStartEquity(serverDayStart);
       if(g_dayStartEquity<=0) {
          Print("Baseline de equity diário não pode ser reconstruído com segurança. Novas entradas bloqueadas.");
          return false;
