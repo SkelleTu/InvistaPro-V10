@@ -30,6 +30,7 @@ assert.ok(ea.includes('CountSymbolPositions() == 0'), 'EA must not merge a new s
 assert.ok(ea.includes('CalculatePriceActionSwingStop'), 'Open positions must trail only by confirmed M5 swing structure');
 assert.ok(ea.includes('SymbolSelect(g_symbol, true)'), 'EA must select and validate the actual chart/override symbol before operating');
 assert.ok(ea.includes('SetTypeFillingBySymbol(g_symbol)'), 'EA must use the broker-supported filling policy');
+assert.ok(ea.includes('SYMBOL_TRADE_TICK_SIZE') && ea.includes('NormalizeManagedPrice(stopLoss') && ea.includes('NormalizeManagedPrice(takeProfit'), 'SL/TP and trailing prices must align to the broker symbol tick size, not only decimal digits');
 assert.ok(ea.includes('riskDistance / entry > 0.015'), 'EA must reject stops wider than 1.5%');
 assert.ok(ea.includes('executableRiskReward < 2.0'), 'EA must enforce minimum net executable R:R of 1:2 after spread');
 assert.ok(ea.includes('estimatedRoundTripCost = currentSpread * 2.0'), 'EA must include round-trip spread in executable R:R validation');
