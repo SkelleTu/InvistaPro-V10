@@ -652,6 +652,7 @@ void OnTick()
    {
       g_lastClosedTradeSync = now;
       SyncClosedTradeReports();
+      SyncOpenPositionReports();
    }
 
    // ── Heartbeat ────────────────────────────────────────────────────────
@@ -1232,8 +1233,10 @@ void FetchAndProcessSignal()
             " | TP: ", NormalizeDouble(takeProfit, ManagedSymbolDigits()));
       PersistPriceActionPositionState();
       long positionIdentifier = GetManagedPositionIdentifier();
-      if (positionIdentifier <= 0) positionIdentifier = (long)trade.ResultOrder();
-      ConfirmTradeOpen(signalId, positionIdentifier, action, lotSize, stopLoss, takeProfit, trade.ResultPrice());
+      if (positionIdentifier > 0)
+         ConfirmTradeOpen(signalId, positionIdentifier, action, lotSize, stopLoss, takeProfit, trade.ResultPrice());
+      else
+         Print("⚠️ Ordem executada, mas posição ainda não identificada; reconciliação automática fará o registro.");
    }
    else
       Print("❌ Falha definitiva: ", trade.ResultRetcode(), " / ", GetLastError());
@@ -1458,6 +1461,54 @@ bool SendHeartbeat()
 //| Confirma abertura de trade                                        |
 //+------------------------------------------------------------------+
 
+bool ConfirmTradeOpen(string signalId, long ticket, string type, double lots, double sl, double tp, double executedPrice)
+{
+   if (ticket <= 0 || lots <= 0.0 || executedPrice <= 0.0) return false;
+   string url     = g_serverUrl + "/api/metatrader/trade/open";
+   string headers = "Content-Type: application/json\\r\\n";
+   string body = "{";
+   body += "\\\"ticket\\\":"       + IntegerToString(ticket)          + ",";
+   body += "\\\"symbol\\\":\\\""     + g_symbol                        + "\\",";
+   body += "\\\"type\\\":\\\""       + type                            + "\\",";
+   body += "\\\"lots\\\":"         + DoubleToString(lots, 8)         + ",";
+   body += "\\\"openPrice\\\":"    + DoubleToString(executedPrice, ManagedSymbolDigits()) + ",";
+   body += "\\\"stopLoss\\\":"     + DoubleToString(sl, ManagedSymbolDigits())     + ",";
+   body += "\\\"takeProfit\\\":"   + DoubleToString(tp, ManagedSymbolDigits())     + ",";
+   body += "\\\"openTime\\\":"     + IntegerToString((long)TimeCurrent() * 1000)  + ",";
+   body += "\\\"signalId\\\":\\\""   + signalId                        + "\\",";
+   if (g_apiToken != "") body += ",\\\"token\\\":\\\"" + g_apiToken + "\\\"";
+   body += "}";
+   char postData[], result[];
+   StringToCharArray(body, postData, 0, StringLen(body));
+   string responseHeaders;
+   int response = WebRequest("POST", url, headers, 5000, postData, result, responseHeaders);
+   if (response == 200)
+   {
+      GlobalVariableSet(PriceActionStateKey("InvistaPA_OPEN", ticket), 1.0);
+      return true;
+   }
+   Print("⚠️ Registro de posição não confirmado pelo servidor; será sincronizado novamente. Ticket=", ticket, " HTTP=", response);
+   return false;
+}
+
+void SyncOpenPositionReports()
+{
+   for (int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      if (!posInfo.SelectByIndex(i)) continue;
+      if (posInfo.Magic() != MagicNumber || posInfo.Symbol() != g_symbol) continue;
+      long identifier = (long)PositionGetInteger(POSITION_IDENTIFIER);
+      if (identifier <= 0 || GlobalVariableCheck(PriceActionStateKey("InvistaPA_OPEN", identifier))) continue;
+      string comment = posInfo.Comment();
+      string signalId = "";
+      int prefix = StringFind(comment, "InvistaPRO_");
+      if (prefix >= 0) signalId = StringSubstr(comment, prefix + StringLen("InvistaPRO_"));
+      string type = posInfo.PositionType() == POSITION_TYPE_BUY ? "BUY" : "SELL";
+      ConfirmTradeOpen(signalId, identifier, type, posInfo.Volume(), posInfo.StopLoss(),
+                       posInfo.TakeProfit(), posInfo.PriceOpen());
+   }
+}
+
 bool IsPositionIdentifierOpen(ulong positionId)
 {
    for (int i = PositionsTotal() - 1; i >= 0; i--)
@@ -1607,28 +1658,6 @@ void OnTradeTransaction(const MqlTradeTransaction &trans, const MqlTradeRequest 
    if (positionId > 0 && !IsPositionIdentifierOpen(positionId)) ReportClosedPosition(positionId);
 }
 
-void ConfirmTradeOpen(string signalId, long ticket, string type, double lots, double sl, double tp, double executedPrice)
-{
-   string url     = g_serverUrl + "/api/metatrader/trade/open";
-   string headers = "Content-Type: application/json\r\n";
-   double openPrice = executedPrice > 0 ? executedPrice : ((type == "BUY") ? SymbolInfoDouble(g_symbol, SYMBOL_ASK) : SymbolInfoDouble(g_symbol, SYMBOL_BID));
-   string body = "{";
-   body += "\"ticket\":"       + IntegerToString(ticket)          + ",";
-   body += "\"symbol\":\""     + g_symbol                        + "\",";
-   body += "\"type\":\""       + type                            + "\",";
-   body += "\"lots\":"         + DoubleToString(lots, 2)         + ",";
-   body += "\"openPrice\":"    + DoubleToString(openPrice, ManagedSymbolDigits()) + ",";
-   body += "\"stopLoss\":"     + DoubleToString(sl, ManagedSymbolDigits())     + ",";
-   body += "\"takeProfit\":"   + DoubleToString(tp, ManagedSymbolDigits())     + ",";
-   body += "\"openTime\":"     + IntegerToString((long)TimeCurrent() * 1000)  + ",";
-   body += "\"signalId\":\""   + signalId                        + "\"";
-   if (g_apiToken != "") body += ",\"token\":\"" + g_apiToken + "\"";
-   body += "}";
-   char   postData[], result[];
-   StringToCharArray(body, postData, 0, StringLen(body));
-   string responseHeaders;
-   WebRequest("POST", url, headers, 5000, postData, result, responseHeaders);
-}
 
 //+------------------------------------------------------------------+
 //| Busca URL de descoberta                                           |
