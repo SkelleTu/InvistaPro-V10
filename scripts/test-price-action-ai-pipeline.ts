@@ -20,7 +20,7 @@ function flat(count: number): Candle[] {
 const entry = rising(32);
 entry.push(
   { time: 32 * 60_000, open: 100.64, high: 100.65, low: 100.60, close: 100.61, volume: 100 },
-  { time: 33 * 60_000, open: 100.61, high: 100.75, low: 100.53, close: 100.70, volume: 200 },
+  { time: 33 * 60_000, open: 100.61, high: 100.75, low: 100.43, close: 100.70, volume: 200 },
   { time: 34 * 60_000, open: 100.70, high: 100.74, low: 100.68, close: 100.72, volume: 100 },
 );
 const frames = { H4: rising(40), H1: rising(40), M15: flat(40), M5: entry };
