@@ -119,11 +119,13 @@ bool Pattern(ENUM_TIMEFRAMES tf, int &side, double &trigger, double &invalidatio
    bool bullPin=p.close>p.open && lower/range>=0.55 && body/range>=0.12;
    bool bearPin=p.close<p.open && upper/range>=0.55 && body/range>=0.12;
    bool inside=p.high<prior.high && p.low>prior.low;
+   bool insideBull=inside && p.close>(prior.high+prior.low)*0.5;
+   bool insideBear=inside && p.close<(prior.high+prior.low)*0.5;
    int t=Trend(PERIOD_H1);
-   if((bullEngulf || bullPin || inside) && last.close<=p.high && (t==1 || t==0)) {
+   if((bullEngulf || bullPin || insideBull) && last.close<=p.high && (t==1 || t==0)) {
       side=1; trigger=p.high; invalidation=p.low; patternTime=p.time; return true;
    }
-   if((bearEngulf || bearPin || inside) && last.close>=p.low && (t==-1 || t==0)) {
+   if((bearEngulf || bearPin || insideBear) && last.close>=p.low && (t==-1 || t==0)) {
       side=-1; trigger=p.low; invalidation=p.high; patternTime=p.time; return true;
    }
    return false;
