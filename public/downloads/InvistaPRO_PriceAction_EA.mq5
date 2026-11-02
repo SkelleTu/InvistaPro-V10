@@ -293,7 +293,7 @@ void ReviewOpenPositionAI() {
       if(!GlobalVariableCheck(key) && PositionSelect(_Symbol)) {
          double volume=PositionGetDouble(POSITION_VOLUME);
          double partial=NormalizeVolume(volume*0.5);
-         if(partial>0 && partial<volume && trade.PositionClosePartial(_Symbol,partial) && TradeRequestSucceeded())
+         if(partial>0 && partial<volume && ClosePartialPosition(side,partial,volume))
             GlobalVariableSet(key,1.0);
       }
    } else if(action=="CLOSE") {
@@ -486,6 +486,21 @@ bool TradeRequestSucceeded() {
 
 string PartialKey(ulong ticket) { return "PA_PARTIAL_"+(string)ticket; }
 
+bool ClosePartialPosition(int side,double closeVolume,double currentVolume) {
+   if(closeVolume<=0 || closeVolume>=currentVolume) return false;
+   ENUM_ACCOUNT_MARGIN_MODE mode=(ENUM_ACCOUNT_MARGIN_MODE)AccountInfoInteger(ACCOUNT_MARGIN_MODE);
+   bool requested=false;
+   if(mode==ACCOUNT_MARGIN_MODE_RETAIL_HEDGING) {
+      requested=trade.PositionClosePartial(_Symbol,closeVolume);
+   } else {
+      // Netting/exchange accounts reduce the existing net position with an opposite deal.
+      requested=side==1
+         ? trade.Sell(closeVolume,_Symbol,0,0,0,"PA partial reduction")
+         : trade.Buy(closeVolume,_Symbol,0,0,0,"PA partial reduction");
+   }
+   return requested && TradeRequestSucceeded();
+}
+
 void ManageOpenPosition() {
    if(!PositionSelect(_Symbol)) return;
    if((long)PositionGetInteger(POSITION_MAGIC)!=InpMagic) return;
@@ -513,7 +528,7 @@ void ManageOpenPosition() {
    if(rNow>=1.5 && !GlobalVariableCheck(partialKey) &&
       volume>SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN)*1.5) {
       double closeVol=NormalizeVolume(volume*0.5);
-      if(closeVol>0 && closeVol<volume && trade.PositionClosePartial(_Symbol,closeVol) && TradeRequestSucceeded())
+      if(closeVol>0 && closeVol<volume && ClosePartialPosition(side,closeVol,volume))
          GlobalVariableSet(partialKey,1.0);
    }
    // Trailing only tightens behind confirmed closed M15 swing points.
