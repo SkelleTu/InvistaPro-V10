@@ -17,6 +17,7 @@ CTrade trade;
 input string InpServerURL = "https://invista-pro-v10-kzlv.onrender.com"; // InvistaPRO production server
 input string InpApiToken = ""; // Injected per authorized account download
 input int    InpHeartbeatSeconds = 30;
+input bool   InpEnableTrading = false; // Safe default: heartbeat only until the user explicitly enables demo trading in EA inputs
 
 // --- Core / risk
 input ulong  InpMagicNumber                 = 101018;
@@ -947,6 +948,7 @@ void SetBlockReason(const string reason)
 
 void EvaluateNewSignal()
   {
+   if(!InpEnableTrading) { SetBlockReason("Conectado; execução pausada (InpEnableTrading=false)"); return; }
    SetBlockReason("Analisando confluências MTF");
    if(!IsAllowedSymbol()) { SetBlockReason("Símbolo bloqueado pela restrição opcional BTC/ETH/SOL"); return; }
    if(!IsInBrasiliaSession()) { SetBlockReason("Fora da janela operacional Brasília"); return; }
@@ -1018,6 +1020,7 @@ void OnNewM5Bar()
 
 bool OpenPositionFromSetup()
   {
+   if(!InpEnableTrading) { SetBlockReason("Entrada bloqueada: habilite InpEnableTrading após validar DEMO"); return false; }
    if(g_setupDirection==0) return false;
    if(!IsAllowedSymbol()) { SetBlockReason("Entrada cancelada: símbolo não permitido"); return false; }
    if(!IsInBrasiliaSession()) { SetBlockReason("Entrada cancelada: fora da sessão"); return false; }
