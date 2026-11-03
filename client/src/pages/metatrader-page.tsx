@@ -325,16 +325,25 @@ export default function MetaTraderPage() {
     return () => clearInterval(interval);
   }, [positions]);
 
-  // Auto-scroll do feed de análises quando chega nova entrada
+  // O feed operacional exibe somente símbolos com dados recebidos de instâncias EA.
+  // O endpoint /ai-analysis também agrega o scanner global; ele nunca deve contaminar este feed.
+  const eaConnectedSymbols = new Set(
+    (status?.cachedSymbols || []).map(symbol => String(symbol).trim().toUpperCase()).filter(Boolean)
+  );
+  const eaAnalysisLog = (aiAnalysis?.log || []).filter(entry =>
+    eaConnectedSymbols.has(String(entry.symbol || '').trim().toUpperCase())
+  );
+
+  // Auto-scroll somente quando chega uma análise de um símbolo monitorado pelo EA.
   const prevAnalysisCount = useRef(0);
   useEffect(() => {
-    if (aiAnalysis?.log && aiAnalysis.log.length > prevAnalysisCount.current) {
-      prevAnalysisCount.current = aiAnalysis.log.length;
+    if (eaAnalysisLog.length > prevAnalysisCount.current) {
+      prevAnalysisCount.current = eaAnalysisLog.length;
       if (activeTab === 'signals' && analysisEndRef.current) {
         analysisEndRef.current.scrollIntoView({ behavior: 'smooth' });
       }
     }
-  }, [aiAnalysis?.log?.length, activeTab]);
+  }, [eaAnalysisLog.length, activeTab]);
 
   const updateConfigMutation = useMutation({
     mutationFn: async (updates: Partial<MT5Config>) => {
@@ -1537,9 +1546,9 @@ export default function MetaTraderPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                {aiAnalysis?.log && aiAnalysis.log.length > 0 ? (
+                {eaAnalysisLog.length > 0 ? (
                   <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
-                    {aiAnalysis.log.slice(0, 30).map((entry, i) => (
+                    {eaAnalysisLog.slice(0, 30).map((entry, i) => (
                       <div key={entry.id} className={`flex gap-3 p-2 rounded-lg border text-xs ${
                         entry.status === 'approved' ? 'border-green-500/30 bg-green-500/5' :
                         entry.status === 'rejected' ? 'border-red-500/30 bg-red-500/5' :
@@ -1589,9 +1598,11 @@ export default function MetaTraderPage() {
                   <div className="space-y-3 py-4">
                     <div className="flex flex-col items-center text-muted-foreground gap-2 pb-2">
                       <Cpu className="h-8 w-8 opacity-30" />
-                      <p className="font-medium text-sm">Aguardando primeiras análises...</p>
+                      <p className="font-medium text-sm">Aguardando análises dos ativos instalados no EA...</p>
                       <p className="text-xs text-center max-w-sm">
-                        O feed é preenchido automaticamente à medida que o EA envia dados do MT5. O EA está {status?.connected ? <span className="text-green-500 font-medium">conectado</span> : <span className="text-yellow-500 font-medium">aguardando</span>}.
+                        {eaConnectedSymbols.size > 0
+                          ? `Aguardando análise de: ${Array.from(eaConnectedSymbols).join(', ')}.`
+                          : 'Nenhum símbolo de gráfico foi recebido do EA. Análises do scanner global ficam fora deste feed.'}
                       </p>
                     </div>
                     {status?.connected && (
