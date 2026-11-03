@@ -1320,6 +1320,63 @@ router.get('/config', mt5DashboardAccess, (_req: Request, res: Response) => {
  * GET /api/mt5/download-ea
  * Serve o EA versionado com URL/token injetados e cabeçalho de versão para validar downloads.
  */
+/**
+ * Download autenticado do Aura Price Action. Injeta URL pública e token MT5
+ * individual somente após autenticação do painel; nunca serve credenciais em URL pública.
+ */
+router.get('/download-aura-ea', mt5DashboardAccess, async (req: Request, res: Response) => {
+  try {
+    let config = metaTraderBridge.getConfig();
+    let token = String(config.apiToken ?? '').trim();
+    if (process.env.NODE_ENV === 'production' && !token) {
+      token = randomBytes(32).toString('hex');
+      metaTraderBridge.updateConfig({ apiToken: token });
+      config = metaTraderBridge.getConfig();
+    }
+    if (!token) {
+      return res.status(503).json({ ok: false, code: 'MT5_API_TOKEN_NOT_CONFIGURED', error: 'Token MT5 ainda não está configurado.' });
+    }
+    await metaTraderBridge.flushDurableConfig();
+
+    const requestHost = String(req.get('host') ?? '').trim();
+    const serverUrl = (process.env.NODE_ENV === 'production'
+      ? (String(process.env.MT5_PUBLIC_BASE_URL ?? '').trim() || String(process.env.RENDER_EXTERNAL_URL ?? '').trim() || (requestHost ? `https://${requestHost}` : ''))
+      : (String(process.env.REPLIT_DEV_DOMAIN ?? '').trim()
+          ? `https://${String(process.env.REPLIT_DEV_DOMAIN).trim()}`
+          : `${req.protocol}://${requestHost}`)).replace(/\\/+$/, '');
+    if (!serverUrl) {
+      return res.status(500).json({ ok: false, error: 'Não foi possível determinar a URL pública do servidor MT5.' });
+    }
+
+    const eaPath = path.join(process.cwd(), 'public', 'downloads', 'InvistaPRO_V10_Aura_MT5_v1_50.mq5');
+    let content = fs.readFileSync(eaPath, 'utf-8');
+    const escapeMqlString = (value: string) => value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/[\\r\\n]/g, '');
+    const serverPattern = /input\\s+string\\s+InpServerURL\\s*=\\s*"[^"]*";/;
+    const tokenPattern = /input\\s+string\\s+InpApiToken\\s*=\\s*"[^"]*";/;
+    if (!serverPattern.test(content) || !tokenPattern.test(content) ||
+        !content.includes('/api/mt5/heartbeat') || !content.includes('InpHeartbeatSeconds')) {
+      return res.status(503).json({ ok: false, code: 'AURA_EA_SOURCE_NOT_CURRENT', error: 'Fonte Aura sem os parâmetros de integração esperados.' });
+    }
+    content = content.replace(serverPattern, `input string InpServerURL = "${escapeMqlString(serverUrl)}"; // URL de produção InvistaPRO`);
+    content = content.replace(tokenPattern, `input string InpApiToken = "${escapeMqlString(token)}"; // Token individual injetado no download autenticado`);
+
+    const version = content.match(/#property\\s+version\\s+"([^"]+)"/)?.[1] ?? 'unknown';
+    if (version !== '1.51') {
+      return res.status(503).json({ ok: false, code: 'AURA_EA_VERSION_MISMATCH', detectedVersion: version });
+    }
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.setHeader('X-InvistaPRO-EA-Version', version);
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="InvistaPRO_V10_Aura_MT5_v1_51.mq5"');
+    return res.send(content);
+  } catch (err: any) {
+    console.error('[MT5 Aura Download] Falha:', err?.message || err);
+    return res.status(500).json({ ok: false, error: 'Não foi possível preparar o download autenticado do Aura.' });
+  }
+});
+
 router.get('/download-ea', mt5DashboardAccess, async (req: Request, res: Response) => {
   try {
     let config = metaTraderBridge.getConfig();
