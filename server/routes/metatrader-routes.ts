@@ -1343,16 +1343,16 @@ router.get('/download-aura-ea', mt5DashboardAccess, async (req: Request, res: Re
       ? (String(process.env.MT5_PUBLIC_BASE_URL ?? '').trim() || String(process.env.RENDER_EXTERNAL_URL ?? '').trim() || (requestHost ? `https://${requestHost}` : ''))
       : (String(process.env.REPLIT_DEV_DOMAIN ?? '').trim()
           ? `https://${String(process.env.REPLIT_DEV_DOMAIN).trim()}`
-          : `${req.protocol}://${requestHost}`)).replace(/\\/+$/, '');
+          : `${req.protocol}://${requestHost}`)).replace(/\/+$/, '');
     if (!serverUrl) {
       return res.status(500).json({ ok: false, error: 'Não foi possível determinar a URL pública do servidor MT5.' });
     }
 
     const eaPath = path.join(process.cwd(), 'public', 'downloads', 'InvistaPRO_V10_Aura_MT5_v1_50.mq5');
     let content = fs.readFileSync(eaPath, 'utf-8');
-    const escapeMqlString = (value: string) => value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/[\\r\\n]/g, '');
-    const serverPattern = /input\\s+string\\s+InpServerURL\\s*=\\s*"[^"]*";/;
-    const tokenPattern = /input\\s+string\\s+InpApiToken\\s*=\\s*"[^"]*";/;
+    const escapeMqlString = (value: string) => value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/[\r\n]/g, '');
+    const serverPattern = /input\s+string\s+InpServerURL\s*=\s*"[^"]*";/;
+    const tokenPattern = /input\s+string\s+InpApiToken\s*=\s*"[^"]*";/;
     if (!serverPattern.test(content) || !tokenPattern.test(content) ||
         !content.includes('/api/mt5/heartbeat') || !content.includes('InpHeartbeatSeconds')) {
       return res.status(503).json({ ok: false, code: 'AURA_EA_SOURCE_NOT_CURRENT', error: 'Fonte Aura sem os parâmetros de integração esperados.' });
@@ -1360,7 +1360,7 @@ router.get('/download-aura-ea', mt5DashboardAccess, async (req: Request, res: Re
     content = content.replace(serverPattern, `input string InpServerURL = "${escapeMqlString(serverUrl)}"; // URL de produção InvistaPRO`);
     content = content.replace(tokenPattern, `input string InpApiToken = "${escapeMqlString(token)}"; // Token individual injetado no download autenticado`);
 
-    const version = content.match(/#property\\s+version\\s+"([^"]+)"/)?.[1] ?? 'unknown';
+    const version = content.match(/#property\s+version\s+"([^"]+)"/)?.[1] ?? 'unknown';
     if (version !== '1.51') {
       return res.status(503).json({ ok: false, code: 'AURA_EA_VERSION_MISMATCH', detectedVersion: version });
     }
