@@ -1328,10 +1328,10 @@ void SendInvistaHeartbeat()
    string accountId=StringFormat("%I64d",AccountInfoInteger(ACCOUNT_LOGIN));
    string broker=AccountInfoString(ACCOUNT_COMPANY);
    string payload=StringFormat(
-      "{\"accountId\":\"%s\",\"broker\":\"%s\",\"balance\":%.2f,\"equity\":%.2f,\"freeMargin\":%.2f,\"openPositions\":%d,\"platform\":\"MT5\",\"accountType\":\"%s\",\"token\":\"%s\"}",
+      "{\"accountId\":\"%s\",\"broker\":\"%s\",\"balance\":%.2f,\"equity\":%.2f,\"freeMargin\":%.2f,\"openPositions\":%d,\"symbol\":\"%s\",\"platform\":\"MT5\",\"accountType\":\"%s\",\"token\":\"%s\"}",
       JsonEscape(accountId),JsonEscape(broker),AccountInfoDouble(ACCOUNT_BALANCE),
       AccountInfoDouble(ACCOUNT_EQUITY),AccountInfoDouble(ACCOUNT_MARGIN_FREE),
-      CountAuraPositions(),accountType,JsonEscape(InpApiToken));
+      CountAuraPositions(),JsonEscape(_Symbol),accountType,JsonEscape(InpApiToken));
 
    char data[],result[];
    StringToCharArray(payload,data,0,WHOLE_ARRAY,CP_UTF8);
