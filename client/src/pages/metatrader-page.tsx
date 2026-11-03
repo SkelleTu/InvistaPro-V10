@@ -37,6 +37,7 @@ interface MT5Status {
   recentTrades: any[];
   systemHealth: 'excellent' | 'good' | 'warning' | 'critical';
   cachedSymbols: string[];
+  activeEaSymbols?: string[];
   lastBalance?: number;
   lastEquity?: number;
   latestAIConsensus?: number;
@@ -328,7 +329,7 @@ export default function MetaTraderPage() {
   // O feed operacional exibe somente símbolos com dados recebidos de instâncias EA.
   // O endpoint /ai-analysis também agrega o scanner global; ele nunca deve contaminar este feed.
   const eaConnectedSymbols = new Set(
-    (status?.cachedSymbols || []).map(symbol => String(symbol).trim().toUpperCase()).filter(Boolean)
+    (status?.activeEaSymbols || []).map(symbol => String(symbol).trim().toUpperCase()).filter(Boolean)
   );
   const eaAnalysisLog = (aiAnalysis?.log || []).filter(entry =>
     eaConnectedSymbols.has(String(entry.symbol || '').trim().toUpperCase())
