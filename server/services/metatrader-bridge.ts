@@ -233,6 +233,7 @@ export interface MT5Status {
   circuitBreakerActive?: boolean;
   circuitBreakerRemainingMin?: number;
   cachedSymbols?: string[];
+  activeEaSymbols?: string[];
 }
 
 const DEFAULT_CONFIG: MT5Config = {
@@ -1353,6 +1354,8 @@ class MetaTraderBridge extends EventEmitter {
   private recentTrades: MT5TradeResult[] = [];
   private signalGenerationInterval: NodeJS.Timeout | null = null;
   private marketDataCache: Map<string, any[]> = new Map();
+  private activeEaSymbolHeartbeats: Map<string, number> = new Map();
+  private readonly EA_SYMBOL_TTL_MS = 90_000;
   private isGeneratingSignal = false;
 
   // ── Memória de Contexto de Posições ──
@@ -2188,6 +2191,7 @@ class MetaTraderBridge extends EventEmitter {
       recentTrades: this.recentTrades.slice(-20),
       openPositions: this.openPositions.size,
       cachedSymbols: this.getCachedSymbols(),
+      activeEaSymbols: this.getActiveEaSymbols(),
       lastBalance: this.currentBalance || undefined,
       lastEquity: this.currentEquity || undefined,
       latestAIConsensus,
@@ -4624,6 +4628,22 @@ class MetaTraderBridge extends EventEmitter {
 
   getCachedSymbols(): string[] {
     return Array.from(this.marketDataCache.keys());
+  }
+
+  /** Record a symbol only when an authenticated EA instance polls the MT5 signal endpoint. */
+  recordActiveEaSymbol(symbol: string): void {
+    const normalized = String(symbol || '').trim().toUpperCase();
+    if (!normalized || normalized.length > 40 || !/^[A-Z0-9._-]+$/.test(normalized)) return;
+    this.activeEaSymbolHeartbeats.set(normalized, Date.now());
+  }
+
+  /** Symbols disappear from the operational feed 90 seconds after their EA stops polling. */
+  getActiveEaSymbols(): string[] {
+    const cutoff = Date.now() - this.EA_SYMBOL_TTL_MS;
+    for (const [symbol, seenAt] of this.activeEaSymbolHeartbeats) {
+      if (seenAt < cutoff) this.activeEaSymbolHeartbeats.delete(symbol);
+    }
+    return Array.from(this.activeEaSymbolHeartbeats.keys());
   }
 
   // generateMockSignal removido — sinais aleatórios são proibidos.
