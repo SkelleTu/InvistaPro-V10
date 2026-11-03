@@ -462,44 +462,54 @@ export default function MetaTraderPage() {
 
   const downloadAuraEA = async () => {
     try {
-      const response = await fetch('/downloads/InvistaPRO_V10_Aura_MT5_v1_50.mq5', {
+      const response = await fetch('/api/mt5/download-aura-ea', {
         method: 'GET',
         credentials: 'same-origin',
-        headers: { Accept: 'text/plain, application/octet-stream' },
+        headers: { Accept: 'text/plain' },
       });
       if (!response.ok) {
-        throw new Error(`O servidor não disponibilizou o InvistaPRO V10 Aura (HTTP ${response.status}).`);
+        let message = `O servidor recusou o download do Aura (HTTP ${response.status}).`;
+        try {
+          const payload = await response.json();
+          message = payload.error || payload.message || message;
+        } catch {
+          // Mantém o status HTTP quando a resposta não é JSON.
+        }
+        throw new Error(message);
       }
 
-      const blob = await response.blob();
-      if (blob.size < 1000) {
-        throw new Error('O arquivo Aura retornado está vazio ou incompleto.');
+      const contentType = (response.headers.get('content-type') || '').toLowerCase();
+      if (!contentType.includes('text/plain')) {
+        throw new Error('A resposta não é um arquivo EA válido. Entre novamente na plataforma e tente baixar.');
       }
-      const source = await blob.text();
-      if (!source.includes('#property version   "1.50"') ||
-          !source.includes('InvistaPRO V10 Aura - Price Action EA for MetaTrader 5')) {
-        throw new Error('O arquivo recebido não corresponde ao InvistaPRO V10 Aura v1.50.');
+      const source = await response.text();
+      if (source.length < 1000 ||
+          !source.includes('#property version   "1.51"') ||
+          !source.includes('InpServerURL = "') ||
+          !source.includes('InpApiToken = "') ||
+          !source.includes('/api/mt5/heartbeat')) {
+        throw new Error('O arquivo recebido não contém a versão Aura integrada e personalizada esperada.');
       }
 
       const verifiedBlob = new Blob([source], { type: 'text/plain;charset=utf-8' });
       const objectUrl = URL.createObjectURL(verifiedBlob);
       const link = document.createElement('a');
       link.href = objectUrl;
-      link.download = 'InvistaPRO_V10_Aura_MT5_v1_50.mq5';
+      link.download = 'InvistaPRO_V10_Aura_MT5_v1_51.mq5';
       document.body.appendChild(link);
       link.click();
       link.remove();
       window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
 
       toast({
-        title: 'InvistaPRO V10 Aura v1.50 baixado!',
-        description: 'EA autônomo de Price Action. Instale em MQL5/Experts, compile no MetaEditor (F7) e teste primeiro em conta DEMO.',
-        duration: 8000,
+        title: 'InvistaPRO V10 Aura v1.51 baixado!',
+        description: 'URL e token individual já vêm configurados. Autorize o domínio em Ferramentas → Opções → Expert Advisors → WebRequest; depois compile no MetaEditor (F7).',
+        duration: 9000,
       });
     } catch (error: any) {
       toast({
         title: 'Falha no download do Aura',
-        description: error?.message || 'Não foi possível acessar o arquivo do EA Aura.',
+        description: error?.message || 'Não foi possível preparar o arquivo personalizado do EA Aura.',
         variant: 'destructive',
       });
     }
@@ -598,7 +608,7 @@ export default function MetaTraderPage() {
             </Button>
             <Button onClick={downloadAuraEA} data-testid="button-download-aura-ea" className="gap-2" variant="outline">
               <Download className="h-4 w-4" />
-              V10 Aura v1.50
+              V10 Aura v1.51
             </Button>
           </div>
         </div>
@@ -684,7 +694,7 @@ export default function MetaTraderPage() {
               </div>
               <div className="space-y-2">
                 <div>
-                  <p className="text-xs font-medium text-muted-foreground mb-1">① EA (F7 → Inputs → <strong>ServerURL</strong>)</p>
+                  <p className="text-xs font-medium text-muted-foreground mb-1">① EA (F7 → Inputs → <strong>InpServerURL</strong>)</p>
                   <div className="flex items-center gap-2">
                     <code className="text-xs bg-background border rounded px-2 py-1 flex-1 truncate font-mono" data-testid="text-current-server-url">
                       {window.location.origin}
@@ -2491,7 +2501,7 @@ export default function MetaTraderPage() {
                     <li>Cole o arquivo <code>.mq5</code> na pasta</li>
                     <li>No MetaTrader: clique em <strong>Compilar (F7)</strong> no MetaEditor</li>
                     <li>Arraste o EA para qualquer gráfico e habilite o <strong>AlgoTrading</strong></li>
-                    <li>Configure a URL do servidor nos parâmetros do EA</li>
+                    <li>A URL e o token já vêm preenchidos no download Aura; autorize o domínio em Ferramentas → Opções → Expert Advisors → WebRequest</li>
                   </ol>
                 </div>
                 <div className="space-y-1">
@@ -2539,7 +2549,7 @@ export default function MetaTraderPage() {
                   </div>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Use os dois botões no topo da página: o tradicional mantém a integração com IA; o V10 Aura baixa o EA autônomo de Price Action.
+                  Use os dois botões no topo da página: o tradicional mantém a integração com IA; o V10 Aura baixa o EA autônomo de Price Action com URL e token individuais injetados automaticamente.
                 </p>
               </CardContent>
             </Card>
