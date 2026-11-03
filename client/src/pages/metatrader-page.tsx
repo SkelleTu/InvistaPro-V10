@@ -292,13 +292,22 @@ export default function MetaTraderPage() {
     setSecondsAgo(0);
   }, [status, positions, trades, aiAnalysis]);
 
-  // Atualizar valores estáveis de IA — só atualiza quando chega valor real (>0), nunca apaga com zero
+  // Keep live AI metrics strictly tied to symbols with a fresh EA heartbeat.
   useEffect(() => {
+    if (Array.isArray(status?.activeEaSymbols)) {
+      const activeSymbols = new Set(status.activeEaSymbols.map(symbol => String(symbol).trim().toUpperCase()));
+      if (activeSymbols.size === 0 || (stableAnalysisSymbol && !activeSymbols.has(stableAnalysisSymbol.toUpperCase()))) {
+        setStableAIConsensus(undefined);
+        setStableAIDirection(undefined);
+        setStableAnalysisSymbol(undefined);
+        setStableRequiredConsensus(undefined);
+      }
+    }
     if (status?.latestAIConsensus !== undefined && status.latestAIConsensus > 0) setStableAIConsensus(status.latestAIConsensus);
     if (status?.latestAIDirection !== undefined) setStableAIDirection(status.latestAIDirection);
     if (status?.latestAnalysisSymbol !== undefined) setStableAnalysisSymbol(status.latestAnalysisSymbol);
     if ((status as any)?.latestRequiredConsensus !== undefined && (status as any).latestRequiredConsensus > 0) setStableRequiredConsensus((status as any).latestRequiredConsensus);
-  }, [status?.latestAIConsensus, status?.latestAIDirection, status?.latestAnalysisSymbol, (status as any)?.latestRequiredConsensus]);
+  }, [status?.activeEaSymbols, status?.latestAIConsensus, status?.latestAIDirection, status?.latestAnalysisSymbol, (status as any)?.latestRequiredConsensus]);
 
   // Contador de segundos desde última atualização
   useEffect(() => {
@@ -1347,7 +1356,7 @@ export default function MetaTraderPage() {
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
                     <div className="bg-background/60 rounded-lg p-2.5 border">
                       <p className="text-muted-foreground mb-1">EA Conectado</p>
-                      <p className="font-bold text-green-500">{status.broker || '—'}</p>
+                      <p className={`font-bold ${status.connected ? 'text-green-500' : 'text-red-500'}`}>{status.connected ? (status.broker || 'Conectado') : 'Desconectado'}</p>
                       <p className="text-muted-foreground">{status.accountId}</p>
                     </div>
                     <div className="bg-background/60 rounded-lg p-2.5 border">
@@ -1357,7 +1366,7 @@ export default function MetaTraderPage() {
                     </div>
                     <div className="bg-background/60 rounded-lg p-2.5 border">
                       <p className="text-muted-foreground mb-1">Último símbolo analisado</p>
-                      <p className="font-bold">{stableAnalysisSymbol || status.cachedSymbols?.[0] || '—'}</p>
+                      <p className="font-bold">{stableAnalysisSymbol || '—'}</p>
                       <p className="text-muted-foreground">{status.latestAnalysisAt ? formatTime(status.latestAnalysisAt) : 'aguardando...'}</p>
                     </div>
                     <div className="bg-background/60 rounded-lg p-2.5 border">
