@@ -2565,11 +2565,8 @@ class MetaTraderBridge extends EventEmitter {
     // Salvar saldo em tempo real — usado pela memória de contexto de posições
     if (accountData.balance > 0) this.currentBalance = accountData.balance;
     if (accountData.equity > 0) this.currentEquity = accountData.equity;
-    if (!this.config.enabled) {
-      this.config.enabled = true;
-      this.startSignalGeneration();
-      console.log(`[MT5Bridge] ✅ Sistema auto-habilitado via heartbeat do EA (${accountData.broker})`);
-    }
+    // Heartbeat only confirms terminal connectivity. It must never enable trading:
+    // execution remains controlled explicitly by the dashboard's Sistema Ativo switch.
     // Reconciliar posições: se o EA reporta 0 posições abertas mas o servidor tem registros,
     // limpar posições fantasma que bloqueiam novos sinais (fechadas via SL/TP sem notificação)
     if (typeof accountData.openPositionsCount === 'number' && accountData.openPositionsCount === 0 && this.openPositions.size > 0) {
