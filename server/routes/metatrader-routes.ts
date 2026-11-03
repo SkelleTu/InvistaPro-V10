@@ -153,6 +153,8 @@ router.get('/signal', mt5SignalAccess, (req: Request, res: Response) => {
     if (productionBlock) {
       return res.status(productionBlock.status).json({ action: 'HOLD', ...productionBlock, timestamp: Date.now() });
     }
+    // Só registra o símbolo depois da autenticação do EA e das validações do canal MT5.
+    if (symbolStr) metaTraderBridge.recordActiveEaSymbol(symbolStr);
     if (!config.enabled) {
       return res.json({
         action: 'HOLD',
@@ -331,6 +333,8 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
       });
     }
 
+    // O polling autenticado e com conta confirmada identifica o símbolo realmente instalado no gráfico.
+    metaTraderBridge.recordActiveEaSymbol(String(symbol).trim());
     // Registrar heartbeat — EA v5.0 usa este endpoint como canal principal
     metaTraderBridge.recordHeartbeat({
       accountId: bodyAccountId || 'EA_AUTO',
