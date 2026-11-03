@@ -29,7 +29,7 @@ input int    InpCooldownMinutes              = 60;    // Pause duration after co
 input double InpMaxDailyLossPercent           = 3.0;   // Maximum daily net loss as % of estimated start-of-day balance
 input int    InpSlippagePoints               = 30;
 input double InpEstimatedRoundTurnCostPerLot = 0.0;  // Configure broker commission/fees in account currency per lot
-input bool   InpOnlyBTCETHSOL                 = true; // Broker symbol must contain BTC, ETH or SOL
+input bool   InpOnlyBTCETHSOL                 = false; // Optional restriction; false lets the EA trade only the chart where it is installed, regardless of asset class
 
 // --- Brazil (Brasilia) trading windows
 input bool   InpUseSessionFilter             = true;
@@ -948,7 +948,7 @@ void SetBlockReason(const string reason)
 void EvaluateNewSignal()
   {
    SetBlockReason("Analisando confluências MTF");
-   if(!IsAllowedSymbol()) { SetBlockReason("Símbolo fora da lista BTC/ETH/SOL"); return; }
+   if(!IsAllowedSymbol()) { SetBlockReason("Símbolo bloqueado pela restrição opcional BTC/ETH/SOL"); return; }
    if(!IsInBrasiliaSession()) { SetBlockReason("Fora da janela operacional Brasília"); return; }
    if(NewsWindowBlocked()) { SetBlockReason("Bloqueio por notícia de alto impacto / calendário indisponível"); return; }
    if(!DailyLimitsAllowEntry()) { SetBlockReason("Limite diário ou cooldown de risco ativo"); return; }
