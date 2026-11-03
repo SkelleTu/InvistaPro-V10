@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //| InvistaPRO V10 Aura - MT5 Expert Advisor                         |
 //| Price Action multi-timeframe implementation                     |
-//| Version 1.50                                                     |
+//| Version 1.51                                                     |
 //|                                                                  |
 //| IMPORTANT: Source code is provided for strategy testing.          |
 //| Compile in MetaEditor and forward-test on a DEMO account first.   |
