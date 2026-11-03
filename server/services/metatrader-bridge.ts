@@ -2174,14 +2174,13 @@ class MetaTraderBridge extends EventEmitter {
       : 0;
 
     // Fallback ao cache do auto-trading-scheduler quando EA não está enviando dados
-    const cacheEntry = latestAnalysisWithConsensus ? null : consensusCache.getLatest();
-    const latestAIConsensus = latestAnalysisWithConsensus?.aiConsensus ?? cacheEntry?.aiConsensus;
-    const latestRequiredConsensus = latestAnalysisWithConsensus?.requiredConsensus ?? cacheEntry?.requiredConsensus;
-    const latestAIDirection = latestAnalysisWithConsensus?.aiDirection ?? cacheEntry?.aiDirection;
+    const latestAIConsensus = latestAnalysisWithConsensus?.aiConsensus;
+    const latestRequiredConsensus = latestAnalysisWithConsensus?.requiredConsensus;
+    const latestAIDirection = latestAnalysisWithConsensus?.aiDirection;
     // Símbolo: sempre prioriza a entrada mais recente do log (mostra o ativo real do EA)
     // Fallback ao consenso cache apenas se não há nenhuma entrada no log
-    const latestAnalysisSymbol = mostRecentEntry?.symbol ?? latestAnalysisWithConsensus?.symbol ?? cacheEntry?.symbol;
-    const latestAnalysisAt = latestAnalysisWithConsensus?.timestamp ?? mostRecentEntry?.timestamp ?? cacheEntry?.timestamp;
+    const latestAnalysisSymbol = mostRecentEntry?.symbol ?? latestAnalysisWithConsensus?.symbol;
+    const latestAnalysisAt = latestAnalysisWithConsensus?.timestamp ?? mostRecentEntry?.timestamp;
 
     return {
       ...this.status,
@@ -4630,20 +4629,29 @@ class MetaTraderBridge extends EventEmitter {
     return Array.from(this.marketDataCache.keys());
   }
 
-  /** Record a symbol only when an authenticated EA instance polls the MT5 signal endpoint. */
-  recordActiveEaSymbol(symbol: string): void {
+  /** Register an EA chart symbol scoped to the authenticated MT5 account. */
+  recordActiveEaSymbol(symbol: string, accountId: string): void {
     const normalized = String(symbol || '').trim().toUpperCase();
-    if (!normalized || normalized.length > 40 || !/^[A-Z0-9._-]+$/.test(normalized)) return;
-    this.activeEaSymbolHeartbeats.set(normalized, Date.now());
+    const account = String(accountId || '').trim();
+    if (!account || account.length > 80 || !normalized || normalized.length > 40 || !/^[A-Z0-9._-]+$/.test(normalized)) return;
+    this.activeEaSymbolHeartbeats.set(`${account}::${normalized}`, Date.now());
   }
 
-  /** Symbols disappear from the operational feed 90 seconds after their EA stops polling. */
-  getActiveEaSymbols(): string[] {
+  /** Return only symbols for one account; stale EA charts expire after 90 seconds. */
+  getActiveEaSymbols(accountId: string = this.status.accountId): string[] {
+    const account = String(accountId || '').trim();
+    if (!account) return [];
     const cutoff = Date.now() - this.EA_SYMBOL_TTL_MS;
-    for (const [symbol, seenAt] of this.activeEaSymbolHeartbeats) {
-      if (seenAt < cutoff) this.activeEaSymbolHeartbeats.delete(symbol);
+    const prefix = `${account}::`;
+    const symbols: string[] = [];
+    for (const [key, seenAt] of this.activeEaSymbolHeartbeats) {
+      if (seenAt < cutoff) {
+        this.activeEaSymbolHeartbeats.delete(key);
+        continue;
+      }
+      if (key.startsWith(prefix)) symbols.push(key.slice(prefix.length));
     }
-    return Array.from(this.activeEaSymbolHeartbeats.keys());
+    return symbols;
   }
 
   // generateMockSignal removido — sinais aleatórios são proibidos.
