@@ -13,6 +13,11 @@
 #include <Trade/Trade.mqh>
 CTrade trade;
 
+// --- InvistaPRO connectivity (credentials are injected by the authorized download)
+input string InpServerURL = "https://invista-pro-v10-kzlv.onrender.com"; // InvistaPRO production server
+input string InpApiToken = ""; // Injected per authorized account download
+input int    InpHeartbeatSeconds = 30;
+
 // --- Core / risk
 input ulong  InpMagicNumber                 = 101018;
 input double InpRiskPercent                 = 1.0;   // Equity risk per trade (%)
@@ -1262,6 +1267,87 @@ void UpdatePanel()
   }
 
 //+------------------------------------------------------------------+
+//| InvistaPRO authenticated heartbeat                                |
+//+------------------------------------------------------------------+
+string JsonEscape(const string value)
+  {
+   string out=value;
+   StringReplace(out,"\\","\\\\");
+   StringReplace(out,"\"","\\\"");
+   StringReplace(out,"\r","");
+   StringReplace(out,"\n","");
+   return out;
+  }
+
+string CurrentAccountType()
+  {
+   long mode=AccountInfoInteger(ACCOUNT_TRADE_MODE);
+   if(mode==ACCOUNT_TRADE_MODE_DEMO) return "demo";
+   if(mode==ACCOUNT_TRADE_MODE_REAL) return "real";
+   if(mode==ACCOUNT_TRADE_MODE_CONTEST) return "contest";
+   return "unknown";
+  }
+
+int CountAuraPositions()
+  {
+   int count=0;
+   for(int i=PositionsTotal()-1;i>=0;i--)
+     {
+      ulong ticket=PositionGetTicket(i);
+      if(ticket==0) continue;
+      if((ulong)PositionGetInteger(POSITION_MAGIC)==InpMagicNumber) count++;
+     }
+   return count;
+  }
+
+void SendInvistaHeartbeat()
+  {
+   if(MQLInfoInteger(MQL_TESTER)) return;
+   string base=InpServerURL;
+   StringTrimLeft(base);
+   StringTrimRight(base);
+   while(StringLen(base)>0 && StringSubstr(base,StringLen(base)-1,1)=="/")
+      base=StringSubstr(base,0,StringLen(base)-1);
+   if(StringLen(base)<8 || StringLen(InpApiToken)<16)
+     {
+      static bool warned=false;
+      if(!warned)
+        {
+         Print("Aura EA: integração InvistaPRO sem URL/token válido. Baixe o EA pelo painel MetaTrader autenticado.");
+         warned=true;
+        }
+      return;
+     }
+
+   string accountType=CurrentAccountType();
+   if(accountType=="unknown")
+     {
+      Print("Aura EA: tipo de conta MT5 desconhecido; heartbeat bloqueado por segurança.");
+      return;
+     }
+   string accountId=StringFormat("%I64d",AccountInfoInteger(ACCOUNT_LOGIN));
+   string broker=AccountInfoString(ACCOUNT_COMPANY);
+   string payload=StringFormat(
+      "{\"accountId\":\"%s\",\"broker\":\"%s\",\"balance\":%.2f,\"equity\":%.2f,\"freeMargin\":%.2f,\"openPositions\":%d,\"platform\":\"MT5\",\"accountType\":\"%s\",\"token\":\"%s\"}",
+      JsonEscape(accountId),JsonEscape(broker),AccountInfoDouble(ACCOUNT_BALANCE),
+      AccountInfoDouble(ACCOUNT_EQUITY),AccountInfoDouble(ACCOUNT_MARGIN_FREE),
+      CountAuraPositions(),accountType,JsonEscape(InpApiToken));
+
+   char data[],result[];
+   StringToCharArray(payload,data,0,WHOLE_ARRAY,CP_UTF8);
+   if(ArraySize(data)>0) ArrayResize(data,ArraySize(data)-1);
+   string responseHeaders;
+   string headers="Content-Type: application/json\\r\\n";
+   ResetLastError();
+   int status=WebRequest("POST",base+"/api/mt5/heartbeat",headers,5000,data,result,responseHeaders);
+   if(status==200)
+      Print("Aura EA: heartbeat InvistaPRO confirmado. Conta ",accountId," | ",accountType);
+   else
+      Print("Aura EA: heartbeat InvistaPRO falhou. HTTP=",status," erro=",GetLastError(),
+            " resposta=",CharArrayToString(result,0,-1,CP_UTF8));
+  }
+
+//+------------------------------------------------------------------+
 //| Expert lifecycle                                                  |
 //+------------------------------------------------------------------+
 int OnInit()
@@ -1300,6 +1386,8 @@ int OnInit()
    trade.SetTypeFillingBySymbol(_Symbol);
    g_lastM5BarTime=iTime(_Symbol,PERIOD_M5,0);
    LoadPositionState();
+   EventSetTimer(MathMax(10,InpHeartbeatSeconds));
+   SendInvistaHeartbeat();
    Print("InvistaPRO V10 Aura MT5 initialized on ",_Symbol,
          ". Use Strategy Tester and DEMO account before any live trading.");
    return INIT_SUCCEEDED;
@@ -1307,9 +1395,15 @@ int OnInit()
 
 void OnDeinit(const int reason)
   {
+   EventKillTimer();
    if(g_atrM5Handle!=INVALID_HANDLE) IndicatorRelease(g_atrM5Handle);
    if(g_atrM15Handle!=INVALID_HANDLE) IndicatorRelease(g_atrM15Handle);
    Comment("");
+  }
+
+void OnTimer()
+  {
+   SendInvistaHeartbeat();
   }
 
 void OnTick()
