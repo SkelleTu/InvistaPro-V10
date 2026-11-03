@@ -88,7 +88,7 @@ function mt5SignalAccess(req: any, res: any, next: any) {
 
 router.post('/heartbeat', mt5EaTokenAccess, (req: Request, res: Response) => {
   try {
-    const { accountId, broker, balance, equity, freeMargin, openPositions, platform, token, accountType } = req.body;
+    const { accountId, broker, balance, equity, freeMargin, openPositions, platform, token, accountType, symbol } = req.body;
     if (!accountId) return res.status(400).json({ error: 'accountId obrigatório' });
     if (!['demo', 'real', 'contest'].includes(accountType)) {
       lastMt5ObservedAccountType = null;
@@ -102,6 +102,7 @@ router.post('/heartbeat', mt5EaTokenAccess, (req: Request, res: Response) => {
       return res.status(409).json({ ok: false, code: 'MT5_ACCOUNT_MODE_MISMATCH', expectedAccountType: config.accountType, actualAccountType: accountType, error: 'A conta conectada não corresponde ao ambiente selecionado no painel. Sinais bloqueados.' });
     }
     metaTraderBridge.recordHeartbeat({ accountId, broker: broker || 'Unknown', balance, equity, freeMargin, openPositionsCount: typeof openPositions === 'number' ? openPositions : undefined });
+    if (symbol) metaTraderBridge.recordActiveEaSymbol(String(symbol), String(accountId));
     const updatedConfig = metaTraderBridge.getConfig();
     console.log(`[MT5Bridge] 💚 Heartbeat: ${broker || 'Unknown'} | Conta: ${accountId} | Saldo: $${balance} | Posições abertas EA: ${openPositions ?? '?'} | Habilitado: ${updatedConfig.enabled}`);
     res.json({
@@ -128,7 +129,7 @@ router.get('/signal', mt5SignalAccess, (req: Request, res: Response) => {
     // Isso evita que o dashboard (sem symbol) mantenha o heartbeat vivo falsamente
     const symbolStr = (symbol as string) || '';
     if (symbolStr) {
-      const accId = (accountId as string) || 'EA_AUTO';
+      const accId = (accountId as string) || '';
       metaTraderBridge.recordHeartbeat({
         accountId: accId,
         broker: 'MT5',
@@ -137,7 +138,8 @@ router.get('/signal', mt5SignalAccess, (req: Request, res: Response) => {
         freeMargin: 0
       });
     }
-    const resolvedSymbol = symbolStr || config.symbols[0] || 'EURUSD';
+    if (!symbolStr) return res.json({ action: 'HOLD', executionEnabled: false, code: 'MT5_SYMBOL_REQUIRED', reason: 'O terminal precisa informar o símbolo do gráfico; nenhum ativo padrão será selecionado.', timestamp: Date.now() });
+    const resolvedSymbol = symbolStr.trim().toUpperCase();
 
     // MT5 orders are placed by the user's logged-in MT5 terminal, not as Deriv contracts.
     if (process.env.NODE_ENV === 'production' && symbolStr && !isAllowedProductionSymbol(symbolStr)) {
@@ -154,7 +156,7 @@ router.get('/signal', mt5SignalAccess, (req: Request, res: Response) => {
       return res.status(productionBlock.status).json({ action: 'HOLD', ...productionBlock, timestamp: Date.now() });
     }
     // Só registra o símbolo depois da autenticação do EA e das validações do canal MT5.
-    if (symbolStr) metaTraderBridge.recordActiveEaSymbol(symbolStr);
+    if (symbolStr) metaTraderBridge.recordActiveEaSymbol(symbolStr, String(accountId || metaTraderBridge.getStatus().accountId || ''));
     if (!config.enabled) {
       return res.json({
         action: 'HOLD',
@@ -334,10 +336,10 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
     }
 
     // O polling autenticado e com conta confirmada identifica o símbolo realmente instalado no gráfico.
-    metaTraderBridge.recordActiveEaSymbol(String(symbol).trim());
+    metaTraderBridge.recordActiveEaSymbol(String(symbol).trim(), String(bodyAccountId || metaTraderBridge.getStatus().accountId || ''));
     // Registrar heartbeat — EA v5.0 usa este endpoint como canal principal
     metaTraderBridge.recordHeartbeat({
-      accountId: bodyAccountId || 'EA_AUTO',
+      accountId: bodyAccountId || metaTraderBridge.getStatus().accountId || '',
       broker: 'MT5',
       balance: 0,
       equity: 0,
@@ -2126,7 +2128,8 @@ router.post('/signal/generate', mt5DashboardAccess, async (req: Request, res: Re
       });
     }
     const { symbol } = req.body;
-    const targetSymbol = symbol || config.symbols[0] || 'EURUSD';
+    const targetSymbol = String(symbol || '').trim().toUpperCase();
+    if (!targetSymbol) return res.status(400).json({ action: 'HOLD', code: 'MT5_SYMBOL_REQUIRED', reason: 'Informe explicitamente o símbolo do gráfico para gerar análise.' });
     const signal = await metaTraderBridge.generateSignal(targetSymbol);
     if (!signal) return res.json({ action: 'HOLD', reason: 'Análise em progresso' });
     res.json(signal);
@@ -2137,49 +2140,12 @@ router.post('/signal/generate', mt5DashboardAccess, async (req: Request, res: Re
 
 router.get('/ai-analysis', mt5DashboardAccess, (_req: Request, res: Response) => {
   try {
-    const bridgeLog = metaTraderBridge.getAnalysisLog();
-    const bridgeLatest = metaTraderBridge.getLatestAnalysis();
-
-    // Fallback: quando o MT5 EA não está conectado, usar o cache do auto-trading-scheduler
-    const cacheLatest = consensusCache.getLatest();
-    const cacheAll = consensusCache.getLatestPerSymbol();
-
-    // Enriquecer com dados do cache quando o bridge não tem análises recentes (EA offline)
-    const hasBridgeData = bridgeLatest !== null && (bridgeLatest as any).aiConsensus > 0;
-    const effectiveLatest = hasBridgeData ? bridgeLatest : (cacheLatest ? {
-      id: `cache_${cacheLatest.timestamp}`,
-      timestamp: cacheLatest.timestamp,
-      symbol: cacheLatest.symbol,
-      phase: 'auto_trading',
-      status: cacheLatest.aiConsensus >= cacheLatest.requiredConsensus ? 'approved' : 'hold',
-      aiConsensus: cacheLatest.aiConsensus,
-      requiredConsensus: cacheLatest.requiredConsensus,
-      aiDirection: cacheLatest.aiDirection,
-      aiReasoning: cacheLatest.reasoning,
-      participatingModels: cacheLatest.participatingModels,
-      decisionReason: `[Deriv] ${cacheLatest.aiDirection.toUpperCase()} ${cacheLatest.symbol} — ${cacheLatest.aiConsensus.toFixed(1)}% / ${cacheLatest.requiredConsensus}% exigido`,
-      source: cacheLatest.source,
-    } : null);
-
-    // Log extra: uma entrada por ativo analisado recentemente pelo scheduler
-    const extraLog = cacheAll.map(e => ({
-      id: `cache_${e.symbol}_${e.timestamp}`,
-      timestamp: e.timestamp,
-      symbol: e.symbol,
-      phase: 'auto_trading',
-      status: e.aiConsensus >= e.requiredConsensus ? 'approved' : 'hold',
-      aiConsensus: e.aiConsensus,
-      requiredConsensus: e.requiredConsensus,
-      aiDirection: e.aiDirection,
-      aiReasoning: e.reasoning,
-      participatingModels: e.participatingModels,
-      decisionReason: `[Deriv] ${e.aiDirection.toUpperCase()} ${e.symbol} — ${e.aiConsensus.toFixed(1)}% / ${e.requiredConsensus}% exigido`,
-      source: e.source,
-    }));
-
-    const mergedLog = hasBridgeData ? bridgeLog : [...extraLog, ...bridgeLog];
-
-    res.json({ log: mergedLog, latest: effectiveLatest, total: mergedLog.length });
+    const activeSymbols = new Set(metaTraderBridge.getStatus().activeEaSymbols ?? []);
+    const log = metaTraderBridge.getAnalysisLog().filter(entry =>
+      activeSymbols.has(String(entry.symbol || '').trim().toUpperCase())
+    );
+    const latest = log[0] ?? null;
+    res.json({ log, latest, total: log.length });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
