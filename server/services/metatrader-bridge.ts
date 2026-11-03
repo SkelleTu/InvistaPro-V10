@@ -13,7 +13,6 @@ import { DerivTickData } from './deriv-api';
 import { storage } from '../storage';
 import { getSignal } from './signal-store';
 import { sqlite } from '../db';
-import { consensusCache } from './consensus-cache';
 import { pgDb, pgSchema, isPostgresAvailable } from '../db-postgres';
 import { eq } from 'drizzle-orm';
 
@@ -2173,12 +2172,10 @@ class MetaTraderBridge extends EventEmitter {
       ? Math.ceil((this.circuitBreakerUntil - now2) / 60000)
       : 0;
 
-    // Fallback ao cache do auto-trading-scheduler quando EA não está enviando dados
     const latestAIConsensus = latestAnalysisWithConsensus?.aiConsensus;
     const latestRequiredConsensus = latestAnalysisWithConsensus?.requiredConsensus;
     const latestAIDirection = latestAnalysisWithConsensus?.aiDirection;
     // Símbolo: sempre prioriza a entrada mais recente do log (mostra o ativo real do EA)
-    // Fallback ao consenso cache apenas se não há nenhuma entrada no log
     const latestAnalysisSymbol = mostRecentEntry?.symbol ?? latestAnalysisWithConsensus?.symbol;
     const latestAnalysisAt = latestAnalysisWithConsensus?.timestamp ?? mostRecentEntry?.timestamp;
 
