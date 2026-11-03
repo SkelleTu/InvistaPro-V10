@@ -102,6 +102,7 @@ router.post('/heartbeat', mt5EaTokenAccess, (req: Request, res: Response) => {
     }
     metaTraderBridge.recordHeartbeat({ accountId, broker: broker || 'Unknown', balance, equity, freeMargin, openPositionsCount: typeof openPositions === 'number' ? openPositions : undefined });
     if (symbol) metaTraderBridge.recordActiveEaSymbol(String(symbol), String(accountId));
+    else console.warn(`[MT5Bridge] Heartbeat sem símbolo no gráfico para a conta ${accountId}; baixe novamente o Aura v1.51 para habilitar o feed por ativo.`);
     const updatedConfig = metaTraderBridge.getConfig();
     console.log(`[MT5Bridge] 💚 Heartbeat: ${broker || 'Unknown'} | Conta: ${accountId} | Saldo: $${balance} | Posições abertas EA: ${openPositions ?? '?'} | Habilitado: ${updatedConfig.enabled}`);
     res.json({
@@ -1359,7 +1360,8 @@ router.get('/download-aura-ea', mt5DashboardAccess, async (req: Request, res: Re
     const serverPattern = /input\s+string\s+InpServerURL\s*=\s*"[^"]*";/;
     const tokenPattern = /input\s+string\s+InpApiToken\s*=\s*"[^"]*";/;
     if (!serverPattern.test(content) || !tokenPattern.test(content) ||
-        !content.includes('/api/mt5/heartbeat') || !content.includes('InpHeartbeatSeconds')) {
+        !content.includes('/api/mt5/heartbeat') || !content.includes('InpHeartbeatSeconds') ||
+        !content.includes('CountAuraPositions(),JsonEscape(_Symbol),accountType')) {
       return res.status(503).json({ ok: false, code: 'AURA_EA_SOURCE_NOT_CURRENT', error: 'Fonte Aura sem os parâmetros de integração esperados.' });
     }
     content = content.replace(serverPattern, `input string InpServerURL = "${escapeMqlString(serverUrl)}"; // URL de produção InvistaPRO`);
