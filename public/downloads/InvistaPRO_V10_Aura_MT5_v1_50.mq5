@@ -7,7 +7,7 @@
 //| Compile in MetaEditor and forward-test on a DEMO account first.   |
 //+------------------------------------------------------------------+
 #property strict
-#property version   "1.50"
+#property version   "1.51"
 #property description "InvistaPRO V10 Aura - Price Action EA for MetaTrader 5"
 
 #include <Trade/Trade.mqh>
