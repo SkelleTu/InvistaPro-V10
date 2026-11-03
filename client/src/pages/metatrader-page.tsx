@@ -1358,6 +1358,9 @@ export default function MetaTraderPage() {
                       <p className="text-muted-foreground mb-1">EA Conectado</p>
                       <p className={`font-bold ${status.connected ? 'text-green-500' : 'text-red-500'}`}>{status.connected ? (status.broker || 'Conectado') : 'Desconectado'}</p>
                       <p className="text-muted-foreground">{status.accountId}</p>
+                      {status.connected && status.activeEaSymbols?.length === 0 && (
+                        <p className="mt-1 text-amber-500">Atualize e compile o Aura v1.51 para registrar o símbolo do gráfico.</p>
+                      )}
                     </div>
                     <div className="bg-background/60 rounded-lg p-2.5 border">
                       <p className="text-muted-foreground mb-1">Saldo / Equity</p>
