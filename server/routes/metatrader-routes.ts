@@ -20,7 +20,6 @@ import { brazilNewsService } from '../services/brazil-news-service';
 import { computeSyntheticGirassol } from '../services/synthetic-girassol';
 import { isAllowedProductionSymbol } from '../services/production-symbol-policy';
 import { getMt5ProductionBlock } from '../services/mt5-production-policy';
-import { consensusCache } from '../services/consensus-cache';
 import { evaluatePriceActionSetup, type Candle } from '../services/price-action-engine';
 import { assessMt5RiskLimit, buildTrustedPriceActionContext, getHighImpactNewsStatus, isAllowedBrasiliaTradingSession } from '../services/price-action-context';
 
