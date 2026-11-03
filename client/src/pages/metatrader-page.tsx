@@ -1653,15 +1653,15 @@ export default function MetaTraderPage() {
                   Forçar Análise Manual
                 </CardTitle>
                 <CardDescription>
-                  {status?.cachedSymbols?.length
+                  {status?.activeEaSymbols?.length
                     ? `Ativos ativos no EA da corretora ${status.broker || 'conectada'}`
                     : 'Aguardando dados do EA — conecte o MetaTrader para ver os ativos disponíveis'}
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                {status?.cachedSymbols?.length ? (
+                {status?.activeEaSymbols?.length ? (
                   <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-                    {status.cachedSymbols.map((sym: string) => (
+                    {status.activeEaSymbols.map((sym: string) => (
                       <Button
                         key={sym}
                         variant="outline"
