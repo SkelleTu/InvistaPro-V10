@@ -2166,8 +2166,13 @@ class MetaTraderBridge extends EventEmitter {
     }
 
     const now2 = Date.now();
-    const latestAnalysisWithConsensus = this.analysisLog.find(e => e.aiConsensus !== undefined && e.aiConsensus > 0) || null;
-    const mostRecentEntry = this.analysisLog[0] || null;
+    const activeEaSymbols = this.getActiveEaSymbols(this.status.accountId);
+    const activeEaSymbolSet = new Set(activeEaSymbols);
+    const activeAnalysisLog = this.analysisLog.filter(entry =>
+      activeEaSymbolSet.has(String(entry.symbol || '').trim().toUpperCase())
+    );
+    const latestAnalysisWithConsensus = activeAnalysisLog.find(e => e.aiConsensus !== undefined && e.aiConsensus > 0) || null;
+    const mostRecentEntry = activeAnalysisLog[0] || null;
     const circuitBreakerRem = this.circuitBreakerUntil > now2
       ? Math.ceil((this.circuitBreakerUntil - now2) / 60000)
       : 0;
@@ -2187,7 +2192,7 @@ class MetaTraderBridge extends EventEmitter {
       recentTrades: this.recentTrades.slice(-20),
       openPositions: this.openPositions.size,
       cachedSymbols: this.getCachedSymbols(),
-      activeEaSymbols: this.getActiveEaSymbols(),
+      activeEaSymbols,
       lastBalance: this.currentBalance || undefined,
       lastEquity: this.currentEquity || undefined,
       latestAIConsensus,
