@@ -307,7 +307,7 @@ export default function MetaTraderPage() {
     if (status?.latestAIDirection !== undefined) setStableAIDirection(status.latestAIDirection);
     if (status?.latestAnalysisSymbol !== undefined) setStableAnalysisSymbol(status.latestAnalysisSymbol);
     if ((status as any)?.latestRequiredConsensus !== undefined && (status as any).latestRequiredConsensus > 0) setStableRequiredConsensus((status as any).latestRequiredConsensus);
-  }, [status?.activeEaSymbols, status?.latestAIConsensus, status?.latestAIDirection, status?.latestAnalysisSymbol, (status as any)?.latestRequiredConsensus]);
+  }, [status?.activeEaSymbols, status?.latestAIConsensus, status?.latestAIDirection, status?.latestAnalysisSymbol, (status as any)?.latestRequiredConsensus, stableAnalysisSymbol]);
 
   // Contador de segundos desde última atualização
   useEffect(() => {
