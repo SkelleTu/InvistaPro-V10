@@ -326,7 +326,7 @@ export default function MetaTraderPage() {
     return () => clearInterval(interval);
   }, [positions]);
 
-  // O feed operacional exibe somente símbolos com dados recebidos de instâncias EA.
+  // O feed operacional usa somente símbolos com polling autenticado recente do EA (TTL controlado no servidor).
   // O endpoint /ai-analysis também agrega o scanner global; ele nunca deve contaminar este feed.
   const eaConnectedSymbols = new Set(
     (status?.activeEaSymbols || []).map(symbol => String(symbol).trim().toUpperCase()).filter(Boolean)
