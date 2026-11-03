@@ -1337,7 +1337,7 @@ void SendInvistaHeartbeat()
    StringToCharArray(payload,data,0,WHOLE_ARRAY,CP_UTF8);
    if(ArraySize(data)>0) ArrayResize(data,ArraySize(data)-1);
    string responseHeaders;
-   string headers="Content-Type: application/json\\r\\n";
+   string headers="Content-Type: application/json\r\n";
    ResetLastError();
    int status=WebRequest("POST",base+"/api/mt5/heartbeat",headers,5000,data,result,responseHeaders);
    if(status==200)
