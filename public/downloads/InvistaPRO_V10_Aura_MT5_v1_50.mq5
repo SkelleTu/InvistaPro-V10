@@ -1554,6 +1554,25 @@ bool ReportAuraPositionUpdated(const ulong ticket)
    return SendAuraLifecycleRequest("/api/mt5/trade/update",body);
   }
 
+void RetryPendingAuraClose()
+  {
+   string idKey=StateKey("PENDING_CLOSE_ID");
+   string ticketKey=StateKey("PENDING_CLOSE_TICKET");
+   string dealKey=StateKey("PENDING_CLOSE_DEAL");
+   if(!GlobalVariableCheck(idKey) || !GlobalVariableCheck(ticketKey) || !GlobalVariableCheck(dealKey)) return;
+   ulong positionIdentifier=(ulong)GlobalVariableGet(idKey);
+   ulong ticket=(ulong)GlobalVariableGet(ticketKey);
+   ulong closingDeal=(ulong)GlobalVariableGet(dealKey);
+   if(ReportAuraPositionClosed(ticket,positionIdentifier,closingDeal))
+     {
+      GlobalVariableDel(idKey);
+      GlobalVariableDel(ticketKey);
+      GlobalVariableDel(dealKey);
+      string positionKey=StateKey("ID_"+StringFormat("%I64u",positionIdentifier));
+      if(GlobalVariableCheck(positionKey)) GlobalVariableDel(positionKey);
+     }
+  }
+
 bool ReportAuraPositionClosed(const ulong ticket,const ulong positionIdentifier,const ulong closingDeal)
   {
    if(ticket==0 || positionIdentifier==0 || closingDeal==0) return false;
@@ -1741,6 +1760,12 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
         {
          if(GlobalVariableCheck(positionKey)) GlobalVariableDel(positionKey);
         }
+      else
+        {
+         GlobalVariableSet(StateKey("PENDING_CLOSE_ID"),(double)positionIdentifier);
+         GlobalVariableSet(StateKey("PENDING_CLOSE_TICKET"),(double)positionTicket);
+         GlobalVariableSet(StateKey("PENDING_CLOSE_DEAL"),(double)trans.deal);
+        }
      }
   }
 
@@ -1797,6 +1822,7 @@ void OnDeinit(const int reason)
 
 void OnTimer()
   {
+   RetryPendingAuraClose();
    SendInvistaHeartbeat();
   }
 
