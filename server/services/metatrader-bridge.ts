@@ -15,6 +15,7 @@ import { getSignal } from './signal-store';
 import { sqlite } from '../db';
 import { pgDb, pgSchema, isPostgresAvailable } from '../db-postgres';
 import { eq } from 'drizzle-orm';
+import { calculateMt5PositionHardStop } from './mt5-position-risk';
 
 export interface MT5Signal {
   id: string;
@@ -170,7 +171,7 @@ export interface MT5TradeResult {
 export interface MT5Config {
   enabled: boolean;
   accountType: 'demo' | 'real';
-  /** Explicit dashboard authorization; defaults to false and is revoked by selecting DEMO. */
+  /** Legacy compatibility field; it no longer gates DEMO or REAL execution. */
   realTradingAuthorized: boolean;
   accountId: string;
   broker: string;
@@ -4536,15 +4537,30 @@ class MetaTraderBridge extends EventEmitter {
   }
 
   confirmTradeOpen(position: MT5Position): void {
+    const alreadyTracked = this.openPositions.has(position.ticket);
     this.openPositions.set(position.ticket, position);
-    this.status.totalTradesExecuted++;
-    if (this.pendingSignals.has(position.signalId)) {
-      this.pendingSignals.delete(position.signalId);
+    if (!alreadyTracked) {
+      this.status.totalTradesExecuted++;
+      if (this.pendingSignals.has(position.signalId)) {
+        this.pendingSignals.delete(position.signalId);
+      }
+      this.saveBridgeState();
+      this.emit('trade_opened', position);
+      console.log(`[MT5Bridge] 📈 Posição aberta: #${position.ticket} ${position.type} ${position.symbol} @ ${position.openPrice}`);
     }
     this.savePositionToDB(position);
-    this.saveBridgeState();
-    this.emit('trade_opened', position);
-    console.log(`[MT5Bridge] 📈 Posição aberta: #${position.ticket} ${position.type} ${position.symbol} @ ${position.openPrice}`);
+  }
+
+  /** Reconcile a live terminal snapshot without counting a recovered position as a new trade. */
+  syncPositionFromEa(position: MT5Position): void {
+    const existing = this.openPositions.get(position.ticket);
+    const synchronized = existing ? { ...existing, ...position } : position;
+    this.openPositions.set(position.ticket, synchronized);
+    this.savePositionToDB(synchronized);
+    if (!existing) {
+      this.emit('trade_opened', synchronized);
+      console.log(`[MT5Bridge] 🔄 Posição reconciliada do MT5: #${position.ticket} ${position.type} ${position.symbol}`);
+    }
   }
 
   updatePosition(ticket: number, update: Partial<MT5Position>): void {
@@ -5126,13 +5142,11 @@ class MetaTraderBridge extends EventEmitter {
 
     const profit         = position.profit ?? 0;
     const ageMinutes     = (Date.now() - ctx.entryTime) / 60000;
-    const lots           = Math.max(position.lots || 1, 1);
+    const lots           = Number.isFinite(position.lots) && position.lots > 0 ? position.lots : 0.01;
 
-    // Hard stop: máximo entre $20/lote e 0.25% do saldo da conta
-    // (para bancas maiores, o limite escala com a banca)
-    const balanceBasedStop = ctx.entryBalance > 0 ? -(ctx.entryBalance * 0.0025) : -20;
-    const lotBasedStop     = -(20 * lots);
-    const hardStopDollars  = Math.max(balanceBasedStop, lotBasedStop); // usa o mais restritivo (menos negativo)
+    // Hard stop: aplica o menor limite entre $20 por lote e 0.25% do saldo.
+    // Micro-lotes mantêm seu limite proporcional; nunca são arredondados para 1 lote.
+    const hardStopDollars = calculateMt5PositionHardStop(ctx.entryBalance, lots);
 
     // ══════════════════════════════════════════════════════════════════
     // PRIORIDADE 1 — HARD STOP (perda máxima absoluta)

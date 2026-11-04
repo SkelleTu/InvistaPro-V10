@@ -503,7 +503,7 @@ export default function MetaTraderPage() {
       }
       const source = await response.text();
       if (source.length < 1000 ||
-          !source.includes('#property version   "1.51"') ||
+          !source.includes('#property version   "1.52"') ||
           !source.includes('InpServerURL = "') ||
           !source.includes('InpApiToken = "') ||
           !source.includes('/api/mt5/heartbeat')) {
@@ -514,14 +514,14 @@ export default function MetaTraderPage() {
       const objectUrl = URL.createObjectURL(verifiedBlob);
       const link = document.createElement('a');
       link.href = objectUrl;
-      link.download = 'InvistaPRO_V10_Aura_MT5_v1_51.mq5';
+      link.download = 'InvistaPRO_V10_Aura_MT5_v1_52.mq5';
       document.body.appendChild(link);
       link.click();
       link.remove();
       window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
 
       toast({
-        title: 'InvistaPRO V10 Aura v1.51 baixado!',
+        title: 'InvistaPRO V10 Aura v1.52 baixado!',
         description: 'URL e token individual já vêm configurados. Autorize o domínio em Ferramentas → Opções → Expert Advisors → WebRequest; depois compile no MetaEditor (F7).',
         duration: 9000,
       });
@@ -561,30 +561,13 @@ export default function MetaTraderPage() {
             </div>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
-            <div className="flex items-center gap-1 rounded-md border p-1" aria-label="Ambiente da conta MT5">
-              <span className="px-2 text-xs text-muted-foreground">Conta MT5</span>
-              <Button size="sm" variant={(config?.accountType ?? 'demo') === 'demo' ? 'default' : 'outline'}
-                disabled={updateConfigMutation.isPending || ((config?.accountType ?? 'demo') === 'demo' && config?.realTradingAuthorized !== true)}
-                onClick={() => updateConfigMutation.mutate({ accountType: 'demo', realTradingAuthorized: false } as Partial<MT5Config>)}
-                data-testid="mt5-account-mode-demo">DEMO</Button>
-              <Button size="sm" variant={config?.accountType === 'real' && config?.realTradingAuthorized === true ? 'destructive' : 'outline'}
-                disabled={updateConfigMutation.isPending || (config?.accountType === 'real' && config?.realTradingAuthorized === true)}
-                onClick={() => {
-                  const confirmed = window.confirm(
-                    'AUTORIZAR OPERAÇÕES REAIS?\n\nO Invista Pro poderá enviar sinais para o EA conectado a uma conta REAL no MetaTrader 5. Isso envolve risco de perda financeira. Confirme somente se você pretende operar com dinheiro real.'
-                  );
-                  if (confirmed) updateConfigMutation.mutate({ accountType: 'real', realTradingAuthorized: true } as Partial<MT5Config>);
-                }}
-                data-testid="mt5-account-mode-real">REAL {config?.accountType === 'real' && config?.realTradingAuthorized === true ? 'AUTORIZADO' : ''}</Button>
+            <div className="flex items-center gap-2 rounded-md border px-3 py-2" aria-label="Conta detectada pelo MT5">
+              <span className="text-xs text-muted-foreground">Conta detectada no MT5:</span>
+              <Badge variant="secondary" data-testid="mt5-connected-account-mode">
+                {status?.connected ? (config?.accountType ?? 'NÃO CONFIRMADA').toUpperCase() : 'AGUARDANDO MT5'}
+              </Badge>
+              <span className="text-xs text-muted-foreground">execução com a mesma política para DEMO e REAL</span>
             </div>
-            <Badge variant={config?.accountType === 'real' && config?.realTradingAuthorized === true ? 'destructive' : 'secondary'}
-              data-testid="mt5-mode-authorization-status">
-              {config?.accountType === 'demo'
-                ? 'MODO DEMO'
-                : config?.realTradingAuthorized === true
-                  ? 'REAL AUTORIZADO'
-                  : 'REAL BLOQUEADO'}
-            </Badge>
             {/* Badge tempo real */}
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground border rounded-full px-2.5 py-1">
               <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-breathe" />
@@ -627,7 +610,7 @@ export default function MetaTraderPage() {
             </Button>
             <Button onClick={downloadAuraEA} data-testid="button-download-aura-ea" className="gap-2" variant="outline">
               <Download className="h-4 w-4" />
-              V10 Aura v1.51
+              V10 Aura v1.52
             </Button>
           </div>
         </div>
@@ -1359,7 +1342,7 @@ export default function MetaTraderPage() {
                       <p className={`font-bold ${status.connected ? 'text-green-500' : 'text-red-500'}`}>{status.connected ? (status.broker || 'Conectado') : 'Desconectado'}</p>
                       <p className="text-muted-foreground">{status.accountId}</p>
                       {status.connected && status.activeEaSymbols?.length === 0 && (
-                        <p className="mt-1 text-amber-500">Atualize e compile o Aura v1.51 para registrar o símbolo do gráfico.</p>
+                        <p className="mt-1 text-amber-500">Atualize e compile o Aura v1.52 para registrar o símbolo do gráfico.</p>
                       )}
                     </div>
                     <div className="bg-background/60 rounded-lg p-2.5 border">

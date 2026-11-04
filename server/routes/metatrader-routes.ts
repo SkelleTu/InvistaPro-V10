@@ -31,9 +31,10 @@ let lastMt5ObservedAccountType: 'demo' | 'real' | 'contest' | null = null;
 let lastMt5EnvironmentHeartbeatAt = 0;
 
 function mt5EnvironmentMismatch() {
-  const config = metaTraderBridge.getConfig();
+  // The connected terminal is authoritative. Do not compare its DEMO/REAL mode
+  // with a manually selected dashboard flag; only require a fresh, valid heartbeat.
   return !lastMt5ObservedAccountType || lastMt5ObservedAccountType === 'contest' ||
-    lastMt5ObservedAccountType !== config.accountType || Date.now() - lastMt5EnvironmentHeartbeatAt > 90_000;
+    Date.now() - lastMt5EnvironmentHeartbeatAt > 90_000;
 }
 
 
@@ -96,13 +97,15 @@ router.post('/heartbeat', mt5EaTokenAccess, (req: Request, res: Response) => {
     }
     lastMt5ObservedAccountType = accountType;
     lastMt5EnvironmentHeartbeatAt = Date.now();
-    const config = metaTraderBridge.getConfig();
-    if (accountType !== config.accountType) {
-      return res.status(409).json({ ok: false, code: 'MT5_ACCOUNT_MODE_MISMATCH', expectedAccountType: config.accountType, actualAccountType: accountType, error: 'A conta conectada não corresponde ao ambiente selecionado no painel. Sinais bloqueados.' });
+    // Sync the dashboard mode from the account actually logged into MT5.
+    // DEMO and REAL use the same execution path; no second authorization flag.
+    const currentConfig = metaTraderBridge.getConfig();
+    if (currentConfig.accountType !== accountType) {
+      metaTraderBridge.updateConfig({ accountType });
     }
     metaTraderBridge.recordHeartbeat({ accountId, broker: broker || 'Unknown', balance, equity, freeMargin, openPositionsCount: typeof openPositions === 'number' ? openPositions : undefined });
     if (symbol) metaTraderBridge.recordActiveEaSymbol(String(symbol), String(accountId));
-    else console.warn(`[MT5Bridge] Heartbeat sem símbolo no gráfico para a conta ${accountId}; baixe novamente o Aura v1.51 para habilitar o feed por ativo.`);
+    else console.warn(`[MT5Bridge] Heartbeat sem símbolo no gráfico para a conta ${accountId}; confira se o EA atualizado está instalado em um gráfico de ativo.`);
     const updatedConfig = metaTraderBridge.getConfig();
     console.log(`[MT5Bridge] 💚 Heartbeat: ${broker || 'Unknown'} | Conta: ${accountId} | Saldo: $${balance} | Posições abertas EA: ${openPositions ?? '?'} | Habilitado: ${updatedConfig.enabled}`);
     res.json({
@@ -123,7 +126,7 @@ router.get('/signal', mt5SignalAccess, (req: Request, res: Response) => {
     const { symbol, accountId } = req.query;
     const config = metaTraderBridge.getConfig();
     if (symbol && mt5EnvironmentMismatch()) {
-      return res.status(409).json({ action: 'HOLD', executionEnabled: false, code: 'MT5_ACCOUNT_MODE_MISMATCH', expectedAccountType: config.accountType, actualAccountType: lastMt5ObservedAccountType, reason: 'Ambiente MT5 não confirmado ou divergente. Verifique a conta conectada e mantenha as operações bloqueadas.', timestamp: Date.now() });
+      return res.status(409).json({ action: 'HOLD', executionEnabled: false, code: 'MT5_ACCOUNT_HEARTBEAT_STALE', actualAccountType: lastMt5ObservedAccountType, reason: 'Aguardando heartbeat recente de uma conta DEMO ou REAL válida no MT5.', timestamp: Date.now() });
     }
     // Registrar heartbeat apenas quando o EA faz polling (tem parâmetro symbol)
     // Isso evita que o dashboard (sem symbol) mantenha o heartbeat vivo falsamente
@@ -151,7 +154,7 @@ router.get('/signal', mt5SignalAccess, (req: Request, res: Response) => {
         timestamp: Date.now(),
       });
     }
-    const productionBlock = getMt5ProductionBlock(config.apiToken, process.env, config.accountType, config.realTradingAuthorized);
+    const productionBlock = getMt5ProductionBlock(config.apiToken, process.env, lastMt5ObservedAccountType ?? 'contest');
     if (productionBlock) {
       return res.status(productionBlock.status).json({ action: 'HOLD', ...productionBlock, timestamp: Date.now() });
     }
@@ -212,7 +215,7 @@ router.get('/signal', mt5SignalAccess, (req: Request, res: Response) => {
       }
     } else {
       // Sem dados do Girassol E ele é obrigatório → bloquear
-      const requireGirassol = metaTraderBridge.getConfig().requireGirassolConfirmation;
+      const requireGirassol = metaTraderBridge.getConfig().requireGirassolConfirmation && clientStrategy !== 'AURA_PRICE_ACTION';
       if (requireGirassol) {
         console.log(`[MT5-Signal] 🚫 ${resolvedSymbol}: Girassol obrigatório mas sem dados — sinal bloqueado no polling`);
         return res.json({
@@ -282,6 +285,7 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
       timeframes,
       accountType: requestAccountType,
       priceActionUseAIReview,
+      clientStrategy,
       indicatorSignals,   // { girassol: {...}, fibonacci: {...} }
       indicatorBuffers,   // array bruto de todos os buffers
       indicatorCount,
@@ -298,17 +302,15 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
     }
 
     const requestedAccountMode = String(requestAccountType ?? '').trim().toLowerCase();
-    if (!['demo', 'real', 'contest'].includes(requestedAccountMode)
-      || requestedAccountMode !== config.accountType
+    if (!['demo', 'real'].includes(requestedAccountMode)
       || requestedAccountMode !== lastMt5ObservedAccountType) {
       return res.status(409).json({
         action: 'HOLD',
         executionEnabled: false,
-        code: 'MT5_ACCOUNT_MODE_MISMATCH',
-        expectedAccountType: config.accountType,
+        code: 'MT5_ACCOUNT_MODE_UNCONFIRMED',
         requestedAccountType: requestedAccountMode || null,
         actualAccountType: lastMt5ObservedAccountType,
-        reason: 'O modo informado pelo terminal diverge do modo configurado/observado; sinais bloqueados.',
+        reason: 'O tipo de conta informado não corresponde ao último heartbeat válido do MT5; sinais bloqueados até nova confirmação.',
         timestamp: Date.now(),
       });
     }
@@ -317,15 +319,14 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
       return res.status(409).json({
         action: 'HOLD',
         executionEnabled: false,
-        code: 'MT5_ACCOUNT_MODE_MISMATCH',
-        expectedAccountType: config.accountType,
+        code: 'MT5_ACCOUNT_HEARTBEAT_STALE',
         actualAccountType: lastMt5ObservedAccountType,
-        reason: 'Conta MT5 não confirmada ou heartbeat desatualizado; sinais bloqueados.',
+        reason: 'Aguardando heartbeat recente de uma conta DEMO ou REAL válida no MT5.',
         timestamp: Date.now(),
       });
     }
 
-    const productionBlock = getMt5ProductionBlock(config.apiToken, process.env, config.accountType, config.realTradingAuthorized);
+    const productionBlock = getMt5ProductionBlock(config.apiToken, process.env, requestedAccountMode);
     if (productionBlock) {
       return res.status(productionBlock.status).json({
         action: 'HOLD',
@@ -365,7 +366,6 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
         status: metaTraderBridge.getStatus(),
         observedAccountType: lastMt5ObservedAccountType,
         accountHeartbeatAt: lastMt5EnvironmentHeartbeatAt,
-        realTradingExplicitlyEnabled: config.realTradingAuthorized === true && String(process.env.MT5_PRODUCTION_TRADING_ENABLED ?? '').trim().toLowerCase() !== 'false',
       });
       const newsStatus = await getHighImpactNewsStatus();
       const sessionOpen = isAllowedBrasiliaTradingSession();
@@ -903,7 +903,7 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
     } else if (!girassol?.detected) {
       // ── CASO 3: Girassol não instalado no gráfico → fallback ────────────
       // Sem o indicador instalado, a IA opera com threshold normal (70%).
-      const requireGirassol = metaTraderBridge.getConfig().requireGirassolConfirmation;
+      const requireGirassol = metaTraderBridge.getConfig().requireGirassolConfirmation && clientStrategy !== 'AURA_PRICE_ACTION';
       if (requireGirassol && finalAction !== 'HOLD') {
         indicatorNotes.push(`⚠️ Girassol NÃO DETECTADO — operação bloqueada (modo Girassol Obrigatório ativo)`);
         console.log(`[MT5-Indicators] ⚠️ ${sym}: Girassol obrigatório mas não encontrado no gráfico`);
@@ -1108,6 +1108,7 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
       slTpSource,
       entryPrice:            baseSignal.entryPrice,
       confidence:            Math.round(finalConfidence * 10) / 10,
+      executionEnabled:       true,
       reason:                finalReason,
       indicatorNotes,
       girassolBias,
@@ -1368,7 +1369,7 @@ router.get('/download-aura-ea', mt5DashboardAccess, async (req: Request, res: Re
     content = content.replace(tokenPattern, `input string InpApiToken = "${escapeMqlString(token)}"; // Token individual injetado no download autenticado`);
 
     const version = content.match(/#property\s+version\s+"([^"]+)"/)?.[1] ?? 'unknown';
-    if (version !== '1.51') {
+    if (version !== '1.52') {
       return res.status(503).json({ ok: false, code: 'AURA_EA_VERSION_MISMATCH', detectedVersion: version });
     }
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
@@ -1376,7 +1377,7 @@ router.get('/download-aura-ea', mt5DashboardAccess, async (req: Request, res: Re
     res.setHeader('Expires', '0');
     res.setHeader('X-InvistaPRO-EA-Version', version);
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-    res.setHeader('Content-Disposition', 'attachment; filename="InvistaPRO_V10_Aura_MT5_v1_51.mq5"');
+    res.setHeader('Content-Disposition', 'attachment; filename="InvistaPRO_V10_Aura_MT5_v1_52.mq5"');
     return res.send(content);
   } catch (err: any) {
     console.error('[MT5 Aura Download] Falha:', err?.message || err);
@@ -2067,16 +2068,8 @@ router.post('/config', mt5DashboardAccess, async (req: Request, res: Response) =
   try {
     const updates = { ...(req.body ?? {}) };
     const currentConfig = metaTraderBridge.getConfig();
-    if (updates.realTradingAuthorized !== undefined && typeof updates.realTradingAuthorized !== 'boolean') {
-      return res.status(400).json({ ok: false, code: 'MT5_INVALID_REAL_AUTHORIZATION', error: 'realTradingAuthorized deve ser booleano.' });
-    }
-    if (updates.accountType === 'demo') updates.realTradingAuthorized = false;
-    if (updates.accountType === 'real' && updates.realTradingAuthorized !== true && currentConfig.realTradingAuthorized !== true) {
-      return res.status(400).json({ ok: false, code: 'MT5_REAL_AUTHORIZATION_REQUIRED', error: 'Para selecionar REAL, confirme explicitamente a autorização no dashboard.' });
-    }
-    if (updates.realTradingAuthorized === true && updates.accountType !== 'real' && currentConfig.accountType !== 'real') {
-      return res.status(400).json({ ok: false, code: 'MT5_REAL_AUTH_REQUIRES_REAL_MODE', error: 'Selecione o modo REAL antes de autorizar execução REAL.' });
-    }
+    // Legacy realTradingAuthorized is ignored; account mode comes from the connected MT5 terminal.
+    delete updates.realTradingAuthorized;
     if (updates.accountType !== undefined && !['demo', 'real'].includes(updates.accountType)) {
       return res.status(400).json({ ok: false, code: 'MT5_INVALID_ACCOUNT_MODE', error: 'accountType deve ser demo ou real.' });
     }
@@ -2102,11 +2095,7 @@ router.post('/config', mt5DashboardAccess, async (req: Request, res: Response) =
       tokenGenerated: generatedToken,
       message: generatedToken
         ? 'Configuração salva e token seguro gerado. Baixe novamente o EA para receber a URL e o token corretos.'
-        : (updates.accountType === 'real' && updates.realTradingAuthorized === true
-          ? 'Modo REAL selecionado e autorização explícita persistida.'
-          : updates.accountType === 'demo'
-            ? 'Modo DEMO selecionado; autorização REAL revogada.'
-            : 'Configuração atualizada'),
+        : 'Configuração atualizada. O modo DEMO/REAL será sincronizado pelo heartbeat do MT5.',
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -2117,9 +2106,9 @@ router.post('/signal/generate', mt5DashboardAccess, async (req: Request, res: Re
   try {
     const config = metaTraderBridge.getConfig();
     if (mt5EnvironmentMismatch()) {
-      return res.status(409).json({ action: 'HOLD', executionEnabled: false, code: 'MT5_ACCOUNT_MODE_MISMATCH', expectedAccountType: config.accountType, actualAccountType: lastMt5ObservedAccountType, reason: 'Ambiente MT5 não confirmado ou divergente. Geração de sinais bloqueada.', timestamp: Date.now() });
+      return res.status(409).json({ action: 'HOLD', executionEnabled: false, code: 'MT5_ACCOUNT_HEARTBEAT_STALE', actualAccountType: lastMt5ObservedAccountType, reason: 'Aguardando heartbeat recente de uma conta DEMO ou REAL válida no MT5.', timestamp: Date.now() });
     }
-    const productionBlock = getMt5ProductionBlock(config.apiToken, process.env, config.accountType, config.realTradingAuthorized);
+    const productionBlock = getMt5ProductionBlock(config.apiToken, process.env, lastMt5ObservedAccountType ?? 'contest');
     if (productionBlock) {
       return res.status(productionBlock.status).json({
         action: 'HOLD',
@@ -2164,7 +2153,28 @@ router.post('/position/monitor', mt5EaTokenAccess, (req: Request, res: Response)
     if (!position || !marketData || !symbol) {
       return res.status(400).json({ error: 'position, marketData e symbol são obrigatórios' });
     }
-    const result = metaTraderBridge.monitorOpenPosition(position, marketData, symbol);
+    const normalizedPosition: MT5Position = {
+      ticket: Number(position.ticket),
+      symbol: String(position.symbol || symbol),
+      type: String(position.type).toUpperCase() as 'BUY' | 'SELL',
+      lots: Number(position.lots),
+      openPrice: Number(position.openPrice),
+      currentPrice: Number(position.currentPrice),
+      stopLoss: Number(position.stopLoss || 0),
+      takeProfit: Number(position.takeProfit || 0),
+      profit: Number(position.profit || 0),
+      openTime: Number(position.openTime || Date.now()),
+      signalId: String(position.signalId || ''),
+      source: 'ea',
+    };
+    if (!Number.isFinite(normalizedPosition.ticket) || normalizedPosition.ticket <= 0 ||
+        !normalizedPosition.symbol || !['BUY', 'SELL'].includes(normalizedPosition.type) ||
+        !Number.isFinite(normalizedPosition.openPrice) || !Number.isFinite(normalizedPosition.currentPrice)) {
+      return res.status(400).json({ error: 'Snapshot de posição MT5 inválido.' });
+    }
+    // The EA monitor is also the reconciliation channel after a backend restart.
+    metaTraderBridge.syncPositionFromEa(normalizedPosition);
+    const result = metaTraderBridge.monitorOpenPosition(normalizedPosition, marketData, symbol);
     res.json(result);
   } catch (err: any) {
     res.status(500).json({ error: err.message });

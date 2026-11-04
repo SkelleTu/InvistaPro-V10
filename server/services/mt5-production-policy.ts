@@ -1,10 +1,12 @@
 /**
- * Independent MT5 mode gates: DEMO is the default for operational validation.
- * REAL requires explicit dashboard authorization; an explicit global false flag is an emergency kill switch.
+ * MT5 account-mode policy.
+ * DEMO and REAL share the same execution path. The connected terminal is the
+ * source of truth for account mode; only contest/unknown modes are rejected.
+ * MT5_PRODUCTION_TRADING_ENABLED=false is a global emergency stop for BOTH modes.
  */
 export interface Mt5ProductionBlock {
   status: 503;
-  code: "MT5_PRODUCTION_TRADING_DISABLED" | "MT5_DEMO_TRADING_DISABLED" | "MT5_API_TOKEN_NOT_CONFIGURED" | "MT5_ACCOUNT_MODE_BLOCKED";
+  code: "MT5_PRODUCTION_TRADING_DISABLED" | "MT5_API_TOKEN_NOT_CONFIGURED" | "MT5_ACCOUNT_MODE_BLOCKED";
   reason: string;
   executionEnabled: false;
 }
@@ -24,8 +26,8 @@ export function isMt5ProductionTradingEnabled(
 export function getMt5ProductionBlock(
   apiToken: string | null | undefined,
   env: Mt5ProductionEnvironment = process.env,
-  accountType: "demo" | "real" | "contest" = "real",
-  realTradingAuthorized = false,
+  accountType: "demo" | "real" | "contest" = "demo",
+  _legacyRealTradingAuthorized?: boolean,
 ): Mt5ProductionBlock | null {
   if (env.NODE_ENV !== "production") return null;
 
@@ -38,41 +40,21 @@ export function getMt5ProductionBlock(
     };
   }
 
-  if (accountType === "contest") {
+  if (accountType !== "demo" && accountType !== "real") {
     return {
       status: 503,
       code: "MT5_ACCOUNT_MODE_BLOCKED",
-      reason: "Contas de competição não são autorizadas para execução pelo Invista Pro.",
+      reason: "O terminal MT5 precisa confirmar uma conta DEMO ou REAL válida.",
       executionEnabled: false,
     };
   }
 
-  if (accountType === "demo") {
-    if (String(env.MT5_DEMO_TRADING_ENABLED ?? "true").trim().toLowerCase() === "false") {
-      return {
-        status: 503,
-        code: "MT5_DEMO_TRADING_DISABLED",
-        reason: "A entrega de sinais DEMO foi desativada explicitamente no servidor.",
-        executionEnabled: false,
-      };
-    }
-    return null;
-  }
-
+  // This is a single emergency stop, deliberately independent of account mode.
   if (String(env.MT5_PRODUCTION_TRADING_ENABLED ?? "").trim().toLowerCase() === "false") {
     return {
       status: 503,
       code: "MT5_PRODUCTION_TRADING_DISABLED",
-      reason: "A execução REAL foi bloqueada pelo interruptor global MT5_PRODUCTION_TRADING_ENABLED=false.",
-      executionEnabled: false,
-    };
-  }
-
-  if (!realTradingAuthorized) {
-    return {
-      status: 503,
-      code: "MT5_PRODUCTION_TRADING_DISABLED",
-      reason: "Execução REAL bloqueada: selecione REAL e confirme a autorização explícita no painel MT5.",
+      reason: "A execução MT5 foi interrompida pelo interruptor global de emergência.",
       executionEnabled: false,
     };
   }
