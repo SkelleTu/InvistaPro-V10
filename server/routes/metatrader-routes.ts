@@ -904,7 +904,7 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
     } else if (!girassol?.detected) {
       // ── CASO 3: Girassol não instalado no gráfico → fallback ────────────
       // Sem o indicador instalado, a IA opera com threshold normal (70%).
-      const requireGirassol = metaTraderBridge.getConfig().requireGirassolConfirmation;
+      const requireGirassol = metaTraderBridge.getConfig().requireGirassolConfirmation && clientStrategy !== 'AURA_PRICE_ACTION';
       if (requireGirassol && finalAction !== 'HOLD') {
         indicatorNotes.push(`⚠️ Girassol NÃO DETECTADO — operação bloqueada (modo Girassol Obrigatório ativo)`);
         console.log(`[MT5-Indicators] ⚠️ ${sym}: Girassol obrigatório mas não encontrado no gráfico`);
