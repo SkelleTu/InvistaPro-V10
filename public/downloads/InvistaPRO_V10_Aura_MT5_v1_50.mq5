@@ -1478,6 +1478,7 @@ string JsonEscape(const string value)
 
 bool SendAuraLifecycleRequest(const string endpoint,const string body)
   {
+   if(MQLInfoInteger(MQL_TESTER)) return false;
    string base=InpServerURL;
    StringTrimLeft(base);
    StringTrimRight(base);
@@ -1699,6 +1700,9 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
    ulong positionIdentifier=(ulong)HistoryDealGetInteger(trans.deal,DEAL_POSITION_ID);
    ulong positionTicket=trans.position;
    if(positionTicket==0) positionTicket=positionIdentifier;
+   string positionKey=StateKey("ID_"+StringFormat("%I64u",positionIdentifier));
+   if(GlobalVariableCheck(positionKey))
+      positionTicket=(ulong)GlobalVariableGet(positionKey);
    long entry=(long)HistoryDealGetInteger(trans.deal,DEAL_ENTRY);
    long dealMagic=(long)HistoryDealGetInteger(trans.deal,DEAL_MAGIC);
    ulong activeTicket=FindAuraPositionByIdentifier(positionIdentifier);
@@ -1728,8 +1732,10 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
       if(!belongsToAura) return;
       if(activeTicket>0)
          ReportAuraPositionUpdated(activeTicket); // partial close: keep the live position open
-      else
-         ReportAuraPositionClosed(positionTicket,positionIdentifier,trans.deal);
+      else if(ReportAuraPositionClosed(positionTicket,positionIdentifier,trans.deal))
+        {
+         if(GlobalVariableCheck(positionKey)) GlobalVariableDel(positionKey);
+        }
      }
   }
 
