@@ -561,30 +561,13 @@ export default function MetaTraderPage() {
             </div>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
-            <div className="flex items-center gap-1 rounded-md border p-1" aria-label="Ambiente da conta MT5">
-              <span className="px-2 text-xs text-muted-foreground">Conta MT5</span>
-              <Button size="sm" variant={(config?.accountType ?? 'demo') === 'demo' ? 'default' : 'outline'}
-                disabled={updateConfigMutation.isPending || ((config?.accountType ?? 'demo') === 'demo' && config?.realTradingAuthorized !== true)}
-                onClick={() => updateConfigMutation.mutate({ accountType: 'demo', realTradingAuthorized: false } as Partial<MT5Config>)}
-                data-testid="mt5-account-mode-demo">DEMO</Button>
-              <Button size="sm" variant={config?.accountType === 'real' && config?.realTradingAuthorized === true ? 'destructive' : 'outline'}
-                disabled={updateConfigMutation.isPending || (config?.accountType === 'real' && config?.realTradingAuthorized === true)}
-                onClick={() => {
-                  const confirmed = window.confirm(
-                    'AUTORIZAR OPERAÇÕES REAIS?\n\nO Invista Pro poderá enviar sinais para o EA conectado a uma conta REAL no MetaTrader 5. Isso envolve risco de perda financeira. Confirme somente se você pretende operar com dinheiro real.'
-                  );
-                  if (confirmed) updateConfigMutation.mutate({ accountType: 'real', realTradingAuthorized: true } as Partial<MT5Config>);
-                }}
-                data-testid="mt5-account-mode-real">REAL {config?.accountType === 'real' && config?.realTradingAuthorized === true ? 'AUTORIZADO' : ''}</Button>
+            <div className="flex items-center gap-2 rounded-md border px-3 py-2" aria-label="Conta detectada pelo MT5">
+              <span className="text-xs text-muted-foreground">Conta detectada no MT5:</span>
+              <Badge variant="secondary" data-testid="mt5-connected-account-mode">
+                {(config?.accountType ?? 'demo').toUpperCase()}
+              </Badge>
+              <span className="text-xs text-muted-foreground">execução com a mesma política para DEMO e REAL</span>
             </div>
-            <Badge variant={config?.accountType === 'real' && config?.realTradingAuthorized === true ? 'destructive' : 'secondary'}
-              data-testid="mt5-mode-authorization-status">
-              {config?.accountType === 'demo'
-                ? 'MODO DEMO'
-                : config?.realTradingAuthorized === true
-                  ? 'REAL AUTORIZADO'
-                  : 'REAL BLOQUEADO'}
-            </Badge>
             {/* Badge tempo real */}
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground border rounded-full px-2.5 py-1">
               <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-breathe" />
