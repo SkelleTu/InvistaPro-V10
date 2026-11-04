@@ -8,10 +8,11 @@ assert.match(aura, /RequestCentralAIApproval\(g_setupDirection\)/);
 assert.match(aura, /\/api\/metatrader\/signal-with-indicators/);
 assert.match(aura, /priceActionUseAIReview\\\":true/);
 assert.match(aura, /clientStrategy\\\":\\\"AURA_PRICE_ACTION/);
-assert.match(aura, /confidence<0\.70/);
+assert.match(aura, /confidence<70\.0/);
 assert.match(aura, /executionEnabled\\\":true/);
 assert.match(aura, /CurrentAccountType\(\)/);
 assert.match(routes, /clientStrategy !== 'AURA_PRICE_ACTION'/);
+assert.match(routes, /executionEnabled:\s+true/);
 assert.match(routes, /generateSignal\(resolvedSymbol\)|generateSignal\(targetSymbol\)/);
 
 console.log("Aura central AI integration contract validated.");
