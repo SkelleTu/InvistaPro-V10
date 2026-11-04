@@ -2070,13 +2070,9 @@ router.post('/config', mt5DashboardAccess, async (req: Request, res: Response) =
     if (updates.realTradingAuthorized !== undefined && typeof updates.realTradingAuthorized !== 'boolean') {
       return res.status(400).json({ ok: false, code: 'MT5_INVALID_REAL_AUTHORIZATION', error: 'realTradingAuthorized deve ser booleano.' });
     }
+    // Legacy compatibility only: selecting DEMO revokes the obsolete REAL flag.
+    // Neither DEMO nor REAL requires a separate dashboard authorization.
     if (updates.accountType === 'demo') updates.realTradingAuthorized = false;
-    if (updates.accountType === 'real' && updates.realTradingAuthorized !== true && currentConfig.realTradingAuthorized !== true) {
-      return res.status(400).json({ ok: false, code: 'MT5_REAL_AUTHORIZATION_REQUIRED', error: 'Para selecionar REAL, confirme explicitamente a autorização no dashboard.' });
-    }
-    if (updates.realTradingAuthorized === true && updates.accountType !== 'real' && currentConfig.accountType !== 'real') {
-      return res.status(400).json({ ok: false, code: 'MT5_REAL_AUTH_REQUIRES_REAL_MODE', error: 'Selecione o modo REAL antes de autorizar execução REAL.' });
-    }
     if (updates.accountType !== undefined && !['demo', 'real'].includes(updates.accountType)) {
       return res.status(400).json({ ok: false, code: 'MT5_INVALID_ACCOUNT_MODE', error: 'accountType deve ser demo ou real.' });
     }
@@ -2102,10 +2098,10 @@ router.post('/config', mt5DashboardAccess, async (req: Request, res: Response) =
       tokenGenerated: generatedToken,
       message: generatedToken
         ? 'Configuração salva e token seguro gerado. Baixe novamente o EA para receber a URL e o token corretos.'
-        : (updates.accountType === 'real' && updates.realTradingAuthorized === true
-          ? 'Modo REAL selecionado e autorização explícita persistida.'
+        : (updates.accountType === 'real'
+          ? 'Modo REAL selecionado; a conta efetiva será confirmada pelo heartbeat do MT5.'
           : updates.accountType === 'demo'
-            ? 'Modo DEMO selecionado; autorização REAL revogada.'
+            ? 'Modo DEMO selecionado.'
             : 'Configuração atualizada'),
     });
   } catch (err: any) {
