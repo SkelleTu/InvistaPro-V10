@@ -1,13 +1,13 @@
 //+------------------------------------------------------------------+
 //| InvistaPRO V10 Aura - MT5 Expert Advisor                         |
 //| Price Action multi-timeframe implementation                     |
-//| Version 1.51                                                     |
+//| Version 1.52                                                     |
 //|                                                                  |
 //| IMPORTANT: Source code is provided for strategy testing.          |
 //| Compile in MetaEditor and forward-test on a DEMO account first.   |
 //+------------------------------------------------------------------+
 #property strict
-#property version   "1.51"
+#property version   "1.52"
 #property description "InvistaPRO V10 Aura - Price Action EA for MetaTrader 5"
 
 #include <Trade/Trade.mqh>
@@ -17,7 +17,8 @@ CTrade trade;
 input string InpServerURL = "https://invista-pro-v10-kzlv.onrender.com"; // InvistaPRO production server
 input string InpApiToken = ""; // Injected per authorized account download
 input int    InpHeartbeatSeconds = 30;
-input bool   InpEnableTrading = false; // Safe default: heartbeat only until the user explicitly enables demo trading in EA inputs
+input bool   InpEnableTrading = true;  // DEMO execution enabled by default; REAL remains separately locked below
+input bool   InpAllowRealTrading = false; // Must be explicitly enabled in EA inputs before any REAL order
 
 // --- Core / risk
 input ulong  InpMagicNumber                 = 101018;
@@ -126,6 +127,17 @@ void ClearPositionState()
    if(GlobalVariableCheck(StateKey("R"))) GlobalVariableDel(StateKey("R"));
    if(GlobalVariableCheck(StateKey("V"))) GlobalVariableDel(StateKey("V"));
    if(GlobalVariableCheck(StateKey("P"))) GlobalVariableDel(StateKey("P"));
+  }
+
+
+bool TradingExecutionAllowed()
+  {
+   if(!InpEnableTrading) return false;
+   long accountMode=AccountInfoInteger(ACCOUNT_TRADE_MODE);
+   if(accountMode==ACCOUNT_TRADE_MODE_DEMO) return true;
+   if(accountMode==ACCOUNT_TRADE_MODE_REAL) return InpAllowRealTrading;
+   // Contest/unknown account modes are never allowed to send orders.
+   return false;
   }
 
 bool IsAllowedSymbol()
@@ -948,7 +960,7 @@ void SetBlockReason(const string reason)
 
 void EvaluateNewSignal()
   {
-   if(!InpEnableTrading) { SetBlockReason("Conectado; execução pausada (InpEnableTrading=false)"); return; }
+   if(!TradingExecutionAllowed()) { SetBlockReason("Execução bloqueada: habilite DEMO ou autorize REAL explicitamente nas entradas do EA"); return; }
    SetBlockReason("Analisando confluências MTF");
    if(!IsAllowedSymbol()) { SetBlockReason("Símbolo bloqueado pela restrição opcional BTC/ETH/SOL"); return; }
    if(!IsInBrasiliaSession()) { SetBlockReason("Fora da janela operacional Brasília"); return; }
@@ -1020,7 +1032,7 @@ void OnNewM5Bar()
 
 bool OpenPositionFromSetup()
   {
-   if(!InpEnableTrading) { SetBlockReason("Entrada bloqueada: habilite InpEnableTrading após validar DEMO"); return false; }
+   if(!TradingExecutionAllowed()) { SetBlockReason("Entrada bloqueada: conta não autorizada para execução"); return false; }
    if(g_setupDirection==0) return false;
    if(!IsAllowedSymbol()) { SetBlockReason("Entrada cancelada: símbolo não permitido"); return false; }
    if(!IsInBrasiliaSession()) { SetBlockReason("Entrada cancelada: fora da sessão"); return false; }

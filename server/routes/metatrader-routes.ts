@@ -1368,7 +1368,7 @@ router.get('/download-aura-ea', mt5DashboardAccess, async (req: Request, res: Re
     content = content.replace(tokenPattern, `input string InpApiToken = "${escapeMqlString(token)}"; // Token individual injetado no download autenticado`);
 
     const version = content.match(/#property\s+version\s+"([^"]+)"/)?.[1] ?? 'unknown';
-    if (version !== '1.51') {
+    if (version !== '1.52') {
       return res.status(503).json({ ok: false, code: 'AURA_EA_VERSION_MISMATCH', detectedVersion: version });
     }
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
@@ -1376,7 +1376,7 @@ router.get('/download-aura-ea', mt5DashboardAccess, async (req: Request, res: Re
     res.setHeader('Expires', '0');
     res.setHeader('X-InvistaPRO-EA-Version', version);
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-    res.setHeader('Content-Disposition', 'attachment; filename="InvistaPRO_V10_Aura_MT5_v1_51.mq5"');
+    res.setHeader('Content-Disposition', 'attachment; filename="InvistaPRO_V10_Aura_MT5_v1_52.mq5"');
     return res.send(content);
   } catch (err: any) {
     console.error('[MT5 Aura Download] Falha:', err?.message || err);
