@@ -5142,7 +5142,7 @@ class MetaTraderBridge extends EventEmitter {
 
     const profit         = position.profit ?? 0;
     const ageMinutes     = (Date.now() - ctx.entryTime) / 60000;
-    const lots           = Math.max(Number(position.lots) || 0.01, 0.01);
+    const lots           = Number.isFinite(position.lots) && position.lots > 0 ? position.lots : 0.01;
 
     // Hard stop: aplica o menor limite entre $20 por lote e 0.25% do saldo.
     // Micro-lotes mantêm seu limite proporcional; nunca são arredondados para 1 lote.
