@@ -2154,7 +2154,28 @@ router.post('/position/monitor', mt5EaTokenAccess, (req: Request, res: Response)
     if (!position || !marketData || !symbol) {
       return res.status(400).json({ error: 'position, marketData e symbol são obrigatórios' });
     }
-    const result = metaTraderBridge.monitorOpenPosition(position, marketData, symbol);
+    const normalizedPosition: MT5Position = {
+      ticket: Number(position.ticket),
+      symbol: String(position.symbol || symbol),
+      type: String(position.type).toUpperCase() as 'BUY' | 'SELL',
+      lots: Number(position.lots),
+      openPrice: Number(position.openPrice),
+      currentPrice: Number(position.currentPrice),
+      stopLoss: Number(position.stopLoss || 0),
+      takeProfit: Number(position.takeProfit || 0),
+      profit: Number(position.profit || 0),
+      openTime: Number(position.openTime || Date.now()),
+      signalId: String(position.signalId || ''),
+      source: 'ea',
+    };
+    if (!Number.isFinite(normalizedPosition.ticket) || normalizedPosition.ticket <= 0 ||
+        !normalizedPosition.symbol || !['BUY', 'SELL'].includes(normalizedPosition.type) ||
+        !Number.isFinite(normalizedPosition.openPrice) || !Number.isFinite(normalizedPosition.currentPrice)) {
+      return res.status(400).json({ error: 'Snapshot de posição MT5 inválido.' });
+    }
+    // The EA monitor is also the reconciliation channel after a backend restart.
+    metaTraderBridge.syncPositionFromEa(normalizedPosition);
+    const result = metaTraderBridge.monitorOpenPosition(normalizedPosition, marketData, symbol);
     res.json(result);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
