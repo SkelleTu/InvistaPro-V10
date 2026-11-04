@@ -154,7 +154,7 @@ router.get('/signal', mt5SignalAccess, (req: Request, res: Response) => {
         timestamp: Date.now(),
       });
     }
-    const productionBlock = getMt5ProductionBlock(config.apiToken, process.env, requestedAccountMode);
+    const productionBlock = getMt5ProductionBlock(config.apiToken, process.env, lastMt5ObservedAccountType ?? 'contest');
     if (productionBlock) {
       return res.status(productionBlock.status).json({ action: 'HOLD', ...productionBlock, timestamp: Date.now() });
     }
@@ -327,7 +327,7 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
       });
     }
 
-    const productionBlock = getMt5ProductionBlock(config.apiToken, process.env, config.accountType, config.realTradingAuthorized);
+    const productionBlock = getMt5ProductionBlock(config.apiToken, process.env, lastMt5ObservedAccountType ?? 'contest');
     if (productionBlock) {
       return res.status(productionBlock.status).json({
         action: 'HOLD',
