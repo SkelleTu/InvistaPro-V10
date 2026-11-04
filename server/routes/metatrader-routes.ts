@@ -307,11 +307,10 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
       return res.status(409).json({
         action: 'HOLD',
         executionEnabled: false,
-        code: 'MT5_ACCOUNT_MODE_MISMATCH',
-        expectedAccountType: config.accountType,
+        code: 'MT5_ACCOUNT_MODE_UNCONFIRMED',
         requestedAccountType: requestedAccountMode || null,
         actualAccountType: lastMt5ObservedAccountType,
-        reason: 'O modo informado pelo terminal diverge do modo configurado/observado; sinais bloqueados.',
+        reason: 'O tipo de conta informado não corresponde ao último heartbeat válido do MT5; sinais bloqueados até nova confirmação.',
         timestamp: Date.now(),
       });
     }
