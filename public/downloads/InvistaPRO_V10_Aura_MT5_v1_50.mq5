@@ -1521,6 +1521,9 @@ bool ReportAuraPositionOpened(const ulong ticket)
    if(!PositionSelectByTicket(ticket)) return false;
    ENUM_POSITION_TYPE type=(ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
    string side=(type==POSITION_TYPE_BUY ? "BUY" : "SELL");
+   ulong positionIdentifier=(ulong)PositionGetInteger(POSITION_IDENTIFIER);
+   if(positionIdentifier>0)
+      GlobalVariableSet(StateKey("ID_"+StringFormat("%I64u",positionIdentifier)),(double)ticket);
    string body="{";
    body+="\"token\":\""+JsonEscape(InpApiToken)+"\",";
    body+="\"ticket\":"+StringFormat("%I64u",ticket)+",";
