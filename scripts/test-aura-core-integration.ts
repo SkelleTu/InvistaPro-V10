@@ -18,6 +18,7 @@ assert.match(aura, /CLOSE_LOSS_PREVENTION/);
 assert.match(aura, /trade\.PositionClose\(ticket\)/);
 assert.match(aura, /RequestCentralPositionManagement\(positionTicket\)/);
 assert.match(routes, /clientStrategy !== 'AURA_PRICE_ACTION'/);
+assert.match(routes, /const requireGirassol = metaTraderBridge\.getConfig\(\)\.requireGirassolConfirmation && clientStrategy !== 'AURA_PRICE_ACTION'/);
 assert.match(routes, /executionEnabled:\s+true/);
 assert.match(routes, /generateSignal\(resolvedSymbol\)|generateSignal\(targetSymbol\)/);
 
