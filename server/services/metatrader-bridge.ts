@@ -4536,15 +4536,30 @@ class MetaTraderBridge extends EventEmitter {
   }
 
   confirmTradeOpen(position: MT5Position): void {
+    const alreadyTracked = this.openPositions.has(position.ticket);
     this.openPositions.set(position.ticket, position);
-    this.status.totalTradesExecuted++;
-    if (this.pendingSignals.has(position.signalId)) {
-      this.pendingSignals.delete(position.signalId);
+    if (!alreadyTracked) {
+      this.status.totalTradesExecuted++;
+      if (this.pendingSignals.has(position.signalId)) {
+        this.pendingSignals.delete(position.signalId);
+      }
+      this.saveBridgeState();
+      this.emit('trade_opened', position);
+      console.log(`[MT5Bridge] 📈 Posição aberta: #${position.ticket} ${position.type} ${position.symbol} @ ${position.openPrice}`);
     }
     this.savePositionToDB(position);
-    this.saveBridgeState();
-    this.emit('trade_opened', position);
-    console.log(`[MT5Bridge] 📈 Posição aberta: #${position.ticket} ${position.type} ${position.symbol} @ ${position.openPrice}`);
+  }
+
+  /** Reconcile a live terminal snapshot without counting a recovered position as a new trade. */
+  syncPositionFromEa(position: MT5Position): void {
+    const existing = this.openPositions.get(position.ticket);
+    const synchronized = existing ? { ...existing, ...position } : position;
+    this.openPositions.set(position.ticket, synchronized);
+    this.savePositionToDB(synchronized);
+    if (!existing) {
+      this.emit('trade_opened', synchronized);
+      console.log(`[MT5Bridge] 🔄 Posição reconciliada do MT5: #${position.ticket} ${position.type} ${position.symbol}`);
+    }
   }
 
   updatePosition(ticket: number, update: Partial<MT5Position>): void {
