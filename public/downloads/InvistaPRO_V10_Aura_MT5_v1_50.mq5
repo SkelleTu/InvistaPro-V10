@@ -1453,7 +1453,7 @@ void UpdatePanel()
    double dailyNet=0.0,startBalance=0.0;
    GetDailyNetPnl(dailyNet,startBalance);
    string setup=(g_setupDirection>0 ? "COMPRA ARMADA" : (g_setupDirection<0 ? "VENDA ARMADA" : "SEM GATILHO"));
-   Comment("INVISTAPRO V10 AURA 1.50 | MT5\n",
+   Comment("INVISTAPRO V10 AURA 1.52 | MT5\n",
            "Símbolo: ",_Symbol," | Tendência H4/H1: ",trend,"\n",
            "Setup M5: ",setup," | Trades hoje: ",trades,"/",InpMaxTradesPerDay,"\n",
            "Perdas hoje: ",losses,"/",InpStopAfterDailyLosses," | Sequência atual: ",streak,"\n",
