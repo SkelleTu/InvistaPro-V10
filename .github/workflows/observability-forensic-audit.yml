@@ -2,10 +2,9 @@ name: Observability Forensic Audit
 
 on:
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "17 7 * * *"
   push:
     branches: [main]
-  pull_request:
   workflow_dispatch:
 
 permissions:
