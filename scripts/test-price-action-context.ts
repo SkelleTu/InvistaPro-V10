@@ -70,9 +70,9 @@ assert.equal(assessMt5RiskLimit({
   now,
 }).ok, true, 'REAL account must not require a separate manual authorization flag');
 assert.equal(assessMt5RiskLimit({
-  config: realConfig, status, observedAccountType: 'real', accountHeartbeatAt: now - 1000,
+  config: realConfig, status, observedAccountType: 'demo', accountHeartbeatAt: now - 1000,
   now,
-}).ok, true, 'REAL account remains eligible when the selected account is confirmed');
+}).ok, false, 'A mismatched observed account mode must block REAL execution');
 
 
 console.log('Price Action context safety tests passed.');
