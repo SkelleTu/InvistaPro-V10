@@ -1599,7 +1599,9 @@ bool ReportAuraPositionClosed(const ulong ticket,const ulong positionIdentifier,
    else if(reason==DEAL_REASON_SL) closeReason="SL";
    else if(reason==DEAL_REASON_EXPERT) closeReason="AI_SIGNAL";
    double point=SymbolInfoDouble(_Symbol,SYMBOL_POINT);
-   double pips=point>0.0 ? ((closePrice-openPrice)/point)*(side=="BUY"?1.0:-1.0) : 0.0;
+   double pipSize=point;
+   if(_Digits==3 || _Digits==5) pipSize=point*10.0;
+   double pips=pipSize>0.0 ? ((closePrice-openPrice)/pipSize)*(side=="BUY"?1.0:-1.0) : 0.0;
 
    string body="{";
    body+="\"token\":\""+JsonEscape(InpApiToken)+"\",";
