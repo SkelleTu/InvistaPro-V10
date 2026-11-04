@@ -564,7 +564,7 @@ export default function MetaTraderPage() {
             <div className="flex items-center gap-2 rounded-md border px-3 py-2" aria-label="Conta detectada pelo MT5">
               <span className="text-xs text-muted-foreground">Conta detectada no MT5:</span>
               <Badge variant="secondary" data-testid="mt5-connected-account-mode">
-                {(config?.accountType ?? 'demo').toUpperCase()}
+                {status?.connected ? (config?.accountType ?? 'NÃO CONFIRMADA').toUpperCase() : 'AGUARDANDO MT5'}
               </Badge>
               <span className="text-xs text-muted-foreground">execução com a mesma política para DEMO e REAL</span>
             </div>
