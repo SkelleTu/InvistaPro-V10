@@ -15,6 +15,7 @@ import { getSignal } from './signal-store';
 import { sqlite } from '../db';
 import { pgDb, pgSchema, isPostgresAvailable } from '../db-postgres';
 import { eq } from 'drizzle-orm';
+import { calculateMt5PositionHardStop } from './mt5-position-risk';
 
 export interface MT5Signal {
   id: string;
@@ -5141,13 +5142,11 @@ class MetaTraderBridge extends EventEmitter {
 
     const profit         = position.profit ?? 0;
     const ageMinutes     = (Date.now() - ctx.entryTime) / 60000;
-    const lots           = Math.max(position.lots || 1, 1);
+    const lots           = Math.max(Number(position.lots) || 0.01, 0.01);
 
-    // Hard stop: máximo entre $20/lote e 0.25% do saldo da conta
-    // (para bancas maiores, o limite escala com a banca)
-    const balanceBasedStop = ctx.entryBalance > 0 ? -(ctx.entryBalance * 0.0025) : -20;
-    const lotBasedStop     = -(20 * lots);
-    const hardStopDollars  = Math.max(balanceBasedStop, lotBasedStop); // usa o mais restritivo (menos negativo)
+    // Hard stop: aplica o menor limite entre $20 por lote e 0.25% do saldo.
+    // Micro-lotes mantêm seu limite proporcional; nunca são arredondados para 1 lote.
+    const hardStopDollars = calculateMt5PositionHardStop(ctx.entryBalance, lots);
 
     // ══════════════════════════════════════════════════════════════════
     // PRIORIDADE 1 — HARD STOP (perda máxima absoluta)
