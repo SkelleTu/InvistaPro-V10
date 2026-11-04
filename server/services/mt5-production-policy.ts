@@ -1,6 +1,6 @@
 /**
  * Independent MT5 mode gates: DEMO is the default for operational validation.
- * REAL requires explicit dashboard authorization; an explicit global false flag is an emergency kill switch.
+ * DEMO and REAL are available without a separate dashboard authorization; explicit global false flags remain emergency controls.
  */
 export interface Mt5ProductionBlock {
   status: 503;
@@ -25,7 +25,7 @@ export function getMt5ProductionBlock(
   apiToken: string | null | undefined,
   env: Mt5ProductionEnvironment = process.env,
   accountType: "demo" | "real" | "contest" = "real",
-  realTradingAuthorized = false,
+  _realTradingAuthorized = false,
 ): Mt5ProductionBlock | null {
   if (env.NODE_ENV !== "production") return null;
 
@@ -64,15 +64,6 @@ export function getMt5ProductionBlock(
       status: 503,
       code: "MT5_PRODUCTION_TRADING_DISABLED",
       reason: "A execução REAL foi bloqueada pelo interruptor global MT5_PRODUCTION_TRADING_ENABLED=false.",
-      executionEnabled: false,
-    };
-  }
-
-  if (!realTradingAuthorized) {
-    return {
-      status: 503,
-      code: "MT5_PRODUCTION_TRADING_DISABLED",
-      reason: "Execução REAL bloqueada: selecione REAL e confirme a autorização explícita no painel MT5.",
       executionEnabled: false,
     };
   }
