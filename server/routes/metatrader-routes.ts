@@ -215,7 +215,7 @@ router.get('/signal', mt5SignalAccess, (req: Request, res: Response) => {
       }
     } else {
       // Sem dados do Girassol E ele é obrigatório → bloquear
-      const requireGirassol = metaTraderBridge.getConfig().requireGirassolConfirmation && clientStrategy !== 'AURA_PRICE_ACTION';
+      const requireGirassol = metaTraderBridge.getConfig().requireGirassolConfirmation;
       if (requireGirassol) {
         console.log(`[MT5-Signal] 🚫 ${resolvedSymbol}: Girassol obrigatório mas sem dados — sinal bloqueado no polling`);
         return res.json({
