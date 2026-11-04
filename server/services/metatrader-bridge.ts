@@ -171,7 +171,7 @@ export interface MT5TradeResult {
 export interface MT5Config {
   enabled: boolean;
   accountType: 'demo' | 'real';
-  /** Explicit dashboard authorization; defaults to false and is revoked by selecting DEMO. */
+  /** Legacy compatibility field; it no longer gates DEMO or REAL execution. */
   realTradingAuthorized: boolean;
   accountId: string;
   broker: string;
