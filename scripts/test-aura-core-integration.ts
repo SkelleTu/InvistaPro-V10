@@ -23,7 +23,7 @@ assert.match(aura, /ReportAuraPositionOpened\(/);
 assert.match(aura, /ReportAuraPositionUpdated\(/);
 assert.match(aura, /ReportAuraPositionClosed\(/);
 assert.match(aura, /void RetryPendingAuraClose\(/);
-assert.match(aura, /RetryPendingAuraClose\\(\);/);
+assert.match(aura, /RetryPendingAuraClose\(\);/);
 assert.match(aura, /\/api\/mt5\/trade\/open/);
 assert.match(aura, /\/api\/mt5\/trade\/update/);
 assert.match(aura, /\/api\/mt5\/trade\/close/);
