@@ -4,9 +4,6 @@ on:
   push:
     branches:
       - audit/invista-v10-login-memory-worker
-  pull_request:
-    branches:
-      - main
   workflow_dispatch:
 
 permissions:
