@@ -1476,6 +1476,147 @@ string JsonEscape(const string value)
    return out;
   }
 
+bool SendAuraLifecycleRequest(const string endpoint,const string body)
+  {
+   string base=InpServerURL;
+   StringTrimLeft(base);
+   StringTrimRight(base);
+   while(StringLen(base)>0 && StringSubstr(base,StringLen(base)-1,1)=="/")
+      base=StringSubstr(base,0,StringLen(base)-1);
+   if(StringLen(base)<8 || StringLen(InpApiToken)<16) return false;
+
+   char data[],result[];
+   StringToCharArray(body,data,0,WHOLE_ARRAY,CP_UTF8);
+   if(ArraySize(data)>0) ArrayResize(data,ArraySize(data)-1);
+   string responseHeaders;
+   string headers="Content-Type: application/json\r\n";
+   ResetLastError();
+   int http=WebRequest("POST",base+endpoint,headers,7000,data,result,responseHeaders);
+   if(http<200 || http>=300)
+     {
+      Print("Aura EA: lifecycle report failed endpoint=",endpoint,
+            " HTTP=",http," error=",GetLastError(),
+            " response=",CharArrayToString(result,0,-1,CP_UTF8));
+      return false;
+     }
+   return true;
+  }
+
+ulong FindAuraPositionByIdentifier(const ulong identifier)
+  {
+   for(int i=PositionsTotal()-1;i>=0;i--)
+     {
+      ulong ticket=PositionGetTicket(i);
+      if(ticket==0) continue;
+      if((ulong)PositionGetInteger(POSITION_IDENTIFIER)==identifier &&
+         (ulong)PositionGetInteger(POSITION_MAGIC)==InpMagicNumber)
+         return ticket;
+     }
+   return 0;
+  }
+
+bool ReportAuraPositionOpened(const ulong ticket)
+  {
+   if(!PositionSelectByTicket(ticket)) return false;
+   ENUM_POSITION_TYPE type=(ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+   string side=(type==POSITION_TYPE_BUY ? "BUY" : "SELL");
+   string body="{";
+   body+="\"token\":\""+JsonEscape(InpApiToken)+"\",";
+   body+="\"ticket\":"+StringFormat("%I64u",ticket)+",";
+   body+="\"symbol\":\""+JsonEscape(_Symbol)+"\",";
+   body+="\"type\":\""+side+"\",";
+   body+="\"lots\":"+DoubleToString(PositionGetDouble(POSITION_VOLUME),4)+",";
+   body+="\"openPrice\":"+DoubleToString(PositionGetDouble(POSITION_PRICE_OPEN),_Digits)+",";
+   body+="\"currentPrice\":"+DoubleToString(PositionGetDouble(POSITION_PRICE_CURRENT),_Digits)+",";
+   body+="\"stopLoss\":"+DoubleToString(PositionGetDouble(POSITION_SL),_Digits)+",";
+   body+="\"takeProfit\":"+DoubleToString(PositionGetDouble(POSITION_TP),_Digits)+",";
+   body+="\"openTime\":"+StringFormat("%I64d",(long)PositionGetInteger(POSITION_TIME))+",";
+   body+="\"signalId\":\"AURA_"+StringFormat("%I64u",ticket)+"\"";
+   body+="}";
+   return SendAuraLifecycleRequest("/api/mt5/trade/open",body);
+  }
+
+bool ReportAuraPositionUpdated(const ulong ticket)
+  {
+   if(!PositionSelectByTicket(ticket)) return false;
+   string body="{";
+   body+="\"token\":\""+JsonEscape(InpApiToken)+"\",";
+   body+="\"ticket\":"+StringFormat("%I64u",ticket)+",";
+   body+="\"currentPrice\":"+DoubleToString(PositionGetDouble(POSITION_PRICE_CURRENT),_Digits)+",";
+   body+="\"profit\":"+DoubleToString(PositionGetDouble(POSITION_PROFIT),2)+",";
+   body+="\"stopLoss\":"+DoubleToString(PositionGetDouble(POSITION_SL),_Digits)+",";
+   body+="\"takeProfit\":"+DoubleToString(PositionGetDouble(POSITION_TP),_Digits);
+   body+="}";
+   return SendAuraLifecycleRequest("/api/mt5/trade/update",body);
+  }
+
+bool ReportAuraPositionClosed(const ulong ticket,const ulong positionIdentifier,const ulong closingDeal)
+  {
+   if(ticket==0 || positionIdentifier==0 || closingDeal==0) return false;
+   string closeKey=StateKey("C_"+StringFormat("%I64u",positionIdentifier));
+   if(GlobalVariableCheck(closeKey)) return true;
+   if(!HistorySelectByPosition(positionIdentifier)) return false;
+
+   double totalProfit=0.0,totalEntryVolume=0.0,weightedEntry=0.0;
+   datetime openTime=0;
+   string side="";
+   int total=HistoryDealsTotal();
+   for(int i=0;i<total;i++)
+     {
+      ulong deal=HistoryDealGetTicket(i);
+      if(deal==0) continue;
+      long entry=(long)HistoryDealGetInteger(deal,DEAL_ENTRY);
+      totalProfit+=HistoryDealGetDouble(deal,DEAL_PROFIT)
+                   +HistoryDealGetDouble(deal,DEAL_SWAP)
+                   +HistoryDealGetDouble(deal,DEAL_COMMISSION)
+                   +HistoryDealGetDouble(deal,DEAL_FEE);
+      if(entry==DEAL_ENTRY_IN)
+        {
+         double volume=HistoryDealGetDouble(deal,DEAL_VOLUME);
+         double price=HistoryDealGetDouble(deal,DEAL_PRICE);
+         totalEntryVolume+=volume;
+         weightedEntry+=price*volume;
+         datetime dealTime=(datetime)HistoryDealGetInteger(deal,DEAL_TIME);
+         if(openTime==0 || dealTime<openTime) openTime=dealTime;
+         if(side=="")
+           {
+            long dealType=(long)HistoryDealGetInteger(deal,DEAL_TYPE);
+            side=(dealType==DEAL_TYPE_BUY ? "BUY" : (dealType==DEAL_TYPE_SELL ? "SELL" : ""));
+           }
+        }
+     }
+   if(totalEntryVolume<=0.0 || side=="") return false;
+   double openPrice=weightedEntry/totalEntryVolume;
+   double closePrice=HistoryDealGetDouble(closingDeal,DEAL_PRICE);
+   datetime closeTime=(datetime)HistoryDealGetInteger(closingDeal,DEAL_TIME);
+   long reason=(long)HistoryDealGetInteger(closingDeal,DEAL_REASON);
+   string closeReason="MANUAL";
+   if(reason==DEAL_REASON_TP) closeReason="TP";
+   else if(reason==DEAL_REASON_SL) closeReason="SL";
+   else if(reason==DEAL_REASON_EXPERT) closeReason="AI_SIGNAL";
+   double point=SymbolInfoDouble(_Symbol,SYMBOL_POINT);
+   double pips=point>0.0 ? ((closePrice-openPrice)/point)*(side=="BUY"?1.0:-1.0) : 0.0;
+
+   string body="{";
+   body+="\"token\":\""+JsonEscape(InpApiToken)+"\",";
+   body+="\"ticket\":"+StringFormat("%I64u",ticket)+",";
+   body+="\"signalId\":\"AURA_"+StringFormat("%I64u",ticket)+"\",";
+   body+="\"symbol\":\""+JsonEscape(_Symbol)+"\",";
+   body+="\"type\":\""+side+"\",";
+   body+="\"lots\":"+DoubleToString(totalEntryVolume,4)+",";
+   body+="\"openPrice\":"+DoubleToString(openPrice,_Digits)+",";
+   body+="\"closePrice\":"+DoubleToString(closePrice,_Digits)+",";
+   body+="\"profit\":"+DoubleToString(totalProfit,2)+",";
+   body+="\"pips\":"+DoubleToString(pips,1)+",";
+   body+="\"openTime\":"+StringFormat("%I64d",(long)openTime)+",";
+   body+="\"closeTime\":"+StringFormat("%I64d",(long)closeTime)+",";
+   body+="\"closeReason\":\""+closeReason+"\"";
+   body+="}";
+   if(!SendAuraLifecycleRequest("/api/mt5/trade/close",body)) return false;
+   GlobalVariableSet(closeKey,(double)TimeCurrent());
+   return true;
+  }
+
 string CurrentAccountType()
   {
    long mode=AccountInfoInteger(ACCOUNT_TRADE_MODE);
@@ -1547,6 +1688,36 @@ void SendInvistaHeartbeat()
 //+------------------------------------------------------------------+
 //| Expert lifecycle                                                  |
 //+------------------------------------------------------------------+
+void OnTradeTransaction(const MqlTradeTransaction &trans,
+                        const MqlTradeRequest &request,
+                        const MqlTradeResult &result)
+  {
+   if(trans.type!=TRADE_TRANSACTION_DEAL_ADD || trans.deal==0) return;
+   if(!HistoryDealSelect(trans.deal)) return;
+   if((ulong)HistoryDealGetInteger(trans.deal,DEAL_MAGIC)!=InpMagicNumber) return;
+   if(HistoryDealGetString(trans.deal,DEAL_SYMBOL)!=_Symbol) return;
+
+   ulong positionIdentifier=(ulong)HistoryDealGetInteger(trans.deal,DEAL_POSITION_ID);
+   ulong positionTicket=trans.position;
+   if(positionTicket==0) positionTicket=positionIdentifier;
+   long entry=(long)HistoryDealGetInteger(trans.deal,DEAL_ENTRY);
+   ulong activeTicket=FindAuraPositionByIdentifier(positionIdentifier);
+
+   if(entry==DEAL_ENTRY_IN || entry==DEAL_ENTRY_INOUT)
+     {
+      if(activeTicket>0) ReportAuraPositionOpened(activeTicket);
+      return;
+     }
+
+   if(entry==DEAL_ENTRY_OUT || entry==DEAL_ENTRY_OUT_BY)
+     {
+      if(activeTicket>0)
+         ReportAuraPositionUpdated(activeTicket); // partial close: keep the live position open
+      else
+         ReportAuraPositionClosed(positionTicket,positionIdentifier,trans.deal);
+     }
+  }
+
 int OnInit()
   {
    if(InpRiskPercent<=0.0 || InpRiskPercent>2.0)
