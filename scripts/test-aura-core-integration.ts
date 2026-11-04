@@ -16,11 +16,11 @@ assert.match(aura, /confidence<0\.70/,
   "Aura must reject central confidence below 70 percent");
 assert.match(aura, /executionEnabled\\\":true/,
   "Aura must require explicit backend execution approval");
-assert.match(aura, /accountType\\\":\\\"\+accountType/,
+assert.match(aura, /CurrentAccountType\(\)/, "Aura must read the connected MT5 account mode");
+assert.match(routes, /generateSignal\(resolvedSymbol\)|generateSignal\(targetSymbol\)/, "Central route must retain the core AI signal generation pipeline");
   "Aura must report the actual connected MT5 account mode");
 assert.match(routes, /clientStrategy !== 'AURA_PRICE_ACTION'/,
   "Backend must scope the Aura Girassol-gate exception to the Aura strategy");
-assert.match(routes, /generateSignal\(sym\)|generateSignal\(symbol/,
   "Central route must retain the core AI signal generation pipeline");
 
 console.log("Aura central AI integration contract validated.");
