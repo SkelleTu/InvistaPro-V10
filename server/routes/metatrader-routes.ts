@@ -1109,6 +1109,7 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
       slTpSource,
       entryPrice:            baseSignal.entryPrice,
       confidence:            Math.round(finalConfidence * 10) / 10,
+      executionEnabled:       true,
       reason:                finalReason,
       indicatorNotes,
       girassolBias,
