@@ -1107,6 +1107,7 @@ bool RequestCentralAIApproval(const int localDirection)
    body+="\"ask\":"+DoubleToString(tick.ask,_Digits)+",";
    body+="\"bid\":"+DoubleToString(tick.bid,_Digits)+",";
    body+="\"priceActionUseAIReview\":true,";
+   body+="\"clientStrategy\":\"AURA_PRICE_ACTION\",";
    body+="\"candles\":"+m5+",";
    body+="\"timeframes\":{\"H4\":"+h4+",\"H1\":"+h1+",\"M15\":"+m15+",\"M5\":"+m5+",\"M1\":"+m1+"},";
    body+="\"indicatorSignals\":{},\"indicatorBuffers\":[]";
