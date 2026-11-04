@@ -4,23 +4,14 @@ import { readFileSync } from "node:fs";
 const aura = readFileSync("public/downloads/InvistaPRO_V10_Aura_MT5_v1_50.mq5", "utf8");
 const routes = readFileSync("server/routes/metatrader-routes.ts", "utf8");
 
-assert.match(aura, /RequestCentralAIApproval\(g_setupDirection\)/,
-  "Aura must require central approval immediately before order execution");
-assert.match(aura, /\/api\/metatrader\/signal-with-indicators/,
-  "Aura must call the central signal and AI consensus endpoint");
-assert.match(aura, /priceActionUseAIReview\\\":true/,
-  "Aura must require AI review, not strategy-only approval");
-assert.match(aura, /clientStrategy\\\":\\\"AURA_PRICE_ACTION/,
-  "Aura must identify its deterministic strategy to the backend");
-assert.match(aura, /confidence<0\.70/,
-  "Aura must reject central confidence below 70 percent");
-assert.match(aura, /executionEnabled\\\":true/,
-  "Aura must require explicit backend execution approval");
-assert.match(aura, /CurrentAccountType\(\)/, "Aura must read the connected MT5 account mode");
-assert.match(routes, /generateSignal\(resolvedSymbol\)|generateSignal\(targetSymbol\)/, "Central route must retain the core AI signal generation pipeline");
-  "Aura must report the actual connected MT5 account mode");
-assert.match(routes, /clientStrategy !== 'AURA_PRICE_ACTION'/,
-  "Backend must scope the Aura Girassol-gate exception to the Aura strategy");
-  "Central route must retain the core AI signal generation pipeline");
+assert.match(aura, /RequestCentralAIApproval\(g_setupDirection\)/);
+assert.match(aura, /\/api\/metatrader\/signal-with-indicators/);
+assert.match(aura, /priceActionUseAIReview\\\":true/);
+assert.match(aura, /clientStrategy\\\":\\\"AURA_PRICE_ACTION/);
+assert.match(aura, /confidence<0\.70/);
+assert.match(aura, /executionEnabled\\\":true/);
+assert.match(aura, /CurrentAccountType\(\)/);
+assert.match(routes, /clientStrategy !== 'AURA_PRICE_ACTION'/);
+assert.match(routes, /generateSignal\(resolvedSymbol\)|generateSignal\(targetSymbol\)/);
 
 console.log("Aura central AI integration contract validated.");
