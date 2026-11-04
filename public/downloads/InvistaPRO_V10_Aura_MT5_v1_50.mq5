@@ -1018,10 +1018,103 @@ void OnNewM5Bar()
    if(g_setupDirection==0) EvaluateNewSignal();
   }
 
+
+datetime g_lastCoreReviewAttempt = 0;
+
+string BuildCoreCandleArray(const ENUM_TIMEFRAMES timeframe,const int requested)
+  {
+   MqlRates rates[];
+   ArraySetAsSeries(rates,false);
+   int copied=CopyRates(_Symbol,timeframe,1,requested,rates);
+   if(copied<30) return "[]";
+   string json="[";
+   for(int i=0;i<copied;i++)
+     {
+      if(i>0) json+=",";
+      json+="{";
+      json+="\\"time\\":"+StringFormat("%I64d",(long)rates[i].time)+",";
+      json+="\\"open\\":"+DoubleToString(rates[i].open,_Digits)+",";
+      json+="\\"high\\":"+DoubleToString(rates[i].high,_Digits)+",";
+      json+="\\"low\\":"+DoubleToString(rates[i].low,_Digits)+",";
+      json+="\\"close\\":"+DoubleToString(rates[i].close,_Digits)+",";
+      json+="\\"volume\\":"+StringFormat("%I64d",(long)rates[i].tick_volume);
+      json+="}";
+     }
+   json+="]";
+   return json;
+  }
+
+bool RequestCentralAIApproval(const int localDirection)
+  {
+   datetime now=TimeCurrent();
+   if(g_lastCoreReviewAttempt>0 && now-g_lastCoreReviewAttempt<10) return false;
+   g_lastCoreReviewAttempt=now;
+   string base=InpServerURL;
+   StringTrimLeft(base); StringTrimRight(base);
+   while(StringLen(base)>0 && StringSubstr(base,StringLen(base)-1,1)=="/")
+      base=StringSubstr(base,0,StringLen(base)-1);
+   if(StringLen(InpApiToken)<16 || StringLen(base)<8)
+     { SetBlockReason("Consenso central indisponível: URL/token não configurado"); return false; }
+
+   string h4=BuildCoreCandleArray(PERIOD_H4,60);
+   string h1=BuildCoreCandleArray(PERIOD_H1,60);
+   string m15=BuildCoreCandleArray(PERIOD_M15,60);
+   string m5=BuildCoreCandleArray(PERIOD_M5,80);
+   string m1=BuildCoreCandleArray(PERIOD_M1,80);
+   if(h4=="[]" || h1=="[]" || m15=="[]" || m5=="[]" || m1=="[]")
+     { SetBlockReason("Consenso central aguardando pelo menos 30 candles por timeframe"); return false; }
+   MqlTick tick;
+   if(!SymbolInfoTick(_Symbol,tick)) { SetBlockReason("Cotação indisponível para análise central"); return false; }
+   string accountType=CurrentAccountType();
+   if(accountType!="demo" && accountType!="real")
+     { SetBlockReason("Conta MT5 não é DEMO/REAL válida"); return false; }
+
+   string body="{";
+   body+="\\"symbol\\":\\""+JsonEscape(_Symbol)+"\\",";
+   body+="\\"accountId\\":\\""+StringFormat("%I64d",AccountInfoInteger(ACCOUNT_LOGIN))+"\\",";
+   body+="\\"accountType\\":\\""+accountType+"\\",";
+   body+="\\"token\\":\\""+JsonEscape(InpApiToken)+"\\",";
+   body+="\\"ask\\":"+DoubleToString(tick.ask,_Digits)+",";
+   body+="\\"bid\\":"+DoubleToString(tick.bid,_Digits)+",";
+   body+="\\"priceActionUseAIReview\\":true,";
+   body+="\\"candles\\":"+m5+",";
+   body+="\\"timeframes\\":{\\"H4\\":"+h4+",\\"H1\\":"+h1+",\\"M15\\":"+m15+",\\"M5\\":"+m5+",\\"M1\\":"+m1+"},";
+   body+="\\"indicatorSignals\\":{},\\"indicatorBuffers\\":[]";
+   body+="}";
+   char data[],result[];
+   StringToCharArray(body,data,0,WHOLE_ARRAY,CP_UTF8);
+   if(ArraySize(data)>0) ArrayResize(data,ArraySize(data)-1);
+   string responseHeaders;
+   string headers="Content-Type: application/json\\r\\n";
+   ResetLastError();
+   int http=WebRequest("POST",base+"/api/metatrader/signal-with-indicators",headers,12000,data,result,responseHeaders);
+   if(http!=200)
+     {
+      SetBlockReason("Consenso central sem resposta válida (HTTP "+IntegerToString(http)+")");
+      Print("Aura EA: core AI review failed HTTP=",http," err=",GetLastError()," response=",CharArrayToString(result,0,-1,CP_UTF8));
+      return false;
+     }
+   string response=CharArrayToString(result,0,-1,CP_UTF8);
+   string action=ExtractJsonString(response,"action");
+   string reason=ExtractJsonString(response,"reason");
+   double confidence=ExtractJsonDouble(response,"confidence");
+   string expected=(localDirection>0 ? "BUY" : "SELL");
+   if(action!=expected)
+     { SetBlockReason("Consenso central não aprovou "+expected+": "+(reason!=""?reason:"ação "+action)); return false; }
+   if(confidence<0.70)
+     { SetBlockReason("Consenso central abaixo de 70% ("+DoubleToString(confidence*100.0,1)+"%)"); return false; }
+   if(StringFind(response,"\\"executionEnabled\\":true")<0)
+     { SetBlockReason("Backend não autorizou execução: "+(reason!=""?reason:"executionEnabled ausente")); return false; }
+   Print("Aura EA: consenso central aprovado ",action," | confiança=",DoubleToString(confidence*100.0,1),"% | ",reason);
+   SetBlockReason("Consenso central aprovado; preparando execução");
+   return true;
+  }
+
 bool OpenPositionFromSetup()
   {
    if(!InpEnableTrading) { SetBlockReason("Entrada bloqueada: habilite InpEnableTrading após validar DEMO"); return false; }
    if(g_setupDirection==0) return false;
+   if(!RequestCentralAIApproval(g_setupDirection)) return false;
    if(!IsAllowedSymbol()) { SetBlockReason("Entrada cancelada: símbolo não permitido"); return false; }
    if(!IsInBrasiliaSession()) { SetBlockReason("Entrada cancelada: fora da sessão"); return false; }
    if(NewsWindowBlocked()) { SetBlockReason("Entrada cancelada: bloqueio de notícia"); return false; }
