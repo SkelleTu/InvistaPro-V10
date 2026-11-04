@@ -126,7 +126,7 @@ router.get('/signal', mt5SignalAccess, (req: Request, res: Response) => {
     const { symbol, accountId } = req.query;
     const config = metaTraderBridge.getConfig();
     if (symbol && mt5EnvironmentMismatch()) {
-      return res.status(409).json({ action: 'HOLD', executionEnabled: false, code: 'MT5_ACCOUNT_MODE_MISMATCH', expectedAccountType: config.accountType, actualAccountType: lastMt5ObservedAccountType, reason: 'Ambiente MT5 não confirmado ou divergente. Verifique a conta conectada e mantenha as operações bloqueadas.', timestamp: Date.now() });
+      return res.status(409).json({ action: 'HOLD', executionEnabled: false, code: 'MT5_ACCOUNT_HEARTBEAT_STALE', actualAccountType: lastMt5ObservedAccountType, reason: 'Aguardando heartbeat recente de uma conta DEMO ou REAL válida no MT5.', timestamp: Date.now() });
     }
     // Registrar heartbeat apenas quando o EA faz polling (tem parâmetro symbol)
     // Isso evita que o dashboard (sem symbol) mantenha o heartbeat vivo falsamente
@@ -319,15 +319,14 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
       return res.status(409).json({
         action: 'HOLD',
         executionEnabled: false,
-        code: 'MT5_ACCOUNT_MODE_MISMATCH',
-        expectedAccountType: config.accountType,
+        code: 'MT5_ACCOUNT_HEARTBEAT_STALE',
         actualAccountType: lastMt5ObservedAccountType,
-        reason: 'Conta MT5 não confirmada ou heartbeat desatualizado; sinais bloqueados.',
+        reason: 'Aguardando heartbeat recente de uma conta DEMO ou REAL válida no MT5.',
         timestamp: Date.now(),
       });
     }
 
-    const productionBlock = getMt5ProductionBlock(config.apiToken, process.env, lastMt5ObservedAccountType ?? 'contest');
+    const productionBlock = getMt5ProductionBlock(config.apiToken, process.env, requestedAccountMode);
     if (productionBlock) {
       return res.status(productionBlock.status).json({
         action: 'HOLD',
@@ -2107,9 +2106,9 @@ router.post('/signal/generate', mt5DashboardAccess, async (req: Request, res: Re
   try {
     const config = metaTraderBridge.getConfig();
     if (mt5EnvironmentMismatch()) {
-      return res.status(409).json({ action: 'HOLD', executionEnabled: false, code: 'MT5_ACCOUNT_MODE_MISMATCH', expectedAccountType: config.accountType, actualAccountType: lastMt5ObservedAccountType, reason: 'Ambiente MT5 não confirmado ou divergente. Geração de sinais bloqueada.', timestamp: Date.now() });
+      return res.status(409).json({ action: 'HOLD', executionEnabled: false, code: 'MT5_ACCOUNT_HEARTBEAT_STALE', actualAccountType: lastMt5ObservedAccountType, reason: 'Aguardando heartbeat recente de uma conta DEMO ou REAL válida no MT5.', timestamp: Date.now() });
     }
-    const productionBlock = getMt5ProductionBlock(config.apiToken, process.env, config.accountType, config.realTradingAuthorized);
+    const productionBlock = getMt5ProductionBlock(config.apiToken, process.env, lastMt5ObservedAccountType ?? 'contest');
     if (productionBlock) {
       return res.status(productionBlock.status).json({
         action: 'HOLD',
