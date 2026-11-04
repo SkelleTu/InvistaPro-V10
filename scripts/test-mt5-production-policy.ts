@@ -37,9 +37,14 @@ assert.equal(
   "MT5_PRODUCTION_TRADING_DISABLED",
 );
 assert.equal(
-  getMt5ProductionBlock("ea-token", { NODE_ENV: "production" }, "real")?.code,
-  "MT5_PRODUCTION_TRADING_DISABLED",
-  "REAL must remain blocked until dashboard authorization is explicitly enabled",
+  getMt5ProductionBlock("ea-token", { NODE_ENV: "production" }, "real"),
+  null,
+  "A confirmed REAL account must not require a separate dashboard authorization",
+);
+assert.equal(
+  getMt5ProductionBlock("ea-token", { NODE_ENV: "production" }, "real", false),
+  null,
+  "The legacy authorization argument must not block REAL account selection",
 );
 assert.equal(
   getMt5ProductionBlock("ea-token", { NODE_ENV: "production" }, "real", true),
