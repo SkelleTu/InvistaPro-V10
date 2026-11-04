@@ -1132,11 +1132,11 @@ bool RequestCentralAIApproval(const int localDirection)
    string expected=(localDirection>0 ? "BUY" : "SELL");
    if(action!=expected)
      { SetBlockReason("Consenso central não aprovou "+expected+": "+(reason!=""?reason:"ação "+action)); return false; }
-   if(confidence<0.70)
-     { SetBlockReason("Consenso central abaixo de 70% ("+DoubleToString(confidence*100.0,1)+"%)"); return false; }
+   if(confidence<70.0)
+     { SetBlockReason("Consenso central abaixo de 70% ("+DoubleToString(confidence,1)+"%)"); return false; }
    if(StringFind(response,"\"executionEnabled\":true")<0)
      { SetBlockReason("Backend não autorizou execução: "+(reason!=""?reason:"executionEnabled ausente")); return false; }
-   Print("Aura EA: consenso central aprovado ",action," | confiança=",DoubleToString(confidence*100.0,1),"% | ",reason);
+   Print("Aura EA: consenso central aprovado ",action," | confiança=",DoubleToString(confidence,1),"% | ",reason);
    SetBlockReason("Consenso central aprovado; preparando execução");
    return true;
   }
