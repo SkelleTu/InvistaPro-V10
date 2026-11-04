@@ -1141,6 +1141,75 @@ bool RequestCentralAIApproval(const int localDirection)
    return true;
   }
 
+
+datetime g_lastPositionMonitorAt = 0;
+
+bool RequestCentralPositionManagement(const ulong ticket)
+  {
+   datetime now=TimeCurrent();
+   if(g_lastPositionMonitorAt>0 && now-g_lastPositionMonitorAt<5) return false;
+   g_lastPositionMonitorAt=now;
+   if(!PositionSelectByTicket(ticket)) return false;
+
+   string base=InpServerURL;
+   StringTrimLeft(base); StringTrimRight(base);
+   while(StringLen(base)>0 && StringSubstr(base,StringLen(base)-1,1)=="/")
+      base=StringSubstr(base,0,StringLen(base)-1);
+   if(StringLen(InpApiToken)<16 || StringLen(base)<8) return false;
+
+   string marketData=BuildCoreCandleArray(PERIOD_M1,100);
+   if(marketData=="[]") return false;
+   ENUM_POSITION_TYPE type=(ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+   string side=(type==POSITION_TYPE_BUY ? "BUY" : "SELL");
+   MqlTick tick;
+   if(!SymbolInfoTick(_Symbol,tick)) return false;
+   string position="{";
+   position+="\\"ticket\\":"+StringFormat("%I64u",ticket)+",";
+   position+="\\"symbol\\":\\""+JsonEscape(_Symbol)+"\\",";
+   position+="\\"type\\":\\""+side+"\\",";
+   position+="\\"lots\\":"+DoubleToString(PositionGetDouble(POSITION_VOLUME),4)+",";
+   position+="\\"openPrice\\":"+DoubleToString(PositionGetDouble(POSITION_PRICE_OPEN),_Digits)+",";
+   position+="\\"currentPrice\\":"+DoubleToString(PositionGetDouble(POSITION_PRICE_CURRENT),_Digits)+",";
+   position+="\\"stopLoss\\":"+DoubleToString(PositionGetDouble(POSITION_SL),_Digits)+",";
+   position+="\\"takeProfit\\":"+DoubleToString(PositionGetDouble(POSITION_TP),_Digits)+",";
+   position+="\\"profit\\":"+DoubleToString(PositionGetDouble(POSITION_PROFIT),2)+",";
+   position+="\\"openTime\\":"+StringFormat("%I64d",(long)PositionGetInteger(POSITION_TIME))+",";
+   position+="\\"signalId\\":\\"AURA_"+StringFormat("%I64u",ticket)+"\\"";
+   position+="}";
+   string body="{\\"position\\":"+position+",\\"marketData\\":"+marketData+
+               ",\\"symbol\\":\\""+JsonEscape(_Symbol)+"\\",\\"token\\":\\""+
+               JsonEscape(InpApiToken)+"\\"}";
+   char data[],result[];
+   StringToCharArray(body,data,0,WHOLE_ARRAY,CP_UTF8);
+   if(ArraySize(data)>0) ArrayResize(data,ArraySize(data)-1);
+   string responseHeaders;
+   string headers="Content-Type: application/json\\r\\n";
+   ResetLastError();
+   int http=WebRequest("POST",base+"/api/mt5/position/monitor",headers,7000,data,result,responseHeaders);
+   if(http!=200)
+     {
+      Print("Aura EA: position monitor request failed HTTP=",http," err=",GetLastError());
+      return false;
+     }
+   string response=CharArrayToString(result,0,-1,CP_UTF8);
+   string action=CoreJsonString(response,"action");
+   string reason=CoreJsonString(response,"reason");
+   if(action!="CLOSE_PROFIT" && action!="CLOSE_SPIKE_EXIT" && action!="CLOSE_LOSS_PREVENTION")
+      return false;
+   trade.SetExpertMagicNumber(InpMagicNumber);
+   trade.SetDeviationInPoints(InpSlippagePoints);
+   bool closed=trade.PositionClose(ticket);
+   if(TradeRetcodeSucceeded(closed))
+     {
+      Print("Aura EA: central monitor closed #",ticket," action=",action," reason=",reason);
+      SetBlockReason("Posição encerrada pelo monitor central: "+action);
+      return true;
+     }
+   Print("Aura EA: central monitor requested close but broker rejected #",ticket,
+         " retcode=",trade.ResultRetcode()," ",trade.ResultRetcodeDescription());
+   return false;
+  }
+
 bool OpenPositionFromSetup()
   {
    if(!InpEnableTrading) { SetBlockReason("Entrada bloqueada: habilite InpEnableTrading após validar DEMO"); return false; }
@@ -1301,6 +1370,7 @@ void ManageOpenPosition()
 
    MqlTick tick;
    if(!SymbolInfoTick(_Symbol,tick)) return;
+   if(RequestCentralPositionManagement(positionTicket)) return;
    double favorable=(type==POSITION_TYPE_BUY ? tick.bid-entry : entry-tick.ask);
    double t1=(type==POSITION_TYPE_BUY ? entry+InpPartialTargetR*g_initialRisk
                                       : entry-InpPartialTargetR*g_initialRisk);
