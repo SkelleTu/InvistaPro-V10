@@ -105,7 +105,7 @@ router.post('/heartbeat', mt5EaTokenAccess, (req: Request, res: Response) => {
     }
     metaTraderBridge.recordHeartbeat({ accountId, broker: broker || 'Unknown', balance, equity, freeMargin, openPositionsCount: typeof openPositions === 'number' ? openPositions : undefined });
     if (symbol) metaTraderBridge.recordActiveEaSymbol(String(symbol), String(accountId));
-    else console.warn(`[MT5Bridge] Heartbeat sem símbolo no gráfico para a conta ${accountId}; baixe novamente o Aura v1.51 para habilitar o feed por ativo.`);
+    else console.warn(`[MT5Bridge] Heartbeat sem símbolo no gráfico para a conta ${accountId}; confira se o EA atualizado está instalado em um gráfico de ativo.`);
     const updatedConfig = metaTraderBridge.getConfig();
     console.log(`[MT5Bridge] 💚 Heartbeat: ${broker || 'Unknown'} | Conta: ${accountId} | Saldo: $${balance} | Posições abertas EA: ${openPositions ?? '?'} | Habilitado: ${updatedConfig.enabled}`);
     res.json({
@@ -366,7 +366,6 @@ router.post('/signal-with-indicators', mt5EaTokenAccess, async (req: Request, re
         status: metaTraderBridge.getStatus(),
         observedAccountType: lastMt5ObservedAccountType,
         accountHeartbeatAt: lastMt5EnvironmentHeartbeatAt,
-        realTradingExplicitlyEnabled: config.realTradingAuthorized === true && String(process.env.MT5_PRODUCTION_TRADING_ENABLED ?? '').trim().toLowerCase() !== 'false',
       });
       const newsStatus = await getHighImpactNewsStatus();
       const sessionOpen = isAllowedBrasiliaTradingSession();
