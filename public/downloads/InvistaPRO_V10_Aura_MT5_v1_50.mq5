@@ -1164,26 +1164,26 @@ bool RequestCentralPositionManagement(const ulong ticket)
    MqlTick tick;
    if(!SymbolInfoTick(_Symbol,tick)) return false;
    string position="{";
-   position+="\\"ticket\\":"+StringFormat("%I64u",ticket)+",";
-   position+="\\"symbol\\":\\""+JsonEscape(_Symbol)+"\\",";
-   position+="\\"type\\":\\""+side+"\\",";
-   position+="\\"lots\\":"+DoubleToString(PositionGetDouble(POSITION_VOLUME),4)+",";
-   position+="\\"openPrice\\":"+DoubleToString(PositionGetDouble(POSITION_PRICE_OPEN),_Digits)+",";
-   position+="\\"currentPrice\\":"+DoubleToString(PositionGetDouble(POSITION_PRICE_CURRENT),_Digits)+",";
-   position+="\\"stopLoss\\":"+DoubleToString(PositionGetDouble(POSITION_SL),_Digits)+",";
-   position+="\\"takeProfit\\":"+DoubleToString(PositionGetDouble(POSITION_TP),_Digits)+",";
-   position+="\\"profit\\":"+DoubleToString(PositionGetDouble(POSITION_PROFIT),2)+",";
-   position+="\\"openTime\\":"+StringFormat("%I64d",(long)PositionGetInteger(POSITION_TIME))+",";
-   position+="\\"signalId\\":\\"AURA_"+StringFormat("%I64u",ticket)+"\\"";
+   position+="\"ticket\":"+StringFormat("%I64u",ticket)+",";
+   position+="\"symbol\":\""+JsonEscape(_Symbol)+"\",";
+   position+="\"type\":\""+side+"\",";
+   position+="\"lots\":"+DoubleToString(PositionGetDouble(POSITION_VOLUME),4)+",";
+   position+="\"openPrice\":"+DoubleToString(PositionGetDouble(POSITION_PRICE_OPEN),_Digits)+",";
+   position+="\"currentPrice\":"+DoubleToString(PositionGetDouble(POSITION_PRICE_CURRENT),_Digits)+",";
+   position+="\"stopLoss\":"+DoubleToString(PositionGetDouble(POSITION_SL),_Digits)+",";
+   position+="\"takeProfit\":"+DoubleToString(PositionGetDouble(POSITION_TP),_Digits)+",";
+   position+="\"profit\":"+DoubleToString(PositionGetDouble(POSITION_PROFIT),2)+",";
+   position+="\"openTime\":"+StringFormat("%I64d",(long)PositionGetInteger(POSITION_TIME))+",";
+   position+="\"signalId\":\"AURA_"+StringFormat("%I64u",ticket)+"\"";
    position+="}";
-   string body="{\\"position\\":"+position+",\\"marketData\\":"+marketData+
-               ",\\"symbol\\":\\""+JsonEscape(_Symbol)+"\\",\\"token\\":\\""+
-               JsonEscape(InpApiToken)+"\\"}";
+   string body="{\"position\":"+position+",\"marketData\":"+marketData+
+               ",\"symbol\":\""+JsonEscape(_Symbol)+"\",\"token\":\""+
+               JsonEscape(InpApiToken)+"\"}";
    char data[],result[];
    StringToCharArray(body,data,0,WHOLE_ARRAY,CP_UTF8);
    if(ArraySize(data)>0) ArrayResize(data,ArraySize(data)-1);
    string responseHeaders;
-   string headers="Content-Type: application/json\\r\\n";
+   string headers="Content-Type: application/json\r\n";
    ResetLastError();
    int http=WebRequest("POST",base+"/api/mt5/position/monitor",headers,7000,data,result,responseHeaders);
    if(http!=200)
