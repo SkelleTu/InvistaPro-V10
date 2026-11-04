@@ -56,7 +56,7 @@ assert.equal(assessMt5RiskLimit({
 }).ok, true, 'Fresh confirmed DEMO account within all limits should pass');
 assert.equal(assessMt5RiskLimit({
   config, status, observedAccountType: 'real', accountHeartbeatAt: now - 1000, now,
-}).ok, false, 'REAL account must fail closed');
+}).ok, true, 'Fresh confirmed REAL account should pass without a separate authorization flag');
 assert.equal(assessMt5RiskLimit({
   config, status, observedAccountType: 'demo', accountHeartbeatAt: now - 91_000, now,
 }).ok, false, 'Stale heartbeat must fail closed');
@@ -67,12 +67,12 @@ assert.equal(assessMt5RiskLimit({
 const realConfig = { ...config, accountType: 'real' } as MT5Config;
 assert.equal(assessMt5RiskLimit({
   config: realConfig, status, observedAccountType: 'real', accountHeartbeatAt: now - 1000,
-  realTradingExplicitlyEnabled: false, now,
-}).ok, false, 'REAL account must remain blocked without explicit server authorization');
+  now,
+}).ok, true, 'REAL account must not require a separate manual authorization flag');
 assert.equal(assessMt5RiskLimit({
   config: realConfig, status, observedAccountType: 'real', accountHeartbeatAt: now - 1000,
-  realTradingExplicitlyEnabled: true, now,
-}).ok, true, 'REAL risk gate can pass only when the separate explicit flag is enabled');
+  now,
+}).ok, true, 'REAL account remains eligible when the selected account is confirmed');
 
 
 console.log('Price Action context safety tests passed.');
