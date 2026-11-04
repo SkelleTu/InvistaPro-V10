@@ -1019,6 +1019,36 @@ void OnNewM5Bar()
   }
 
 
+
+string CoreJsonString(const string json,const string key)
+  {
+   int keyPos=StringFind(json,"\\""+key+"\\"");
+   if(keyPos<0) return "";
+   int colon=StringFind(json,":",keyPos);
+   if(colon<0) return "";
+   int start=StringFind(json,"\\"",colon+1);
+   if(start<0) return "";
+   int end=StringFind(json,"\\"",start+1);
+   if(end<0) return "";
+   return StringSubstr(json,start+1,end-start-1);
+  }
+
+double CoreJsonNumber(const string json,const string key)
+  {
+   int keyPos=StringFind(json,"\\""+key+"\\"");
+   if(keyPos<0) return 0.0;
+   int colon=StringFind(json,":",keyPos);
+   if(colon<0) return 0.0;
+   string tail=StringSubstr(json,colon+1);
+   StringTrimLeft(tail);
+   int comma=StringFind(tail,",");
+   int brace=StringFind(tail,"}");
+   int end=StringLen(tail);
+   if(comma>=0 && comma<end) end=comma;
+   if(brace>=0 && brace<end) end=brace;
+   return StringToDouble(StringSubstr(tail,0,end));
+  }
+
 datetime g_lastCoreReviewAttempt = 0;
 
 string BuildCoreCandleArray(const ENUM_TIMEFRAMES timeframe,const int requested)
@@ -1095,9 +1125,9 @@ bool RequestCentralAIApproval(const int localDirection)
       return false;
      }
    string response=CharArrayToString(result,0,-1,CP_UTF8);
-   string action=ExtractJsonString(response,"action");
-   string reason=ExtractJsonString(response,"reason");
-   double confidence=ExtractJsonDouble(response,"confidence");
+   string action=CoreJsonString(response,"action");
+   string reason=CoreJsonString(response,"reason");
+   double confidence=CoreJsonNumber(response,"confidence");
    string expected=(localDirection>0 ? "BUY" : "SELL");
    if(action!=expected)
      { SetBlockReason("Consenso central não aprovou "+expected+": "+(reason!=""?reason:"ação "+action)); return false; }
