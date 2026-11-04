@@ -1022,20 +1022,20 @@ void OnNewM5Bar()
 
 string CoreJsonString(const string json,const string key)
   {
-   int keyPos=StringFind(json,"\\""+key+"\\"");
+   int keyPos=StringFind(json,"\""+key+"\"");
    if(keyPos<0) return "";
    int colon=StringFind(json,":",keyPos);
    if(colon<0) return "";
-   int start=StringFind(json,"\\"",colon+1);
+   int start=StringFind(json,"\"",colon+1);
    if(start<0) return "";
-   int end=StringFind(json,"\\"",start+1);
+   int end=StringFind(json,"\"",start+1);
    if(end<0) return "";
    return StringSubstr(json,start+1,end-start-1);
   }
 
 double CoreJsonNumber(const string json,const string key)
   {
-   int keyPos=StringFind(json,"\\""+key+"\\"");
+   int keyPos=StringFind(json,"\""+key+"\"");
    if(keyPos<0) return 0.0;
    int colon=StringFind(json,":",keyPos);
    if(colon<0) return 0.0;
@@ -1062,12 +1062,12 @@ string BuildCoreCandleArray(const ENUM_TIMEFRAMES timeframe,const int requested)
      {
       if(i>0) json+=",";
       json+="{";
-      json+="\\"time\\":"+StringFormat("%I64d",(long)rates[i].time)+",";
-      json+="\\"open\\":"+DoubleToString(rates[i].open,_Digits)+",";
-      json+="\\"high\\":"+DoubleToString(rates[i].high,_Digits)+",";
-      json+="\\"low\\":"+DoubleToString(rates[i].low,_Digits)+",";
-      json+="\\"close\\":"+DoubleToString(rates[i].close,_Digits)+",";
-      json+="\\"volume\\":"+StringFormat("%I64d",(long)rates[i].tick_volume);
+      json+="\"time\":"+StringFormat("%I64d",(long)rates[i].time)+",";
+      json+="\"open\":"+DoubleToString(rates[i].open,_Digits)+",";
+      json+="\"high\":"+DoubleToString(rates[i].high,_Digits)+",";
+      json+="\"low\":"+DoubleToString(rates[i].low,_Digits)+",";
+      json+="\"close\":"+DoubleToString(rates[i].close,_Digits)+",";
+      json+="\"volume\":"+StringFormat("%I64d",(long)rates[i].tick_volume);
       json+="}";
      }
    json+="]";
@@ -1100,22 +1100,22 @@ bool RequestCentralAIApproval(const int localDirection)
      { SetBlockReason("Conta MT5 não é DEMO/REAL válida"); return false; }
 
    string body="{";
-   body+="\\"symbol\\":\\""+JsonEscape(_Symbol)+"\\",";
-   body+="\\"accountId\\":\\""+StringFormat("%I64d",AccountInfoInteger(ACCOUNT_LOGIN))+"\\",";
-   body+="\\"accountType\\":\\""+accountType+"\\",";
-   body+="\\"token\\":\\""+JsonEscape(InpApiToken)+"\\",";
-   body+="\\"ask\\":"+DoubleToString(tick.ask,_Digits)+",";
-   body+="\\"bid\\":"+DoubleToString(tick.bid,_Digits)+",";
-   body+="\\"priceActionUseAIReview\\":true,";
-   body+="\\"candles\\":"+m5+",";
-   body+="\\"timeframes\\":{\\"H4\\":"+h4+",\\"H1\\":"+h1+",\\"M15\\":"+m15+",\\"M5\\":"+m5+",\\"M1\\":"+m1+"},";
-   body+="\\"indicatorSignals\\":{},\\"indicatorBuffers\\":[]";
+   body+="\"symbol\":\""+JsonEscape(_Symbol)+"\",";
+   body+="\"accountId\":\""+StringFormat("%I64d",AccountInfoInteger(ACCOUNT_LOGIN))+"\",";
+   body+="\"accountType\":\""+accountType+"\",";
+   body+="\"token\":\""+JsonEscape(InpApiToken)+"\",";
+   body+="\"ask\":"+DoubleToString(tick.ask,_Digits)+",";
+   body+="\"bid\":"+DoubleToString(tick.bid,_Digits)+",";
+   body+="\"priceActionUseAIReview\":true,";
+   body+="\"candles\":"+m5+",";
+   body+="\"timeframes\":{\"H4\":"+h4+",\"H1\":"+h1+",\"M15\":"+m15+",\"M5\":"+m5+",\"M1\":"+m1+"},";
+   body+="\"indicatorSignals\":{},\"indicatorBuffers\":[]";
    body+="}";
    char data[],result[];
    StringToCharArray(body,data,0,WHOLE_ARRAY,CP_UTF8);
    if(ArraySize(data)>0) ArrayResize(data,ArraySize(data)-1);
    string responseHeaders;
-   string headers="Content-Type: application/json\\r\\n";
+   string headers="Content-Type: application/json\r\n";
    ResetLastError();
    int http=WebRequest("POST",base+"/api/metatrader/signal-with-indicators",headers,12000,data,result,responseHeaders);
    if(http!=200)
@@ -1133,7 +1133,7 @@ bool RequestCentralAIApproval(const int localDirection)
      { SetBlockReason("Consenso central não aprovou "+expected+": "+(reason!=""?reason:"ação "+action)); return false; }
    if(confidence<0.70)
      { SetBlockReason("Consenso central abaixo de 70% ("+DoubleToString(confidence*100.0,1)+"%)"); return false; }
-   if(StringFind(response,"\\"executionEnabled\\":true")<0)
+   if(StringFind(response,"\"executionEnabled\":true")<0)
      { SetBlockReason("Backend não autorizou execução: "+(reason!=""?reason:"executionEnabled ausente")); return false; }
    Print("Aura EA: consenso central aprovado ",action," | confiança=",DoubleToString(confidence*100.0,1),"% | ",reason);
    SetBlockReason("Consenso central aprovado; preparando execução");
