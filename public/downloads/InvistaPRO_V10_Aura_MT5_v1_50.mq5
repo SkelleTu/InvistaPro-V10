@@ -1694,23 +1694,38 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
   {
    if(trans.type!=TRADE_TRANSACTION_DEAL_ADD || trans.deal==0) return;
    if(!HistoryDealSelect(trans.deal)) return;
-   if((ulong)HistoryDealGetInteger(trans.deal,DEAL_MAGIC)!=InpMagicNumber) return;
    if(HistoryDealGetString(trans.deal,DEAL_SYMBOL)!=_Symbol) return;
 
    ulong positionIdentifier=(ulong)HistoryDealGetInteger(trans.deal,DEAL_POSITION_ID);
    ulong positionTicket=trans.position;
    if(positionTicket==0) positionTicket=positionIdentifier;
    long entry=(long)HistoryDealGetInteger(trans.deal,DEAL_ENTRY);
+   long dealMagic=(long)HistoryDealGetInteger(trans.deal,DEAL_MAGIC);
    ulong activeTicket=FindAuraPositionByIdentifier(positionIdentifier);
 
    if(entry==DEAL_ENTRY_IN || entry==DEAL_ENTRY_INOUT)
      {
+      if((ulong)dealMagic!=InpMagicNumber) return;
       if(activeTicket>0) ReportAuraPositionOpened(activeTicket);
       return;
      }
 
    if(entry==DEAL_ENTRY_OUT || entry==DEAL_ENTRY_OUT_BY)
      {
+      // A manual/mobile close may carry magic=0. Verify ownership from the
+      // original entry deal instead of rejecting the closing transaction.
+      if(!HistorySelectByPosition(positionIdentifier)) return;
+      bool belongsToAura=false;
+      for(int i=0;i<HistoryDealsTotal();i++)
+        {
+         ulong historyDeal=HistoryDealGetTicket(i);
+         if(historyDeal==0) continue;
+         long historyEntry=(long)HistoryDealGetInteger(historyDeal,DEAL_ENTRY);
+         long historyMagic=(long)HistoryDealGetInteger(historyDeal,DEAL_MAGIC);
+         if(historyEntry==DEAL_ENTRY_IN && (ulong)historyMagic==InpMagicNumber)
+           { belongsToAura=true; break; }
+        }
+      if(!belongsToAura) return;
       if(activeTicket>0)
          ReportAuraPositionUpdated(activeTicket); // partial close: keep the live position open
       else
