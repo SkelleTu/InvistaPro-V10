@@ -8,8 +8,6 @@ on:
       - "server/routes.ts"
       - "shared/schema.ts"
       - "scripts/test-module-account-routing.ts"
-      - "package.json"
-      - ".github/workflows/module-account-routing-audit.yml"
   push:
     branches: [main]
     paths:
