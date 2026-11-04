@@ -1,13 +1,13 @@
 //+------------------------------------------------------------------+
 //| InvistaPRO V10 Aura - MT5 Expert Advisor                         |
 //| Price Action multi-timeframe implementation                     |
-//| Version 1.51                                                     |
+//| Version 1.52                                                     |
 //|                                                                  |
 //| IMPORTANT: Source code is provided for strategy testing.          |
 //| Compile in MetaEditor and forward-test on a DEMO account first.   |
 //+------------------------------------------------------------------+
 #property strict
-#property version   "1.51"
+#property version   "1.52"
 #property description "InvistaPRO V10 Aura - Price Action EA for MetaTrader 5"
 
 #include <Trade/Trade.mqh>
@@ -17,7 +17,7 @@ CTrade trade;
 input string InpServerURL = "https://invista-pro-v10-kzlv.onrender.com"; // InvistaPRO production server
 input string InpApiToken = ""; // Injected per authorized account download
 input int    InpHeartbeatSeconds = 30;
-input bool   InpEnableTrading = false; // Safe default: heartbeat only until the user explicitly enables demo trading in EA inputs
+input bool   InpEnableTrading = true;  // Execution enabled by default; account mode follows the connected MT5 terminal
 
 // --- Core / risk
 input ulong  InpMagicNumber                 = 101018;
