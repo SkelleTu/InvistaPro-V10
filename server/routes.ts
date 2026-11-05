@@ -130,7 +130,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       process.env.INVISTAPRO_ACCOUNT_EMAIL,
       process.env.ADMIN_EMAIL,
     ].map((value) => String(value || "").trim().toLowerCase()).filter(Boolean);
-    const isMaster = Boolean(email && masterEmails.includes(email)) || Boolean(req.user?.isAdmin);
+    const isMaster = Boolean(email && masterEmails.includes(email));
     const role = isMaster ? "master" : "client";
     res.setHeader("Cache-Control", "no-store, max-age=0");
     return res.json({ role, destination: role === "master" ? "/dashboard" : "/portal-cliente" });
@@ -600,6 +600,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       // Prepare user data - but DON'T save to database yet
       const userData = {
         ...validatedData,
+        isAdmin: false, // Public registration can never grant administrative privileges.
         passwordHash,
         telefoneVerificado: true, // Auto-verify since we're removing verification requirement
         contaAprovada: true, // Auto-approve for easier testing/demo
