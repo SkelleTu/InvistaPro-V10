@@ -60,7 +60,7 @@ export default function PortalCliente() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [referralCopied, setReferralCopied] = useState(false);
-  const [documentType, setDocumentType] = useState("rg");
+  const [documentType, setDocumentType] = useState("rg_cnh_frente");
   const [documentFile, setDocumentFile] = useState<File | null>(null);
   const [withdrawalAmount, setWithdrawalAmount] = useState("100");
 
@@ -427,7 +427,7 @@ export default function PortalCliente() {
         <p className="text-xs text-slate-500 mt-1">Arquivos JPG, PNG ou PDF até 5 MB. O envio fica pendente de análise administrativa.</p>
         <div className="grid grid-cols-1 sm:grid-cols-[1fr_1.5fr_auto] gap-3 mt-4">
           <select value={documentType} onChange={(e)=>setDocumentType(e.target.value)} className="rounded-xl bg-slate-950 border border-white/10 px-3 py-2.5 text-sm text-white">
-            <option value="rg">RG</option><option value="cnh">CNH</option><option value="cpf">CPF</option><option value="comprovante">Comprovante de residência</option>
+            <option value="rg_cnh_frente">RG/CNH — frente</option><option value="rg_cnh_verso">RG/CNH — verso</option><option value="comprovante_residencia">Comprovante de residência</option>
           </select>
           <input type="file" accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf" onChange={(e)=>setDocumentFile(e.target.files?.[0] || null)} className="min-w-0 text-xs text-slate-300 file:mr-3 file:rounded-lg file:border-0 file:bg-violet-600 file:px-3 file:py-2 file:text-white" />
           <Button disabled={!documentFile || uploadDocumentMutation.isPending} onClick={()=>uploadDocumentMutation.mutate()} className="bg-violet-600 hover:bg-violet-500 text-white">{uploadDocumentMutation.isPending ? "Enviando…" : "Enviar arquivo"}</Button>
