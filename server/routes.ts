@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { dualStorage as dbStorage } from "./storage-dual";
 import { setupAuth, isAuthenticated, isApproved, hashPassword, comparePasswords, generateVerificationCode } from "./auth";
+import { getAffiliateDashboard } from "./services/affiliate-program";
 import { db } from "./db";
 import { eq } from "drizzle-orm";
 import { registerUserSchema, loginSchema, phoneVerificationSchema, insertMovimentoSchema, updateUserSchema, uploadDocumentSchema, withdrawalRequestSchema, users, movimentos, documentos } from "@shared/schema";
@@ -118,6 +119,105 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   // Authentication/session middleware must be installed before registering ANY route.
   // Otherwise early routes can call req.isAuthenticated before Passport attaches it.
   setupAuth(app);
+
+  // Resolve the UI destination from the authenticated server-side identity.
+  // This endpoint never grants permissions; each protected API enforces its own access rules.
+  app.get("/api/auth/destination", isAuthenticated, isApproved, (req: any, res: any) => {
+    const email = String(req.user?.email || "").trim().toLowerCase();
+    const masterEmails = [
+      process.env.MASTER_EMAIL,
+      process.env.INVISTA_MASTER_EMAIL,
+      process.env.INVISTAPRO_ACCOUNT_EMAIL,
+      process.env.ADMIN_EMAIL,
+    ].map((value) => String(value || "").trim().toLowerCase()).filter(Boolean);
+    const isMaster = Boolean(email && masterEmails.includes(email)) || Boolean(req.user?.isAdmin);
+    const role = isMaster ? "master" : "client";
+    res.setHeader("Cache-Control", "no-store, max-age=0");
+    return res.json({ role, destination: role === "master" ? "/dashboard" : "/portal-cliente" });
+  });
+
+  // Customer-only read endpoints. Every query is scoped to the authenticated user ID.
+  app.get("/api/client/financial-summary", isAuthenticated, isApproved, async (req: any, res: any) => {
+    try {
+      const userId = String(req.user.id);
+      const [movements, account] = await Promise.all([
+        dbStorage.getUserMovimentos(userId, 100000),
+        dbStorage.getUser(userId),
+      ]);
+      const totals = (movements || []).reduce((sum: any, movement: any) => {
+        const amount = Number(movement.valor || 0);
+        if (movement.tipo === "deposito") sum.totalDeposits += amount;
+        if (movement.tipo === "rendimento") sum.totalYields += amount;
+        if (movement.tipo === "saque") sum.totalWithdrawals += amount;
+        return sum;
+      }, { totalDeposits: 0, totalYields: 0, totalWithdrawals: 0 });
+      res.setHeader("Cache-Control", "no-store, max-age=0");
+      return res.json({
+        balance: Number(account?.saldo || 0),
+        ...totals,
+        netRecordedFlow: totals.totalDeposits + totals.totalYields - totals.totalWithdrawals,
+        movementCount: movements?.length || 0,
+        lastMovementAt: movements?.[0]?.createdAt ?? null,
+      });
+    } catch (error) {
+      console.error("[CLIENT FINANCIAL SUMMARY]", error);
+      return res.status(500).json({ message: "Não foi possível consultar o resumo financeiro." });
+    }
+  });
+
+  app.get("/api/client/activity", isAuthenticated, isApproved, async (req: any, res: any) => {
+    try {
+      const requested = Number.parseInt(String(req.query.limit || "200"), 10);
+      const limit = Number.isFinite(requested) ? Math.min(Math.max(requested, 1), 500) : 200;
+      const operations = await dbStorage.getUserTradeOperations(String(req.user.id), limit);
+      res.setHeader("Cache-Control", "no-store, max-age=0");
+      return res.json({ operations: (operations || []).map((op: any) => ({
+        id: op.id, symbol: op.symbol, tradeType: op.tradeType, direction: op.direction,
+        amount: op.amount, duration: op.duration, status: op.status, profit: op.profit,
+        createdAt: op.createdAt, completedAt: op.completedAt,
+      })) });
+    } catch (error) {
+      console.error("[CLIENT ACTIVITY]", error);
+      return res.status(500).json({ message: "Não foi possível carregar o histórico de operações." });
+    }
+  });
+
+  app.get("/api/affiliates", isAuthenticated, isApproved, async (req: any, res: any) => {
+    try {
+      const data = await getAffiliateDashboard(String(req.user.id));
+      res.setHeader("Cache-Control", "no-store, max-age=0");
+      return res.json(data);
+    } catch (error) {
+      console.error("[AFFILIATE DASHBOARD]", error);
+      return res.status(503).json({ message: "Não foi possível carregar sua rede de afiliados." });
+    }
+  });
+
+  // Informative withdrawal quote only: no withdrawal request, balance mutation or PIX transfer.
+  app.post("/api/withdrawal/quote", isAuthenticated, isApproved, async (req: any, res: any) => {
+    try {
+      const amount = Number(req.body?.valor);
+      if (!Number.isFinite(amount) || amount <= 0 || Math.abs(amount * 100 - Math.round(amount * 100)) > 0.000001) {
+        return res.status(400).json({ message: "Informe um valor válido com até duas casas decimais." });
+      }
+      const account = await dbStorage.getUser(String(req.user.id));
+      if (!account) return res.status(404).json({ message: "Usuário não encontrado." });
+      const requestedCents = Math.round(amount * 100);
+      const balanceCents = Math.max(0, Math.round(Number(account.saldo || 0) * 100));
+      if (requestedCents > balanceCents) return res.status(400).json({ message: "O valor solicitado excede o saldo registrado." });
+      const feeCents = Math.round(requestedCents * 780 / 10000);
+      res.setHeader("Cache-Control", "no-store, max-age=0");
+      return res.json({
+        valorSolicitado: requestedCents / 100, taxaPercentual: 7.8,
+        taxaServico: feeCents / 100, valorLiquido: (requestedCents - feeCents) / 100,
+        moeda: "BRL", status: "cotacao",
+        aviso: "Cotação informativa. Não cria pedido, não reserva saldo e não realiza transferência PIX."
+      });
+    } catch (error) {
+      console.error("[WITHDRAWAL QUOTE]", error);
+      return res.status(500).json({ message: "Não foi possível calcular a cotação do saque." });
+    }
+  });
 
   const isTradingAuthorized = (req: any, res: any, next: any) => {
     const userEmail = req.user?.email;
