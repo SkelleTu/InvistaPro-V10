@@ -64,6 +64,9 @@ function Router() {
     queryKey: ["/api/auth/destination"],
     enabled: isAuthenticated && isApproved && isPhoneVerified,
     retry: false,
+    staleTime: 0,
+    gcTime: 0,
+    refetchOnMount: "always",
   });
 
   return (
