@@ -15,7 +15,7 @@ function pdfEscape(value: unknown): string {
     .replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
 }
 
-function buildPdf(lines: string[]): Buffer {
+export function buildPdf(lines: string[]): Buffer {
   const pages: string[][] = [];
   for (let i = 0; i < lines.length; i += 52) pages.push(lines.slice(i, i + 52));
   if (!pages.length) pages.push(["Relatorio sem registros no periodo consultado."]);
