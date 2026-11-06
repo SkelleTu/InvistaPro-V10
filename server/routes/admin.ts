@@ -4,6 +4,7 @@ import { isAuthenticated } from "../auth";
 import { isAuthorizedEmail, ACCESS_DENIED_MESSAGE } from "../config/access";
 import { getAffiliateAdminSummary, getAffiliateAdminNetwork } from "../services/affiliate-program";
 import { readPrivateDocument } from "../services/private-document-storage";
+import { generateAdminFinancialReport, getAdminReport, listAdminReports, recordAdminReportDownload } from "../services/admin-financial-reports";
 
 // Extend session type
 declare module 'express-session' {
@@ -535,6 +536,85 @@ router.get('/dashboard-data', isAuthenticated, isAdmin, async (_req, res) => {
   } catch (error) {
     console.error("Error getting dashboard data:", error);
     return res.status(500).json({ message: "Erro interno do servidor" });
+  }
+});
+
+
+// Generate a complete, archived PDF from the durable PostgreSQL source of truth.
+router.post('/reports', isAuthenticated, isAdmin, async (req, res) => {
+  try {
+    const actorUserId = String((req as any).session.passport?.user || "");
+    const scope = req.body?.scope;
+    if (scope !== "client" && scope !== "platform") {
+      return res.status(400).json({ message: "Escopo de relatório inválido." });
+    }
+    const userId = scope === "client" ? String(req.body?.userId || "") : undefined;
+    if (scope === "client" && (!userId || userId.length > 32)) {
+      return res.status(400).json({ message: "Selecione um cliente válido." });
+    }
+    const report = await generateAdminFinancialReport({
+      requestedBy: actorUserId,
+      scope,
+      userId,
+      from: req.body?.from ? String(req.body.from) : undefined,
+      to: req.body?.to ? String(req.body.to) : undefined,
+      reason: req.body?.reason ? String(req.body.reason).slice(0, 500) : undefined,
+      requestId: String(req.headers["x-request-id"] || ""),
+      ip: req.ip,
+      userAgent: String(req.headers["user-agent"] || ""),
+    });
+    res.setHeader("Cache-Control", "private, no-store, max-age=0");
+    return res.status(201).json({ ...report, downloadUrl: `/api/admin/reports/${report.id}/download` });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("Admin financial report generation failed:", message);
+    if (message === "REPORT_CLIENT_NOT_FOUND") return res.status(404).json({ message: "Cliente não encontrado." });
+    if (message === "INVALID_REPORT_PERIOD") return res.status(400).json({ message: "Período inválido." });
+    if (message === "DURABLE_POSTGRES_REQUIRED" || message.includes("PRIVATE_REPORT_STORAGE_NOT_CONFIGURED")) {
+      return res.status(503).json({ message: "Relatórios arquivados indisponíveis: banco durável ou armazenamento privado não configurado." });
+    }
+    return res.status(500).json({ message: "Não foi possível gerar e arquivar o relatório." });
+  }
+});
+
+// Report archive index; metadata only, never exposes storage references.
+router.get('/reports', isAuthenticated, isAdmin, async (req, res) => {
+  try {
+    const requested = Number.parseInt(String(req.query.limit || "100"), 10);
+    const reports = await listAdminReports(Number.isFinite(requested) ? requested : 100);
+    return res.json(reports.map((report: any) => ({
+      id: report.id, scope: report.reportScope, subjectUserId: report.subjectUserId,
+      periodStart: report.periodStart, periodEnd: report.periodEnd, rowCount: report.rowCount,
+      contentSha256: report.contentSha256, createdAt: report.createdAt,
+      downloadUrl: `/api/admin/reports/${report.id}/download`,
+    })));
+  } catch (error) {
+    console.error("Admin report archive listing failed:", error);
+    return res.status(503).json({ message: "Não foi possível consultar o arquivo de relatórios." });
+  }
+});
+
+// Every report download is authorized and written to the financial audit trail.
+router.get('/reports/:reportId/download', isAuthenticated, isAdmin, async (req, res) => {
+  try {
+    const reportId = String(req.params.reportId || "");
+    if (!/^[0-9a-f-]{36}$/i.test(reportId)) return res.status(400).json({ message: "Relatório inválido." });
+    const report = await getAdminReport(reportId);
+    if (!report) return res.status(404).json({ message: "Relatório não encontrado." });
+    const actorUserId = String((req as any).session.passport?.user || "");
+    const buffer = await recordAdminReportDownload(report, actorUserId, {
+      requestId: String(req.headers["x-request-id"] || ""), ip: req.ip,
+      userAgent: String(req.headers["user-agent"] || ""),
+    });
+    res.setHeader("Cache-Control", "private, no-store, max-age=0");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Length", String(buffer.length));
+    res.setHeader("Content-Disposition", `attachment; filename="invistapro-relatorio-${report.id}.pdf"`);
+    return res.status(200).send(buffer);
+  } catch (error) {
+    console.error("Admin report download failed:", error);
+    return res.status(503).json({ message: "Não foi possível validar e recuperar o PDF arquivado." });
   }
 });
 
