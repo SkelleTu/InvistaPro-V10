@@ -181,8 +181,8 @@ export const updateUserSchema = createInsertSchema(users).omit({
 
 // Schema for document upload
 export const uploadDocumentSchema = z.object({
-  tipo: z.enum(['rg_cnh_frente', 'rg_cnh_verso', 'comprovante_residencia'], {
-    required_error: "Tipo de documento é obrigatório"
+  tipo: z.enum(['rg_cnh_frente', 'rg_cnh_verso', 'comprovante_residencia'] as const, {
+    error: "Tipo de documento é obrigatório"
   }),
   arquivo: z.string().min(1, "Arquivo é obrigatório"),
 });
@@ -190,8 +190,8 @@ export const uploadDocumentSchema = z.object({
 // Schema for admin document review
 export const reviewDocumentSchema = z.object({
   documentId: z.string().min(1, "ID do documento é obrigatório"),
-  status: z.enum(['aprovado', 'rejeitado'], {
-    required_error: "Status é obrigatório"
+  status: z.enum(['aprovado', 'rejeitado'] as const, {
+    error: "Status é obrigatório"
   }),
   motivoRejeicao: z.string().optional(),
 });
@@ -201,8 +201,8 @@ export const reviewDocumentSchema = z.object({
 // Schema for withdrawal request
 export const withdrawalRequestSchema = z.object({
   valor: z.number().min(0.01, "Valor deve ser maior que zero"),
-  tipo: z.enum(['rendimento', 'total'], {
-    required_error: "Tipo de saque é obrigatório"
+  tipo: z.enum(['rendimento', 'total'] as const, {
+    error: "Tipo de saque é obrigatório"
   }),
 });
 
@@ -421,8 +421,8 @@ export const insertAiRecoveryStrategySchema = createInsertSchema(aiRecoveryStrat
 // Trading form validation schemas
 export const derivTokenConfigSchema = z.object({
   token: z.string().min(1, "Token Deriv é obrigatório"),
-  accountType: z.enum(['demo', 'real'], {
-    required_error: "Tipo de conta é obrigatório"
+  accountType: z.enum(['demo', 'real'] as const, {
+    error: "Tipo de conta é obrigatório"
   }),
 });
 
@@ -430,15 +430,15 @@ export const tradeModeConfigSchema = z.object({
   mode: z.enum([
     'production_3-4_24h', 'production_2_24h', 'production_4_perpetuo',
     'test_4_1min', 'test_3_2min', 'test_4_1hour', 'test_3_2hour', 'test_4_perpetuo', 'test_sem_limites'
-  ], {
-    required_error: "Modo de operação é obrigatório"
+  ] as const, {
+    error: "Modo de operação é obrigatório"
   }),
 });
 
 export const manualTradeSchema = z.object({
   symbol: z.string().min(1, "Símbolo é obrigatório"),
-  direction: z.enum(['up', 'down'], {
-    required_error: "Direção é obrigatória"
+  direction: z.enum(['up', 'down'] as const, {
+    error: "Direção é obrigatória"
   }),
   amount: z.number().min(0.35, "Valor mínimo é 0.35").max(50000, "Valor máximo é 50000"),
   duration: z.number().min(1, "Duração mínima é 1 tick").max(10, "Duração máxima é 10 ticks"),
