@@ -25,6 +25,7 @@ assert.match(webhook, /settleVerifiedWithdrawal/);
 assert.match(webhook, /markProviderWebhookProcessed/);
 assert.match(index, /rawBody = Buffer\.from\(buffer\)/);
 assert.match(ledger, /createCipheriv\("aes-256-gcm"/);
+assert.match(ledger, /WITHDRAWAL_DESTINATION_ENCRYPTION_KEY/);
 assert.match(ledger, /destinationFingerprint/);
 assert.match(ledger, /reconcileVerifiedPayment/);
 assert.match(adapter, /createPixPayment/);
