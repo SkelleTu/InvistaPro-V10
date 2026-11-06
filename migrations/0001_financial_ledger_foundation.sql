@@ -230,3 +230,54 @@ DROP TRIGGER IF EXISTS trg_admin_report_exports_immutable ON admin_report_export
 CREATE TRIGGER trg_admin_report_exports_immutable
 BEFORE UPDATE OR DELETE ON admin_report_exports
 FOR EACH ROW EXECUTE FUNCTION reject_financial_archive_mutation();
+
+
+-- Guard state machines and immutable request terms at the database boundary.
+CREATE OR REPLACE FUNCTION enforce_payment_intent_transition() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.user_id <> OLD.user_id OR NEW.amount_cents <> OLD.amount_cents OR
+     NEW.currency <> OLD.currency OR NEW.idempotency_key <> OLD.idempotency_key THEN
+    RAISE EXCEPTION 'PAYMENT_INTENT_IMMUTABLE_TERMS';
+  END IF;
+  IF NEW.status <> OLD.status AND NOT (
+    (OLD.status = 'created' AND NEW.status IN ('pending','cancelled','expired')) OR
+    (OLD.status = 'pending' AND NEW.status IN ('approved','rejected','cancelled','expired','refunded')) OR
+    (OLD.status = 'approved' AND NEW.status = 'refunded')
+  ) THEN
+    RAISE EXCEPTION 'PAYMENT_INTENT_INVALID_TRANSITION: % -> %', OLD.status, NEW.status;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_payment_intent_transition ON payment_intents;
+CREATE TRIGGER trg_payment_intent_transition
+BEFORE UPDATE ON payment_intents
+FOR EACH ROW EXECUTE FUNCTION enforce_payment_intent_transition();
+
+CREATE OR REPLACE FUNCTION enforce_withdrawal_transition() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.user_id <> OLD.user_id OR NEW.amount_cents <> OLD.amount_cents OR
+     NEW.fee_cents <> OLD.fee_cents OR NEW.net_amount_cents <> OLD.net_amount_cents OR
+     NEW.currency <> OLD.currency OR NEW.idempotency_key <> OLD.idempotency_key OR
+     NEW.destination_fingerprint IS DISTINCT FROM OLD.destination_fingerprint OR
+     NEW.destination_encrypted IS DISTINCT FROM OLD.destination_encrypted THEN
+    RAISE EXCEPTION 'WITHDRAWAL_IMMUTABLE_TERMS';
+  END IF;
+  IF NEW.status <> OLD.status AND NOT (
+    (OLD.status = 'requested' AND NEW.status IN ('reserved','cancelled','failed')) OR
+    (OLD.status = 'reserved' AND NEW.status IN ('submitted','failed','cancelled')) OR
+    (OLD.status = 'submitted' AND NEW.status IN ('paid','failed'))
+  ) THEN
+    RAISE EXCEPTION 'WITHDRAWAL_INVALID_TRANSITION: % -> %', OLD.status, NEW.status;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_withdrawal_transition ON withdrawal_requests;
+CREATE TRIGGER trg_withdrawal_transition
+BEFORE UPDATE ON withdrawal_requests
+FOR EACH ROW EXECUTE FUNCTION enforce_withdrawal_transition();
