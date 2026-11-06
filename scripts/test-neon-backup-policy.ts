@@ -13,6 +13,7 @@ for (const secret of ["DATABASE_URL","SUPABASE_URL","SUPABASE_SERVICE_ROLE_KEY",
 }
 assert.match(backup, /aes-256-gcm/);
 assert.match(backup, /createBucket\(bucket,\s*\{\s*public: false/);
+assert.match(backup, /BACKUP_BUCKET_MUST_BE_PRIVATE/);
 assert.match(backup, /plaintextSha256/);
 assert.match(backup, /encryptedSha256/);
 assert.match(restore, /createDecipheriv\("aes-256-gcm"/);
