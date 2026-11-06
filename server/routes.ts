@@ -22,6 +22,7 @@ import kycRoutes from "./routes/kyc";
 import adminRoutes from "./routes/admin";
 import clientFinanceRoutes from "./routes/client-finance";
 import providerWebhookRoutes from "./routes/provider-webhooks";
+import { getClientFinancialSummary } from "./services/financial-ledger";
 import monitorRoutes from "./routes/monitor-routes";
 import learningRoutes from "./routes/learning-routes";
 import metaTraderRoutes from "./routes/metatrader-routes";
@@ -140,43 +141,50 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     res.json({ role, destination: role === "master" ? "/dashboard" : role === "admin" ? "/central-admin" : "/portal-cliente" });
   });
 
-  // Withdrawal quote only: does not reserve balance, create a withdrawal, or send PIX.
-  // The 7.8% service fee is calculated server-side and rounded to cents.
+  // Withdrawal quote only: uses the ledger's available balance and configured fee.
+  // It does not reserve balance, create a withdrawal, or send PIX.
   app.post("/api/withdrawal/quote", isAuthenticated, isApproved, async (req: any, res: any) => {
     try {
       const requested = Number(req.body?.valor);
       if (!Number.isFinite(requested) || requested <= 0) {
         return res.status(400).json({ message: "Informe um valor de saque válido." });
       }
-
       const amountCents = Math.round(requested * 100);
       if (amountCents < 1 || Math.abs(requested * 100 - amountCents) > 0.000001) {
         return res.status(400).json({ message: "O valor deve ter no máximo duas casas decimais." });
       }
-
-      const user = await dbStorage.getUser(req.user.id);
-      if (!user) return res.status(404).json({ message: "Usuário não encontrado." });
-
-      const balanceCents = Math.max(0, Math.round(Number(user.saldo || 0) * 100));
-      if (amountCents > balanceCents) {
-        return res.status(400).json({ message: "O valor solicitado excede o saldo registrado." });
+      const maxWithdrawalCents = Number.parseInt(String(process.env.MAX_WITHDRAWAL_CENTS || "0"), 10);
+      if (!Number.isSafeInteger(maxWithdrawalCents) || maxWithdrawalCents <= 0) {
+        return res.status(503).json({ message: "Limite máximo de saque não configurado." });
       }
-
-      const feeCents = Math.round(amountCents * 780 / 10000);
+      if (amountCents > maxWithdrawalCents) return res.status(400).json({ message: "Valor acima do limite permitido por saque." });
+      if (process.env.WITHDRAWAL_FEE_CENTS === undefined) {
+        return res.status(503).json({ message: "Política de taxas de saque não configurada." });
+      }
+      const feeCents = Number.parseInt(String(process.env.WITHDRAWAL_FEE_CENTS), 10);
+      if (!Number.isSafeInteger(feeCents) || feeCents < 0 || feeCents >= amountCents) {
+        return res.status(503).json({ message: "Política de taxas de saque não configurada." });
+      }
+      const summary = await getClientFinancialSummary(String(req.user.id));
+      const availableCents = Number(summary.availableBalanceCents || 0);
+      if (amountCents > availableCents) {
+        return res.status(409).json({ message: "O valor solicitado excede o saldo disponível no ledger." });
+      }
       const netCents = amountCents - feeCents;
       res.setHeader("Cache-Control", "no-store, max-age=0");
       return res.json({
         valorSolicitado: amountCents / 100,
-        taxaPercentual: 7.8,
+        taxaPercentual: Number(((feeCents / amountCents) * 100).toFixed(4)),
         taxaServico: feeCents / 100,
         valorLiquido: netCents / 100,
+        saldoDisponivel: availableCents / 100,
         moeda: "BRL",
         status: "cotacao",
-        aviso: "Cotação informativa. Não cria pedido, não reserva saldo e não realiza transferência PIX."
+        aviso: "Cotação informativa baseada no ledger. Não cria pedido, não reserva saldo e não realiza transferência PIX."
       });
     } catch (error) {
       console.error("Erro ao calcular cotação de saque:", error);
-      return res.status(500).json({ message: "Não foi possível calcular a cotação do saque." });
+      return res.status(503).json({ message: "Não foi possível consultar o saldo contábil durável." });
     }
   });
 
