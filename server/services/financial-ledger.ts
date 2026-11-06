@@ -91,7 +91,15 @@ export async function getClientFinancialSummary(userId: string) {
     const credit = Number(rows.find((r: any) => r.accountId === account.id && r.direction === "credit")?.total || 0);
     balances[kind] = Math.round((credit - debit));
   }
-  return { currency: "BRL", unit: "centavos", balances, legacyBalanceNotReconciled: true };
+  const balancesBRL = Object.fromEntries(Object.entries(balances).map(([kind, cents]) => [kind, cents / 100]));
+  return {
+    currency: "BRL", unit: "centavos", balancesCents: balances,
+    balancesBRL, availableBalanceCents: balances.client_available || 0,
+    reservedBalanceCents: balances.client_reserved || 0,
+    capitalBalanceCents: balances.client_capital || 0,
+    yieldBalanceCents: balances.client_yield || 0,
+    legacyBalanceNotReconciled: true,
+  };
 }
 
 export async function reserveWithdrawal(input: {
