@@ -16,8 +16,15 @@ function pdfEscape(value: unknown): string {
 }
 
 export function buildPdf(lines: string[]): Buffer {
+  const wrappedLines = lines.flatMap((line) => {
+    const value = String(line ?? "");
+    if (!value.length) return [""];
+    const parts: string[] = [];
+    for (let offset = 0; offset < value.length; offset += 105) parts.push(value.slice(offset, offset + 105));
+    return parts;
+  });
   const pages: string[][] = [];
-  for (let i = 0; i < lines.length; i += 52) pages.push(lines.slice(i, i + 52));
+  for (let i = 0; i < wrappedLines.length; i += 52) pages.push(wrappedLines.slice(i, i + 52));
   if (!pages.length) pages.push(["Relatorio sem registros no periodo consultado."]);
   const objects: string[] = [];
   const pageRefs: number[] = [];
@@ -30,7 +37,7 @@ export function buildPdf(lines: string[]): Buffer {
     pageRefs.push(pageId);
     const commands = [
       "BT", "/F1 9 Tf", "40 800 Td", "12 TL",
-      ...pages[i].map((line, index) => `(${pdfEscape(line).slice(0, 180)}) Tj${index < pages[i].length - 1 ? " T*" : ""}`),
+      ...pages[i].map((line, index) => `(${pdfEscape(line)}) Tj${index < pages[i].length - 1 ? " T*" : ""}`),
       "ET",
     ].join("\n");
     objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents ${contentId} 0 R >>`);
@@ -87,7 +94,7 @@ export async function generateAdminFinancialReport(input: {
     .from(pgSchema.users).where(eq(pgSchema.users.id, input.requestedBy)).limit(1);
   if (!requestedBy) throw new Error("ADMIN_NOT_FOUND");
 
-  const [users, movements, trades, documents, transactions, entries, paymentIntents, withdrawals, auditEvents] = await Promise.all([
+  const [users, movements, trades, documents, transactions, entries, paymentIntents, providerPayments, withdrawals, auditEvents, webhookEvents] = await Promise.all([
     input.scope === "client"
       ? db.select().from(pgSchema.users).where(eq(pgSchema.users.id, input.userId!))
       : db.select({ id: pgSchema.users.id, nomeCompleto: pgSchema.users.nomeCompleto, email: pgSchema.users.email, isAdmin: pgSchema.users.isAdmin, contaAprovada: pgSchema.users.contaAprovada, documentosVerificados: pgSchema.users.documentosVerificados, createdAt: pgSchema.users.createdAt }).from(pgSchema.users),
@@ -95,12 +102,14 @@ export async function generateAdminFinancialReport(input: {
     db.select().from(pgSchema.tradeOperations).where(conditionsFor(pgSchema.tradeOperations.createdAt, pgSchema.tradeOperations.userId)).orderBy(desc(pgSchema.tradeOperations.createdAt)),
     db.select().from(pgSchema.documentos).where(conditionsFor(pgSchema.documentos.createdAt, pgSchema.documentos.userId)).orderBy(desc(pgSchema.documentos.createdAt)),
     db.select().from(pgSchema.ledgerTransactions).where(periodConditions(pgSchema.ledgerTransactions.createdAt, start, end).length ? and(...periodConditions(pgSchema.ledgerTransactions.createdAt, start, end)) : undefined).orderBy(desc(pgSchema.ledgerTransactions.createdAt)),
-    db.select().from(pgSchema.ledgerEntries).orderBy(desc(pgSchema.ledgerEntries.createdAt)),
+    db.select().from(pgSchema.ledgerEntries).where(periodConditions(pgSchema.ledgerEntries.createdAt, start, end).length ? and(...periodConditions(pgSchema.ledgerEntries.createdAt, start, end)) : undefined).orderBy(desc(pgSchema.ledgerEntries.createdAt)),
     db.select().from(pgSchema.paymentIntents).where(conditionsFor(pgSchema.paymentIntents.createdAt, pgSchema.paymentIntents.userId)).orderBy(desc(pgSchema.paymentIntents.createdAt)),
+    db.select().from(pgSchema.providerPayments).where(periodConditions(pgSchema.providerPayments.createdAt, start, end).length ? and(...periodConditions(pgSchema.providerPayments.createdAt, start, end)) : undefined).orderBy(desc(pgSchema.providerPayments.createdAt)),
     db.select().from(pgSchema.withdrawalRequests).where(conditionsFor(pgSchema.withdrawalRequests.requestedAt, pgSchema.withdrawalRequests.userId)).orderBy(desc(pgSchema.withdrawalRequests.requestedAt)),
-    input.scope === "client"
-      ? db.select().from(pgSchema.financialAuditEvents).where(eq(pgSchema.financialAuditEvents.subjectUserId, input.userId!)).orderBy(desc(pgSchema.financialAuditEvents.createdAt))
-      : db.select().from(pgSchema.financialAuditEvents).where(periodConditions(pgSchema.financialAuditEvents.createdAt, start, end).length ? and(...periodConditions(pgSchema.financialAuditEvents.createdAt, start, end)) : undefined).orderBy(desc(pgSchema.financialAuditEvents.createdAt)),
+    db.select().from(pgSchema.financialAuditEvents).where(conditionsFor(pgSchema.financialAuditEvents.createdAt, pgSchema.financialAuditEvents.subjectUserId)).orderBy(desc(pgSchema.financialAuditEvents.createdAt)),
+    input.scope === "platform"
+      ? db.select().from(pgSchema.providerWebhookEvents).where(periodConditions(pgSchema.providerWebhookEvents.receivedAt, start, end).length ? and(...periodConditions(pgSchema.providerWebhookEvents.receivedAt, start, end)) : undefined).orderBy(desc(pgSchema.providerWebhookEvents.receivedAt))
+      : Promise.resolve([]),
   ]);
 
   const user = input.scope === "client" ? users[0] as any : null;
@@ -108,6 +117,9 @@ export async function generateAdminFinancialReport(input: {
   const relevantAccounts = await db.select().from(pgSchema.financialAccounts)
     .where(input.scope === "client" ? eq(pgSchema.financialAccounts.ownerUserId, input.userId!) : undefined);
   const relevantAccountIds = new Set(relevantAccounts.map((a: any) => a.id));
+  const paymentIntentIds = new Set(paymentIntents.map((intent: any) => intent.id));
+  const relevantProviderPayments = providerPayments.filter((payment: any) => paymentIntentIds.has(payment.paymentIntentId));
+  const relevantWebhookEvents = input.scope === "platform" ? webhookEvents : [];
   const relevantEntries = entries.filter((entry: any) => {
     const timestamp = new Date(entry.createdAt as any).getTime();
     return relevantAccountIds.has(entry.accountId) && (!start || timestamp >= start.getTime()) && (!end || timestamp <= end.getTime());
@@ -126,7 +138,7 @@ export async function generateAdminFinancialReport(input: {
     `Solicitante: ${requestedBy.name} <${requestedBy.email}>`,
     `Periodo UTC: ${start?.toISOString() || "inicio do historico"} ate ${end?.toISOString() || "agora"}`,
     `Escopo: ${input.scope === "client" ? "cliente individual" : "plataforma consolidada"}`,
-    `Registros listados: ${movements.length + trades.length + documents.length + relevantTransactions.length + relevantEntries.length + paymentIntents.length + withdrawals.length + audit.length}`,
+    `Registros listados: ${users.length + movements.length + trades.length + documents.length + relevantTransactions.length + relevantEntries.length + paymentIntents.length + relevantProviderPayments.length + withdrawals.length + audit.length + relevantWebhookEvents.length}`,
     " ",
   ];
   if (user) {
@@ -156,6 +168,12 @@ export async function generateAdminFinancialReport(input: {
   }
   lines.push(" ", "INTENCOES DE PAGAMENTO");
   for (const row of paymentIntents as any[]) lines.push(`${row.createdAt?.toISOString?.() || row.createdAt || ""} | ${brlFromCents(row.amountCents)} | ${row.status} | ${row.provider || "sem provedor"} | ${row.id}`);
+  lines.push(" ", "PAGAMENTOS CONFIRMADOS/OBSERVADOS PELO PROVEDOR");
+  for (const row of relevantProviderPayments as any[]) lines.push(`${row.createdAt?.toISOString?.() || row.createdAt || ""} | ${row.provider} | ${row.providerPaymentId} | ${brlFromCents(row.amountCents)} | ${row.providerStatus} | intent ${row.paymentIntentId}`);
+  if (input.scope === "platform") {
+    lines.push(" ", "EVENTOS DE WEBHOOK DO PROVEDOR");
+    for (const row of relevantWebhookEvents as any[]) lines.push(`${row.receivedAt?.toISOString?.() || row.receivedAt || ""} | ${row.provider} | ${row.eventType} | ${row.processingStatus} | assinatura verificada: ${row.signatureVerified ? "sim" : "nao"} | ${row.providerEventId}`);
+  }
   lines.push(" ", "SOLICITACOES DE SAQUE");
   for (const row of withdrawals as any[]) lines.push(`${row.requestedAt?.toISOString?.() || row.requestedAt || ""} | bruto ${brlFromCents(row.amountCents)} | taxa ${brlFromCents(row.feeCents)} | liquido ${brlFromCents(row.netAmountCents)} | ${row.status} | ${row.id}`);
   lines.push(" ", "DOCUMENTOS E REVISOES");
@@ -168,7 +186,7 @@ export async function generateAdminFinancialReport(input: {
   const pdf = buildPdf(lines);
   const hash = createHash("sha256").update(pdf).digest("hex");
   const storageRef = await storePrivateReport(reportId, pdf);
-  const rowCount = movements.length + trades.length + documents.length + relevantTransactions.length + relevantEntries.length + paymentIntents.length + withdrawals.length + audit.length;
+  const rowCount = users.length + movements.length + trades.length + documents.length + relevantTransactions.length + relevantEntries.length + paymentIntents.length + relevantProviderPayments.length + withdrawals.length + audit.length + relevantWebhookEvents.length;
   try {
     await db.transaction(async (tx: any) => {
       await tx.insert(pgSchema.adminReportExports).values({
