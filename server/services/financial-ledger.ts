@@ -157,6 +157,7 @@ export async function confirmVerifiedProviderPayment(input: {
   rawSnapshot?: Record<string, unknown>; verifiedAt?: Date;
 }) {
   assertCents(input.amountCents);
+  if (!["approved", "paid", "accredited"].includes(String(input.providerStatus).toLowerCase())) throw new Error("PROVIDER_PAYMENT_NOT_APPROVED");
   if (!input.provider || !input.providerPaymentId || !input.externalReference) throw new Error("INVALID_PROVIDER_PAYMENT_REFERENCE");
   const db = requirePostgres();
   return db.transaction(async (tx: any) => {
@@ -238,6 +239,7 @@ export async function markWithdrawalSubmitted(withdrawalId: string, provider: st
 export async function settleVerifiedWithdrawal(input: {
   withdrawalId: string; provider: string; providerTransferId: string; verifiedStatus: string;
 }) {
+  if (!["paid", "approved", "completed", "success"].includes(String(input.verifiedStatus).toLowerCase())) throw new Error("PROVIDER_TRANSFER_NOT_SETTLED");
   const db = requirePostgres();
   return db.transaction(async (tx: any) => {
     await tx.execute(sql`SELECT id FROM withdrawal_requests WHERE id = ${input.withdrawalId}::uuid FOR UPDATE`);
@@ -319,4 +321,33 @@ export async function releaseFailedWithdrawal(input: {
     });
     return { withdrawal: updated, duplicate: false };
   });
+}
+
+
+export async function recordVerifiedProviderWebhook(input: {
+  provider: string; providerEventId: string; eventType: string;
+  signatureVerified: boolean; payload: Record<string, unknown>;
+}) {
+  if (!input.signatureVerified) throw new Error("PROVIDER_WEBHOOK_SIGNATURE_INVALID");
+  if (!input.provider || !input.providerEventId || !input.eventType) throw new Error("INVALID_PROVIDER_WEBHOOK");
+  const db = requirePostgres();
+  const [event] = await db.insert(pgSchema.providerWebhookEvents).values({
+    provider: input.provider, providerEventId: input.providerEventId,
+    eventType: input.eventType, signatureVerified: true, payload: input.payload,
+  }).onConflictDoNothing().returning();
+  if (event) return { event, duplicate: false };
+  const [existing] = await db.select().from(pgSchema.providerWebhookEvents)
+    .where(and(eq(pgSchema.providerWebhookEvents.provider, input.provider),
+      eq(pgSchema.providerWebhookEvents.providerEventId, input.providerEventId))).limit(1);
+  return { event: existing, duplicate: true };
+}
+
+export async function markProviderWebhookProcessed(eventId: string, status: "processed" | "ignored" | "failed", error?: string) {
+  if (!["processed", "ignored", "failed"].includes(status)) throw new Error("INVALID_WEBHOOK_PROCESSING_STATUS");
+  const db = requirePostgres();
+  const [updated] = await db.update(pgSchema.providerWebhookEvents).set({
+    processingStatus: status, processingError: error ? error.slice(0, 1000) : null,
+    processedAt: new Date(),
+  }).where(eq(pgSchema.providerWebhookEvents.id, eventId)).returning();
+  return updated || null;
 }
