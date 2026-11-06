@@ -226,14 +226,6 @@ export class PostgresStorage implements IStorage {
   // Movement operations
   async createMovimento(_movimento: InsertMovimento): Promise<Movimento> {
     throw new Error("LEGACY_FINANCIAL_MOVEMENT_WRITE_DISABLED: post financial movements through the durable ledger.");
-    /* Legacy implementation intentionally unreachable; historical rows remain readable.
-    const pgData = convertSQLiteDataToPostgres(movimento);
-    const [newMovimento] = await db
-      .insert(pgSchema.movimentos)
-      .values(pgData)
-      .returning();
-    return newMovimento as Movimento;
-    */
   }
 
   async getUserMovimentos(userId: string, limit = 10): Promise<Movimento[]> {
