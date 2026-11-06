@@ -221,6 +221,36 @@ export class TursoStorage implements IStorage {
     return documento;
   }
 
+  async getAllMovimentos(limit?: number): Promise<Movimento[]> {
+    const query = getDb().select().from(movimentos).orderBy(desc(movimentos.createdAt));
+    return limit ? await query.limit(limit) : await query;
+  }
+
+  async getAllDocumentos(): Promise<Documento[]> {
+    return await getDb().select().from(documentos).orderBy(desc(documentos.createdAt));
+  }
+
+  async getDocumento(id: string): Promise<Documento | undefined> {
+    const [document] = await getDb().select().from(documentos).where(eq(documentos.id, id)).limit(1);
+    return document;
+  }
+
+  async updateDocumento(id: string, updates: Partial<Documento>): Promise<Documento> {
+    const safeUpdates: Partial<Documento> = {};
+    for (const key of ["arquivo", "status", "motivoRejeicao", "aprovadoPor", "aprovadoEm", "updatedAt"] as const) {
+      if (key in updates) Object.assign(safeUpdates, { [key]: updates[key] });
+    }
+    safeUpdates.updatedAt ??= new Date().toISOString();
+    const [document] = await getDb().update(documentos).set(safeUpdates)
+      .where(eq(documentos.id, id)).returning();
+    if (!document) throw new Error("DOCUMENT_NOT_FOUND");
+    return document;
+  }
+
+  async getAllTradeOperations(): Promise<TradeOperation[]> {
+    return await getDb().select().from(tradeOperations).orderBy(desc(tradeOperations.createdAt));
+  }
+
   async createDerivToken(tokenData: InsertDerivToken): Promise<DerivToken> {
     const db = getDb();
     await db

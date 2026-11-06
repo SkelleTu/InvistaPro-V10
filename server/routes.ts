@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import { dualStorage as dbStorage } from "./storage-dual";
 import { setupAuth, isAuthenticated, isApproved, hashPassword, comparePasswords, generateVerificationCode } from "./auth";
 import { db } from "./db";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { registerUserSchema, loginSchema, phoneVerificationSchema, insertMovimentoSchema, updateUserSchema, uploadDocumentSchema, withdrawalRequestSchema, users, movimentos, documentos } from "@shared/schema";
 import { notificationService } from "./notifications";
 // import { internalEmailService } from "./internalEmailService"; // Sistema removido
@@ -18,7 +18,6 @@ import QRCode from "qrcode";
 import multer from "multer";
 import path from "path";
 import crypto from "crypto";
-import { mkdirSync } from "fs";
 import kycRoutes from "./routes/kyc";
 import adminRoutes from "./routes/admin";
 import monitorRoutes from "./routes/monitor-routes";
@@ -54,6 +53,8 @@ import { tpmSystem } from './services/tpm-system';
 import { getRegistryInfo } from './services/url-registry';
 import { registerUniversalSession, setUniversalTradingArmed, disconnectUniversalSession, syncDerivTokenToUniversalServer, ensureUniversalDerivSession, deleteUniversalDerivSession, disconnectUniversalDerivSession } from './services/universal-server-session';
 import { isAllowedProductionSymbol, isAllowedProductionContractType } from './services/production-symbol-policy';
+import { findAffiliateReferrer, ensureAffiliateProfile, attachAffiliateReferral, getAffiliateDashboard } from "./services/affiliate-program";
+import { saveKycDocument } from "./services/kyc-document-service";
 
 // PIX payload generator compatível com Santander
 function generatePixPayload(data: {
@@ -119,6 +120,64 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   // Otherwise early routes can call req.isAuthenticated before Passport attaches it.
   setupAuth(app);
 
+  // Resolve the destination from server-side identity and allowlists.
+  // This endpoint is informational only; protected APIs keep enforcing their own authorization.
+  app.get("/api/auth/destination", isAuthenticated, isApproved, (req: any, res: any) => {
+    const email = String(req.user?.email || "").toLowerCase();
+    const emergencyAdminEmail = String(process.env.ADMIN_EMAIL || "").toLowerCase();
+    const configuredMasterEmails = [
+      process.env.MASTER_EMAIL,
+      process.env.INVISTA_MASTER_EMAIL,
+      process.env.INVISTAPRO_ACCOUNT_EMAIL,
+    ].map((value) => String(value || "").trim().toLowerCase()).filter(Boolean);
+    const isMaster = Boolean(email && configuredMasterEmails.includes(email));
+    const isAdmin = Boolean(email && emergencyAdminEmail && email === emergencyAdminEmail) ||
+      isAuthorizedEmail(email);
+    const role = isMaster ? "master" : isAdmin ? "admin" : "client";
+    res.setHeader("Cache-Control", "no-store, max-age=0");
+    res.json({ role, destination: role === "master" ? "/dashboard" : role === "admin" ? "/central-admin" : "/portal-cliente" });
+  });
+
+  // Withdrawal quote only: does not reserve balance, create a withdrawal, or send PIX.
+  // The 7.8% service fee is calculated server-side and rounded to cents.
+  app.post("/api/withdrawal/quote", isAuthenticated, isApproved, async (req: any, res: any) => {
+    try {
+      const requested = Number(req.body?.valor);
+      if (!Number.isFinite(requested) || requested <= 0) {
+        return res.status(400).json({ message: "Informe um valor de saque válido." });
+      }
+
+      const amountCents = Math.round(requested * 100);
+      if (amountCents < 1 || Math.abs(requested * 100 - amountCents) > 0.000001) {
+        return res.status(400).json({ message: "O valor deve ter no máximo duas casas decimais." });
+      }
+
+      const user = await dbStorage.getUser(req.user.id);
+      if (!user) return res.status(404).json({ message: "Usuário não encontrado." });
+
+      const balanceCents = Math.max(0, Math.round(Number(user.saldo || 0) * 100));
+      if (amountCents > balanceCents) {
+        return res.status(400).json({ message: "O valor solicitado excede o saldo registrado." });
+      }
+
+      const feeCents = Math.round(amountCents * 780 / 10000);
+      const netCents = amountCents - feeCents;
+      res.setHeader("Cache-Control", "no-store, max-age=0");
+      return res.json({
+        valorSolicitado: amountCents / 100,
+        taxaPercentual: 7.8,
+        taxaServico: feeCents / 100,
+        valorLiquido: netCents / 100,
+        moeda: "BRL",
+        status: "cotacao",
+        aviso: "Cotação informativa. Não cria pedido, não reserva saldo e não realiza transferência PIX."
+      });
+    } catch (error) {
+      console.error("Erro ao calcular cotação de saque:", error);
+      return res.status(500).json({ message: "Não foi possível calcular a cotação do saque." });
+    }
+  });
+
   const isTradingAuthorized = (req: any, res: any, next: any) => {
     const userEmail = req.user?.email;
     const envAdminEmail = process.env.ADMIN_EMAIL;
@@ -130,8 +189,6 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
     next();
   };
-
-  mkdirSync(path.resolve(process.cwd(), "uploads", "documents"), { recursive: true });
 
   // API de Trading
   app.get("/api/trading/assets", isAuthenticated, async (req, res) => {
@@ -443,36 +500,91 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   });
 
 
-  // Configure multer for file uploads
-  const fileStorage = multer.diskStorage({
-    destination: function (req, file, cb) {
-      cb(null, path.resolve(process.cwd(), 'uploads', 'documents'))
+  // KYC files are buffered and sent to private object storage; never written into the Git workspace.
+  const upload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 5 * 1024 * 1024 },
+    fileFilter: function (_req, file, cb) {
+      const allowedTypes = ["image/jpeg", "image/png", "image/jpg", "application/pdf"];
+      if (allowedTypes.includes(file.mimetype)) cb(null, true);
+      else cb(new Error("Tipo de arquivo não permitido. Use JPEG, PNG ou PDF."));
     },
-    filename: function (req, file, cb) {
-      const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9)
-      cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname))
+  });
+
+  // Full account movement aggregates. Unlike the history list, these totals cover all stored movements.
+  app.get('/api/client/financial-summary', isAuthenticated, isApproved, async (req: any, res) => {
+    try {
+      const userId = String(req.user.id);
+      const [movements, account] = await Promise.all([
+        dbStorage.getUserMovimentos(userId, 100000),
+        dbStorage.getUser(userId),
+      ]);
+      const summary = movements.reduce((totals, movement) => {
+        const amount = Number(movement.valor || 0);
+        if (movement.tipo === "deposito") totals.totalDeposits += amount;
+        if (movement.tipo === "rendimento") totals.totalYields += amount;
+        if (movement.tipo === "saque") totals.totalWithdrawals += amount;
+        return totals;
+      }, { totalDeposits: 0, totalYields: 0, totalWithdrawals: 0 });
+      const lastMovementAt = movements[0]?.createdAt ?? null;
+      res.setHeader("Cache-Control", "no-store, max-age=0");
+      return res.json({
+        balance: Number(account?.saldo || 0),
+        ...summary,
+        netRecordedFlow: summary.totalDeposits + summary.totalYields - summary.totalWithdrawals,
+        movementCount: movements.length,
+        lastMovementAt,
+      });
+    } catch (error) {
+      console.error("[CLIENT FINANCIAL SUMMARY] Failed to aggregate account movements:", error instanceof Error ? error.message : String(error));
+      return res.status(500).json({ message: "Não foi possível consultar o resumo financeiro da conta." });
     }
   });
 
-  const upload = multer({ 
-    storage: fileStorage,
-    limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
-    fileFilter: function (req, file, cb) {
-      const allowedTypes = ['image/jpeg', 'image/png', 'image/jpg', 'application/pdf'];
-      if (allowedTypes.includes(file.mimetype)) {
-        cb(null, true);
-      } else {
-        cb(new Error('Tipo de arquivo não permitido. Use JPEG, PNG ou PDF.'));
-      }
+  // Client-safe trading history: only the authenticated user's own operations and non-secret fields.
+  app.get('/api/client/activity', isAuthenticated, isApproved, async (req: any, res) => {
+    try {
+      const requestedLimit = Number.parseInt(String(req.query.limit || "200"), 10);
+      const limit = Number.isFinite(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 500) : 200;
+      const operations = await dbStorage.getUserTradeOperations(String(req.user.id), limit);
+      res.setHeader("Cache-Control", "no-store, max-age=0");
+      return res.json({
+        operations: operations.map((operation: any) => ({
+          id: operation.id,
+          symbol: operation.symbol,
+          tradeType: operation.tradeType,
+          direction: operation.direction,
+          amount: operation.amount,
+          duration: operation.duration,
+          status: operation.status,
+          profit: operation.profit,
+          createdAt: operation.createdAt,
+          completedAt: operation.completedAt,
+        })),
+      });
+    } catch (error) {
+      console.error("[CLIENT ACTIVITY] Failed to load account activity:", error instanceof Error ? error.message : String(error));
+      return res.status(500).json({ message: "Não foi possível carregar o histórico de operações." });
+    }
+  });
+
+  // Affiliate account summary and referral link, scoped to the authenticated user.
+  app.get('/api/affiliates', isAuthenticated, isApproved, async (req: any, res) => {
+    try {
+      const data = await getAffiliateDashboard(String(req.user.id));
+      res.setHeader("Cache-Control", "no-store, max-age=0");
+      return res.json(data);
+    } catch (error) {
+      console.error("[AFFILIATE] Failed to load user dashboard:", error instanceof Error ? error.message : String(error));
+      return res.status(503).json({ message: "Não foi possível carregar sua rede de afiliados no momento." });
     }
   });
 
   // Registration route
   app.post('/api/register', async (req, res) => {
     try {
-      console.log('Registration request body:', req.body);
+      // Registration payloads contain passwords and personal data; never log them.
       const validatedData = registerUserSchema.parse(req.body);
-      console.log('Validated data:', validatedData);
       
       // Perform real data validation
       const validation = await validateUserData(validatedData);
@@ -494,6 +606,15 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         return res.status(400).json({ message: "CPF já cadastrado" });
       }
 
+      const referralCode = String(validatedData.referralCode || "").trim().toUpperCase();
+      let referrerUserId: string | null = null;
+      if (referralCode) {
+        referrerUserId = await findAffiliateReferrer(referralCode);
+        if (!referrerUserId) {
+          return res.status(400).json({ message: "Código de indicação não encontrado." });
+        }
+      }
+
       // Hash password
       const passwordHash = await hashPassword(validatedData.password);
 
@@ -508,6 +629,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       // Remove password fields before inserting
       delete (userData as any).password;
       delete (userData as any).confirmPassword;
+      delete (userData as any).referralCode;
 
       // TRY to create user - this is wrapped in try/catch
       // If ANY error occurs, the user will NOT be saved to database
@@ -522,6 +644,13 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         }
         
         console.log("✅ Usuário criado com sucesso:", verifyUser.email, "ID:", verifyUser.id);
+
+        try {
+          await ensureAffiliateProfile(verifyUser.id);
+          if (referrerUserId) await attachAffiliateReferral(verifyUser.id, referrerUserId);
+        } catch (affiliateError) {
+          console.error("[AFFILIATE] Referral setup requires reconciliation:", affiliateError instanceof Error ? affiliateError.message : String(affiliateError));
+        }
         
         // Adicionar automaticamente à lista de marketing
         try {
@@ -1255,7 +1384,18 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       if (!req.user) {
         return res.status(401).json({ message: "Não autenticado" });
       }
-      const { passwordHash, codigoVerificacao, ...userWithoutSensitiveData } = req.user;
+      const {
+        passwordHash,
+        senhaFallback,
+        codigoVerificacao,
+        codigoExpiresAt,
+        passwordResetToken,
+        passwordResetTokenExpiresAt,
+        chavePix,
+        tipoChavePix,
+        isAdmin,
+        ...userWithoutSensitiveData
+      } = req.user;
       // Existing persistent web sessions may predate the Universal Server token vault.
       // Reconcile the user's saved Deriv token in the background without exposing it
       // to the browser or forcing the user to log out and back in.
@@ -1265,6 +1405,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
           await ensureUniversalDerivSession(String(req.user.id), savedDerivToken.token, savedDerivToken.accountType as 'demo' | 'real');
         }
       }).catch((e) => console.warn('⚠️ [UNIVERSAL] Falha ao reconciliar sessão web/Deriv ativa:', e instanceof Error ? e.message : String(e)));
+      res.setHeader("Cache-Control", "no-store, max-age=0");
       res.json(userWithoutSensitiveData);
     } catch (error) {
       console.error("Error fetching user:", error);
@@ -1299,105 +1440,23 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
   });
 
-  // Generate PIX for deposit with predefined amounts
-  app.post('/api/pix/generate', isAuthenticated, isApproved, async (req: any, res) => {
-    try {
-      const userId = req.user.id;
-      const { valor } = req.body;
-      
-      const valorNum = parseFloat(valor);
-      
-      if (!valor || valorNum < 130) {
-        return res.status(400).json({ message: "Valor mínimo de depósito é R$ 130,00" });
-      }
-
-      const user = await dbStorage.getUser(userId);
-      if (!user || !user.cpf) {
-        return res.status(400).json({ message: "CPF não cadastrado" });
-      }
-
-      // Validar se é um valor permitido
-      const baseAmounts = [130, 350, 825, 1000];
-      const isBaseAmount = baseAmounts.includes(valorNum);
-      const isIncrementalAmount = valorNum >= 10000 && valorNum <= 100000 && valorNum % 10000 === 0;
-      
-      if (!isBaseAmount && !isIncrementalAmount) {
-        return res.status(400).json({ 
-          message: "Valor não permitido. Use um dos valores disponíveis." 
-        });
-      }
-
-      let pixString;
-      let qrCodeDataURL;
-      
-      if (valorNum === 130) {
-        // Usar o PIX code exato fornecido para R$ 130
-        pixString = "00020126580014br.gov.bcb.pix013605f6ace9-d21c-43f2-8fb9-40e7da3009a827600016BR.COM.PAGSEGURO01360A3DF8F0-D509-4AF4-A5CE-5602D46FB8C45204899953039865406130.005802BR5919Victor Felipe Diogo6006Araras62290525PAGS00001300025081513148863042DA0";
-      } else {
-        // Para outros valores, gerar PIX com as mesmas informações do merchant
-        const pixKey = "05f6ace9-d21c-43f2-8fb9-40e7da3009a8";
-        const empresaNome = "Victor Felipe Diogo";
-        const empresaCidade = "Araras";
-        
-        pixString = generatePixPayload({
-          pixKey: pixKey,
-          merchantName: empresaNome,
-          merchantCity: empresaCidade,
-          amount: valorNum,
-          transactionId: `DEP-${userId.substring(0, 8)}-${Date.now()}`
-        });
-      }
-      
-      qrCodeDataURL = await QRCode.toDataURL(pixString);
-      
-      res.json({
-        qrCode: qrCodeDataURL,
-        pixString: pixString,
-        valor: valorNum.toFixed(2),
-        chavePix: "05f6ace9-d21c-43f2-8fb9-40e7da3009a8",
-        empresa: "Victor Felipe Diogo",
-        observacao: `Depósito InvistaPRO R$ ${valorNum.toFixed(2)} - Invista com Risco Zero`
-      });
-    } catch (error) {
-      console.error("Error generating PIX:", error);
-      res.status(500).json({ message: "Failed to generate PIX" });
-    }
+  // Pagamentos PIX desativados temporariamente.
+  // A geração anterior usava dados fixos de recebedor e não tinha confirmação bancária.
+  app.post('/api/pix/generate', isAuthenticated, isApproved, (_req: any, res: any) => {
+    res.setHeader("Cache-Control", "no-store, max-age=0");
+    return res.status(503).json({
+      code: "PAYMENTS_NOT_CONFIGURED",
+      message: "Pagamentos indisponíveis temporariamente. A integração com o Mercado Pago ainda será configurada."
+    });
   });
 
-  // Process deposit (simulate PIX payment confirmation)
-  app.post('/api/deposit/confirm', isAuthenticated, isApproved, async (req: any, res) => {
-    try {
-      const userId = req.user.id;
-      const { valor, pixString } = req.body;
-      
-      const user = await dbStorage.getUser(userId);
-      if (!user) {
-        return res.status(404).json({ message: "User not found" });
-      }
-
-      const valorNum = parseFloat(valor);
-      const novoSaldo = Number(user.saldo) + valorNum;
-      
-      // Update user balance and deposit date
-      await dbStorage.updateUser(userId, {
-        saldo: novoSaldo,
-        depositoData: new Date().toISOString(),
-      });
-
-      // Create movement record
-      await dbStorage.createMovimento({
-        userId,
-        tipo: 'deposito',
-        valor: valorNum,
-        descricao: 'Depósito via PIX',
-        pixString,
-      });
-
-      res.json({ message: "Depósito confirmado com sucesso", novoSaldo });
-    } catch (error) {
-      console.error("Error confirming deposit:", error);
-      res.status(500).json({ message: "Failed to confirm deposit" });
-    }
+  // Nunca permitir crédito manual de carteira por requisição do cliente.
+  app.post('/api/deposit/confirm', isAuthenticated, isApproved, (_req: any, res: any) => {
+    res.setHeader("Cache-Control", "no-store, max-age=0");
+    return res.status(410).json({
+      code: "MANUAL_DEPOSIT_CONFIRMATION_DISABLED",
+      message: "A confirmação manual de depósitos foi desativada. O saldo só poderá ser creditado após confirmação verificável do provedor de pagamento."
+    });
   });
 
   // Calculate current yield
@@ -1450,7 +1509,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         totalTrades: Math.max(0, parseInt(String(stats?.totalTrades || 0))),
         wonTrades: Math.max(0, parseInt(String(stats?.wonTrades || 0))),
         winRate: Math.max(0, parseFloat(String(stats?.winRate || 0))),
-        totalPnL: Math.max(0, parseFloat(String(stats?.totalProfit || 0))),
+        totalPnL: parseFloat(String(stats?.totalProfit || 0)),
         investidoMesAtual: movimentos.filter(m => m.tipo === 'deposito').reduce((sum, m) => sum + Number(m.valor), 0),
         movimentos: movimentos.map(m => ({
           tipo: m.tipo,
@@ -1535,94 +1594,22 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
   });
 
-  // Withdraw yield (only on last day of month)
-  app.post('/api/yield/withdraw', isAuthenticated, isApproved, async (req: any, res) => {
-    try {
-      const userId = req.user.id;
-      const user = await dbStorage.getUser(userId);
-      
-      if (!user) {
-        return res.status(404).json({ message: "User not found" });
-      }
-
-      const hoje = new Date();
-      const ultimoDiaMes = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0).getDate();
-      
-      if (hoje.getDate() !== ultimoDiaMes) {
-        return res.status(400).json({ 
-          message: "Saque de rendimento só disponível no último dia do mês" 
-        });
-      }
-
-      const rendimento = await dbStorage.calcularRendimento(Number(user.saldo));
-      
-      // Create movement record
-      await dbStorage.createMovimento({
-        userId,
-        tipo: 'rendimento',
-        valor: rendimento,
-        descricao: 'Saque de rendimento - até 130% dos melhores bancos',
-      });
-
-      res.json({ 
-        message: `Rendimento de R$${rendimento.toFixed(2)} sacado!`,
-        rendimento 
-      });
-    } catch (error) {
-      console.error("Error withdrawing yield:", error);
-      res.status(500).json({ message: "Failed to withdraw yield" });
-    }
+  // Legacy yield and total-withdrawal routes disabled until real payment-provider reconciliation.
+  // The old yield route created synthetic income movements and the total route zeroed balances without a bank transfer.
+  app.post('/api/yield/withdraw', isAuthenticated, isApproved, (_req: any, res: any) => {
+    res.setHeader("Cache-Control", "no-store, max-age=0");
+    return res.status(503).json({
+      code: "YIELD_WITHDRAWAL_NOT_CONFIGURED",
+      message: "Retirada de rendimento indisponível até existir apuração financeira conciliada e transferência real pelo provedor."
+    });
   });
 
-  // Total withdrawal (after 95 days)
-  app.post('/api/withdraw/total', isAuthenticated, isApproved, async (req: any, res) => {
-    try {
-      const userId = req.user.id;
-      const user = await dbStorage.getUser(userId);
-      
-      if (!user) {
-        return res.status(404).json({ message: "User not found" });
-      }
-
-      if (!user.depositoData) {
-        return res.status(400).json({ message: "Nenhum depósito encontrado" });
-      }
-
-      const hoje = new Date();
-      const depositoDate = new Date(user.depositoData);
-      const diasPassados = Math.floor(
-        (hoje.getTime() - depositoDate.getTime()) / (1000 * 60 * 60 * 24)
-      );
-      
-      if (diasPassados < 95 || hoje.getDate() > 5) {
-        return res.status(400).json({ 
-          message: "Saque total só disponível após 95 dias e até o 5º dia útil do mês." 
-        });
-      }
-
-      const valorTotal = Number(user.saldo);
-      
-      // Update user balance to 0
-      await dbStorage.updateUser(userId, {
-        saldo: 0,
-      });
-
-      // Create movement record
-      await dbStorage.createMovimento({
-        userId,
-        tipo: 'saque',
-        valor: valorTotal,
-        descricao: 'Saque total do investimento',
-      });
-
-      res.json({ 
-        message: `Saque total de R$${valorTotal.toFixed(2)} realizado!`,
-        valorTotal 
-      });
-    } catch (error) {
-      console.error("Error processing total withdrawal:", error);
-      res.status(500).json({ message: "Failed to process total withdrawal" });
-    }
+  app.post('/api/withdraw/total', isAuthenticated, isApproved, (_req: any, res: any) => {
+    res.setHeader("Cache-Control", "no-store, max-age=0");
+    return res.status(503).json({
+      code: "TOTAL_WITHDRAWAL_NOT_CONFIGURED",
+      message: "Saque total indisponível até integração real com provedor, reserva do saldo e confirmação da transferência."
+    });
   });
 
   // Investment simulation
@@ -1666,10 +1653,18 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   app.get('/api/movements', isAuthenticated, isApproved, async (req: any, res) => {
     try {
       const userId = req.user.id;
-      const limit = parseInt(req.query.limit as string) || 10;
+      const requestedLimit = Number.parseInt(String(req.query.limit || "10"), 10);
+      const limit = Number.isFinite(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 500) : 10;
       
       const movements = await dbStorage.getUserMovimentos(userId, limit);
-      res.json(movements);
+      res.setHeader("Cache-Control", "no-store, max-age=0");
+      res.json(movements.map((movement: any) => ({
+        id: movement.id,
+        tipo: movement.tipo,
+        valor: movement.valor,
+        descricao: movement.descricao,
+        createdAt: movement.createdAt,
+      })));
     } catch (error) {
       console.error("Error fetching movements:", error);
       res.status(500).json({ message: "Failed to fetch movements" });
@@ -1692,22 +1687,29 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         return res.status(400).json({ message: "Tipo de documento inválido" });
       }
 
-      // Create document record
-      const documento = await dbStorage.createDocumento({
-        userId,
-        tipo,
-        arquivo: req.file.path,
-        status: 'pendente'
-      });
-
-      res.json({ 
+      const documento = await saveKycDocument(String(userId), String(tipo), req.file);
+      res.setHeader("Cache-Control", "no-store, max-age=0");
+      return res.json({
         message: "Documento enviado com sucesso",
         documentoId: documento.id,
-        status: 'pendente'
+        status: "pendente",
       });
     } catch (error) {
-      console.error("Error uploading document:", error);
-      res.status(500).json({ message: "Erro ao enviar documento" });
+      const message = error instanceof Error ? error.message : String(error);
+      console.error("Error uploading document:", message);
+      if (message === "KYC_DOCUMENT_ALREADY_APPROVED") {
+        return res.status(409).json({ message: "Este documento já foi aprovado. Entre em contato com o suporte se precisar alterá-lo." });
+      }
+      if (message === "KYC_DOCUMENT_TYPE_INVALID") {
+        return res.status(400).json({ message: "Tipo de documento inválido." });
+      }
+      if (message.includes("DOCUMENT_CONTENT_TYPE_MISMATCH")) {
+        return res.status(400).json({ message: "O conteúdo do arquivo não corresponde a um JPEG, PNG ou PDF válido." });
+      }
+      if (message.includes("PRIVATE_DOCUMENT_STORAGE_NOT_CONFIGURED")) {
+        return res.status(503).json({ code: "PRIVATE_DOCUMENT_STORAGE_NOT_CONFIGURED", message: "O armazenamento privado de documentos ainda não foi configurado." });
+      }
+      return res.status(500).json({ message: "Erro ao enviar documento" });
     }
   });
 
@@ -1716,7 +1718,15 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     try {
       const userId = req.user.id;
       const documentos = await dbStorage.getUserDocumentos(userId);
-      res.json(documentos);
+      res.setHeader("Cache-Control", "no-store, max-age=0");
+      res.json(documentos.map((documento: any) => ({
+        id: documento.id,
+        tipo: documento.tipo,
+        status: documento.status,
+        motivoRejeicao: documento.motivoRejeicao,
+        createdAt: documento.createdAt,
+        updatedAt: documento.updatedAt,
+      })));
     } catch (error) {
       console.error("Error fetching documents:", error);
       res.status(500).json({ message: "Erro ao buscar documentos" });
@@ -1725,122 +1735,13 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
 
 
 
-  // Enhanced withdrawal route with document requirements
-  app.post('/api/withdraw', isAuthenticated, isApproved, async (req: any, res) => {
-    try {
-      const userId = req.user.id;
-      const { valor, tipo } = withdrawalRequestSchema.parse(req.body);
-      
-      const user = await dbStorage.getUser(userId);
-      if (!user) {
-        return res.status(404).json({ message: "Usuário não encontrado" });
-      }
-
-      // Check for total withdrawal requirements
-      if (tipo === 'total') {
-        // Check if user has uploaded required documents
-        const documentos = await dbStorage.getUserDocumentos(userId);
-        const requiredDocs = ['cpf', 'rg', 'comprovante'];
-        const uploadedDocs = documentos.filter(doc => doc.status === 'aprovado').map(doc => doc.tipo);
-        const missingDocs = requiredDocs.filter(doc => !uploadedDocs.includes(doc));
-        
-        if (missingDocs.length > 0) {
-          return res.status(400).json({ 
-            message: `Documentos pendentes: ${missingDocs.join(', ')}`,
-            missingDocuments: missingDocs
-          });
-        }
-
-        // Check 95-day waiting period
-        if (user.depositoData) {
-          const daysSinceDeposit = Math.floor((Date.now() - new Date(user.depositoData).getTime()) / (1000 * 60 * 60 * 24));
-          if (daysSinceDeposit < 95) {
-            return res.status(400).json({ 
-              message: `Saque total disponível após 95 dias. Faltam ${95 - daysSinceDeposit} dias.`
-            });
-          }
-        }
-      }
-
-      // Sistema híbrido: verificação de segurança para saques > R$300
-      let securityVerified = false;
-      let verificacaoUsada = 'nenhuma';
-      
-      if (valor > 300) {
-        const temBiometria = user.biometriaConfigurada;
-        const temSenhaFallback = !!user.senhaFallback;
-        
-        if (!temBiometria && !temSenhaFallback) {
-          return res.status(400).json({ 
-            message: "Configure biometria ou senha de segurança para saques acima de R$300",
-            requiresSecuritySetup: true
-          });
-        }
-        
-        // Verificar se alguma verificação foi passada
-        const { biometriaVerificada, senhaVerificada } = req.body;
-        
-        if (biometriaVerificada && temBiometria) {
-          securityVerified = true;
-          verificacaoUsada = 'biometria';
-        } else if (senhaVerificada && temSenhaFallback) {
-          securityVerified = true;
-          verificacaoUsada = 'senha';
-        } else {
-          return res.status(400).json({ 
-            message: "Verificação de segurança obrigatória para saques acima de R$300",
-            metodosDisponiveis: {
-              biometria: temBiometria,
-              senhaFallback: temSenhaFallback
-            }
-          });
-        }
-      }
-
-      let novoSaldo: number;
-      let descricao: string;
-
-      if (tipo === 'rendimento') {
-        const rendimento = await dbStorage.calcularRendimento(Number(user.saldo));
-        if (valor > rendimento) {
-          return res.status(400).json({ message: "Valor solicitado maior que o rendimento disponível" });
-        }
-        novoSaldo = Number(user.saldo) - valor;
-        descricao = `Saque de rendimento - R$${valor.toFixed(2)}`;
-      } else {
-        if (valor > Number(user.saldo)) {
-          return res.status(400).json({ message: "Saldo insuficiente" });
-        }
-        novoSaldo = Number(user.saldo) - valor;
-        descricao = `Saque total - R$${valor.toFixed(2)}`;
-      }
-
-      // Update user balance
-      await dbStorage.updateUser(userId, {
-        saldo: novoSaldo,
-      });
-
-      // Create movement record
-      await dbStorage.createMovimento({
-        userId,
-        tipo: 'saque',
-        valor,
-        descricao,
-        biometriaVerificada: valor > 300 && securityVerified,
-      });
-
-      res.json({ 
-        message: "Saque realizado com sucesso!",
-        valorSacado: valor,
-        novoSaldo
-      });
-    } catch (error: any) {
-      console.error("Error processing withdrawal:", error);
-      if (error.issues) {
-        return res.status(400).json({ message: error.issues[0].message });
-      }
-      res.status(500).json({ message: "Erro ao processar saque" });
-    }
+  // Saques desativados até integração real com provedor e reconciliação de transferência.
+  app.post('/api/withdraw', isAuthenticated, isApproved, (_req: any, res: any) => {
+    res.setHeader("Cache-Control", "no-store, max-age=0");
+    return res.status(503).json({
+      code: "WITHDRAWALS_NOT_CONFIGURED",
+      message: "Saques temporariamente indisponíveis. A transferência PIX será habilitada após integração e confirmação do provedor."
+    });
   });
 
   // Rotas do sistema interno de emails removidas - sistema desnecessário
@@ -4761,7 +4662,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         const { rmSync } = await import('fs');
         try { rmSync(MT5_UPLOAD_DIR, { recursive: true, force: true }); } catch {}
       }
-      mkdirSync(MT5_UPLOAD_DIR, { recursive: true });
+      mkdirSyncFs(MT5_UPLOAD_DIR, { recursive: true });
 
       let savedCount = 0;
       for (const file of files) {
@@ -4769,7 +4670,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         const relativePath = file.originalname.replace(/\\/g, '/');
         const targetPath = pathMod.join(MT5_UPLOAD_DIR, relativePath);
         const targetDir = pathMod.dirname(targetPath);
-        mkdirSync(targetDir, { recursive: true });
+        mkdirSyncFs(targetDir, { recursive: true });
         writeFileSync(targetPath, file.buffer);
         savedCount++;
       }
@@ -4823,7 +4724,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
 
       // If this is the last chunk — extract with 7z
       if (chunkIndex === totalChunks - 1) {
-        mkdirSync(MT5_UPLOAD_DIR, { recursive: true });
+        mkdirSyncFs(MT5_UPLOAD_DIR, { recursive: true });
         const { execSync } = await import('child_process');
         try {
           // Extract to a temp subfolder first to detect top-level dir
@@ -4895,7 +4796,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   // ========== AI ASSISTANT ROUTES ==========
   const { processAiAssistantMessage } = await import('./services/ai-assistant.js');
 
-  app.post('/api/ai-assistant/chat', isAuthenticated, async (req: any, res: any) => {
+  app.post('/api/ai-assistant/chat', isAuthenticated, isApproved, async (req: any, res: any) => {
     try {
       const userId = String(req.user?.id);
       const { message, history = [] } = req.body;
@@ -4903,8 +4804,24 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       if (!message || typeof message !== 'string') {
         return res.status(400).json({ error: 'Message is required' });
       }
+      if (message.length > 4000 || !Array.isArray(history) || history.length > 10) {
+        return res.status(400).json({ error: 'Mensagem ou histórico excede o limite permitido.' });
+      }
 
-      const response = await processAiAssistantMessage(userId, message, history);
+      const currentUser = await dbStorage.getUser(userId);
+      const currentEmail = String(currentUser?.email || '').trim().toLowerCase();
+      const privilegedEmails = [
+        process.env.MASTER_EMAIL,
+        process.env.INVISTA_MASTER_EMAIL,
+        process.env.INVISTAPRO_ACCOUNT_EMAIL,
+        process.env.ADMIN_EMAIL,
+      ].map((value) => String(value || '').trim().toLowerCase()).filter(Boolean);
+      const canControlTrading = privilegedEmails.includes(currentEmail) || isAuthorizedEmail(currentEmail);
+      const safeHistory = history.filter((item: any) =>
+        item && (item.role === 'user' || item.role === 'assistant') &&
+        typeof item.content === 'string' && item.content.length <= 4000
+      );
+      const response = await processAiAssistantMessage(userId, message, safeHistory, canControlTrading);
       res.json(response);
     } catch (err: any) {
       console.error('[AI Assistant] Error:', err);

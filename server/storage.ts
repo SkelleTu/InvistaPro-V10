@@ -55,7 +55,7 @@ import {
   type ModuleSlotConfig,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, and, isNotNull, isNull, sql, lt } from "drizzle-orm";
+import { eq, desc, and, isNotNull, isNull, sql, lt, inArray } from "drizzle-orm";
 import { createHash, randomBytes, createCipheriv, createDecipheriv } from "crypto";
 
 // Encryption utilities for sensitive data
@@ -147,6 +147,7 @@ export interface IStorage {
   // Movement operations
   createMovimento(movimento: InsertMovimento): Promise<Movimento>;
   getUserMovimentos(userId: string, limit?: number): Promise<Movimento[]>;
+  getAllMovimentos(limit?: number): Promise<Movimento[]>;
   
   // Financial calculations
   calcularRendimento(saldo: number): Promise<number>;
@@ -154,7 +155,10 @@ export interface IStorage {
   // Document operations
   createDocumento(documento: InsertDocumento): Promise<Documento>;
   getUserDocumentos(userId: string): Promise<Documento[]>;
+  getAllDocumentos(): Promise<Documento[]>;
+  getDocumento(id: string): Promise<Documento | undefined>;
   updateDocumentoStatus(id: string, status: string, motivoRejeicao?: string): Promise<Documento>;
+  updateDocumento(id: string, updates: Partial<Documento>): Promise<Documento>;
 
   // TRADING SYSTEM OPERATIONS
   
@@ -202,6 +206,7 @@ export interface IStorage {
   // Trade operations
   createTradeOperation(operation: InsertTradeOperation): Promise<TradeOperation>;
   getUserTradeOperations(userId: string, limit?: number): Promise<TradeOperation[]>;
+  getAllTradeOperations(): Promise<TradeOperation[]>;
   updateTradeOperation(id: string, updates: Partial<TradeOperation>): Promise<TradeOperation>;
   getTradeOperationByDerivContractId(derivContractId: string): Promise<TradeOperation | null>;
   getActiveTradeOperations(userId: string): Promise<TradeOperation[]>;
@@ -407,6 +412,11 @@ export class DatabaseStorage implements IStorage {
       .limit(limit);
   }
 
+  async getAllMovimentos(limit?: number): Promise<Movimento[]> {
+    const query = db.select().from(movimentos).orderBy(desc(movimentos.createdAt));
+    return limit ? await query.limit(limit) : await query;
+  }
+
   // Financial calculations
   async calcularRendimento(saldo: number): Promise<number> {
     const taxaMensal = 0.00835; // 0.835% mensal = 10.63% anual composto exato
@@ -429,6 +439,27 @@ export class DatabaseStorage implements IStorage {
       .from(documentos)
       .where(eq(documentos.userId, userId))
       .orderBy(desc(documentos.createdAt));
+  }
+
+  async getAllDocumentos(): Promise<Documento[]> {
+    return await db.select().from(documentos).orderBy(desc(documentos.createdAt));
+  }
+
+  async getDocumento(id: string): Promise<Documento | undefined> {
+    const [document] = await db.select().from(documentos).where(eq(documentos.id, id)).limit(1);
+    return document;
+  }
+
+  async updateDocumento(id: string, updates: Partial<Documento>): Promise<Documento> {
+    const safeUpdates: any = {};
+    for (const key of ["arquivo", "status", "motivoRejeicao", "aprovadoPor", "aprovadoEm", "updatedAt"] as const) {
+      if (key in updates) safeUpdates[key] = updates[key];
+    }
+    safeUpdates.updatedAt ??= new Date().toISOString();
+    const [document] = await db.update(documentos).set(safeUpdates)
+      .where(eq(documentos.id, id)).returning();
+    if (!document) throw new Error("DOCUMENT_NOT_FOUND");
+    return document;
   }
 
   async updateDocumentoStatus(id: string, status: string, motivoRejeicao?: string): Promise<Documento> {
@@ -929,6 +960,10 @@ export class DatabaseStorage implements IStorage {
       .limit(limit);
   }
 
+  async getAllTradeOperations(): Promise<TradeOperation[]> {
+    return await db.select().from(tradeOperations).orderBy(desc(tradeOperations.createdAt));
+  }
+
   async getTradeOperationByDerivContractId(derivContractId: string): Promise<TradeOperation | null> {
     const [op] = await db
       .select()
@@ -987,7 +1022,7 @@ export class DatabaseStorage implements IStorage {
       .from(tradeOperations)
       .where(and(
         eq(tradeOperations.userId, userId),
-        eq(tradeOperations.status, 'active')
+        inArray(tradeOperations.status, ["pending", "active", "open", "purchased", "in_progress"])
       ))
       .orderBy(desc(tradeOperations.createdAt));
   }
@@ -1100,7 +1135,10 @@ export class DatabaseStorage implements IStorage {
     const expiredTrades = operations.filter(op => op.status === 'expired' || op.status === 'closed').length;
     
     // Filter only completed trades (not pending and has profit value)
-    const completedTrades = operations.filter(op => op.status !== 'pending' && op.status !== 'active' && op.profit !== null && op.profit !== undefined);
+    const completedTrades = operations.filter(op =>
+      !['pending', 'active', 'open', 'purchased', 'in_progress'].includes(String(op.status || '').toLowerCase()) &&
+      op.profit !== null && op.profit !== undefined
+    );
     
     // Count wins and losses based on PROFIT (not status)
     const wonTrades = completedTrades.filter(op => (op.profit || 0) > 0).length;
@@ -1918,11 +1956,9 @@ export class DatabaseStorage implements IStorage {
   async isAssetBlocked(userId: string, assetName: string): Promise<boolean> {
     const blacklisted = await db.select().from(assetBlacklist).where(eq(assetBlacklist.userId, userId));
     return blacklisted.some(ba => {
-      if (ba.patternType === 'exact') {
-        return ba.assetPattern === assetName;
-      } else if (ba.patternType === 'contains') {
-        return assetName.includes(ba.assetPattern);
-      }
+      if (ba.isActive === false) return false;
+      if (ba.patternType === "exact") return ba.assetPattern === assetName;
+      if (ba.patternType === "contains") return assetName.includes(ba.assetPattern);
       return false;
     });
   }
@@ -1945,24 +1981,52 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createPauseConfig(config: InsertPauseConfiguration): Promise<PauseConfiguration> {
+    const existing = await db.select({ id: pauseConfiguration.id })
+      .from(pauseConfiguration)
+      .where(eq(pauseConfiguration.userId, config.userId))
+      .limit(1);
+    if (existing.length > 0) return this.updatePauseConfig(config.userId, {
+      isEnabled: config.isEnabled ?? undefined,
+      operatingDurationMinutes: config.operatingDurationMinutes ?? undefined,
+      pauseDurationMinSeconds: config.pauseDurationMinSeconds ?? undefined,
+      pauseDurationMaxSeconds: config.pauseDurationMaxSeconds ?? undefined,
+      useTechnicalAnalysisConsensus: config.useTechnicalAnalysisConsensus ?? undefined,
+      minAIConsensusForPause: config.minAIConsensusForPause ?? undefined,
+    });
     const [result] = await db.insert(pauseConfiguration).values(config).returning();
     return result;
   }
 
   async updatePauseConfig(userId: string, config: UpdatePauseConfiguration): Promise<PauseConfiguration> {
+    const updatedAt = new Date().toISOString();
     const [result] = await db.update(pauseConfiguration).set({
       ...config,
-      updatedAt: new Date().toISOString(),
+      updatedAt,
     }).where(eq(pauseConfiguration.userId, userId)).returning();
-    return result;
+    if (result) return result;
+    const [created] = await db.insert(pauseConfiguration).values({
+      userId,
+      ...config,
+      updatedAt,
+    }).returning();
+    return created;
   }
 
   async updatePausedNowStatus(userId: string, isPausedNow: boolean): Promise<void> {
-    await db.update(pauseConfiguration).set({
+    const now = new Date().toISOString();
+    const [updated] = await db.update(pauseConfiguration).set({
       isPausedNow,
-      lastPauseStartedAt: isPausedNow ? new Date().toISOString() : null,
-      updatedAt: new Date().toISOString(),
-    }).where(eq(pauseConfiguration.userId, userId));
+      lastPauseStartedAt: isPausedNow ? now : null,
+      updatedAt: now,
+    }).where(eq(pauseConfiguration.userId, userId)).returning({ id: pauseConfiguration.id });
+    if (!updated) {
+      await db.insert(pauseConfiguration).values({
+        userId,
+        isPausedNow,
+        lastPauseStartedAt: isPausedNow ? now : null,
+        updatedAt: now,
+      });
+    }
   }
 
   /**

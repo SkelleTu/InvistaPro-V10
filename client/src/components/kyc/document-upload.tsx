@@ -57,8 +57,8 @@ export default function DocumentUpload() {
       return;
     }
 
-    // Validar tamanho (máximo 10MB)
-    const maxSize = 10 * 1024 * 1024; // 10MB
+    // Validar tamanho (máximo 5MB)
+    const maxSize = 5 * 1024 * 1024; // 5MB
     if (file.size > maxSize) {
       toast({
         title: "Arquivo muito grande",
@@ -173,7 +173,7 @@ export default function DocumentUpload() {
             </p>
           )}
           <p className="text-xs text-muted-foreground">
-            Formatos aceitos: JPG, PNG, PDF. Máximo 10MB.
+            Formatos aceitos: JPG, PNG, PDF. Máximo 5MB.
           </p>
         </div>
 

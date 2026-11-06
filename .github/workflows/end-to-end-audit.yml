@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: audit-${{ github.workflow }}-${{ github.ref }}
@@ -21,11 +21,30 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+          fetch-depth: 0
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
+      # Resolve compatible transitive fixes and persist the lockfile before clean install.
+      - name: Apply compatible dependency security updates
+        continue-on-error: true
+        run: npm audit fix --package-lock-only --ignore-scripts
+      - name: Commit updated lockfile to the pull request
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          BRANCH_NAME: ${{ github.head_ref }}
+        run: |
+          if ! git diff --quiet -- package-lock.json; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add package-lock.json
+            git commit -m "chore: apply compatible dependency security updates"
+            git push origin "HEAD:${BRANCH_NAME}"
+          fi
       - name: Install locked dependencies
         run: npm ci --include=dev
       - name: TypeScript check
@@ -33,7 +52,7 @@ jobs:
       - name: Production symbol policy tests
         run: npm test
       - name: Audit production dependencies
-        run: npm audit --omit=dev --audit-level=high
+        run: npm audit --omit=dev --audit-level=low
       - name: Production build
         run: npm run build
       - name: Verify expected build artifacts

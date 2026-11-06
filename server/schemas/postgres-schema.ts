@@ -24,6 +24,8 @@ export const invistaDatabaseIdentity = pgTable("invista_database_identity", {
   platformId: varchar("platform_id", { length: 20 }).notNull(),
   createdAt: timestamp("created_at").defaultNow(),
   essentialBackfillCompletedAt: timestamp("essential_backfill_completed_at"),
+  operationalBackfillCompletedAt: timestamp("operational_backfill_completed_at"),
+  riskControlsBackfillCompletedAt: timestamp("risk_controls_backfill_completed_at"),
 });
 
 // Session storage table for express sessions
@@ -204,6 +206,19 @@ export const tradeOperations = pgTable("trade_operations", {
   entryPrice: real("entry_price"),
   exitPrice: real("exit_price"),
   profit: real("profit"),
+  shortcode: text("shortcode"),
+  buyPrice: real("buy_price"),
+  sellPrice: real("sell_price"),
+  entryEpoch: integer("entry_epoch"),
+  exitEpoch: integer("exit_epoch"),
+  contractType: varchar("contract_type", { length: 50 }),
+  barrier: varchar("barrier", { length: 20 }),
+  derivStatus: varchar("deriv_status", { length: 50 }),
+  derivProfit: real("deriv_profit"),
+  payout: real("payout"),
+  statusChangedAt: timestamp("status_changed_at"),
+  lastSyncAt: timestamp("last_sync_at"),
+  syncCount: integer("sync_count").default(0),
   aiConsensus: text("ai_consensus").notNull(),
   isRecoveryMode: boolean("isRecoveryMode").default(false),
   recoveryMultiplier: real("recovery_multiplier").default(1.0),
@@ -230,6 +245,41 @@ export const dailyPnL = pgTable("daily_pnl", {
   recoveryOperations: integer("recovery_operations").default(0),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const pauseConfiguration = pgTable("pause_configuration", {
+  id: varchar("id", { length: 32 }).primaryKey().default(sql`replace(gen_random_uuid()::text, '-', '')`),
+  userId: varchar("user_id", { length: 32 }).notNull().references(() => users.id),
+  isEnabled: boolean("is_enabled").default(true),
+  operatingDurationMinutes: integer("operating_duration_minutes").default(15),
+  pauseDurationMinSeconds: integer("pause_duration_min_seconds").default(60),
+  pauseDurationMaxSeconds: integer("pause_duration_max_seconds").default(180),
+  useTechnicalAnalysisConsensus: boolean("use_technical_analysis_consensus").default(true),
+  minAIConsensusForPause: real("min_ai_consensus_for_pause").default(0.7),
+  lastPauseStartedAt: timestamp("last_pause_started_at"),
+  lastOperatingStartedAt: timestamp("last_operating_started_at"),
+  isPausedNow: boolean("is_paused_now").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const assetBlacklist = pgTable("asset_blacklist", {
+  id: varchar("id", { length: 32 }).primaryKey().default(sql`replace(gen_random_uuid()::text, '-', '')`),
+  userId: varchar("user_id", { length: 32 }).notNull().references(() => users.id),
+  assetPattern: text("asset_pattern").notNull(),
+  patternType: varchar("pattern_type", { length: 20 }).notNull(),
+  isActive: boolean("is_active").default(true),
+  reason: text("reason"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const blockedAssets = pgTable("blocked_assets", {
+  id: varchar("id", { length: 32 }).primaryKey().default(sql`replace(gen_random_uuid()::text, '-', '')`),
+  userId: varchar("user_id", { length: 32 }).notNull().references(() => users.id),
+  tradeMode: varchar("trade_mode", { length: 50 }).notNull(),
+  symbol: varchar("symbol", { length: 100 }).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
 });
 
 export const aiRecoveryStrategies = pgTable("ai_recovery_strategies", {

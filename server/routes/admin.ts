@@ -1,9 +1,9 @@
 import express from "express";
-import { db } from "../db";
-import { eq, desc, sql } from "drizzle-orm";
-import { users, movimentos, documentos } from "@shared/schema";
+import { dualStorage } from "../storage-dual";
 import { isAuthenticated } from "../auth";
 import { isAuthorizedEmail, ACCESS_DENIED_MESSAGE } from "../config/access";
+import { getAffiliateAdminSummary, getAffiliateAdminNetwork } from "../services/affiliate-program";
+import { readPrivateDocument } from "../services/private-document-storage";
 
 // Extend session type
 declare module 'express-session' {
@@ -18,22 +18,30 @@ const router = express.Router();
 router.get('/check-access', isAuthenticated, async (req, res) => {
   try {
     const userId = (req as any).session.passport?.user;
-    const user = await db.select().from(users).where(eq(users.id, userId)).limit(1);
-    
-    if (user.length === 0) {
+    const user = userId ? await dualStorage.getUser(String(userId)) : null;
+
+    if (!user) {
       return res.json({
         hasAccess: false,
         userEmail: null,
         message: 'Usuário não encontrado'
       });
     }
-    
-    const userEmail = user[0].email;
-    const envAdminEmail = process.env.ADMIN_EMAIL;
-    
-    const hasAccess = isAuthorizedEmail(userEmail) || 
-                      (envAdminEmail && userEmail.toLowerCase() === envAdminEmail.toLowerCase());
-    
+
+    const userEmail = String(user.email || "");
+    const normalizedEmail = userEmail.toLowerCase();
+    const envAdminEmail = String(process.env.ADMIN_EMAIL || "").trim().toLowerCase();
+    const masterEmails = [
+      process.env.MASTER_EMAIL,
+      process.env.INVISTA_MASTER_EMAIL,
+      process.env.INVISTAPRO_ACCOUNT_EMAIL,
+    ].map(value => String(value || "").trim().toLowerCase()).filter(Boolean);
+
+    const hasAccess = isAuthorizedEmail(userEmail) ||
+      Boolean(envAdminEmail && normalizedEmail === envAdminEmail) ||
+      masterEmails.includes(normalizedEmail);
+
+    res.setHeader("Cache-Control", "no-store, max-age=0");
     res.json({
       hasAccess,
       userEmail,
@@ -54,23 +62,30 @@ router.get('/check-access', isAuthenticated, async (req, res) => {
 const isAdmin = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
   try {
     const userId = (req as any).session.passport?.user;
-    const user = await db.select().from(users).where(eq(users.id, userId)).limit(1);
-    
-    if (user.length === 0) {
+    const user = userId ? await dualStorage.getUser(String(userId)) : null;
+
+    if (!user) {
       return res.status(403).json({ message: ACCESS_DENIED_MESSAGE });
     }
-    
-    // Controle administrativo: exige flag explícita de admin ou o e-mail
-    // configurado como administrador de emergência.
-    const userEmail = user[0].email;
-    const envAdminEmail = process.env.ADMIN_EMAIL;
-    const isAdminUser = Boolean(user[0].isAdmin) ||
-      Boolean(envAdminEmail && userEmail.toLowerCase() === envAdminEmail.toLowerCase());
+
+    // Use the durable user record for authorization, not only the local SQLite cache.
+    const userEmail = String(user.email || "").toLowerCase();
+    const envAdminEmail = String(process.env.ADMIN_EMAIL || "").trim().toLowerCase();
+    const masterEmails = [
+      process.env.MASTER_EMAIL,
+      process.env.INVISTA_MASTER_EMAIL,
+      process.env.INVISTAPRO_ACCOUNT_EMAIL,
+    ].map((value) => String(value || "").trim().toLowerCase()).filter(Boolean);
+    const isAdminUser = isAuthorizedEmail(userEmail) ||
+      Boolean(envAdminEmail && userEmail === envAdminEmail) ||
+      masterEmails.includes(userEmail);
     
     if (!isAdminUser) {
       return res.status(403).json({ message: ACCESS_DENIED_MESSAGE });
     }
-    
+
+    // Administrative responses include private customer and financial data.
+    res.setHeader("Cache-Control", "no-store, max-age=0");
     next();
   } catch (error) {
     console.error('Error checking admin status:', error);
@@ -78,25 +93,74 @@ const isAdmin = async (req: express.Request, res: express.Response, next: expres
   }
 };
 
+// Affiliate network and commission ledger summary.
+router.get('/affiliates/summary', isAuthenticated, isAdmin, async (_req, res) => {
+  try {
+    const summary = await getAffiliateAdminSummary();
+    res.setHeader("Cache-Control", "no-store, max-age=0");
+    return res.json(summary);
+  } catch (error) {
+    console.error("Error getting affiliate summary:", error instanceof Error ? error.message : String(error));
+    return res.status(503).json({ message: "Não foi possível consultar o resumo de afiliados." });
+  }
+});
+
+// Global parent-child affiliate links for authorized administrators.
+router.get('/affiliates/network', isAuthenticated, isAdmin, async (req, res) => {
+  try {
+    const requested = Number.parseInt(String(req.query.limit || "500"), 10);
+    const limit = Number.isFinite(requested) ? Math.min(Math.max(requested, 1), 1000) : 500;
+    const network = await getAffiliateAdminNetwork(limit);
+    res.setHeader("Cache-Control", "no-store, max-age=0");
+    return res.json(network);
+  } catch (error) {
+    console.error("Error getting global affiliate network:", error);
+    return res.status(500).json({ message: "Não foi possível consultar a rede global de afiliados." });
+  }
+});
+
+// Aggregated trading activity across customer accounts (read-only).
+router.get('/trading/summary', isAuthenticated, isAdmin, async (_req, res) => {
+  try {
+    const operations = await dualStorage.getAllTradeOperations();
+    const openStatuses = new Set(["pending", "active", "open", "purchased", "in_progress"]);
+    const completed = operations.filter(op => !openStatuses.has(String(op.status || "").toLowerCase()) && op.profit !== null && op.profit !== undefined);
+    const summary = {
+      totalOperations: operations.length,
+      openOperations: operations.filter(op => openStatuses.has(String(op.status || "").toLowerCase())).length,
+      winningOperations: completed.filter(op => Number(op.profit) > 0).length,
+      losingOperations: completed.filter(op => Number(op.profit) < 0).length,
+      netProfit: completed.reduce((sum, op) => sum + Number(op.profit || 0), 0),
+      participatingUsers: new Set(operations.map(op => op.userId)).size,
+    };
+    res.setHeader("Cache-Control", "no-store, max-age=0");
+    return res.json(summary);
+  } catch (error) {
+    console.error("Error getting global trading summary:", error);
+    return res.status(500).json({ message: "Não foi possível consultar o resumo operacional." });
+  }
+});
+
 // Get all users
 router.get('/users', isAuthenticated, isAdmin, async (req, res) => {
   try {
-    const allUsers = await db
-      .select({
-        id: users.id,
-        nomeCompleto: users.nomeCompleto,
-        email: users.email,
-        cpf: users.cpf,
-        telefone: users.telefone,
-        saldo: users.saldo,
-        documentosVerificados: users.documentosVerificados,
-        contaAprovada: users.contaAprovada,
-        createdAt: users.createdAt
-      })
-      .from(users)
-      .orderBy(desc(users.createdAt));
+    const allUsers = await dualStorage.getAllUsers();
+    const safeUsers = allUsers
+      .map(user => ({
+        id: user.id,
+        nomeCompleto: user.nomeCompleto,
+        email: user.email,
+        cpf: user.cpf,
+        telefone: user.telefone,
+        saldo: user.saldo,
+        documentosVerificados: user.documentosVerificados,
+        contaAprovada: user.contaAprovada,
+        createdAt: user.createdAt,
+      }))
+      .sort((a, b) => new Date(String(b.createdAt || 0)).getTime() - new Date(String(a.createdAt || 0)).getTime());
 
-    res.json(allUsers);
+    res.setHeader("Cache-Control", "no-store, max-age=0");
+    res.json(safeUsers);
   } catch (error) {
     console.error('Error getting users:', error);
     res.status(500).json({ message: 'Erro interno do servidor' });
@@ -104,57 +168,75 @@ router.get('/users', isAuthenticated, isAdmin, async (req, res) => {
 });
 
 // Get pending documents for review
-router.get('/documents/pending', isAuthenticated, isAdmin, async (req, res) => {
+router.get('/documents/pending', isAuthenticated, isAdmin, async (_req, res) => {
   try {
-    const pendingDocs = await db
-      .select({
-        id: documentos.id,
-        userId: documentos.userId,
-        tipo: documentos.tipo,
-        status: documentos.status,
-        createdAt: documentos.createdAt,
-        user: {
-          nomeCompleto: users.nomeCompleto,
-          email: users.email,
-          cpf: users.cpf
-        }
+    const [allDocuments, allUsers] = await Promise.all([
+      dualStorage.getAllDocumentos(),
+      dualStorage.getAllUsers(),
+    ]);
+    const usersById = new Map(allUsers.map(user => [user.id, user]));
+    const pendingDocs = allDocuments
+      .filter(document => document.status === "pendente")
+      .map(document => {
+        const user = usersById.get(document.userId);
+        return {
+          id: document.id, userId: document.userId, tipo: document.tipo,
+          status: document.status, createdAt: document.createdAt,
+          user: user ? { nomeCompleto: user.nomeCompleto, email: user.email, cpf: user.cpf } : null,
+        };
       })
-      .from(documentos)
-      .innerJoin(users, eq(documentos.userId, users.id))
-      .where(eq(documentos.status, 'pendente'))
-      .orderBy(desc(documentos.createdAt));
-
-    res.json(pendingDocs);
+      .sort((a, b) => new Date(String(b.createdAt || 0)).getTime() - new Date(String(a.createdAt || 0)).getTime());
+    res.setHeader("Cache-Control", "private, no-store, max-age=0");
+    return res.json(pendingDocs);
   } catch (error) {
-    console.error('Error getting pending documents:', error);
-    res.status(500).json({ message: 'Erro interno do servidor' });
+    console.error("Error getting pending documents:", error);
+    return res.status(500).json({ message: "Erro interno do servidor" });
   }
 });
 
 // Get all movements
-router.get('/movements', isAuthenticated, isAdmin, async (req, res) => {
+router.get('/movements', isAuthenticated, isAdmin, async (_req, res) => {
   try {
-    const allMovements = await db
-      .select({
-        id: movimentos.id,
-        tipo: movimentos.tipo,
-        valor: movimentos.valor,
-        descricao: movimentos.descricao,
-        createdAt: movimentos.createdAt,
-        user: {
-          nomeCompleto: users.nomeCompleto,
-          email: users.email
-        }
-      })
-      .from(movimentos)
-      .innerJoin(users, eq(movimentos.userId, users.id))
-      .orderBy(desc(movimentos.createdAt))
-      .limit(100); // Limit to last 100 movements
-
-    res.json(allMovements);
+    const [storedMovements, allUsers] = await Promise.all([
+      dualStorage.getAllMovimentos(100),
+      dualStorage.getAllUsers(),
+    ]);
+    const usersById = new Map(allUsers.map(user => [user.id, user]));
+    const safeMovements = storedMovements.map(movement => {
+      const user = usersById.get(movement.userId);
+      return {
+        id: movement.id, tipo: movement.tipo, valor: Number(movement.valor || 0),
+        descricao: movement.descricao, createdAt: movement.createdAt,
+        user: user ? { nomeCompleto: user.nomeCompleto, email: user.email } : null,
+      };
+    });
+    res.setHeader("Cache-Control", "private, no-store, max-age=0");
+    return res.json(safeMovements);
   } catch (error) {
-    console.error('Error getting movements:', error);
-    res.status(500).json({ message: 'Erro interno do servidor' });
+    console.error("Error getting movements:", error);
+    return res.status(500).json({ message: "Erro interno do servidor" });
+  }
+});
+
+// Serve KYC documents only to authenticated administrators; never expose disk paths.
+router.get('/documents/:documentId/file', isAuthenticated, isAdmin, async (req, res) => {
+  try {
+    const documentId = String(req.params.documentId || "");
+    if (!documentId || documentId.length > 128) {
+      return res.status(400).json({ message: "Documento inválido." });
+    }
+    const document = await dualStorage.getDocumento(documentId);
+    if (!document?.arquivo) return res.status(404).json({ message: "Arquivo não encontrado." });
+
+    const storedFile = await readPrivateDocument(String(document.arquivo));
+    res.setHeader("Cache-Control", "private, no-store, max-age=0");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Content-Type", storedFile.contentType);
+    res.setHeader("Content-Length", String(storedFile.buffer.length));
+    return res.status(200).send(storedFile.buffer);
+  } catch (error) {
+    console.error("Error serving KYC document:", error);
+    return res.status(500).json({ message: "Não foi possível abrir o documento." });
   }
 });
 
@@ -163,53 +245,64 @@ router.get('/user/:userId', isAuthenticated, isAdmin, async (req, res) => {
   try {
     const { userId } = req.params;
 
-    // Get user details
-    const user = await db
-      .select()
-      .from(users)
-      .where(eq(users.id, userId))
-      .limit(1);
+    // User identity and account status come from the durable storage layer.
+    const user = await dualStorage.getUser(userId);
 
-    if (user.length === 0) {
+    if (!user) {
       return res.status(404).json({ message: 'Usuário não encontrado' });
     }
 
-    // Get user movements
-    const userMovements = await db
-      .select()
-      .from(movimentos)
-      .where(eq(movimentos.userId, userId))
-      .orderBy(desc(movimentos.createdAt));
+    // Read the customer's complete history from the same durable source as their identity.
+    const [storedMovements, storedTrades, storedDocuments] = await Promise.all([
+      dualStorage.getUserMovimentos(userId, 500),
+      dualStorage.getUserTradeOperations(userId, 200),
+      dualStorage.getUserDocumentos(userId),
+    ]);
+    const userMovements = storedMovements.map(mov => ({
+      id: mov.id, tipo: mov.tipo, valor: Number(mov.valor || 0),
+      descricao: mov.descricao, createdAt: mov.createdAt,
+    }));
 
-    // Calculate financial summary
     const summary = userMovements.reduce(
       (acc, mov) => {
-        switch (mov.tipo) {
-          case 'deposito':
-            acc.totalDeposited += mov.valor;
-            break;
-          case 'saque':
-            acc.totalWithdrawn += mov.valor;
-            break;
-          case 'rendimento':
-            acc.totalYield += mov.valor;
-            break;
-        }
+        if (mov.tipo === "deposito") acc.totalDeposited += mov.valor;
+        if (mov.tipo === "saque") acc.totalWithdrawn += mov.valor;
+        if (mov.tipo === "rendimento") acc.totalYield += mov.valor;
         return acc;
       },
       { totalDeposited: 0, totalWithdrawn: 0, totalYield: 0 }
     );
 
-    // Get user documents
-    const userDocuments = await db
-      .select()
-      .from(documentos)
-      .where(eq(documentos.userId, userId))
-      .orderBy(desc(documentos.createdAt));
+    const userTradeOperations = storedTrades.map(op => ({
+      id: op.id, symbol: op.symbol, tradeType: op.tradeType, direction: op.direction,
+      amount: op.amount, duration: op.duration, status: op.status, profit: op.profit,
+      derivContractId: op.derivContractId, createdAt: op.createdAt, completedAt: op.completedAt,
+    }));
+    const userDocuments = storedDocuments.map(doc => ({
+      id: doc.id, tipo: doc.tipo, status: doc.status, motivoRejeicao: doc.motivoRejeicao,
+      createdAt: doc.createdAt, updatedAt: doc.updatedAt,
+    }));
 
+    res.setHeader("Cache-Control", "no-store, max-age=0");
     res.json({
-      user: user[0],
+      user: {
+        id: user.id,
+        nomeCompleto: user.nomeCompleto,
+        email: user.email,
+        cpf: user.cpf,
+        telefone: user.telefone,
+        endereco: user.endereco,
+        cidade: user.cidade,
+        estado: user.estado,
+        cep: user.cep,
+        saldo: user.saldo,
+        contaAprovada: user.contaAprovada,
+        documentosVerificados: user.documentosVerificados,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
+      },
       movements: userMovements,
+      tradeOperations: userTradeOperations,
       documents: userDocuments,
       summary
     });
@@ -235,83 +328,58 @@ router.post('/documents/review', isAuthenticated, isAdmin, async (req, res) => {
 
     // Get admin user info
     const adminUserId = (req as any).session.passport?.user;
-    const adminUser = await db
-      .select()
-      .from(users)
-      .where(eq(users.id, adminUserId))
-      .limit(1);
-
-    // Get document info
-    const document = await db
-      .select()
-      .from(documentos)
-      .where(eq(documentos.id, documentId))
-      .limit(1);
-
-    if (document.length === 0) {
-      return res.status(404).json({ message: 'Documento não encontrado' });
+    const adminUser = adminUserId ? await dualStorage.getUser(String(adminUserId)) : null;
+    if (!adminUser) {
+      return res.status(403).json({ message: ACCESS_DENIED_MESSAGE });
     }
 
-    // Update document status
-    const updateData: any = {
-      status: approved ? 'aprovado' : 'rejeitado',
-      aprovadoPor: adminUser[0].email,
-      aprovadoEm: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
+    const document = await dualStorage.getDocumento(String(documentId));
+    if (!document) {
+      return res.status(404).json({ message: "Documento não encontrado" });
+    }
+
+    const previousDecision = {
+      status: document.status,
+      motivoRejeicao: document.motivoRejeicao,
+      aprovadoPor: document.aprovadoPor,
+      aprovadoEm: document.aprovadoEm,
+      updatedAt: document.updatedAt,
     };
+    const updateData: any = {
+      status: approved ? "aprovado" : "rejeitado",
+      aprovadoPor: adminUser.email,
+      aprovadoEm: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      motivoRejeicao: approved ? null : String(reason).trim(),
+    };
+    await dualStorage.updateDocumento(String(documentId), updateData);
 
-    if (!approved) {
-      updateData.motivoRejeicao = reason;
-    }
-
-    await db
-      .update(documentos)
-      .set(updateData)
-      .where(eq(documentos.id, documentId));
-
-    // Check if all user documents are approved
-    const userDocs = await db
-      .select()
-      .from(documentos)
-      .where(eq(documentos.userId, document[0].userId));
-
-    const requiredDocs = ['rg', 'comprovante']; // RG/CNH and comprovante are required
-    const approvedRequiredDocs = userDocs.filter(doc => 
-      requiredDocs.includes(doc.tipo) && doc.status === 'aprovado'
+    const userDocs = await dualStorage.getUserDocumentos(document.userId);
+    const hasApprovedIdentity = userDocs.some(doc =>
+      ["rg", "cnh"].includes(String(doc.tipo || "").toLowerCase()) && doc.status === "aprovado"
     );
+    const hasApprovedAddress = userDocs.some(doc =>
+      String(doc.tipo || "").toLowerCase() === "comprovante" && doc.status === "aprovado"
+    );
+    const documentsVerified = hasApprovedIdentity && hasApprovedAddress;
 
-    // If all required documents are approved, mark user as verified
-    if (approved && approvedRequiredDocs.length >= requiredDocs.length) {
-      await db
-        .update(users)
-        .set({
-          documentosVerificados: true,
-          documentosAprovadosEm: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        })
-        .where(eq(users.id, document[0].userId));
-    } else if (!approved) {
-      // If any required document is rejected, mark user as not verified
-      const hasRejectedRequired = userDocs.some(doc => 
-        requiredDocs.includes(doc.tipo) && doc.status === 'rejeitado'
-      );
-      
-      if (hasRejectedRequired) {
-        await db
-          .update(users)
-          .set({
-            documentosVerificados: false,
-            documentosAprovadosEm: null,
-            updatedAt: new Date().toISOString()
-          })
-          .where(eq(users.id, document[0].userId));
-      }
+    try {
+      await dualStorage.updateUser(document.userId, {
+        documentosVerificados: documentsVerified,
+        documentosAprovadosEm: documentsVerified ? new Date().toISOString() : null,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (userUpdateError) {
+      // Restore the durable document decision if the account-level KYC update fails.
+      await dualStorage.updateDocumento(String(documentId), previousDecision);
+      throw userUpdateError;
     }
 
+    res.setHeader("Cache-Control", "no-store, max-age=0");
     res.json({
       message: approved 
         ? 'Documento aprovado com sucesso!' 
-        : 'Documento rejeitado. Usuário foi notificado.',
+        : 'Documento rejeitado. O status e o motivo foram atualizados para consulta no perfil.',
       document: {
         id: documentId,
         status: approved ? 'aprovado' : 'rejeitado'
@@ -325,244 +393,148 @@ router.post('/documents/review', isAuthenticated, isAdmin, async (req, res) => {
 });
 
 // Get admin dashboard statistics
-router.get('/stats', isAuthenticated, isAdmin, async (req, res) => {
+router.get('/stats', isAuthenticated, isAdmin, async (_req, res) => {
   try {
-    // Get total users count
-    const [totalUsersResult] = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(users);
-
-    // Get verified users count
-    const [verifiedUsersResult] = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(users)
-      .where(eq(users.documentosVerificados, true));
-
-    // Get pending documents count
-    const [pendingDocsResult] = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(documentos)
-      .where(eq(documentos.status, 'pendente'));
-
-    // Get total current balance (saldo com rendimentos)
-    const [totalBalanceResult] = await db
-      .select({ 
-        total: sql<number>`COALESCE(SUM(${users.saldo}), 0)` 
-      })
-      .from(users);
-
-    // Calculate total invested amount (only deposits)
-    const [totalDepositedResult] = await db
-      .select({ 
-        total: sql<number>`COALESCE(SUM(${movimentos.valor}), 0)` 
-      })
-      .from(movimentos)
-      .where(eq(movimentos.tipo, 'deposito'));
-
-    // Calculate total yields generated
-    const [totalYieldsResult] = await db
-      .select({ 
-        total: sql<number>`COALESCE(SUM(${movimentos.valor}), 0)` 
-      })
-      .from(movimentos)
-      .where(eq(movimentos.tipo, 'rendimento'));
-
-    // Calculate total withdrawals
-    const [totalWithdrawalsResult] = await db
-      .select({ 
-        total: sql<number>`COALESCE(SUM(${movimentos.valor}), 0)` 
-      })
-      .from(movimentos)
-      .where(eq(movimentos.tipo, 'saque'));
-
-    // Get recent movements count
-    const [recentMovementsResult] = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(movimentos)
-      .where(sql`${movimentos.createdAt} >= date('now', '-30 days')`);
-
-    // Get movement breakdown by type
-    const movementBreakdown = await db
-      .select({ 
-        tipo: movimentos.tipo,
-        total: sql<number>`COALESCE(SUM(${movimentos.valor}), 0)`,
-        count: sql<number>`count(*)`
-      })
-      .from(movimentos)
-      .groupBy(movimentos.tipo);
-
-    // Get daily transaction volumes for the last 30 days
-    const dailyVolume = await db
-      .select({ 
-        date: sql<string>`date(${movimentos.createdAt})`,
-        totalVolume: sql<number>`COALESCE(SUM(${movimentos.valor}), 0)`,
-        transactionCount: sql<number>`count(*)`
-      })
-      .from(movimentos)
-      .where(sql`${movimentos.createdAt} >= date('now', '-30 days')`)
-      .groupBy(sql`date(${movimentos.createdAt})`)
-      .orderBy(sql`date(${movimentos.createdAt}) DESC`);
-
-    res.json({
-      totalUsers: totalUsersResult.count,
-      verifiedUsers: verifiedUsersResult.count,
-      pendingDocuments: pendingDocsResult.count,
-      totalBalance: totalBalanceResult.total,
-      totalInvested: totalDepositedResult.total,
-      totalYields: totalYieldsResult.total,
-      totalWithdrawals: totalWithdrawalsResult.total,
-      recentMovements: recentMovementsResult.count,
-      movementBreakdown,
-      dailyVolume
+    const [allUsers, allDocuments, allMovements] = await Promise.all([
+      dualStorage.getAllUsers(),
+      dualStorage.getAllDocumentos(),
+      dualStorage.getAllMovimentos(),
+    ]);
+    const sumType = (type: string) => allMovements
+      .filter(movement => movement.tipo === type)
+      .reduce((sum, movement) => sum + Number(movement.valor || 0), 0);
+    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    const recent = allMovements.filter(movement => {
+      const timestamp = new Date(String(movement.createdAt || "")).getTime();
+      return Number.isFinite(timestamp) && timestamp >= cutoff;
     });
 
+    const breakdown = new Map<string, { tipo: string; total: number; count: number }>();
+    for (const movement of allMovements) {
+      const key = String(movement.tipo || "outro");
+      const item = breakdown.get(key) || { tipo: key, total: 0, count: 0 };
+      item.total += Number(movement.valor || 0);
+      item.count++;
+      breakdown.set(key, item);
+    }
+
+    const daily = new Map<string, { date: string; totalVolume: number; transactionCount: number }>();
+    for (const movement of recent) {
+      const date = new Date(String(movement.createdAt)).toISOString().slice(0, 10);
+      const item = daily.get(date) || { date, totalVolume: 0, transactionCount: 0 };
+      item.totalVolume += Number(movement.valor || 0);
+      item.transactionCount++;
+      daily.set(date, item);
+    }
+
+    res.setHeader("Cache-Control", "private, no-store, max-age=0");
+    return res.json({
+      totalUsers: allUsers.length,
+      verifiedUsers: allUsers.filter(user => Boolean(user.documentosVerificados)).length,
+      pendingDocuments: allDocuments.filter(document => document.status === "pendente").length,
+      totalBalance: allUsers.reduce((sum, user) => sum + Number(user.saldo || 0), 0),
+      totalInvested: sumType("deposito"),
+      totalYields: sumType("rendimento"),
+      totalWithdrawals: sumType("saque"),
+      recentMovements: recent.length,
+      movementBreakdown: Array.from(breakdown.values()),
+      dailyVolume: Array.from(daily.values()).sort((x, y) => y.date.localeCompare(x.date)),
+    });
   } catch (error) {
-    console.error('Error getting admin stats:', error);
-    res.status(500).json({ message: 'Erro interno do servidor' });
+    console.error("Error getting admin stats:", error);
+    return res.status(500).json({ message: "Erro interno do servidor" });
   }
 });
 
 // Get comprehensive dashboard data
-router.get('/dashboard-data', isAuthenticated, isAdmin, async (req, res) => {
+router.get('/dashboard-data', isAuthenticated, isAdmin, async (_req, res) => {
   try {
-    // Get all users with their financial data and last access info
-    const usersWithFinancials = await db
-      .select({
-        id: users.id,
-        nomeCompleto: users.nomeCompleto,
-        email: users.email,
-        cpf: users.cpf,
-        saldo: users.saldo,
-        documentosVerificados: users.documentosVerificados,
-        contaAprovada: users.contaAprovada,
-        createdAt: users.createdAt,
-        updatedAt: users.updatedAt
+    const [durableUsers, storedMovements] = await Promise.all([
+      dualStorage.getAllUsers(),
+      dualStorage.getAllMovimentos(),
+    ]);
+    const usersWithFinancials = durableUsers
+      .map(user => ({
+        id: user.id, nomeCompleto: user.nomeCompleto, email: user.email, cpf: user.cpf,
+        saldo: Number(user.saldo || 0), documentosVerificados: Boolean(user.documentosVerificados),
+        contaAprovada: Boolean(user.contaAprovada), createdAt: user.createdAt, updatedAt: user.updatedAt,
+      }))
+      .sort((a, b) => new Date(String(b.createdAt || 0)).getTime() - new Date(String(a.createdAt || 0)).getTime());
+    const usersById = new Map(usersWithFinancials.map(user => [user.id, user]));
+    const allMovements = storedMovements
+      .map(movement => {
+        const user = usersById.get(movement.userId);
+        return {
+          id: movement.id, userId: movement.userId, tipo: movement.tipo,
+          valor: Number(movement.valor || 0), descricao: movement.descricao,
+          createdAt: movement.createdAt, userName: user?.nomeCompleto ?? "Conta não localizada",
+          userEmail: user?.email ?? "",
+        };
       })
-      .from(users)
-      .orderBy(desc(users.createdAt));
+      .sort((a, b) => new Date(String(b.createdAt || 0)).getTime() - new Date(String(a.createdAt || 0)).getTime());
 
-    // Get detailed movement history for all users
-    const allMovements = await db
-      .select({
-        id: movimentos.id,
-        userId: movimentos.userId,
-        tipo: movimentos.tipo,
-        valor: movimentos.valor,
-        descricao: movimentos.descricao,
-        createdAt: movimentos.createdAt,
-        userName: users.nomeCompleto,
-        userEmail: users.email
-      })
-      .from(movimentos)
-      .innerJoin(users, eq(movimentos.userId, users.id))
-      .orderBy(desc(movimentos.createdAt));
+    const sumType = (type: string) => allMovements
+      .filter(movement => movement.tipo === type)
+      .reduce((sum, movement) => sum + movement.valor, 0);
+    const totalInvested = sumType("deposito");
+    const totalYields = sumType("rendimento");
+    const totalWithdrawals = sumType("saque");
+    const totalCurrentBalance = usersWithFinancials.reduce((sum, user) => sum + user.saldo, 0);
 
-    // Calculate platform totals
-    const [totalInvestedResult] = await db
-      .select({ 
-        total: sql<number>`COALESCE(SUM(${movimentos.valor}), 0)` 
-      })
-      .from(movimentos)
-      .where(eq(movimentos.tipo, 'deposito'));
+    const movementTypes = new Map<string, { tipo: string; count: number; total: number }>();
+    for (const movement of allMovements) {
+      const item = movementTypes.get(movement.tipo) || { tipo: movement.tipo, count: 0, total: 0 };
+      item.count++;
+      item.total += movement.valor;
+      movementTypes.set(movement.tipo, item);
+    }
 
-    const [totalYieldsResult] = await db
-      .select({ 
-        total: sql<number>`COALESCE(SUM(${movimentos.valor}), 0)` 
-      })
-      .from(movimentos)
-      .where(eq(movimentos.tipo, 'rendimento'));
+    const monthly = new Map<string, { month: string; deposits: number; yields: number; withdrawals: number; userCount: Set<string> }>();
+    const monthCutoff = new Date();
+    monthCutoff.setMonth(monthCutoff.getMonth() - 12);
+    for (const movement of allMovements) {
+      const timestamp = new Date(String(movement.createdAt || ""));
+      if (!Number.isFinite(timestamp.getTime()) || timestamp < monthCutoff) continue;
+      const month = timestamp.toISOString().slice(0, 7);
+      const item = monthly.get(month) || { month, deposits: 0, yields: 0, withdrawals: 0, userCount: new Set<string>() };
+      if (movement.tipo === "deposito") item.deposits += movement.valor;
+      if (movement.tipo === "rendimento") item.yields += movement.valor;
+      if (movement.tipo === "saque") item.withdrawals += movement.valor;
+      item.userCount.add(movement.userId);
+      monthly.set(month, item);
+    }
+    const monthlyGrowth = Array.from(monthly.values())
+      .map(item => ({ month: item.month, deposits: item.deposits, yields: item.yields, withdrawals: item.withdrawals, userCount: item.userCount.size }))
+      .sort((a, b) => b.month.localeCompare(a.month));
 
-    const [totalWithdrawalsResult] = await db
-      .select({ 
-        total: sql<number>`COALESCE(SUM(${movimentos.valor}), 0)` 
-      })
-      .from(movimentos)
-      .where(eq(movimentos.tipo, 'saque'));
-
-    const [totalCurrentBalanceResult] = await db
-      .select({ 
-        total: sql<number>`COALESCE(SUM(${users.saldo}), 0)` 
-      })
-      .from(users);
-
-    // Get movement counts by type for pie chart
-    const movementTypeStats = await db
-      .select({ 
-        tipo: movimentos.tipo,
-        count: sql<number>`count(*)`,
-        total: sql<number>`COALESCE(SUM(${movimentos.valor}), 0)`
-      })
-      .from(movimentos)
-      .groupBy(movimentos.tipo);
-
-    // Get monthly growth data (last 12 months)
-    const monthlyGrowth = await db
-      .select({ 
-        month: sql<string>`strftime('%Y-%m', ${movimentos.createdAt})`,
-        deposits: sql<number>`COALESCE(SUM(CASE WHEN ${movimentos.tipo} = 'deposito' THEN ${movimentos.valor} ELSE 0 END), 0)`,
-        yields: sql<number>`COALESCE(SUM(CASE WHEN ${movimentos.tipo} = 'rendimento' THEN ${movimentos.valor} ELSE 0 END), 0)`,
-        withdrawals: sql<number>`COALESCE(SUM(CASE WHEN ${movimentos.tipo} = 'saque' THEN ${movimentos.valor} ELSE 0 END), 0)`,
-        userCount: sql<number>`count(DISTINCT ${movimentos.userId})`
-      })
-      .from(movimentos)
-      .where(sql`${movimentos.createdAt} >= date('now', '-12 months')`)
-      .groupBy(sql`strftime('%Y-%m', ${movimentos.createdAt})`)
-      .orderBy(sql`strftime('%Y-%m', ${movimentos.createdAt}) DESC`);
-
-    // Calculate individual user summaries
     const userSummaries = usersWithFinancials.map(user => {
-      const userMovements = allMovements.filter(mov => mov.userId === user.id);
-      
-      const totalDeposited = userMovements
-        .filter(mov => mov.tipo === 'deposito')
-        .reduce((sum, mov) => sum + mov.valor, 0);
-      
-      const totalYield = userMovements
-        .filter(mov => mov.tipo === 'rendimento')
-        .reduce((sum, mov) => sum + mov.valor, 0);
-        
-      const totalWithdrawn = userMovements
-        .filter(mov => mov.tipo === 'saque')
-        .reduce((sum, mov) => sum + mov.valor, 0);
-
-      const lastMovement = userMovements[0]; // Sorted by desc createdAt
-      const lastAccess = lastMovement ? lastMovement.createdAt : user.updatedAt;
-
+      const userMovements = allMovements.filter(movement => movement.userId === user.id);
+      const totalDeposited = userMovements.filter(movement => movement.tipo === "deposito").reduce((sum, movement) => sum + movement.valor, 0);
+      const totalYield = userMovements.filter(movement => movement.tipo === "rendimento").reduce((sum, movement) => sum + movement.valor, 0);
+      const totalWithdrawn = userMovements.filter(movement => movement.tipo === "saque").reduce((sum, movement) => sum + movement.valor, 0);
+      const lastMovement = userMovements[0];
       return {
-        ...user,
-        totalDeposited,
-        totalYield,
-        totalWithdrawn,
-        lastAccess,
-        movementCount: userMovements.length
+        ...user, totalDeposited, totalYield, totalWithdrawn,
+        lastAccess: lastMovement ? lastMovement.createdAt : user.updatedAt,
+        movementCount: userMovements.length,
       };
     });
 
-    res.json({
-      // Platform totals
+    res.setHeader("Cache-Control", "private, no-store, max-age=0");
+    return res.json({
       platformTotals: {
-        totalInvested: totalInvestedResult.total,
-        totalYields: totalYieldsResult.total,
-        totalWithdrawals: totalWithdrawalsResult.total,
-        totalCurrentBalance: totalCurrentBalanceResult.total,
+        totalInvested, totalYields, totalWithdrawals, totalCurrentBalance,
         totalUsers: usersWithFinancials.length,
-        verifiedUsers: usersWithFinancials.filter(u => u.documentosVerificados).length
+        verifiedUsers: usersWithFinancials.filter(user => user.documentosVerificados).length,
       },
-      
-      // Chart data
-      movementTypeStats,
+      movementTypeStats: Array.from(movementTypes.values()),
       monthlyGrowth,
-      
-      // User details
       userSummaries,
-      
-      // Recent movements
-      recentMovements: allMovements.slice(0, 50)
+      recentMovements: allMovements.slice(0, 50),
     });
-
   } catch (error) {
-    console.error('Error getting dashboard data:', error);
-    res.status(500).json({ message: 'Erro interno do servidor' });
+    console.error("Error getting dashboard data:", error);
+    return res.status(500).json({ message: "Erro interno do servidor" });
   }
 });
 

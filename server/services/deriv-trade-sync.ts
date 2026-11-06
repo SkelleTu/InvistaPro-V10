@@ -232,7 +232,7 @@ export class DerivTradeSync {
               if (updates.status === 'won') {
                 realStatsTracker.recordWin(profit, contractIdStr);
               } else if (updates.status === 'lost') {
-                realStatsTracker.recordLoss(profit, operation.symbol, contractIdStr, operation.contractType);
+                realStatsTracker.recordLoss(profit, operation.symbol, contractIdStr, operation.contractType ?? undefined);
               }
             }
 
@@ -310,7 +310,7 @@ export class DerivTradeSync {
               if (updates.status === 'won') {
                 realStatsTracker.recordWin(profit, contractIdStr);
               } else if (updates.status === 'lost') {
-                realStatsTracker.recordLoss(profit, operation.symbol, contractIdStr, operation.contractType);
+                realStatsTracker.recordLoss(profit, operation.symbol, contractIdStr, operation.contractType ?? undefined);
               }
             }
           } else if (contractInfo.status === 'open') {

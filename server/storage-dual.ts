@@ -1,8 +1,9 @@
 /**
  * STORAGE NEON + SQLITE
  *
- * Neon: fonte durável para identidade, tokens e configurações essenciais.
- * SQLite: cache local, logs técnicos, dados transitórios e histórico operacional local.
+ * Neon: fonte durável para identidade, movimentos financeiros, KYC, contratos Deriv,
+ * tokens e configurações essenciais.
+ * SQLite: cache reidratável do motor, logs técnicos e dados transitórios.
  * Turso is intentionally not used by this storage layer.
  */
 
@@ -214,15 +215,82 @@ export class DualStorage implements IStorage {
 
   // ─── Movimentos ───────────────────────────────────────────────────────────
 
-  async createMovimento(m: InsertMovimento) { return this.write(() => this.turso!.createMovimento(m), () => this.sqlite.createMovimento(m), 'createMovimento'); }
-  async getUserMovimentos(uid: string, limit?: number) { return this.sqlite.getUserMovimentos(uid, limit); }
+  async createMovimento(m: InsertMovimento) {
+    const payload = { ...m, id: (m as any).id ?? randomBytes(16).toString("hex") } as InsertMovimento;
+    return this.writeEssential(
+      () => this.neon!.createMovimento(payload),
+      () => this.sqlite.createMovimento(payload),
+      "createMovimento"
+    );
+  }
+  async getUserMovimentos(uid: string, limit?: number) {
+    return this.read(
+      () => this.neon!.getUserMovimentos(uid, limit),
+      () => this.turso!.getUserMovimentos(uid, limit),
+      () => this.sqlite.getUserMovimentos(uid, limit),
+      "getUserMovimentos"
+    );
+  }
+
+  async getAllMovimentos(limit?: number) {
+    return this.read(
+      () => this.neon!.getAllMovimentos(limit),
+      () => this.turso!.getAllMovimentos(limit),
+      () => this.sqlite.getAllMovimentos(limit),
+      "getAllMovimentos"
+    );
+  }
   async calcularRendimento(saldo: number) { return this.sqlite.calcularRendimento(saldo); }
 
   // ─── Documentos ───────────────────────────────────────────────────────────
 
-  async createDocumento(d: InsertDocumento) { return this.write(() => this.turso!.createDocumento(d), () => this.sqlite.createDocumento(d), 'createDocumento'); }
-  async getUserDocumentos(uid: string) { return this.sqlite.getUserDocumentos(uid); }
-  async updateDocumentoStatus(id: string, status: string, motivo?: string) { return this.write(() => this.turso!.updateDocumentoStatus(id, status, motivo), () => this.sqlite.updateDocumentoStatus(id, status, motivo), 'updateDocumentoStatus'); }
+  async createDocumento(d: InsertDocumento) {
+    const payload = { ...d, id: (d as any).id ?? randomBytes(16).toString("hex") } as InsertDocumento;
+    return this.writeEssential(
+      () => this.neon!.createDocumento(payload),
+      () => this.sqlite.createDocumento(payload),
+      "createDocumento"
+    );
+  }
+  async getUserDocumentos(uid: string) {
+    return this.read(
+      () => this.neon!.getUserDocumentos(uid),
+      () => this.turso!.getUserDocumentos(uid),
+      () => this.sqlite.getUserDocumentos(uid),
+      "getUserDocumentos"
+    );
+  }
+
+  async getAllDocumentos() {
+    return this.read(
+      () => this.neon!.getAllDocumentos(),
+      () => this.turso!.getAllDocumentos(),
+      () => this.sqlite.getAllDocumentos(),
+      "getAllDocumentos"
+    );
+  }
+  async getDocumento(id: string) {
+    return this.read(
+      () => this.neon!.getDocumento(id),
+      () => this.turso!.getDocumento(id),
+      () => this.sqlite.getDocumento(id),
+      "getDocumento"
+    );
+  }
+  async updateDocumento(id: string, updates: Partial<Documento>) {
+    return this.writeEssential(
+      () => this.neon!.updateDocumento(id, updates),
+      () => this.sqlite.updateDocumento(id, updates),
+      "updateDocumento"
+    );
+  }
+  async updateDocumentoStatus(id: string, status: string, motivo?: string) {
+    return this.writeEssential(
+      () => this.neon!.updateDocumentoStatus(id, status, motivo),
+      () => this.sqlite.updateDocumentoStatus(id, status, motivo),
+      "updateDocumentoStatus"
+    );
+  }
 
   // ─── Tokens Deriv ─────────────────────────────────────────────────────────
 
@@ -317,78 +385,53 @@ export class DualStorage implements IStorage {
   // ─── Operações de Trade ───────────────────────────────────────────────────
 
   async createTradeOperation(op: InsertTradeOperation): Promise<TradeOperation> {
-    const id = randomBytes(16).toString('hex').toUpperCase();
-    const withId = { ...op, id } as any;
-    if (this.turso) {
-      try {
-        await this.ensureUserInTurso(op.userId);
-        // Aguardar AMBOS (Turso + SQLite) para garantir consistência.
-        // Sem isso, SQLite fica desatualizado e o sync não encontra operações pendentes.
-        const [tursoResult] = await Promise.allSettled([
-          this.turso.createTradeOperation(withId),
-          this.sqlite.createTradeOperation(withId),
-        ]);
-        if (tursoResult.status === 'fulfilled') return tursoResult.value;
-        // Turso falhou mas SQLite pode ter dado certo
-        const sqliteResult = await this.sqlite.createTradeOperation(withId).catch((e: any) => {
-          console.warn('⚠️ [SQLITE] createTradeOperation (após falha Turso):', e.message);
-          throw e;
-        });
-        return sqliteResult;
-      } catch (e: any) {
-        console.warn('⚠️ [TURSO] createTradeOperation falhou, fallback SQLite:', e.message);
-      }
-    }
-    return this.sqlite.createTradeOperation(withId);
+    const payload = { ...op, id: (op as any).id ?? randomBytes(16).toString("hex").toUpperCase() } as InsertTradeOperation;
+    return this.writeEssential(
+      () => this.neon!.createTradeOperation(payload),
+      () => this.sqlite.createTradeOperation(payload),
+      "createTradeOperation"
+    );
   }
 
   async getUserTradeOperations(uid: string, limit?: number) {
-    // Busca SQLite e Turso em paralelo e mescla os resultados para não perder pendentes.
-    // Isso resolve o bug onde novos trades ficavam só no Turso e o sync nunca os encontrava.
-    let sqliteOps: any[] = [];
-    let tursoOps: any[] = [];
-
-    try {
-      sqliteOps = await this.sqlite.getUserTradeOperations(uid, limit) ?? [];
-    } catch {}
-
-    if (this.turso && this.tursoReadOk) {
-      try {
-        tursoOps = await this.turso.getUserTradeOperations(uid, limit) ?? [];
-        this.tursoReadFailCount = 0;
-      } catch (e: any) {
-        this.onTursoReadError(e, 'getUserTradeOperations');
-      }
-    }
-
-    if (tursoOps.length === 0) return sqliteOps;
-    if (sqliteOps.length === 0) return tursoOps;
-
-    // Mesclar: usar mapa por ID, preferindo Turso (fonte primária de escrita)
-    const merged = new Map<string, any>();
-    for (const op of sqliteOps) if (op?.id) merged.set(op.id, op);
-    for (const op of tursoOps)  if (op?.id) merged.set(op.id, op); // sobrescreve com dado mais recente
-    const result = Array.from(merged.values());
-
-    // Ordenar por createdAt decrescente (mais recente primeiro), respeitando o limit
-    result.sort((a: any, b: any) => {
-      const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-      const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-      return tb - ta;
-    });
-    return limit ? result.slice(0, limit) : result;
-  }
-  async getTradeOperationByDerivContractId(derivContractId: string): Promise<TradeOperation | null> {
-    return this.localRead(
-      () => this.turso!.getTradeOperationByDerivContractId(derivContractId),
-      () => this.sqlite.getTradeOperationByDerivContractId(derivContractId),
-      'getTradeOperationByDerivContractId'
+    return this.read(
+      () => this.neon!.getUserTradeOperations(uid, limit),
+      () => this.turso!.getUserTradeOperations(uid, limit),
+      () => this.sqlite.getUserTradeOperations(uid, limit),
+      "getUserTradeOperations"
     );
   }
-  async updateTradeOperation(id: string, updates: Partial<TradeOperation>) { return this.write(() => this.turso!.updateTradeOperation(id, updates), () => this.sqlite.updateTradeOperation(id, updates), 'updateTradeOperation'); }
+
+  async getAllTradeOperations() {
+    return this.read(
+      () => this.neon!.getAllTradeOperations(),
+      () => this.turso!.getAllTradeOperations(),
+      () => this.sqlite.getAllTradeOperations(),
+      "getAllTradeOperations"
+    );
+  }
+  async getTradeOperationByDerivContractId(derivContractId: string): Promise<TradeOperation | null> {
+    return this.read(
+      () => this.neon!.getTradeOperationByDerivContractId(derivContractId),
+      () => this.turso!.getTradeOperationByDerivContractId(derivContractId),
+      () => this.sqlite.getTradeOperationByDerivContractId(derivContractId),
+      "getTradeOperationByDerivContractId"
+    );
+  }
+  async updateTradeOperation(id: string, updates: Partial<TradeOperation>) {
+    return this.writeEssential(
+      () => this.neon!.updateTradeOperation(id, updates),
+      () => this.sqlite.updateTradeOperation(id, updates),
+      "updateTradeOperation"
+    );
+  }
   async getActiveTradeOperations(uid: string) {
-    // Alta frequência (sync a cada 30s) → SQLite first
-    return this.localRead(() => this.turso!.getActiveTradeOperations(uid), () => this.sqlite.getActiveTradeOperations(uid), 'getActiveTradeOperations');
+    return this.read(
+      () => this.neon!.getActiveTradeOperations(uid),
+      () => this.turso!.getActiveTradeOperations(uid),
+      () => this.sqlite.getActiveTradeOperations(uid),
+      "getActiveTradeOperations"
+    );
   }
 
   // ─── Logs de IA (somente SQLite — dados transientes de alta frequência) ───
@@ -406,22 +449,29 @@ export class DualStorage implements IStorage {
   // ─── Estatísticas de Trading ──────────────────────────────────────────────
 
   async getTradingStats(uid: string) {
-    // Turso é a fonte primária de escrita — buscar dele para ter estatísticas atualizadas.
-    // SQLite fica como fallback caso Turso esteja indisponível.
-    return this.localRead(
+    return this.read(
+      () => this.neon!.getTradingStats(uid),
       () => this.turso!.getTradingStats(uid),
       () => this.sqlite.getTradingStats(uid),
-      'getTradingStats'
+      "getTradingStats"
     );
   }
 
   async getActiveTradesCount(uid: string) {
-    // Alta frequência → SQLite first
-    return this.localRead(() => this.turso!.getActiveTradesCount(uid), () => this.sqlite.getActiveTradesCount(uid), 'getActiveTradesCount');
+    return this.read(
+      () => this.neon!.getActiveTradesCount(uid),
+      () => this.turso!.getActiveTradesCount(uid),
+      () => this.sqlite.getActiveTradesCount(uid),
+      "getActiveTradesCount"
+    );
   }
   async getDailyLossCount(uid: string, date: string) {
-    // Alta frequência → SQLite first
-    return this.localRead(() => this.turso!.getDailyLossCount(uid, date), () => this.sqlite.getDailyLossCount(uid, date), 'getDailyLossCount');
+    return this.read(
+      () => this.neon!.getDailyLossCount(uid, date),
+      () => this.turso!.getDailyLossCount(uid, date),
+      () => this.sqlite.getDailyLossCount(uid, date),
+      "getDailyLossCount"
+    );
   }
   // saveActiveTradeForTracking: dados temporários de rastreamento → SQLite only
   async saveActiveTradeForTracking(data: any) { return this.sqlite.saveActiveTradeForTracking(data); }
@@ -429,36 +479,69 @@ export class DualStorage implements IStorage {
   // ─── PnL Diário ───────────────────────────────────────────────────────────
 
   async createOrUpdateDailyPnL(uid: string, data: Partial<InsertDailyPnL>) {
-    if (this.turso) {
-      try {
-        await this.ensureUserInTurso(uid);
-        const r = await this.turso.createOrUpdateDailyPnL(uid, data);
-        this.sqlite.createOrUpdateDailyPnL(uid, data).catch(() => {});
-        return r;
-      } catch (e: any) {
-        console.warn(`⚠️ [TURSO] createOrUpdateDailyPnL falhou, fallback SQLite:`, e.message);
-      }
-    }
-    return this.sqlite.createOrUpdateDailyPnL(uid, data);
+    return this.writeEssential(
+      () => this.neon!.createOrUpdateDailyPnL(uid, data),
+      () => this.sqlite.createOrUpdateDailyPnL(uid, data),
+      "createOrUpdateDailyPnL"
+    );
   }
   async getDailyPnL(uid: string, date?: string) {
-    return this.localRead(() => this.turso!.getDailyPnL(uid, date), () => this.sqlite.getDailyPnL(uid, date), 'getDailyPnL');
+    return this.read(
+      () => this.neon!.getDailyPnL(uid, date),
+      () => this.turso!.getDailyPnL(uid, date),
+      () => this.sqlite.getDailyPnL(uid, date),
+      "getDailyPnL"
+    );
   }
   async getConservativeOperationsToday(uid: string) {
-    return this.localRead(() => this.turso!.getConservativeOperationsToday(uid), () => this.sqlite.getConservativeOperationsToday(uid), 'getConservativeOperationsToday');
+    return this.read(
+      () => this.neon!.getConservativeOperationsToday(uid),
+      () => this.turso!.getConservativeOperationsToday(uid),
+      () => this.sqlite.getConservativeOperationsToday(uid),
+      "getConservativeOperationsToday"
+    );
   }
-  async incrementConservativeOperations(uid: string) { return this.write(() => this.turso!.incrementConservativeOperations(uid), () => this.sqlite.incrementConservativeOperations(uid), 'incrementConservativeOperations'); }
+  async incrementConservativeOperations(uid: string) {
+    return this.writeEssential(
+      () => this.neon!.incrementConservativeOperations(uid),
+      () => this.sqlite.incrementConservativeOperations(uid),
+      "incrementConservativeOperations"
+    );
+  }
   async getRecentDailyPnL(uid: string, days?: number) {
-    return this.localRead(() => this.turso!.getRecentDailyPnL(uid, days), () => this.sqlite.getRecentDailyPnL(uid, days), 'getRecentDailyPnL');
+    return this.read(
+      () => this.neon!.getRecentDailyPnL(uid, days),
+      () => this.turso!.getRecentDailyPnL(uid, days),
+      () => this.sqlite.getRecentDailyPnL(uid, days),
+      "getRecentDailyPnL"
+    );
   }
 
   // ─── Estratégias de Recuperação ───────────────────────────────────────────
 
-  async createAiRecoveryStrategy(s: InsertAiRecoveryStrategy) { return this.write(() => this.turso!.createAiRecoveryStrategy(s), () => this.sqlite.createAiRecoveryStrategy(s), 'createAiRecoveryStrategy'); }
-  async getUserRecoveryStrategies(uid: string) {
-    return this.localRead(() => this.turso!.getUserRecoveryStrategies(uid), () => this.sqlite.getUserRecoveryStrategies(uid), 'getUserRecoveryStrategies');
+  async createAiRecoveryStrategy(s: InsertAiRecoveryStrategy) {
+    return this.writeEssential(
+      () => this.neon!.createAiRecoveryStrategy(s),
+      () => this.sqlite.createAiRecoveryStrategy(s),
+      "createAiRecoveryStrategy"
+    );
   }
-  async updateRecoveryStrategy(id: string, updates: Partial<AiRecoveryStrategy>) { return this.write(() => this.turso!.updateRecoveryStrategy(id, updates), () => this.sqlite.updateRecoveryStrategy(id, updates), 'updateRecoveryStrategy'); }
+  async getUserRecoveryStrategies(uid: string) {
+    return this.read(
+      () => this.neon!.getUserRecoveryStrategies(uid),
+      () => this.turso!.getUserRecoveryStrategies(uid),
+      () => this.sqlite.getUserRecoveryStrategies(uid),
+      "getUserRecoveryStrategies"
+    );
+  }
+  async updateRecoveryStrategy(id: string, updates: Partial<AiRecoveryStrategy>) {
+    return this.writeEssential(
+      () => this.neon!.updateRecoveryStrategy(id, updates),
+      () => this.sqlite.updateRecoveryStrategy(id, updates),
+      "updateRecoveryStrategy"
+    );
+  }
+
   async calculateRecoveryMultiplier(uid: string) {
     return this.localRead(() => this.turso!.calculateRecoveryMultiplier(uid), () => this.sqlite.calculateRecoveryMultiplier(uid), 'calculateRecoveryMultiplier');
   }
@@ -507,26 +590,100 @@ export class DualStorage implements IStorage {
   // ─── Controle de Trading ──────────────────────────────────────────────────
 
   async getTradingControlStatus() {
-    // Alta frequência → SQLite first
-    return this.localRead(() => this.turso!.getTradingControlStatus(), () => this.sqlite.getTradingControlStatus(), 'getTradingControlStatus');
+    return this.read(
+      () => this.neon!.getTradingControlStatus(),
+      () => this.turso!.getTradingControlStatus(),
+      () => this.sqlite.getTradingControlStatus(),
+      "getTradingControlStatus"
+    );
   }
-  async pauseTrading(by: string, reason: string) { return this.write(() => this.turso!.pauseTrading(by, reason), () => this.sqlite.pauseTrading(by, reason), 'pauseTrading'); }
-  async resumeTrading()                           { return this.write(() => this.turso!.resumeTrading(), () => this.sqlite.resumeTrading(), 'resumeTrading'); }
+  async pauseTrading(by: string, reason: string) {
+    return this.writeEssential(
+      () => this.neon!.pauseTrading(by, reason),
+      () => this.sqlite.pauseTrading(by, reason),
+      "pauseTrading"
+    );
+  }
+  async resumeTrading() {
+    return this.writeEssential(
+      () => this.neon!.resumeTrading(),
+      () => this.sqlite.resumeTrading(),
+      "resumeTrading"
+    );
+  }
 
-  // ─── Blacklist / Ativos Bloqueados (SQLite only — verificação por trade) ──
+  // ─── Blacklist / Ativos Bloqueados ────────────────────────────────────────
 
-  async createAssetBlacklist(b: any)                          { return this.sqlite.createAssetBlacklist(b); }
-  async getUserAssetBlacklists(uid: string)                   { return this.sqlite.getUserAssetBlacklists(uid); }
-  async deleteAssetBlacklist(id: string)                      { return this.sqlite.deleteAssetBlacklist(id); }
-  async isAssetBlocked(uid: string, asset: string)            { return this.sqlite.isAssetBlocked(uid, asset); }
-  async isUserBlockedAsset(uid: string, sym: string, mode: string) { return this.sqlite.isUserBlockedAsset(uid, sym, mode); }
+  async createAssetBlacklist(b: any) {
+    return this.writeEssential(
+      () => this.neon!.createAssetBlacklist(b),
+      () => this.sqlite.createAssetBlacklist(b),
+      "createAssetBlacklist"
+    );
+  }
+  async getUserAssetBlacklists(uid: string) {
+    return this.read(
+      () => this.neon!.getUserAssetBlacklists(uid),
+      () => this.turso!.getUserAssetBlacklists(uid),
+      () => this.sqlite.getUserAssetBlacklists(uid),
+      "getUserAssetBlacklists"
+    );
+  }
+  async deleteAssetBlacklist(id: string) {
+    return this.writeEssential(
+      () => this.neon!.deleteAssetBlacklist(id),
+      () => this.sqlite.deleteAssetBlacklist(id),
+      "deleteAssetBlacklist"
+    );
+  }
+  async isAssetBlocked(uid: string, asset: string) {
+    return this.read(
+      () => this.neon!.isAssetBlocked(uid, asset),
+      () => this.turso!.isAssetBlocked(uid, asset),
+      () => this.sqlite.isAssetBlocked(uid, asset),
+      "isAssetBlocked"
+    );
+  }
+  async isUserBlockedAsset(uid: string, sym: string, mode: string) {
+    return this.read(
+      () => this.neon!.isUserBlockedAsset(uid, sym, mode),
+      () => this.turso!.isUserBlockedAsset(uid, sym, mode),
+      () => this.sqlite.isUserBlockedAsset(uid, sym, mode),
+      "isUserBlockedAsset"
+    );
+  }
 
-  // ─── Configuração de Pausa (SQLite only — verificação por trade) ──────────
+  // ─── Configuração de Pausa ────────────────────────────────────────────────
 
-  async getUserPauseConfig(uid: string)                       { return this.sqlite.getUserPauseConfig(uid); }
-  async createPauseConfig(cfg: any)                           { return this.sqlite.createPauseConfig(cfg); }
-  async updatePauseConfig(uid: string, cfg: any)              { return this.sqlite.updatePauseConfig(uid, cfg); }
-  async updatePausedNowStatus(uid: string, v: boolean)        { return this.sqlite.updatePausedNowStatus(uid, v); }
+  async getUserPauseConfig(uid: string) {
+    return this.read(
+      () => this.neon!.getUserPauseConfig(uid),
+      () => this.turso!.getUserPauseConfig(uid),
+      () => this.sqlite.getUserPauseConfig(uid),
+      "getUserPauseConfig"
+    );
+  }
+  async createPauseConfig(cfg: any) {
+    return this.writeEssential(
+      () => this.neon!.createPauseConfig(cfg),
+      () => this.sqlite.createPauseConfig(cfg),
+      "createPauseConfig"
+    );
+  }
+  async updatePauseConfig(uid: string, cfg: any) {
+    return this.writeEssential(
+      () => this.neon!.updatePauseConfig(uid, cfg),
+      () => this.sqlite.updatePauseConfig(uid, cfg),
+      "updatePauseConfig"
+    );
+  }
+  async updatePausedNowStatus(uid: string, v: boolean) {
+    return this.writeEssential(
+      () => this.neon!.updatePausedNowStatus(uid, v),
+      () => this.sqlite.updatePausedNowStatus(uid, v),
+      "updatePausedNowStatus"
+    );
+  }
 
   // ─── Utilitários ─────────────────────────────────────────────────────────
 
