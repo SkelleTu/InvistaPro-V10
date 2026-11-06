@@ -1,5 +1,6 @@
 import { and, desc, eq, sql } from "drizzle-orm";
 import { reconcileVerifiedPayment } from "./payment-domain";
+import { assertPositiveCents, calculateLiabilityBalance, splitWithdrawal, validateBalancedLedgerLines } from "./financial-ledger-policy";
 import { pgDb, pgSchema, isPostgresAvailable } from "../db-postgres";
 
 export type ClientAccountKind = "client_available" | "client_reserved" | "client_capital" | "client_yield";
@@ -15,9 +16,7 @@ function requirePostgres() {
   return pgDb;
 }
 
-function assertCents(value: number, name = "amountCents") {
-  if (!Number.isSafeInteger(value) || value <= 0) throw new Error(`INVALID_${name.toUpperCase()}`);
-}
+function assertCents(value: number) { assertPositiveCents(value); }
 
 export async function ensureClientFinancialAccounts(userId: string, txArg?: any) {
   if (!userId) throw new Error("USER_REQUIRED");
@@ -37,15 +36,7 @@ export async function ensureClientFinancialAccounts(userId: string, txArg?: any)
 export async function postLedgerTransaction(input: PostLedgerInput) {
   const db = requirePostgres();
   if (!input.idempotencyKey || input.idempotencyKey.length > 160) throw new Error("INVALID_IDEMPOTENCY_KEY");
-  if (input.entries.length < 2) throw new Error("LEDGER_REQUIRES_TWO_ENTRIES");
-  let debit = 0, credit = 0;
-  for (const line of input.entries) {
-    assertCents(line.amountCents);
-    if (line.direction === "debit") debit += line.amountCents;
-    else if (line.direction === "credit") credit += line.amountCents;
-    else throw new Error("INVALID_LEDGER_DIRECTION");
-  }
-  if (!Number.isSafeInteger(debit) || debit !== credit) throw new Error("LEDGER_NOT_BALANCED");
+  validateBalancedLedgerLines(input.entries);
 
   return db.transaction(async (tx: any) => {
     const inserted = await tx.insert(pgSchema.ledgerTransactions).values({
@@ -91,7 +82,7 @@ export async function reserveWithdrawal(input: {
   userId: string; amountCents: number; feeCents: number; idempotencyKey: string; actorUserId: string;
 }) {
   assertCents(input.amountCents);
-  if (!Number.isSafeInteger(input.feeCents) || input.feeCents < 0 || input.feeCents >= input.amountCents) throw new Error("INVALID_FEE");
+  const split = splitWithdrawal(input.amountCents, input.feeCents);
   const db = requirePostgres();
   return db.transaction(async (tx: any) => {
     const accounts = await ensureClientFinancialAccounts(input.userId, tx);
@@ -110,9 +101,9 @@ export async function reserveWithdrawal(input: {
       credit: sql<string>`COALESCE(SUM(amount_cents) FILTER (WHERE direction='credit'),0)::text`,
       debit: sql<string>`COALESCE(SUM(amount_cents) FILTER (WHERE direction='debit'),0)::text`,
     }).from(pgSchema.ledgerEntries).where(eq(pgSchema.ledgerEntries.accountId, available.id));
-    const availableCents = Number(totals.credit) - Number(totals.debit);
+    const availableCents = calculateLiabilityBalance(Number(totals.credit), Number(totals.debit));
     if (availableCents < input.amountCents) throw new Error("INSUFFICIENT_AVAILABLE_BALANCE");
-    const netAmountCents = input.amountCents - input.feeCents;
+    const netAmountCents = split.netAmountCents;
     const [withdrawal] = await tx.insert(pgSchema.withdrawalRequests).values({
       userId: input.userId, amountCents: input.amountCents, feeCents: input.feeCents,
       netAmountCents, status: "reserved", idempotencyKey: input.idempotencyKey,
