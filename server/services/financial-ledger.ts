@@ -430,3 +430,19 @@ export async function findWithdrawalByProviderTransfer(provider: string, provide
       eq(pgSchema.withdrawalRequests.providerTransferId, providerTransferId))).limit(1);
   return withdrawal || null;
 }
+
+
+export async function getProviderPaymentForIntent(paymentIntentId: string) {
+  const db = requirePostgres();
+  const [payment] = await db.select().from(pgSchema.providerPayments)
+    .where(eq(pgSchema.providerPayments.paymentIntentId, paymentIntentId)).limit(1);
+  return payment || null;
+}
+
+export async function listClientWithdrawals(userId: string, limit = 100) {
+  const db = requirePostgres();
+  return db.select().from(pgSchema.withdrawalRequests)
+    .where(eq(pgSchema.withdrawalRequests.userId, userId))
+    .orderBy(desc(pgSchema.withdrawalRequests.requestedAt))
+    .limit(Math.min(Math.max(limit, 1), 500));
+}
