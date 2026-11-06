@@ -31,7 +31,9 @@ async function ensurePrivateBucket(client: SupabaseClient, bucket = getStorageCo
     const ready = (async () => {
       const listed = await client.storage.listBuckets();
       if (listed.error) throw listed.error;
-      if (!listed.data.some(item => item.name === bucket)) {
+      const existingBucket = listed.data.find(item => item.name === bucket);
+      if (existingBucket?.public) throw new Error(`PRIVATE_BUCKET_REQUIRED:${bucket}`);
+      if (!existingBucket) {
         const created = await client.storage.createBucket(bucket, {
           public: false,
           fileSizeLimit,
@@ -164,6 +166,7 @@ export async function storePrivateReport(reportId: string, buffer: Buffer): Prom
   if (!/^[-a-zA-Z0-9_]{8,80}$/.test(reportId) || !buffer.subarray(0, 5).toString("ascii").startsWith("%PDF-")) {
     throw new Error("INVALID_REPORT_FILE");
   }
+  if (REPORT_BUCKET === getStorageConfig().bucket) throw new Error("REPORT_BUCKET_MUST_BE_SEPARATE_FROM_KYC_BUCKET");
   const client = getSupabase();
   const objectPath = `reports/${reportId}.pdf`;
   if (client) {
