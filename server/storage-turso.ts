@@ -133,6 +133,7 @@ export class TursoStorage implements IStorage {
   }
 
   async updateUser(id: string, data: UpdateUser): Promise<User> {
+    if (Object.prototype.hasOwnProperty.call(data, "saldo")) throw new Error("LEGACY_BALANCE_MUTATION_DISABLED: use the financial ledger service.");
     const [user] = await getDb()
       .update(users)
       .set({ ...data, updatedAt: new Date().toISOString() })
@@ -180,9 +181,12 @@ export class TursoStorage implements IStorage {
     return user;
   }
 
-  async createMovimento(movimento: InsertMovimento): Promise<Movimento> {
+  async createMovimento(_movimento: InsertMovimento): Promise<Movimento> {
+    throw new Error("LEGACY_FINANCIAL_MOVEMENT_WRITE_DISABLED: post financial movements through the durable ledger.");
+    /* Legacy implementation intentionally unreachable; historical rows remain readable.
     const [newMovimento] = await getDb().insert(movimentos).values(movimento).returning();
     return newMovimento;
+    */
   }
 
   async getUserMovimentos(userId: string, limit = 10): Promise<Movimento[]> {
