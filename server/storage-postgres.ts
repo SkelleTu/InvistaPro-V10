@@ -174,6 +174,7 @@ export class PostgresStorage implements IStorage {
   }
 
   async updateUser(id: string, data: UpdateUser): Promise<User> {
+    if (Object.prototype.hasOwnProperty.call(data, "saldo")) throw new Error("LEGACY_BALANCE_MUTATION_DISABLED: use the financial ledger service.");
     const pgData = convertSQLiteDataToPostgres(data);
     const [user] = await db
       .update(pgSchema.users)
@@ -223,13 +224,16 @@ export class PostgresStorage implements IStorage {
   }
 
   // Movement operations
-  async createMovimento(movimento: InsertMovimento): Promise<Movimento> {
+  async createMovimento(_movimento: InsertMovimento): Promise<Movimento> {
+    throw new Error("LEGACY_FINANCIAL_MOVEMENT_WRITE_DISABLED: post financial movements through the durable ledger.");
+    /* Legacy implementation intentionally unreachable; historical rows remain readable.
     const pgData = convertSQLiteDataToPostgres(movimento);
     const [newMovimento] = await db
       .insert(pgSchema.movimentos)
       .values(pgData)
       .returning();
     return newMovimento as Movimento;
+    */
   }
 
   async getUserMovimentos(userId: string, limit = 10): Promise<Movimento[]> {
