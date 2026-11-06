@@ -26,7 +26,7 @@ function getSupabase(): SupabaseClient | null {
   return supabaseClient;
 }
 
-async function ensurePrivateBucket(client: SupabaseClient, bucket = getStorageConfig().bucket, allowedMimeTypes: string[] = [...ALLOWED_MIME_TYPES]): Promise<void> {
+async function ensurePrivateBucket(client: SupabaseClient, bucket = getStorageConfig().bucket, allowedMimeTypes: string[] = [...ALLOWED_MIME_TYPES], fileSizeLimit = "5MB"): Promise<void> {
   if (!bucketReady.has(bucket)) {
     const ready = (async () => {
       const listed = await client.storage.listBuckets();
@@ -34,7 +34,7 @@ async function ensurePrivateBucket(client: SupabaseClient, bucket = getStorageCo
       if (!listed.data.some(item => item.name === bucket)) {
         const created = await client.storage.createBucket(bucket, {
           public: false,
-          fileSizeLimit: "5MB",
+          fileSizeLimit,
           allowedMimeTypes,
         });
         if (created.error) throw created.error;
@@ -167,7 +167,7 @@ export async function storePrivateReport(reportId: string, buffer: Buffer): Prom
   const client = getSupabase();
   const objectPath = `reports/${reportId}.pdf`;
   if (client) {
-    await ensurePrivateBucket(client, REPORT_BUCKET, ["application/pdf"]);
+    await ensurePrivateBucket(client, REPORT_BUCKET, ["application/pdf"], "50MB");
     const { error } = await client.storage.from(REPORT_BUCKET).upload(objectPath, buffer, {
       contentType: "application/pdf", cacheControl: "0", upsert: false,
     });
