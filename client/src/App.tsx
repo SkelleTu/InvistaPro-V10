@@ -1,6 +1,6 @@
-import { Switch, Route, useLocation } from "wouter";
+import { Switch, Route, useLocation, Redirect } from "wouter";
 import { queryClient } from "./lib/queryClient";
-import { QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Loader2 } from "lucide-react";
@@ -26,6 +26,7 @@ const TradingSystemPage = lazy(() => import("@/pages/trading-system"));
 const MetaTraderPage = lazy(() => import("@/pages/metatrader-page"));
 const MetaTrader5Page = lazy(() => import("@/pages/metatrader5-page"));
 const KeepAliveSetup = lazy(() => import("@/pages/KeepAliveSetup"));
+const PortalCliente = lazy(() => import("@/pages/portal-cliente"));
 
 import { useAuth } from "@/hooks/useAuth";
 import { ThemeProvider } from "@/contexts/ThemeContext";
@@ -59,6 +60,14 @@ function SaveAndRedirectToAuth({ currentPath }: { currentPath: string }) {
 function Router() {
   const { isAuthenticated, isLoading, isApproved, isPhoneVerified } = useAuth();
   const [location] = useLocation();
+  const destinationQuery = useQuery<{ role: "master" | "admin" | "client"; destination: string }>({
+    queryKey: ["/api/auth/destination"],
+    enabled: isAuthenticated && isApproved && isPhoneVerified,
+    retry: false,
+    staleTime: 0,
+    gcTime: 0,
+    refetchOnMount: "always",
+  });
 
   return (
     <Switch>
@@ -102,6 +111,23 @@ function Router() {
 
         if (!isApproved) {
           return <Route><PendingApprovalPage /></Route>;
+        }
+
+        if (destinationQuery.isLoading) {
+          return <Route><div className="min-h-screen flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div></Route>;
+        }
+
+        if (destinationQuery.isError || !destinationQuery.data?.role) {
+          return <Route><div className="min-h-screen flex items-center justify-center bg-background p-6"><div className="max-w-md text-center"><h1 className="text-xl font-bold">Não foi possível validar o perfil</h1><p className="text-sm text-muted-foreground mt-2">Por segurança, o sistema não abriu nenhum módulo. Atualize a página ou entre novamente.</p></div></div></Route>;
+        }
+
+        if (destinationQuery.data.role === "client") {
+          return (
+            <Switch>
+              <Route path="/portal-cliente" component={PortalCliente} />
+              <Route><Redirect to="/portal-cliente" /></Route>
+            </Switch>
+          );
         }
 
         return (
