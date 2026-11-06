@@ -216,3 +216,17 @@ DEFERRABLE INITIALLY DEFERRED
 FOR EACH ROW EXECUTE FUNCTION assert_ledger_transaction_balanced();
 
 -- Report metadata is retained; the PDF itself must live in private object storage.
+
+
+-- Archived report metadata is append-only; replace a report by creating a new export.
+CREATE OR REPLACE FUNCTION reject_financial_archive_mutation() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION 'FINANCIAL_ARCHIVE_APPEND_ONLY: archived report metadata cannot be changed or deleted';
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_admin_report_exports_immutable ON admin_report_exports;
+CREATE TRIGGER trg_admin_report_exports_immutable
+BEFORE UPDATE OR DELETE ON admin_report_exports
+FOR EACH ROW EXECUTE FUNCTION reject_financial_archive_mutation();
