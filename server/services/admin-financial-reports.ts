@@ -113,6 +113,7 @@ export async function generateAdminFinancialReport(input: {
   ]);
 
   const user = input.scope === "client" ? users[0] as any : null;
+  const clientUsers = (users as any[]).filter((item: any) => !item.isAdmin);
   if (input.scope === "client" && !user) throw new Error("REPORT_CLIENT_NOT_FOUND");
   const relevantAccounts = await db.select().from(pgSchema.financialAccounts)
     .where(input.scope === "client" ? eq(pgSchema.financialAccounts.ownerUserId, input.userId!) : undefined);
@@ -138,7 +139,7 @@ export async function generateAdminFinancialReport(input: {
     `Solicitante: ${requestedBy.name} <${requestedBy.email}>`,
     `Periodo UTC: ${start?.toISOString() || "inicio do historico"} ate ${end?.toISOString() || "agora"}`,
     `Escopo: ${input.scope === "client" ? "cliente individual" : "plataforma consolidada"}`,
-    `Registros listados: ${users.length + movements.length + trades.length + documents.length + relevantTransactions.length + relevantEntries.length + paymentIntents.length + relevantProviderPayments.length + withdrawals.length + audit.length + relevantWebhookEvents.length}`,
+    `Registros listados: ${clientUsers.length + movements.length + trades.length + documents.length + relevantTransactions.length + relevantEntries.length + paymentIntents.length + relevantProviderPayments.length + withdrawals.length + audit.length + relevantWebhookEvents.length}`,
     " ",
   ];
   if (user) {
@@ -151,7 +152,7 @@ export async function generateAdminFinancialReport(input: {
       `Conta aprovada: ${user.contaAprovada ? "sim" : "nao"}`,
       `KYC verificado: ${user.documentosVerificados ? "sim" : "nao"}`, " ");
   } else {
-    lines.push("RESUMO DA PLATAFORMA", `Clientes cadastrados: ${users.length}`,
+    lines.push("RESUMO DA PLATAFORMA", `Clientes cadastrados: ${clientUsers.length}`,
       `Aportes legados registrados: ${movements.filter((m: any) => m.tipo === "deposito").length}`,
       `Saques legados registrados: ${movements.filter((m: any) => m.tipo === "saque").length}`,
       `Operacoes de trading: ${trades.length}`, `Lancamentos contabeis: ${relevantTransactions.length}`,
@@ -219,7 +220,7 @@ export async function generateAdminFinancialReport(input: {
     await deletePrivateReport(storageRef).catch(() => {});
     throw new Error("REPORT_STORAGE_HASH_MISMATCH");
   }
-  const rowCount = users.length + movements.length + trades.length + documents.length + relevantTransactions.length + relevantEntries.length + paymentIntents.length + relevantProviderPayments.length + withdrawals.length + audit.length + relevantWebhookEvents.length;
+  const rowCount = clientUsers.length + movements.length + trades.length + documents.length + relevantTransactions.length + relevantEntries.length + paymentIntents.length + relevantProviderPayments.length + withdrawals.length + audit.length + relevantWebhookEvents.length;
   try {
     await db.transaction(async (tx: any) => {
       await tx.insert(pgSchema.adminReportExports).values({
