@@ -1,4 +1,5 @@
 import { and, desc, eq, sql } from "drizzle-orm";
+import { reconcileVerifiedPayment } from "./payment-domain";
 import { pgDb, pgSchema, isPostgresAvailable } from "../db-postgres";
 
 export type ClientAccountKind = "client_available" | "client_reserved" | "client_capital" | "client_yield";
@@ -155,9 +156,11 @@ export async function confirmVerifiedProviderPayment(input: {
   paymentIntentId: string; provider: string; providerPaymentId: string;
   externalReference: string; amountCents: number; providerStatus: string;
   rawSnapshot?: Record<string, unknown>; verifiedAt?: Date;
+  webhookVerified: boolean; providerLookupVerified: boolean;
 }) {
   assertCents(input.amountCents);
   if (!["approved", "paid", "accredited"].includes(String(input.providerStatus).toLowerCase())) throw new Error("PROVIDER_PAYMENT_NOT_APPROVED");
+  if (!input.webhookVerified || !input.providerLookupVerified) throw new Error("PAYMENT_PROVIDER_VERIFICATION_REQUIRED");
   if (!input.provider || !input.providerPaymentId || !input.externalReference) throw new Error("INVALID_PROVIDER_PAYMENT_REFERENCE");
   const db = requirePostgres();
   return db.transaction(async (tx: any) => {
@@ -165,7 +168,16 @@ export async function confirmVerifiedProviderPayment(input: {
     const [intent] = await tx.select().from(pgSchema.paymentIntents)
       .where(eq(pgSchema.paymentIntents.id, input.paymentIntentId)).limit(1);
     if (!intent) throw new Error("PAYMENT_INTENT_NOT_FOUND");
-    if (Number(intent.amountCents) !== input.amountCents) throw new Error("PAYMENT_AMOUNT_MISMATCH");
+    const reconciliation = reconcileVerifiedPayment({
+      id: intent.id, userId: intent.userId, amountCents: Number(intent.amountCents),
+      currency: "BRL", status: intent.status as any, providerPaymentId: intent.providerPaymentId,
+    }, {
+      providerPaymentId: input.providerPaymentId, externalReference: input.externalReference,
+      amountCents: input.amountCents, currency: "BRL", status: input.providerStatus,
+      webhookVerified: input.webhookVerified, providerLookupVerified: input.providerLookupVerified,
+    });
+    if (!reconciliation.shouldCredit && reconciliation.duplicate) return { intent, duplicate: true };
+    if (!reconciliation.shouldCredit) throw new Error("PROVIDER_PAYMENT_NOT_CREDITABLE");
     if (intent.status === "approved") {
       if (intent.provider !== input.provider || intent.providerPaymentId !== input.providerPaymentId) throw new Error("PAYMENT_INTENT_ALREADY_SETTLED_BY_DIFFERENT_PAYMENT");
       return { intent, duplicate: true };
@@ -238,7 +250,9 @@ export async function markWithdrawalSubmitted(withdrawalId: string, provider: st
 
 export async function settleVerifiedWithdrawal(input: {
   withdrawalId: string; provider: string; providerTransferId: string; verifiedStatus: string;
+  webhookVerified: boolean; providerLookupVerified: boolean;
 }) {
+  if (!input.webhookVerified || !input.providerLookupVerified) throw new Error("TRANSFER_PROVIDER_VERIFICATION_REQUIRED");
   if (!["paid", "approved", "completed", "success"].includes(String(input.verifiedStatus).toLowerCase())) throw new Error("PROVIDER_TRANSFER_NOT_SETTLED");
   const db = requirePostgres();
   return db.transaction(async (tx: any) => {
@@ -288,7 +302,7 @@ export async function settleVerifiedWithdrawal(input: {
 }
 
 export async function releaseFailedWithdrawal(input: {
-  withdrawalId: string; reason: string; provider?: string; providerTransferId?: string;
+  withdrawalId: string; reason: string; provider?: string; providerTransferId?: string; providerLookupVerified?: boolean;
 }) {
   const db = requirePostgres();
   return db.transaction(async (tx: any) => {
@@ -298,6 +312,7 @@ export async function releaseFailedWithdrawal(input: {
     if (!withdrawal) throw new Error("WITHDRAWAL_NOT_FOUND");
     if (["failed", "cancelled"].includes(withdrawal.status)) return { withdrawal, duplicate: true };
     if (!["reserved", "submitted"].includes(withdrawal.status)) throw new Error("WITHDRAWAL_NOT_REVERSIBLE");
+    if (withdrawal.status === "submitted" && !input.providerLookupVerified) throw new Error("TRANSFER_OUTCOME_MUST_BE_VERIFIED_BEFORE_RELEASE");
     if (input.provider && withdrawal.provider && input.provider !== withdrawal.provider) throw new Error("WITHDRAWAL_PROVIDER_MISMATCH");
     if (input.providerTransferId && withdrawal.providerTransferId && input.providerTransferId !== withdrawal.providerTransferId) throw new Error("WITHDRAWAL_TRANSFER_MISMATCH");
     const accounts = await ensureClientFinancialAccounts(withdrawal.userId, tx);
