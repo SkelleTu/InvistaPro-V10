@@ -9,6 +9,7 @@ const adminRoutes = read("server/routes/admin.ts");
 const schema = read("server/schemas/postgres-schema.ts");
 const ui = read("client/src/pages/central-administrativa.tsx");
 const env = read("render-invista-pro-v10.env.example");
+const migration = read("migrations/0001_financial_ledger_foundation.sql");
 
 const pdf = buildPdf(["INVISTAPRO — TESTE DE RELATORIO", "Linha de integridade", "R$ 100,00"]);
 assert.equal(pdf.subarray(0, 8).toString("ascii"), "%PDF-1.4");
@@ -20,6 +21,9 @@ assert.match(reportService, /createHash\("sha256"\)/);
 assert.match(reportService, /storePrivateReport\(reportId, pdf\)/);
 assert.match(reportService, /contentSha256: hash/);
 assert.match(reportService, /REPORT_HASH_MISMATCH/);
+assert.match(reportService, /REPORT_STORAGE_HASH_MISMATCH/);
+assert.match(reportService, /deletePrivateReport\(storageRef\)/);
+assert.match(reportService, /wrappedLines/);
 assert.match(reportService, /financialAuditEvents/);
 assert.match(reportService, /pgSchema\.ledgerEntries/);
 assert.match(reportService, /pgSchema\.tradeOperations/);
@@ -34,5 +38,7 @@ assert.match(ui, /Imprimir \/ arquivar dossiê/);
 assert.match(ui, /PDF geral da plataforma/);
 assert.match(ui, /Arquivo de relatórios PDF/);
 assert.match(env, /SUPABASE_REPORTS_BUCKET=admin-reports/);
+assert.match(migration, /trg_admin_report_exports_immutable/);
+assert.match(migration, /FINANCIAL_ARCHIVE_APPEND_ONLY/);
 
 console.log("✓ admin financial reports: PDF structure, private archive, SHA-256, audit and UI controls");
