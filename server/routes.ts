@@ -130,7 +130,10 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       process.env.INVISTAPRO_ACCOUNT_EMAIL,
       process.env.ADMIN_EMAIL,
     ].map((value) => String(value || "").trim().toLowerCase()).filter(Boolean);
-    const isMaster = Boolean(email && masterEmails.includes(email));
+    // Reuse the same centralized allowlist that protects the trading/admin APIs.
+    // Otherwise a legacy master account could be misrouted into the customer portal
+    // whenever the optional MASTER_* environment variables are not configured.
+    const isMaster = Boolean(email && (masterEmails.includes(email) || isAuthorizedEmail(email)));
     const role = isMaster ? "master" : "client";
     res.setHeader("Cache-Control", "no-store, max-age=0");
     return res.json({ role, destination: role === "master" ? "/dashboard" : "/portal-cliente" });
