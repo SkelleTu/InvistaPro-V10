@@ -150,7 +150,7 @@ export async function confirmVerifiedProviderPayment(input: {
   webhookVerified: boolean; providerLookupVerified: boolean;
 }) {
   assertCents(input.amountCents);
-  if (!["approved", "paid", "accredited"].includes(String(input.providerStatus).toLowerCase())) throw new Error("PROVIDER_PAYMENT_NOT_APPROVED");
+  if (String(input.providerStatus).toLowerCase() !== "approved") throw new Error("PROVIDER_PAYMENT_NOT_APPROVED");
   if (!input.webhookVerified || !input.providerLookupVerified) throw new Error("PAYMENT_PROVIDER_VERIFICATION_REQUIRED");
   if (!input.provider || !input.providerPaymentId || !input.externalReference) throw new Error("INVALID_PROVIDER_PAYMENT_REFERENCE");
   const db = requirePostgres();
@@ -356,4 +356,68 @@ export async function markProviderWebhookProcessed(eventId: string, status: "pro
     processedAt: new Date(),
   }).where(eq(pgSchema.providerWebhookEvents.id, eventId)).returning();
   return updated || null;
+}
+
+
+export async function createPaymentIntent(input: {
+  userId: string; amountCents: number; idempotencyKey: string;
+}) {
+  assertCents(input.amountCents);
+  if (!input.idempotencyKey || input.idempotencyKey.length > 160) throw new Error("INVALID_IDEMPOTENCY_KEY");
+  const db = requirePostgres();
+  return db.transaction(async (tx: any) => {
+    const [existing] = await tx.select().from(pgSchema.paymentIntents)
+      .where(eq(pgSchema.paymentIntents.idempotencyKey, input.idempotencyKey)).limit(1);
+    if (existing) {
+      if (existing.userId !== input.userId || Number(existing.amountCents) !== input.amountCents) {
+        throw new Error("IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST");
+      }
+      return { intent: existing, duplicate: true };
+    }
+    const [intent] = await tx.insert(pgSchema.paymentIntents).values({
+      userId: input.userId, amountCents: input.amountCents, currency: "BRL",
+      status: "created", idempotencyKey: input.idempotencyKey,
+    }).returning();
+    await tx.insert(pgSchema.financialAuditEvents).values({
+      subjectUserId: input.userId, action: "payment_intent_created",
+      entityType: "payment_intent", entityId: intent.id,
+      afterState: { amountCents: input.amountCents, currency: "BRL", status: "created" },
+    });
+    return { intent, duplicate: false };
+  });
+}
+
+export async function attachProviderPayment(input: {
+  paymentIntentId: string; provider: string; providerPaymentId: string;
+  amountCents: number; providerStatus: string; rawSnapshot?: Record<string, unknown>;
+}) {
+  assertCents(input.amountCents);
+  const db = requirePostgres();
+  return db.transaction(async (tx: any) => {
+    await tx.execute(sql`SELECT id FROM payment_intents WHERE id = ${input.paymentIntentId}::uuid FOR UPDATE`);
+    const [intent] = await tx.select().from(pgSchema.paymentIntents)
+      .where(eq(pgSchema.paymentIntents.id, input.paymentIntentId)).limit(1);
+    if (!intent) throw new Error("PAYMENT_INTENT_NOT_FOUND");
+    if (Number(intent.amountCents) !== input.amountCents) throw new Error("PAYMENT_AMOUNT_MISMATCH");
+    if (intent.status === "pending" && intent.provider === input.provider && intent.providerPaymentId === input.providerPaymentId) {
+      return { intent, duplicate: true };
+    }
+    if (intent.status !== "created") throw new Error("PAYMENT_INTENT_STATE_INVALID");
+    const [providerPayment] = await tx.insert(pgSchema.providerPayments).values({
+      paymentIntentId: intent.id, provider: input.provider, providerPaymentId: input.providerPaymentId,
+      externalReference: intent.id, amountCents: input.amountCents, currency: "BRL",
+      providerStatus: input.providerStatus, verifiedAt: new Date(), rawSnapshot: input.rawSnapshot || {},
+    }).onConflictDoNothing().returning();
+    if (!providerPayment) throw new Error("PROVIDER_PAYMENT_ALREADY_REGISTERED");
+    const [updated] = await tx.update(pgSchema.paymentIntents).set({
+      status: "pending", provider: input.provider, providerPaymentId: input.providerPaymentId,
+      updatedAt: new Date(),
+    }).where(eq(pgSchema.paymentIntents.id, intent.id)).returning();
+    await tx.insert(pgSchema.financialAuditEvents).values({
+      subjectUserId: intent.userId, action: "provider_payment_created",
+      entityType: "payment_intent", entityId: intent.id,
+      afterState: { provider: input.provider, providerPaymentId: input.providerPaymentId, status: "pending" },
+    });
+    return { intent: updated, duplicate: false };
+  });
 }
