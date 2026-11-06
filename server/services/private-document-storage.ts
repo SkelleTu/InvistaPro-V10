@@ -32,7 +32,7 @@ async function ensurePrivateBucket(client: SupabaseClient, bucket = getStorageCo
       const listed = await client.storage.listBuckets();
       if (listed.error) throw listed.error;
       const existingBucket = listed.data.find(item => item.name === bucket);
-      if (existingBucket?.public) throw new Error(`PRIVATE_BUCKET_REQUIRED:${bucket}`);
+      if (existingBucket && existingBucket.public !== false) throw new Error(`PRIVATE_BUCKET_REQUIRED:${bucket}`);
       if (!existingBucket) {
         const created = await client.storage.createBucket(bucket, {
           public: false,
