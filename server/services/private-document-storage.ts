@@ -208,3 +208,25 @@ export async function readPrivateReport(reference: string): Promise<Buffer> {
   if (!buffer.subarray(0, 5).toString("ascii").startsWith("%PDF-")) throw new Error("INVALID_REPORT_FILE");
   return buffer;
 }
+
+
+export async function deletePrivateReport(reference: string): Promise<void> {
+  if (reference.startsWith("supabase-report://")) {
+    const client = getSupabase();
+    if (!client) throw new Error("PRIVATE_REPORT_STORAGE_NOT_CONFIGURED");
+    const remainder = reference.slice("supabase-report://".length);
+    const separator = remainder.indexOf("/");
+    if (separator < 1 || remainder.slice(0, separator) !== REPORT_BUCKET) throw new Error("INVALID_PRIVATE_REPORT_REFERENCE");
+    const objectPath = remainder.slice(separator + 1);
+    if (!objectPath.startsWith("reports/") || objectPath.includes("..")) throw new Error("INVALID_PRIVATE_REPORT_REFERENCE");
+    const { error } = await client.storage.from(REPORT_BUCKET).remove([objectPath]);
+    if (error) throw error;
+    return;
+  }
+  if (reference.startsWith("local-report://")) {
+    const directory = path.resolve(process.env.REPORT_UPLOAD_DIR || path.join(process.cwd(), "uploads", "reports"));
+    const resolved = path.resolve(reference.slice("local-report://".length));
+    const relative = path.relative(directory, resolved);
+    if (relative && !relative.startsWith("..") && !path.isAbsolute(relative)) await unlink(resolved).catch(() => {});
+  }
+}
