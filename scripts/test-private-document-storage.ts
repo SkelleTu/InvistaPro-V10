@@ -1,0 +1,45 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+
+const read = (path: string) => readFileSync(path, "utf8");
+const storage = read("server/services/private-document-storage.ts");
+const routes = read("server/routes.ts");
+const adminRoutes = read("server/routes/admin.ts");
+const gitignore = read(".gitignore");
+const renderEnv = read("render-invista-pro-v10.env.example");
+const migration = read("scripts/migrate-kyc-documents-to-supabase.ts");
+const kycRoutes = read("server/routes/kyc.ts");
+const kycService = read("server/services/kyc-document-service.ts");
+const legacyKycUi = read("client/src/components/kyc/document-upload.tsx");
+
+assert.match(storage, /SUPABASE_SERVICE_ROLE_KEY/);
+assert.match(storage, /createBucket\(bucket,\s*\{\s*public: false/);
+assert.match(storage, /validatePrivateDocument/);
+assert.match(storage, /DOCUMENT_CONTENT_TYPE_MISMATCH/);
+assert.match(storage, /PRIVATE_DOCUMENT_STORAGE_NOT_CONFIGURED/);
+assert.match(storage, /fileSizeLimit: "5MB"/);
+assert.match(storage, /allowedMimeTypes: \[\.\.\.ALLOWED_MIME_TYPES\]/);
+assert.match(routes, /storage: multer\.memoryStorage\(\)/);
+assert.match(routes, /saveKycDocument\(String\(userId\), String\(tipo\), req\.file\)/);
+assert.match(kycService, /storePrivateDocument\(userId, file\)/);
+assert.match(kycService, /deletePrivateDocument\(newReference\)/);
+assert.match(kycService, /deletePrivateDocument\(existing\.arquivo\)/);
+assert.doesNotMatch(routes, /req\.file\.path/);
+assert.match(adminRoutes, /readPrivateDocument\(String\(document\.arquivo\)\)/);
+assert.match(gitignore, /uploads\/documents\//);
+assert.match(renderEnv, /SUPABASE_SERVICE_ROLE_KEY=REPLACE_WITH_SUPABASE_SERVICE_ROLE_KEY/);
+assert.match(renderEnv, /SUPABASE_KYC_BUCKET=kyc-documents/);
+assert.match(migration, /KYC_OBJECT_VERIFICATION_FAILED/);
+assert.match(migration, /KYC_MIGRATION_INCOMPLETE/);
+assert.match(migration, /createHash\("sha256"\)/);
+assert.match(migration, /storePrivateDocument/);
+assert.match(migration, /readPrivateDocument/);
+assert.match(kycRoutes, /storage: multer\.memoryStorage\(\)/);
+assert.doesNotMatch(kycRoutes, /multer\.diskStorage|req\.file\.path|from "\.\.\/db"/);
+assert.match(kycRoutes, /saveKycDocument/);
+assert.match(kycRoutes, /readPrivateDocument/);
+assert.match(kycService, /dualStorage\.updateDocumento/);
+assert.match(kycService, /KYC_DOCUMENT_ALREADY_APPROVED/);
+assert.match(legacyKycUi, /maxSize = 5 \* 1024 \* 1024/);
+
+console.log("PRIVATE KYC OBJECT STORAGE POLICY PASSED");

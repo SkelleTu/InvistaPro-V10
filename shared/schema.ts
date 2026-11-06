@@ -145,6 +145,7 @@ export const registerUserSchema = createInsertSchema(users).omit({
   email: z.string().email("Email inválido"),
   telefone: z.string().min(10, "Telefone deve ter pelo menos 10 dígitos").max(15, "Telefone inválido"),
   cep: z.string().min(8, "CEP deve ter 8 dígitos").max(9, "CEP inválido"),
+  referralCode: z.string().trim().max(20, "Código de indicação inválido").optional().or(z.literal("")),
 }).refine(data => data.password === data.confirmPassword, {
   message: "Senhas não coincidem",
   path: ["confirmPassword"],

@@ -4,9 +4,13 @@ import { readFileSync } from "node:fs";
 const read = (path: string) => readFileSync(path, "utf8");
 const storage = read("server/storage-dual.ts");
 const storageSqlite = read("server/storage.ts");
-const storagePostgres = read("server/storage-postgres.ts");
 const migration = read("server/migrate-postgres.ts");
 const restore = read("server/neon-sqlite-sync.ts");
+const operationalSync = read("server/neon-operational-sync.ts");
+const riskSync = read("server/neon-risk-controls-sync.ts");
+const postgresStorage = read("server/storage-postgres.ts");
+const postgresSchema = read("server/schemas/postgres-schema.ts");
+const adminRoutes = read("server/routes/admin.ts");
 const boot = read("server/index.ts");
 const sqliteDb = read("server/db.ts");
 const secretHealth = read("server/services/secret-health.ts");
@@ -14,6 +18,58 @@ const productionObservability = read("server/services/production-observability.t
 const deploymentDocs = read("docs/neon-sqlite-storage.md");
 
 assert.match(storage, /private async writeEssential/);
+assert.match(storage, /async createMovimento[\s\S]*?this\.writeEssential/);
+assert.match(storage, /async createDocumento[\s\S]*?this\.writeEssential/);
+assert.match(storage, /async updateDocumento[\s\S]*?this\.writeEssential/);
+assert.match(storage, /async createTradeOperation[\s\S]*?this\.writeEssential/);
+assert.match(storage, /async updateTradeOperation[\s\S]*?this\.writeEssential/);
+assert.match(storage, /async getAllMovimentos[\s\S]*?this\.read/);
+assert.match(storage, /async getAllDocumentos[\s\S]*?this\.read/);
+assert.match(storage, /async getAllTradeOperations[\s\S]*?this\.read/);
+assert.match(operationalSync, /backfillOperationalHistoryToNeon/);
+assert.match(operationalSync, /operationalBackfillCompletedAt/);
+assert.match(operationalSync, /onConflictDoNothing/);
+assert.match(operationalSync, /restoreOperationalHistoryToSqlite/);
+assert.match(riskSync, /backfillRiskControlsToNeon/);
+assert.match(riskSync, /restoreRiskControlsToSqlite/);
+assert.match(riskSync, /riskControlsBackfillCompletedAt/);
+assert.match(riskSync, /pause_configuration/);
+assert.match(riskSync, /asset_blacklist/);
+assert.match(riskSync, /blocked_assets/);
+assert.match(postgresStorage, /async createOrUpdateDailyPnL[\s\S]*?onConflictDoUpdate/);
+assert.match(postgresStorage, /async getUserRecoveryStrategies[\s\S]*?pgSchema\.aiRecoveryStrategies/);
+assert.match(postgresStorage, /async pauseTrading[\s\S]*?pgSchema\.tradingControl/);
+assert.match(postgresStorage, /async createAssetBlacklist[\s\S]*?pgSchema\.assetBlacklist/);
+assert.match(postgresStorage, /async getUserPauseConfig[\s\S]*?pgSchema\.pauseConfiguration/);
+assert.match(storageSqlite, /async createPauseConfig[\s\S]*?this\.updatePauseConfig/);
+assert.match(storageSqlite, /async updatePauseConfig[\s\S]*?if \(result\) return result;[\s\S]*?db\.insert\(pauseConfiguration\)/);
+assert.match(storageSqlite, /async updatePausedNowStatus[\s\S]*?if \(!updated\)[\s\S]*?db\.insert\(pauseConfiguration\)/);
+assert.match(boot, /backfillRiskControlsToNeon/);
+assert.match(boot, /restoreRiskControlsToSqlite/);
+
+assert.match(operationalSync, /INSERT INTO trade_operations/);
+assert.match(postgresSchema, /shortcode: text\("shortcode"\)/);
+assert.match(postgresSchema, /operationalBackfillCompletedAt/);
+assert.match(migration, /operational_backfill_completed_at/);
+assert.match(migration, /ADD COLUMN IF NOT EXISTS deriv_profit REAL/);
+assert.match(migration, /ROW_NUMBER\(\) OVER \([\s\S]*?PARTITION BY user_id, date/);
+assert.match(migration, /PARTITION BY user_id, trade_mode, symbol/);
+assert.match(migration, /PARTITION BY user_id ORDER BY updated_at/);
+assert.ok(
+  migration.indexOf("CREATE TABLE IF NOT EXISTS daily_pnl") <
+    migration.indexOf("idx_daily_pnl_user_date_unique"),
+  "daily_pnl must exist before its unique index is created"
+);
+assert.match(postgresStorage, /import \{ eq, desc, and, isNull, isNotNull, inArray, sql \} from "drizzle-orm"/);
+assert.match(postgresStorage, /async incrementConservativeOperations[\s\S]*?sql`.*conservativeOperations.*\+ 1/);
+
+assert.match(boot, /backfillOperationalHistoryToNeon/);
+assert.match(boot, /restoreOperationalHistoryToSqlite/);
+assert.match(adminRoutes, /dualStorage\.getAllMovimentos/);
+assert.match(adminRoutes, /dualStorage\.getAllDocumentos/);
+assert.match(adminRoutes, /dualStorage\.getAllTradeOperations/);
+assert.doesNotMatch(adminRoutes, /import \{ db \} from "\.\.\/db"/);
+
 assert.match(storage, /NEON_REQUIRED/);
 assert.match(storage, /NEON_RETRY_COOLDOWN_MS = 30_000/);
 assert.match(storage, /neonQuotaBlocked/);
@@ -54,18 +110,18 @@ assert.match(restore, /parts\.length === 3[\s\S]*?\{32\}[\s\S]*?\{32\}/);
 assert.doesNotMatch(restore, /token\.includes\(\s*['"]:['"]\s*\)/);
 assert.doesNotMatch(restore, /pgSchema\.(tradeOperations|marketData|aiLogs)/);
 
-assert.match(storagePostgres, /async updateDerivToken[\s\S]*?db\.transaction/);
-assert.match(storagePostgres, /currentPrimary/);
-assert.match(storagePostgres, /eq\(pgSchema\.derivTokens\.isPrimary, true\)/);
+assert.match(postgresStorage, /async updateDerivToken[\s\S]*?db\.transaction/);
+assert.match(postgresStorage, /currentPrimary/);
+assert.match(postgresStorage, /eq\(pgSchema\.derivTokens\.isPrimary, true\)/);
 assert.match(storageSqlite, /eq\(derivTokens\.isPrimary, true\)/);
 assert.match(storageSqlite, /isPrimary: true/);
 for (const column of ["shortcode", "buy_price", "sell_price", "entry_epoch", "exit_epoch", "contract_type", "barrier", "deriv_status", "deriv_profit", "payout", "status_changed_at", "last_sync_at", "sync_count", "is_conservative_forced"]) {
   assert.match(sqliteDb, new RegExp(`\\['${column}',`), `SQLite migration must add missing trade_operations column: ${column}`);
 }
 assert.match(sqliteDb, /ALTER TABLE trade_operations ADD COLUMN operation_mode TEXT/);
-assert.match(storagePostgres, /async upsertDerivTokenBySlot[\s\S]*?db\.transaction/);
-assert.match(storagePostgres, /async createTradeConfig[\s\S]*?db\.transaction/);
-assert.match(storagePostgres, /async updateTradeConfig[\s\S]*?db\.transaction/);
+assert.match(postgresStorage, /async upsertDerivTokenBySlot[\s\S]*?db\.transaction/);
+assert.match(postgresStorage, /async createTradeConfig[\s\S]*?db\.transaction/);
+assert.match(postgresStorage, /async updateTradeConfig[\s\S]*?db\.transaction/);
 assert.match(boot, /restoreEssentialDataToSqlite/);
 assert.match(boot, /maxPersistenceAttempts = 3/);
 assert.match(boot, /persistenceReady = true/);

@@ -62,7 +62,13 @@ function MessageBubble({ message }: { message: Message }) {
   const isUser = message.role === "user";
 
   const formatContent = (text: string) => {
-    return text
+    const escaped = text
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+    return escaped
       .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
       .replace(/\*(.*?)\*/g, "<em>$1</em>")
       .replace(/\n/g, "<br/>");
@@ -153,12 +159,18 @@ function VoiceButton({
 export default function AiAssistant() {
   const [isOpen, setIsOpen] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
+
+  useEffect(() => {
+    const openAssistant = () => setIsOpen(true);
+    window.addEventListener("invista:open-ai-assistant", openAssistant);
+    return () => window.removeEventListener("invista:open-ai-assistant", openAssistant);
+  }, []);
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "welcome",
       role: "assistant",
       content:
-        "👋 Olá! Sou a IA da **InvistaPRO** — agora com voz natural!\n\nPressione 🎤 e fale comigo, ou escreva sua pergunta:\n\n• \"Qual meu resultado hoje?\"\n• \"Iniciar o robô\"\n• \"Como estão meus trades?\"",
+        "Olá! Sou a IA da **InvistaPRO**.\n\nPressione o microfone e fale comigo, ou escreva sua pergunta. Posso ajudar a consultar informações da sua conta, histórico e resultados registrados.",
       timestamp: new Date(),
     },
   ]);

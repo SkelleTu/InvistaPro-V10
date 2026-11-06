@@ -7,6 +7,10 @@ vite.config.ts.*
 database/
 database-backups/
 
+# Private KYC uploads and customer identity documents - never version these files
+uploads/documents/
+
+
 # Sensitive files - never commit secrets
 invista-pro-secrets.txt
 **/CREDENCIAIS*.txt

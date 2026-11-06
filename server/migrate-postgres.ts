@@ -29,6 +29,8 @@ async function migratePostgres() {
       )
     `);
     await pgDb.execute(sql`ALTER TABLE invista_database_identity ADD COLUMN IF NOT EXISTS essential_backfill_completed_at TIMESTAMP`);
+    await pgDb.execute(sql`ALTER TABLE invista_database_identity ADD COLUMN IF NOT EXISTS operational_backfill_completed_at TIMESTAMP`);
+    await pgDb.execute(sql`ALTER TABLE invista_database_identity ADD COLUMN IF NOT EXISTS risk_controls_backfill_completed_at TIMESTAMP`);
     await pgDb.insert(pgSchema.invistaDatabaseIdentity).values({ id: 1, platformId }).onConflictDoNothing();
     const [databaseIdentity] = await pgDb.select().from(pgSchema.invistaDatabaseIdentity)
       .where(eq(pgSchema.invistaDatabaseIdentity.id, 1));
@@ -238,6 +240,32 @@ async function migratePostgres() {
     await pgDb.execute(sql`
       ALTER TABLE trade_operations ADD COLUMN IF NOT EXISTS operation_mode VARCHAR(100) DEFAULT 'Operação Ordinária'
     `);
+    // Complete the durable Deriv contract snapshot used by the trading engine and audits.
+    await pgDb.execute(sql`ALTER TABLE trade_operations ADD COLUMN IF NOT EXISTS shortcode TEXT`);
+    await pgDb.execute(sql`ALTER TABLE trade_operations ADD COLUMN IF NOT EXISTS buy_price REAL`);
+    await pgDb.execute(sql`ALTER TABLE trade_operations ADD COLUMN IF NOT EXISTS sell_price REAL`);
+    await pgDb.execute(sql`ALTER TABLE trade_operations ADD COLUMN IF NOT EXISTS entry_epoch INTEGER`);
+    await pgDb.execute(sql`ALTER TABLE trade_operations ADD COLUMN IF NOT EXISTS exit_epoch INTEGER`);
+    await pgDb.execute(sql`ALTER TABLE trade_operations ADD COLUMN IF NOT EXISTS contract_type VARCHAR(50)`);
+    await pgDb.execute(sql`ALTER TABLE trade_operations ADD COLUMN IF NOT EXISTS barrier VARCHAR(20)`);
+    await pgDb.execute(sql`ALTER TABLE trade_operations ADD COLUMN IF NOT EXISTS deriv_status VARCHAR(50)`);
+    await pgDb.execute(sql`ALTER TABLE trade_operations ADD COLUMN IF NOT EXISTS deriv_profit REAL`);
+    await pgDb.execute(sql`ALTER TABLE trade_operations ADD COLUMN IF NOT EXISTS payout REAL`);
+    await pgDb.execute(sql`ALTER TABLE trade_operations ADD COLUMN IF NOT EXISTS status_changed_at TIMESTAMP`);
+    await pgDb.execute(sql`ALTER TABLE trade_operations ADD COLUMN IF NOT EXISTS last_sync_at TIMESTAMP`);
+    await pgDb.execute(sql`ALTER TABLE trade_operations ADD COLUMN IF NOT EXISTS sync_count INTEGER DEFAULT 0`);
+    await pgDb.execute(sql`
+      CREATE INDEX IF NOT EXISTS idx_trade_operations_user_created
+      ON trade_operations(user_id, created_at DESC)
+    `);
+    await pgDb.execute(sql`
+      CREATE INDEX IF NOT EXISTS idx_movimentos_user_created
+      ON movimentos(user_id, created_at DESC)
+    `);
+    await pgDb.execute(sql`
+      CREATE INDEX IF NOT EXISTS idx_documentos_user_created
+      ON documentos(user_id, created_at DESC)
+    `);
 
     await pgDb.execute(sql`
       CREATE TABLE IF NOT EXISTS market_data (
@@ -261,6 +289,71 @@ async function migratePostgres() {
         updated_at TIMESTAMP DEFAULT NOW()
       );
     `);
+    await pgDb.execute(sql`
+      CREATE TABLE IF NOT EXISTS pause_configuration (
+        id VARCHAR(32) PRIMARY KEY DEFAULT replace(gen_random_uuid()::text, '-', ''),
+        user_id VARCHAR(32) NOT NULL REFERENCES users(id),
+        is_enabled BOOLEAN DEFAULT TRUE,
+        operating_duration_minutes INTEGER DEFAULT 15,
+        pause_duration_min_seconds INTEGER DEFAULT 60,
+        pause_duration_max_seconds INTEGER DEFAULT 180,
+        use_technical_analysis_consensus BOOLEAN DEFAULT TRUE,
+        min_ai_consensus_for_pause REAL DEFAULT 0.7,
+        last_pause_started_at TIMESTAMP,
+        last_operating_started_at TIMESTAMP,
+        is_paused_now BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    // Legacy SQLite allowed duplicate per-user pause rows; keep the most recently updated configuration.
+    await pgDb.execute(sql`
+      WITH ranked AS (
+        SELECT ctid, ROW_NUMBER() OVER (
+          PARTITION BY user_id ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST, id DESC
+        ) AS position
+        FROM pause_configuration
+      )
+      DELETE FROM pause_configuration target USING ranked
+      WHERE target.ctid = ranked.ctid AND ranked.position > 1
+    `);
+    await pgDb.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_pause_configuration_user_unique ON pause_configuration(user_id)`);
+
+    await pgDb.execute(sql`
+      CREATE TABLE IF NOT EXISTS asset_blacklist (
+        id VARCHAR(32) PRIMARY KEY DEFAULT replace(gen_random_uuid()::text, '-', ''),
+        user_id VARCHAR(32) NOT NULL REFERENCES users(id),
+        asset_pattern TEXT NOT NULL,
+        pattern_type VARCHAR(20) NOT NULL,
+        is_active BOOLEAN DEFAULT TRUE,
+        reason TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    await pgDb.execute(sql`CREATE INDEX IF NOT EXISTS idx_asset_blacklist_user ON asset_blacklist(user_id)`);
+
+    await pgDb.execute(sql`
+      CREATE TABLE IF NOT EXISTS blocked_assets (
+        id VARCHAR(32) PRIMARY KEY DEFAULT replace(gen_random_uuid()::text, '-', ''),
+        user_id VARCHAR(32) NOT NULL REFERENCES users(id),
+        trade_mode VARCHAR(50) NOT NULL,
+        symbol VARCHAR(100) NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    // Duplicate block rows are semantically identical; retain the oldest record for stable identity.
+    await pgDb.execute(sql`
+      WITH ranked AS (
+        SELECT ctid, ROW_NUMBER() OVER (
+          PARTITION BY user_id, trade_mode, symbol ORDER BY created_at ASC NULLS LAST, id ASC
+        ) AS position
+        FROM blocked_assets
+      )
+      DELETE FROM blocked_assets target USING ranked
+      WHERE target.ctid = ranked.ctid AND ranked.position > 1
+    `);
+    await pgDb.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_blocked_assets_user_mode_symbol ON blocked_assets(user_id, trade_mode, symbol)`);
     
     await pgDb.execute(sql`
       CREATE TABLE IF NOT EXISTS daily_pnl (
@@ -282,6 +375,18 @@ async function migratePostgres() {
         updated_at TIMESTAMP DEFAULT NOW()
       );
     `);
+    // Daily PnL is a per-user/per-day snapshot; keep the latest snapshot if legacy duplicates exist.
+    await pgDb.execute(sql`
+      WITH ranked AS (
+        SELECT ctid, ROW_NUMBER() OVER (
+          PARTITION BY user_id, date ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST, id DESC
+        ) AS position
+        FROM daily_pnl
+      )
+      DELETE FROM daily_pnl target USING ranked
+      WHERE target.ctid = ranked.ctid AND ranked.position > 1
+    `);
+    await pgDb.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_pnl_user_date_unique ON daily_pnl(user_id, date)`);
     
     await pgDb.execute(sql`
       CREATE TABLE IF NOT EXISTS ai_recovery_strategies (

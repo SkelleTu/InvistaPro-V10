@@ -23,6 +23,8 @@ import { derivTradeSync } from "./services/deriv-trade-sync";
 import { realStatsTracker } from "./services/real-stats-tracker";
 import { runPostgresMigration } from "./migrate-postgres";
 import { backfillMissingEssentialDataToNeon, restoreEssentialDataToSqlite } from "./neon-sqlite-sync";
+import { backfillOperationalHistoryToNeon, restoreOperationalHistoryToSqlite } from "./neon-operational-sync";
+import { backfillRiskControlsToNeon, restoreRiskControlsToSqlite } from "./neon-risk-controls-sync";
 import { initUrlRegistry } from "./services/url-registry";
 import { startDerivObservabilityBridge } from "./services/deriv-observability-bridge";
 import { startUniversalHeartbeatLoop } from "./services/universal-server-session";
@@ -355,8 +357,16 @@ app.use((req, res, next) => {
         await runPostgresMigration();
         const backfill = await backfillMissingEssentialDataToNeon();
         console.log('✅ [SQLITE→NEON] Backfill aditivo de essenciais concluído', backfill);
+        const operationalBackfill = await backfillOperationalHistoryToNeon();
+        console.log('✅ [SQLITE→NEON] Histórico financeiro, KYC e contratos importados', operationalBackfill);
         const restored = await restoreEssentialDataToSqlite();
         console.log('✅ [NEON→SQLITE] Dados essenciais restaurados', restored);
+        const operationalRestored = await restoreOperationalHistoryToSqlite();
+        console.log('✅ [NEON→SQLITE] Histórico operacional reidratado no cache local', operationalRestored);
+        const riskBackfill = await backfillRiskControlsToNeon();
+        console.log('✅ [SQLITE→NEON] Controles de risco importados', riskBackfill);
+        const riskRestored = await restoreRiskControlsToSqlite();
+        console.log('✅ [NEON→SQLITE] Controles de risco restaurados', riskRestored);
         const mt5ConfigRestored = await metaTraderBridge.restoreDurableConfig();
         console.log(mt5ConfigRestored
           ? '✅ [MT5] Configuração restaurada da persistência durável.'
@@ -367,7 +377,7 @@ app.use((req, res, next) => {
         console.log('✅ Migração e restauração concluídas.');
         console.log(`   • ${dbType} conectado e identidade de plataforma validada`);
         console.log('   • Identidade, tokens e configurações essenciais restaurados da Neon');
-        console.log('   • Histórico operacional, logs de IA e dados de mercado permanecem locais');
+        console.log('   • Movimentações, documentos e contratos Deriv têm fonte durável na Neon; SQLite é cache reidratável. Logs de IA e dados de mercado permanecem locais.');
         console.log('   🎉 Persistência pronta para uso.');
         break;
       } catch (persistenceError: any) {

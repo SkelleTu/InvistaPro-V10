@@ -1,5 +1,5 @@
 import { pgDb as db, pgSchema, isPostgresAvailable } from "./db-postgres";
-import { eq, desc, and, isNull, isNotNull } from "drizzle-orm";
+import { eq, desc, and, isNull, isNotNull, inArray, sql } from "drizzle-orm";
 import { createHash, randomBytes, createCipheriv, createDecipheriv } from "crypto";
 import type {
   User,
@@ -23,6 +23,12 @@ import type {
   InsertDailyPnL,
   AiRecoveryStrategy,
   InsertAiRecoveryStrategy,
+  AssetBlacklist,
+  InsertAssetBlacklist,
+  PauseConfiguration,
+  InsertPauseConfiguration,
+  UpdatePauseConfiguration,
+  TradingControl,
 } from "@shared/schema";
 import type { IStorage } from "./storage";
 
@@ -236,6 +242,11 @@ export class PostgresStorage implements IStorage {
     return movs as Movimento[];
   }
 
+  async getAllMovimentos(limit?: number): Promise<Movimento[]> {
+    const query = db.select().from(pgSchema.movimentos).orderBy(desc(pgSchema.movimentos.createdAt));
+    return (limit ? await query.limit(limit) : await query) as Movimento[];
+  }
+
   async calcularRendimento(saldo: number): Promise<number> {
     const taxaMensal = 0.00835;
     const rendimento = saldo * taxaMensal;
@@ -261,6 +272,16 @@ export class PostgresStorage implements IStorage {
     return docs as Documento[];
   }
 
+  async getAllDocumentos(): Promise<Documento[]> {
+    const docs = await db.select().from(pgSchema.documentos).orderBy(desc(pgSchema.documentos.createdAt));
+    return docs as Documento[];
+  }
+
+  async getDocumento(id: string): Promise<Documento | undefined> {
+    const [document] = await db.select().from(pgSchema.documentos).where(eq(pgSchema.documentos.id, id)).limit(1);
+    return document as Documento | undefined;
+  }
+
   async updateDocumentoStatus(id: string, status: string, motivoRejeicao?: string): Promise<Documento> {
     const [documento] = await db
       .update(pgSchema.documentos)
@@ -272,6 +293,20 @@ export class PostgresStorage implements IStorage {
       .where(eq(pgSchema.documentos.id, id))
       .returning();
     return documento as Documento;
+  }
+
+  async updateDocumento(id: string, updates: Partial<Documento>): Promise<Documento> {
+    const allowed = ["arquivo", "status", "motivoRejeicao", "aprovadoPor", "aprovadoEm", "updatedAt"] as const;
+    const filtered: any = {};
+    for (const key of allowed) if (key in updates) filtered[key] = (updates as any)[key];
+    filtered.updatedAt ??= new Date();
+    const safeUpdates = serializeDateFields(convertSQLiteDataToPostgres(filtered));
+    const [document] = await db.update(pgSchema.documentos)
+      .set(safeUpdates)
+      .where(eq(pgSchema.documentos.id, id))
+      .returning();
+    if (!document) throw new Error("DOCUMENT_NOT_FOUND");
+    return document as Documento;
   }
 
   // Deriv token operations
@@ -516,6 +551,11 @@ export class PostgresStorage implements IStorage {
     return ops as TradeOperation[];
   }
 
+  async getAllTradeOperations(): Promise<TradeOperation[]> {
+    const ops = await db.select().from(pgSchema.tradeOperations).orderBy(desc(pgSchema.tradeOperations.createdAt));
+    return ops as TradeOperation[];
+  }
+
   async getTradeOperationByDerivContractId(derivContractId: string): Promise<TradeOperation | null> {
     try {
       const ops = await db
@@ -536,6 +576,9 @@ export class PostgresStorage implements IStorage {
     // causam erro no Drizzle pois não existem no schema Postgres.
     const NEON_ALLOWED = new Set([
       'status', 'profit', 'entryPrice', 'exitPrice', 'derivContractId',
+      'shortcode', 'buyPrice', 'sellPrice', 'entryEpoch', 'exitEpoch',
+      'contractType', 'barrier', 'derivStatus', 'derivProfit', 'payout',
+      'statusChangedAt', 'lastSyncAt', 'syncCount',
       'completedAt', 'isRecoveryMode', 'recoveryMultiplier', 'isConservativeForced', 'operationMode',
     ]);
     const filtered: any = {};
@@ -566,7 +609,7 @@ export class PostgresStorage implements IStorage {
       .from(pgSchema.tradeOperations)
       .where(and(
         eq(pgSchema.tradeOperations.userId, userId),
-        eq(pgSchema.tradeOperations.status, 'active')
+        inArray(pgSchema.tradeOperations.status, ["pending", "active", "open", "purchased", "in_progress"])
       ))
       .orderBy(desc(pgSchema.tradeOperations.createdAt));
     return ops as TradeOperation[];
@@ -649,12 +692,15 @@ export class PostgresStorage implements IStorage {
     totalProfit: number;
     winRate: number;
   }> {
-    const operations = await this.getUserTradeOperations(userId, 1000);
+    const operations = await this.getUserTradeOperations(userId, 100000);
     
     const expiredTrades = operations.filter(op => op.status === 'expired' || op.status === 'closed').length;
     
     // Filter only completed trades (not pending/active and has profit value)
-    const completedTrades = operations.filter(op => op.status !== 'pending' && op.status !== 'active' && op.profit !== null && op.profit !== undefined);
+    const openStatuses = new Set(["pending", "active", "open", "purchased", "in_progress"]);
+    const completedTrades = operations.filter(op =>
+      !openStatuses.has(String(op.status || "").toLowerCase()) && op.profit !== null && op.profit !== undefined
+    );
     
     const wonTrades = completedTrades.filter(op => (op.profit || 0) > 0).length;
     const lostTrades = completedTrades.filter(op => (op.profit || 0) < 0).length;
@@ -693,34 +739,102 @@ export class PostgresStorage implements IStorage {
     // Implementar se necessário
   }
 
-  // Daily P&L Operations
-  async createOrUpdateDailyPnL(userId: string, dailyData: Partial<any>): Promise<any> {
-    // Delegado para SQLite
-    return { userId, ...dailyData };
+  // Durable daily P&L and recovery strategy records.
+  async createOrUpdateDailyPnL(userId: string, dailyData: Partial<InsertDailyPnL>): Promise<DailyPnL> {
+    const date = String((dailyData as any).date || new Date().toISOString().slice(0, 10));
+    const values: any = {
+      id: (dailyData as any).id || randomBytes(16).toString("hex"),
+      userId,
+      date,
+      openingBalance: Number(dailyData.openingBalance ?? 0),
+      currentBalance: Number(dailyData.currentBalance ?? 0),
+      dailyPnL: Number(dailyData.dailyPnL ?? 0),
+      totalTrades: dailyData.totalTrades ?? 0,
+      wonTrades: dailyData.wonTrades ?? 0,
+      lostTrades: dailyData.lostTrades ?? 0,
+      conservativeOperations: dailyData.conservativeOperations ?? 0,
+      isRecoveryActive: dailyData.isRecoveryActive ?? false,
+      recoveryThreshold: dailyData.recoveryThreshold ?? 0.75,
+      maxDrawdown: dailyData.maxDrawdown ?? 0,
+      recoveryOperations: dailyData.recoveryOperations ?? 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    const update: any = { updatedAt: new Date() };
+    for (const key of [
+      "openingBalance", "currentBalance", "dailyPnL", "totalTrades", "wonTrades",
+      "lostTrades", "conservativeOperations", "isRecoveryActive", "recoveryThreshold",
+      "maxDrawdown", "recoveryOperations",
+    ] as const) {
+      if (key in dailyData) update[key] = (dailyData as any)[key];
+    }
+    const [record] = await db.insert(pgSchema.dailyPnL).values(values)
+      .onConflictDoUpdate({
+        target: [pgSchema.dailyPnL.userId, pgSchema.dailyPnL.date],
+        set: update,
+      }).returning();
+    return record as DailyPnL;
   }
 
-  async getDailyPnL(userId: string, date?: string): Promise<any | undefined> {
-    return undefined;
+  async getDailyPnL(userId: string, date?: string): Promise<DailyPnL | undefined> {
+    const targetDate = date || new Date().toISOString().slice(0, 10);
+    const [record] = await db.select().from(pgSchema.dailyPnL)
+      .where(and(eq(pgSchema.dailyPnL.userId, userId), eq(pgSchema.dailyPnL.date, targetDate)))
+      .limit(1);
+    return record as DailyPnL | undefined;
   }
 
   async getConservativeOperationsToday(userId: string): Promise<number> {
-    return 0;
+    const record = await this.getDailyPnL(userId);
+    return Number(record?.conservativeOperations || 0);
   }
 
   async incrementConservativeOperations(userId: string): Promise<number> {
-    return 1;
+    const date = new Date().toISOString().slice(0, 10);
+    const [updated] = await db.update(pgSchema.dailyPnL)
+      .set({
+        conservativeOperations: sql`${pgSchema.dailyPnL.conservativeOperations} + 1`,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(pgSchema.dailyPnL.userId, userId), eq(pgSchema.dailyPnL.date, date)))
+      .returning({ conservativeOperations: pgSchema.dailyPnL.conservativeOperations });
+    if (updated) return Number(updated.conservativeOperations || 0);
+    const created = await this.createOrUpdateDailyPnL(userId, {
+      date, openingBalance: 0, currentBalance: 0, dailyPnL: 0, conservativeOperations: 1,
+    } as any);
+    return Number(created.conservativeOperations || 1);
   }
 
-  async createUserRecoveryStrategy(strategy: any): Promise<any> {
-    return strategy;
+  async getRecentDailyPnL(userId: string, days = 7): Promise<DailyPnL[]> {
+    const records = await db.select().from(pgSchema.dailyPnL)
+      .where(eq(pgSchema.dailyPnL.userId, userId))
+      .orderBy(desc(pgSchema.dailyPnL.date))
+      .limit(Math.min(Math.max(Math.trunc(days) || 7, 1), 365));
+    return records as DailyPnL[];
   }
 
-  async getUserRecoveryStrategies(userId: string): Promise<any[]> {
-    return [];
+  async createAiRecoveryStrategy(strategy: InsertAiRecoveryStrategy): Promise<AiRecoveryStrategy> {
+    const data = convertSQLiteDataToPostgres(strategy);
+    const [created] = await db.insert(pgSchema.aiRecoveryStrategies).values(data).returning();
+    return created as AiRecoveryStrategy;
   }
 
-  async updateRecoveryStrategy(id: string, updates: Partial<any>): Promise<any> {
-    return updates;
+  async getUserRecoveryStrategies(userId: string): Promise<AiRecoveryStrategy[]> {
+    const records = await db.select().from(pgSchema.aiRecoveryStrategies)
+      .where(eq(pgSchema.aiRecoveryStrategies.userId, userId))
+      .orderBy(desc(pgSchema.aiRecoveryStrategies.successRate));
+    return records as AiRecoveryStrategy[];
+  }
+
+  async updateRecoveryStrategy(id: string, updates: Partial<AiRecoveryStrategy>): Promise<AiRecoveryStrategy> {
+    const allowed = ["strategyName", "isActive", "parameters", "successRate", "totalRecoveries", "avgRecoveryTime"] as const;
+    const safe: any = {};
+    for (const key of allowed) if (key in updates) safe[key] = (updates as any)[key];
+    safe.updatedAt = new Date();
+    const [updated] = await db.update(pgSchema.aiRecoveryStrategies).set(safe)
+      .where(eq(pgSchema.aiRecoveryStrategies.id, id)).returning();
+    if (!updated) throw new Error("RECOVERY_STRATEGY_NOT_FOUND");
+    return updated as AiRecoveryStrategy;
   }
 
   async calculateRecoveryMultiplier(userId: string): Promise<number> {
@@ -799,9 +913,10 @@ export class PostgresStorage implements IStorage {
     // Implementado
   }
 
-  async getTradingControlStatus(): Promise<any | undefined> {
-    const [control] = await db.select().from(pgSchema.tradingControl).limit(1);
-    return control;
+  async getTradingControlStatus(): Promise<TradingControl | undefined> {
+    const [control] = await db.select().from(pgSchema.tradingControl)
+      .orderBy(desc(pgSchema.tradingControl.updatedAt)).limit(1);
+    return control as TradingControl | undefined;
   }
 
   async pauseTrading(pausedBy: string, reason: string): Promise<any> {
@@ -834,49 +949,96 @@ export class PostgresStorage implements IStorage {
     }
   }
 
-  async resumeTrading(): Promise<any> {
-    const [control] = await db
-      .update(pgSchema.tradingControl)
-      .set({
-        isPaused: false,
-        resumedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .returning();
-    return control;
+  async resumeTrading(): Promise<TradingControl> {
+    const existing = await this.getTradingControlStatus();
+    if (existing) {
+      const [updated] = await db.update(pgSchema.tradingControl)
+        .set({ isPaused: false, resumedAt: new Date(), updatedAt: new Date() })
+        .where(eq(pgSchema.tradingControl.id, existing.id)).returning();
+      return updated as TradingControl;
+    }
+    const [created] = await db.insert(pgSchema.tradingControl)
+      .values({ isPaused: false, resumedAt: new Date(), updatedAt: new Date() }).returning();
+    return created as TradingControl;
   }
 
-  async getRecentDailyPnL(userId: string, days?: number): Promise<any[]> {
-    return [];
+  async createAssetBlacklist(blacklist: InsertAssetBlacklist): Promise<AssetBlacklist> {
+    const [created] = await db.insert(pgSchema.assetBlacklist)
+      .values(convertSQLiteDataToPostgres(blacklist)).returning();
+    return created as AssetBlacklist;
   }
 
-  async createAssetBlacklist(blacklist: any): Promise<any> {
-    return blacklist;
+  async getUserAssetBlacklists(userId: string): Promise<AssetBlacklist[]> {
+    const records = await db.select().from(pgSchema.assetBlacklist)
+      .where(eq(pgSchema.assetBlacklist.userId, userId));
+    return records as AssetBlacklist[];
   }
 
-  async getUserAssetBlacklists(userId: string): Promise<any[]> {
-    return [];
+  async deleteAssetBlacklist(id: string): Promise<void> {
+    await db.delete(pgSchema.assetBlacklist).where(eq(pgSchema.assetBlacklist.id, id));
   }
-
-  async deleteAssetBlacklist(id: string): Promise<void> {}
 
   async isAssetBlocked(userId: string, assetName: string): Promise<boolean> {
-    return false;
+    const records = await this.getUserAssetBlacklists(userId);
+    return records.some(record => record.isActive !== false && (
+      record.patternType === "exact"
+        ? record.assetPattern === assetName
+        : record.patternType === "contains" && assetName.includes(record.assetPattern)
+    ));
   }
 
-  async getUserPauseConfig(userId: string): Promise<any | undefined> {
-    return undefined;
+  async isUserBlockedAsset(userId: string, symbol: string, tradeMode: string): Promise<boolean> {
+    const [record] = await db.select({ id: pgSchema.blockedAssets.id })
+      .from(pgSchema.blockedAssets)
+      .where(and(
+        eq(pgSchema.blockedAssets.userId, userId),
+        eq(pgSchema.blockedAssets.tradeMode, tradeMode),
+        eq(pgSchema.blockedAssets.symbol, symbol),
+      )).limit(1);
+    return Boolean(record);
   }
 
-  async createPauseConfig(config: any): Promise<any> {
-    return config;
+  async getUserPauseConfig(userId: string): Promise<PauseConfiguration | undefined> {
+    const [config] = await db.select().from(pgSchema.pauseConfiguration)
+      .where(eq(pgSchema.pauseConfiguration.userId, userId)).limit(1);
+    return config as PauseConfiguration | undefined;
   }
 
-  async updatePauseConfig(userId: string, config: any): Promise<any> {
-    return config;
+  async createPauseConfig(config: InsertPauseConfiguration): Promise<PauseConfiguration> {
+    const values = convertSQLiteDataToPostgres(config);
+    const { id: _id, userId: _userId, createdAt: _createdAt, ...mutable } = values;
+    const [created] = await db.insert(pgSchema.pauseConfiguration).values(values)
+      .onConflictDoUpdate({
+        target: pgSchema.pauseConfiguration.userId,
+        set: { ...mutable, updatedAt: new Date() },
+      }).returning();
+    return created as PauseConfiguration;
   }
 
-  async updatePausedNowStatus(userId: string, isPausedNow: boolean): Promise<void> {}
+  async updatePauseConfig(userId: string, config: UpdatePauseConfiguration): Promise<PauseConfiguration> {
+    const values = convertSQLiteDataToPostgres(config);
+    const { id: _id, userId: _userId, createdAt: _createdAt, ...mutable } = values;
+    const [updated] = await db.insert(pgSchema.pauseConfiguration).values({ userId, ...values })
+      .onConflictDoUpdate({
+        target: pgSchema.pauseConfiguration.userId,
+        set: { ...mutable, updatedAt: new Date() },
+      }).returning();
+    return updated as PauseConfiguration;
+  }
+
+  async updatePausedNowStatus(userId: string, isPausedNow: boolean): Promise<void> {
+    const now = new Date();
+    const [updated] = await db.update(pgSchema.pauseConfiguration).set({
+      isPausedNow,
+      lastPauseStartedAt: isPausedNow ? now : null,
+      updatedAt: now,
+    }).where(eq(pgSchema.pauseConfiguration.userId, userId)).returning({ id: pgSchema.pauseConfiguration.id });
+    if (!updated) {
+      await db.insert(pgSchema.pauseConfiguration).values({
+        userId, isPausedNow, lastPauseStartedAt: isPausedNow ? now : null, updatedAt: now,
+      });
+    }
+  }
 
   async getAllDerivTokens(userId: string): Promise<DerivToken[]> {
     const rows = await db.select().from(pgSchema.derivTokens)
@@ -924,8 +1086,6 @@ export class PostgresStorage implements IStorage {
       .values({ userId, modality, slotConfigs: JSON.stringify(slotConfigs) }).returning();
     return row;
   }
-
-  async isUserBlockedAsset(_userId: string, _symbol: string, _tradeMode: string): Promise<boolean> { return false; }
 
   async expireOldPendingTrades(_olderThanMinutes?: number): Promise<number> { return 0; }
 

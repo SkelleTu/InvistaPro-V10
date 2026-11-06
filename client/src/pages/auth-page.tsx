@@ -29,6 +29,9 @@ export default function AuthPage() {
   // Registration form
   const registerForm = useForm<RegisterUser>({
     resolver: zodResolver(registerUserSchema),
+    defaultValues: {
+      referralCode: new URLSearchParams(window.location.search).get("ref")?.trim().toUpperCase() || "",
+    },
   });
 
   // Login form  
@@ -402,6 +405,17 @@ export default function AuthPage() {
                         {...registerForm.register("email")}
                         placeholder="seu@email.com"
                         className="h-10 sm:h-12"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="register-referral">Código de indicação (opcional)</Label>
+                      <Input
+                        id="register-referral"
+                        {...registerForm.register("referralCode")}
+                        placeholder="Digite o código recebido"
+                        className="h-10 sm:h-12 uppercase"
+                        autoComplete="off"
                       />
                     </div>
 
