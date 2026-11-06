@@ -1554,7 +1554,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         totalTrades: Math.max(0, parseInt(String(stats?.totalTrades || 0))),
         wonTrades: Math.max(0, parseInt(String(stats?.wonTrades || 0))),
         winRate: Math.max(0, parseFloat(String(stats?.winRate || 0))),
-        totalPnL: Math.max(0, parseFloat(String(stats?.totalProfit || 0))),
+        totalPnL: Number.isFinite(Number(stats?.totalProfit)) ? Number(stats?.totalProfit) : 0,
         investidoMesAtual: movimentos.filter(m => m.tipo === 'deposito').reduce((sum, m) => sum + Number(m.valor), 0),
         movimentos: movimentos.map(m => ({
           tipo: m.tipo,
