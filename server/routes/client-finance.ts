@@ -89,6 +89,9 @@ router.post("/deposits", isAuthenticated, async (req, res) => {
       }
       return res.status(409).json({ message: "A cobrança já existe; aguarde a reconciliação do provedor." });
     }
+    if (intentResult.intent.status !== "created") {
+      return res.status(409).json({ message: "Esta intenção já foi encerrada ou liquidada. Crie uma nova solicitação com outra chave de idempotência." });
+    }
     const adapter = getPaymentProviderAdapter();
     const pix = await adapter.createPixPayment({
       intentId: intentResult.intent.id, amountCents, currency: "BRL",
