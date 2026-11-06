@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { parseAmountToCents, reconcileVerifiedPayment } from "../server/services/payment-domain";
 import { readFileSync } from "node:fs";
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
@@ -74,5 +75,30 @@ assert.match(adminRoutes, /Cache-Control", "no-store, max-age=0"/, "admin custom
 assert.match(ai, /requestedAction && !canControlTrading/, "client AI must reject central motor control requests");
 assert.match(ai, /somente consulta/, "client AI context must be read-only");
 assert.ok(assistantUi.includes('replace(/</g, "&lt;")'), "assistant output must escape HTML before formatting");
+
+
+const paymentIntent = { id: "intent-test", userId: "user-test", amountCents: 13000, currency: "BRL" as const, status: "pending" as const };
+assert.equal(parseAmountToCents("130,00"), 13000);
+assert.throws(() => parseAmountToCents(0), /PAYMENT_AMOUNT_INVALID/);
+const verifiedPayment = {
+  providerPaymentId: "provider-test-1", externalReference: paymentIntent.id,
+  amountCents: 13000, currency: "BRL", status: "approved",
+  webhookVerified: true, providerLookupVerified: true,
+};
+assert.deepEqual(reconcileVerifiedPayment(paymentIntent, verifiedPayment), {
+  status: "approved", shouldCredit: true, duplicate: false,
+});
+assert.deepEqual(reconcileVerifiedPayment({
+  ...paymentIntent, status: "approved", providerPaymentId: "provider-test-1",
+}, verifiedPayment), { status: "approved", shouldCredit: false, duplicate: true });
+assert.throws(() => reconcileVerifiedPayment(paymentIntent, {
+  ...verifiedPayment, webhookVerified: false,
+}), /PAYMENT_PROVIDER_VERIFICATION_REQUIRED/);
+assert.throws(() => reconcileVerifiedPayment(paymentIntent, {
+  ...verifiedPayment, amountCents: 12999,
+}), /PAYMENT_AMOUNT_MISMATCH/);
+assert.throws(() => reconcileVerifiedPayment(paymentIntent, {
+  ...verifiedPayment, externalReference: "different-intent",
+}), /PAYMENT_REFERENCE_MISMATCH/);
 
 console.log("Client portal, affiliate, AI permission and payment-boundary policy checks passed.");
