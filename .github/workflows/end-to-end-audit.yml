@@ -29,6 +29,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      # Resolve compatible transitive fixes and persist the lockfile before clean install.
       - name: Apply compatible dependency security updates
         continue-on-error: true
         run: npm audit fix --package-lock-only --ignore-scripts
