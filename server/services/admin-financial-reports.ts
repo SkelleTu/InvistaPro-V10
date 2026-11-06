@@ -186,7 +186,13 @@ export async function generateAdminFinancialReport(input: {
   const pdf = buildPdf(lines);
   const hash = createHash("sha256").update(pdf).digest("hex");
   const storageRef = await storePrivateReport(reportId, pdf);
-  const storedPdf = await readPrivateReport(storageRef);
+  let storedPdf: Buffer;
+  try {
+    storedPdf = await readPrivateReport(storageRef);
+  } catch (error) {
+    await deletePrivateReport(storageRef).catch(() => {});
+    throw error;
+  }
   if (createHash("sha256").update(storedPdf).digest("hex") !== hash) {
     await deletePrivateReport(storageRef).catch(() => {});
     throw new Error("REPORT_STORAGE_HASH_MISMATCH");
