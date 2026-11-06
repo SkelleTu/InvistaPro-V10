@@ -312,8 +312,8 @@ export default function PortalCliente() {
       </div>
       <div className="grid grid-cols-1 xl:grid-cols-[1.4fr_1fr] gap-4">
         <section className="rounded-2xl border border-white/10 bg-slate-900/70 overflow-hidden">
-          <div className="flex items-center justify-between p-5 border-b border-white/5"><div><h2 className="font-semibold text-white">Movimentações recentes</h2><p className="text-xs text-slate-500 mt-1">Dados vinculados à sua conta</p></div><button onClick={() => selectTab("historico")} className="text-xs text-violet-300 hover:text-white">Ver histórico</button></div>
-          <MovementList limit={5} />
+          <div className="flex items-center justify-between p-5 border-b border-white/5"><div><h2 className="font-semibold text-white">Lançamentos contábeis recentes</h2><p className="text-xs text-slate-500 mt-1">Extrato oficial da carteira</p></div><button onClick={() => selectTab("historico")} className="text-xs text-violet-300 hover:text-white">Ver histórico</button></div>
+          <LedgerList limit={5} />
         </section>
         <section className="rounded-2xl border border-violet-400/20 bg-gradient-to-br from-violet-950/60 to-slate-900 p-5">
           <div className="h-10 w-10 rounded-xl bg-violet-400/15 flex items-center justify-center mb-4"><Sparkles className="h-5 w-5 text-violet-200" /></div>
