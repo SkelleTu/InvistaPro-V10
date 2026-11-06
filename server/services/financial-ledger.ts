@@ -421,3 +421,12 @@ export async function attachProviderPayment(input: {
     return { intent: updated, duplicate: false };
   });
 }
+
+
+export async function findWithdrawalByProviderTransfer(provider: string, providerTransferId: string) {
+  const db = requirePostgres();
+  const [withdrawal] = await db.select().from(pgSchema.withdrawalRequests)
+    .where(and(eq(pgSchema.withdrawalRequests.provider, provider),
+      eq(pgSchema.withdrawalRequests.providerTransferId, providerTransferId))).limit(1);
+  return withdrawal || null;
+}
