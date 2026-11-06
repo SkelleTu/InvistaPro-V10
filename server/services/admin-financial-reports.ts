@@ -145,7 +145,10 @@ export async function generateAdminFinancialReport(input: {
     const cpf = String(user.cpf || "");
     lines.push("IDENTIFICACAO DO CLIENTE", `Nome: ${user.nomeCompleto}`, `E-mail: ${user.email}`,
       `CPF: ${cpf.length >= 11 ? cpf.slice(0, 3) + ".***.***-" + cpf.slice(-2) : "nao informado"}`,
-      `Telefone: ${user.telefone || "nao informado"}`, `Conta aprovada: ${user.contaAprovada ? "sim" : "nao"}`,
+      `Telefone: ${user.telefone || "nao informado"}`, `Endereco: ${user.endereco || "nao informado"}`,
+      `Cidade/UF: ${[user.cidade, user.estado].filter(Boolean).join("/") || "nao informado"}`, `CEP: ${user.cep || "nao informado"}`,
+      `Cadastro criado: ${user.createdAt?.toISOString?.() || user.createdAt || "nao informado"}`,
+      `Conta aprovada: ${user.contaAprovada ? "sim" : "nao"}`,
       `KYC verificado: ${user.documentosVerificados ? "sim" : "nao"}`, " ");
   } else {
     lines.push("RESUMO DA PLATAFORMA", `Clientes cadastrados: ${users.length}`,
@@ -154,20 +157,33 @@ export async function generateAdminFinancialReport(input: {
       `Operacoes de trading: ${trades.length}`, `Lancamentos contabeis: ${relevantTransactions.length}`,
       `Solicitacoes de saque: ${withdrawals.length}`, " ");
   }
+  const userById = new Map((users as any[]).map((item: any) => [item.id, item]));
+  const accountById = new Map((relevantAccounts as any[]).map((item: any) => [item.id, item]));
   lines.push("MOVIMENTACOES LEGADAS (nao equivalem a lancamentos conciliados)");
-  for (const row of movements as any[]) lines.push(`${row.createdAt?.toISOString?.() || row.createdAt || ""} | ${row.tipo} | ${Number(row.valor || 0).toFixed(2)} BRL | ${row.id} | ${row.descricao || ""}`);
+  for (const row of movements as any[]) {
+    const owner: any = userById.get(row.userId);
+    lines.push(`${row.createdAt?.toISOString?.() || row.createdAt || ""} | cliente ${owner?.nomeCompleto || row.userId} (${row.userId}) | ${row.tipo} | ${Number(row.valor || 0).toFixed(2)} BRL | ${row.id} | ${row.descricao || ""}`);
+  }
   lines.push(" ", "OPERACOES DE TRADING (secao separada do fluxo de caixa)");
-  for (const row of trades as any[]) lines.push(`${row.createdAt?.toISOString?.() || row.createdAt || ""} | ${row.symbol} | ${row.tradeType}/${row.direction} | stake ${Number(row.amount || 0).toFixed(2)} | status ${row.status} | PnL ${row.profit == null ? "pendente" : Number(row.profit).toFixed(2)} | ${row.id}`);
+  for (const row of trades as any[]) {
+    const owner: any = userById.get(row.userId);
+    lines.push(`${row.createdAt?.toISOString?.() || row.createdAt || ""} | cliente ${owner?.nomeCompleto || row.userId} (${row.userId}) | ${row.symbol} | ${row.tradeType}/${row.direction} | stake ${Number(row.amount || 0).toFixed(2)} | status ${row.status} | PnL ${row.profit == null ? "pendente" : Number(row.profit).toFixed(2)} | ${row.id}`);
+  }
   lines.push(" ", "CONTAS FINANCEIRAS");
   for (const account of relevantAccounts as any[]) lines.push(`${account.accountCode} | ${account.accountKind} | ${account.status} | ${account.currency}`);
   lines.push(" ", "LANCAMENTOS CONTABEIS (centavos)");
   const transactionById = new Map((relevantTransactions as any[]).map(tx => [tx.id, tx]));
   for (const entry of relevantEntries as any[]) {
     const tx: any = transactionById.get(entry.transactionId);
-    lines.push(`${entry.createdAt?.toISOString?.() || entry.createdAt || ""} | ${entry.direction} ${entry.amountCents} ${entry.currency} | ${tx?.eventType || ""} | ${tx?.idempotencyKey || ""}`);
+    const account: any = accountById.get(entry.accountId);
+    const owner: any = account?.ownerUserId ? userById.get(account.ownerUserId) : null;
+    lines.push(`${entry.createdAt?.toISOString?.() || entry.createdAt || ""} | cliente ${owner?.nomeCompleto || account?.ownerUserId || "plataforma"} | conta ${account?.accountCode || entry.accountId} | ${entry.direction} ${entry.amountCents} ${entry.currency} | ${tx?.eventType || ""} | ${tx?.idempotencyKey || ""}`);
   }
   lines.push(" ", "INTENCOES DE PAGAMENTO");
-  for (const row of paymentIntents as any[]) lines.push(`${row.createdAt?.toISOString?.() || row.createdAt || ""} | ${brlFromCents(row.amountCents)} | ${row.status} | ${row.provider || "sem provedor"} | ${row.id}`);
+  for (const row of paymentIntents as any[]) {
+    const owner: any = userById.get(row.userId);
+    lines.push(`${row.createdAt?.toISOString?.() || row.createdAt || ""} | cliente ${owner?.nomeCompleto || row.userId} (${row.userId}) | ${brlFromCents(row.amountCents)} | ${row.status} | ${row.provider || "sem provedor"} | ${row.id}`);
+  }
   lines.push(" ", "PAGAMENTOS CONFIRMADOS/OBSERVADOS PELO PROVEDOR");
   for (const row of relevantProviderPayments as any[]) lines.push(`${row.createdAt?.toISOString?.() || row.createdAt || ""} | ${row.provider} | ${row.providerPaymentId} | ${brlFromCents(row.amountCents)} | ${row.providerStatus} | intent ${row.paymentIntentId}`);
   if (input.scope === "platform") {
@@ -175,11 +191,17 @@ export async function generateAdminFinancialReport(input: {
     for (const row of relevantWebhookEvents as any[]) lines.push(`${row.receivedAt?.toISOString?.() || row.receivedAt || ""} | ${row.provider} | ${row.eventType} | ${row.processingStatus} | assinatura verificada: ${row.signatureVerified ? "sim" : "nao"} | ${row.providerEventId}`);
   }
   lines.push(" ", "SOLICITACOES DE SAQUE");
-  for (const row of withdrawals as any[]) lines.push(`${row.requestedAt?.toISOString?.() || row.requestedAt || ""} | bruto ${brlFromCents(row.amountCents)} | taxa ${brlFromCents(row.feeCents)} | liquido ${brlFromCents(row.netAmountCents)} | ${row.status} | ${row.id}`);
+  for (const row of withdrawals as any[]) {
+    const owner: any = userById.get(row.userId);
+    lines.push(`${row.requestedAt?.toISOString?.() || row.requestedAt || ""} | cliente ${owner?.nomeCompleto || row.userId} (${row.userId}) | bruto ${brlFromCents(row.amountCents)} | taxa ${brlFromCents(row.feeCents)} | liquido ${brlFromCents(row.netAmountCents)} | ${row.status} | ${row.id}`);
+  }
   lines.push(" ", "DOCUMENTOS E REVISOES");
-  for (const row of documents as any[]) lines.push(`${row.createdAt?.toISOString?.() || row.createdAt || ""} | ${row.tipo} | ${row.status} | aprovador ${row.aprovadoPor || "nao informado"} | ${row.id}`);
+  for (const row of documents as any[]) {
+    const owner: any = userById.get(row.userId);
+    lines.push(`${row.createdAt?.toISOString?.() || row.createdAt || ""} | cliente ${owner?.nomeCompleto || row.userId} (${row.userId}) | ${row.tipo} | ${row.status} | aprovador ${row.aprovadoPor || "nao informado"} | ${row.id}`);
+  }
   lines.push(" ", "EVENTOS DE AUDITORIA");
-  for (const row of audit as any[]) lines.push(`${row.createdAt?.toISOString?.() || row.createdAt || ""} | ${row.action} | ${row.entityType}:${row.entityId} | ator ${row.actorUserId || "sistema"} | ${row.reason || ""}`);
+  for (const row of audit as any[]) lines.push(`${row.createdAt?.toISOString?.() || row.createdAt || ""} | cliente ${row.subjectUserId || "plataforma"} | ${row.action} | ${row.entityType}:${row.entityId} | ator ${row.actorUserId || "sistema"} | req ${row.requestId || ""} | ${row.reason || ""}`);
   lines.push(" ", "NOTAS DE INTEGRIDADE", "Este PDF e uma copia documental; a fonte oficial sao os registros persistidos no PostgreSQL.",
     "Movimentos legados e resultados de trading nao sao automaticamente conciliados com o ledger.",
     "A integridade do arquivo e verificada pelo hash SHA-256 registrado no banco.");
