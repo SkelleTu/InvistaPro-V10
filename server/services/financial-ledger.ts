@@ -110,7 +110,7 @@ export async function reserveWithdrawal(input: {
     const [existing] = await tx.select().from(pgSchema.withdrawalRequests)
       .where(eq(pgSchema.withdrawalRequests.idempotencyKey, input.idempotencyKey)).limit(1);
     if (existing) {
-      if (existing.userId !== input.userId || Number(existing.amountCents) !== input.amountCents || Number(existing.feeCents) !== input.feeCents) {
+      if (existing.userId !== input.userId || Number(existing.amountCents) !== input.amountCents || Number(existing.feeCents) !== input.feeCents || existing.destinationFingerprint !== destination.fingerprint) {
         throw new Error("IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST");
       }
       return { withdrawal: existing, duplicate: true };
