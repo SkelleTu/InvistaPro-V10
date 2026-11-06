@@ -43,6 +43,9 @@ assert.match(affiliate, /referredUserId === referrerUserId/, "self-referral must
 
 assert.match(auth, /registerForm\.register\("referralCode"\)/, "registration must accept a referral code");
 assert.match(portal, /queryKey: \["\/api\/affiliates"\]/, "client affiliate screen must use authenticated API");
+assert.match(portal, /id: "aportes", label: "Aportes e pagamentos"/, "client deposits must have a dedicated navigation entry separate from the AI assistant");
+assert.match(portal, /Aguardando Mercado Pago/, "client portal must clearly disclose that payment provider integration is pending");
+assert.match(portal, /Nenhum comprovante enviado pelo cliente, clique ou confirmação manual altera a carteira/, "client UI must explain that manual evidence cannot credit wallet balance");
 assert.match(portal, /\/api\/documents\/upload/, "client profile must support document upload");
 assert.match(routes, /storage: multer\.memoryStorage\(\)/, "KYC uploads must be buffered for private object storage");
 assert.match(routes, /saveKycDocument\(String\(userId\), String\(tipo\), req\.file\)/, "KYC uploads must use the private storage adapter");
