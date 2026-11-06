@@ -531,11 +531,13 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       const lastMovementAt = movements[0]?.createdAt ?? null;
       res.setHeader("Cache-Control", "no-store, max-age=0");
       return res.json({
-        balance: Number(account?.saldo || 0),
+        legacyBalance: Number(account?.saldo || 0),
         ...summary,
         netRecordedFlow: summary.totalDeposits + summary.totalYields - summary.totalWithdrawals,
         movementCount: movements.length,
         lastMovementAt,
+        source: "legacy_movimentos_not_reconciled",
+        isOfficialBalance: false,
       });
     } catch (error) {
       console.error("[CLIENT FINANCIAL SUMMARY] Failed to aggregate account movements:", error instanceof Error ? error.message : String(error));
