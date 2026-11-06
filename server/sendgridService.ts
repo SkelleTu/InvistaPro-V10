@@ -1,5 +1,3 @@
-import sgMail from '@sendgrid/mail';
-
 // Configuração do SendGrid - sempre usar se a chave estiver disponível
 const hasSendGridKey = !!process.env.SENDGRID_API_KEY;
 
@@ -302,77 +300,75 @@ Esta é uma mensagem automática.
   }
 }
 
+async function sendGridRequest(params: EmailParams): Promise<{ ok: boolean; status: number; body: string }> {
+  const apiKey = String(process.env.SENDGRID_API_KEY || "").trim();
+  if (!apiKey) return { ok: false, status: 0, body: "SENDGRID_API_KEY não configurada" };
+
+  const filteredHeaders = params.headers ? Object.fromEntries(
+    Object.entries(params.headers).filter(([key]) =>
+      !["reply-to", "return-path", "list-unsubscribe", "from"].includes(key.toLowerCase())
+    )
+  ) : {};
+  const headers = {
+    "X-Mailer": "InvestPro Corporate Mail System v2.1",
+    "X-Priority": "3",
+    "X-MSMail-Priority": "Normal",
+    "X-InvestPro-Type": "transactional",
+    Organization: "InvestPro Corretora de Valores S.A.",
+    "X-Auto-Response-Suppress": "OOF, DR, RN, NRN",
+    ...filteredHeaders,
+  };
+  const content = [
+    ...(params.text ? [{ type: "text/plain", value: params.text }] : []),
+    ...(params.html ? [{ type: "text/html", value: params.html }] : []),
+  ];
+  if (content.length === 0) return { ok: false, status: 0, body: "Email sem conteúdo de texto ou HTML" };
+
+  const payload = {
+    personalizations: [{ to: [{ email: params.to }] }],
+    from: { email: params.from, name: "InvestPro Corretora" },
+    reply_to: { email: "naoresponda@investpro.com.br", name: "Não Responder" },
+    subject: params.subject,
+    content,
+    headers,
+    tracking_settings: {
+      click_tracking: { enable: false },
+      open_tracking: { enable: false },
+    },
+    mail_settings: {
+      sandbox_mode: { enable: false },
+      bypass_list_management: { enable: false },
+    },
+  };
+
+  const response = await fetch("https://api.sendgrid.com/v3/mail/send", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  return { ok: response.ok, status: response.status, body: await response.text() };
+}
+
 export async function sendEmail(params: EmailParams): Promise<boolean> {
-  // Força o uso do SendGrid se a chave estiver disponível
   if (!process.env.SENDGRID_API_KEY) {
-    console.log('⚠️ SendGrid não disponível, retornando false para fallback');
+    console.log("⚠️ SendGrid não disponível, retornando false para fallback");
     return false;
   }
-  
-  // Configura a chave API novamente para garantir
-  sgMail.setApiKey(process.env.SENDGRID_API_KEY);
-  console.log('✅ SendGrid configurado e pronto para envio');
 
   try {
-    // Headers corporativos profissionais (filtrando headers reservados)
-    const filteredHeaders = params.headers ? Object.fromEntries(
-      Object.entries(params.headers).filter(([key]) => 
-        !['Reply-To', 'Return-Path', 'List-Unsubscribe', 'From'].includes(key)
-      )
-    ) : {};
-    
-    const corporateHeaders = {
-      'X-Mailer': 'InvestPro Corporate Mail System v2.1',
-      'X-Priority': '3',
-      'X-MSMail-Priority': 'Normal',
-      'X-InvestPro-Type': 'transactional',
-      'Organization': 'InvestPro Corretora de Valores S.A.',
-      'X-Auto-Response-Suppress': 'OOF, DR, RN, NRN',
-      ...filteredHeaders
-    };
-    
-    const msg: any = {
-      to: params.to,
-      from: {
-        email: params.from,
-        name: 'InvestPro Corretora'
-      },
-      replyTo: {
-        email: 'naoresponda@investpro.com.br',
-        name: 'Não Responder'
-      },
-      subject: params.subject,
-      text: params.text,
-      html: params.html,
-      headers: corporateHeaders,
-      trackingSettings: {
-        clickTracking: { enable: false },
-        openTracking: { enable: false }
-      },
-      mailSettings: {
-        sandboxMode: { enable: false },
-        bypassListManagement: { enable: false }
-      }
-    };
-    
-    const response = await sgMail.send(msg);
-    
-    console.log('✅ Email corporativo enviado via SendGrid!');
-    console.log('📨 Status:', response[0].statusCode);
-    console.log('🎯 Destinatário:', params.to);
-    console.log('🏢 Remetente empresarial: InvestPro Corretora');
-    
-    return true;
-  } catch (error: any) {
-    console.error('❌ Erro no envio corporativo!');
-    
-    if (error.response) {
-      console.error('Status:', error.response.statusCode);
-      console.error('Body:', error.response.body);
-    } else {
-      console.error('Erro:', error);
+    const result = await sendGridRequest(params);
+    if (!result.ok) {
+      console.error("❌ Erro no envio corporativo via SendGrid:", result.status, result.body.slice(0, 1000));
+      return false;
     }
-    
+    console.log("✅ Email corporativo aceito pelo SendGrid. Status:", result.status);
+    console.log("🎯 Destinatário:", params.to);
+    return true;
+  } catch (error) {
+    console.error("❌ Erro de conexão no envio via SendGrid:", error instanceof Error ? error.message : String(error));
     return false;
   }
 }
@@ -416,70 +412,26 @@ export async function checkDeliveryStatus(messageId?: string): Promise<void> {
 
 // Função de teste robusta conforme guia ChatGPT
 export async function testSendGridConnection(): Promise<void> {
-  console.log('\n' + '='.repeat(80));
-  console.log('🧪 TESTANDO CONEXÃO SENDGRID - Guia ChatGPT');
-  console.log('='.repeat(80));
-  
+  console.log("\n" + "=".repeat(80));
+  console.log("🧪 TESTANDO CONEXÃO SENDGRID");
+  console.log("=".repeat(80));
+
   if (!hasSendGridKey) {
-    console.log('❌ SENDGRID_API_KEY não configurada');
-    console.log('⚠️ Configure no Replit Secrets: SENDGRID_API_KEY = SG.xxxxx');
+    console.log("❌ SENDGRID_API_KEY não configurada");
     return;
   }
-  
-  console.log('✅ SendGrid API Key detectada e configurada');
-  
-  const testMsg = {
-    to: 'teste@exemplo.com', // ⚠️ Substitua por email real para teste
-    from: 'invistapro_group@outlook.com', // ✅ VERIFICADO no SendGrid
-    subject: 'Teste SendGrid - InvistaPRO',
-    text: 'Este é um teste básico do SendGrid.',
-    html: '<strong>Este é um teste em HTML do SendGrid</strong>',
-  };
-  
-  try {
-    const response = await sgMail.send(testMsg);
-    
-    console.log('✅ TESTE ENVIADO COM SUCESSO!');
-    console.log('📨 Status da resposta:', response[0].statusCode);
-    console.log('📩 Headers:', response[0].headers);
-    console.log('🎯 Para:', testMsg.to);
-    console.log('📧 From:', testMsg.from);
-    
-    // Extrair Message ID para rastreamento
-    const messageId = response[0].headers['x-message-id'];
-    if (messageId) {
-      console.log('🆔 Message ID para rastreamento:', messageId);
-      console.log('\n🔍 COMO VERIFICAR SE CHEGOU:');
-      console.log('1. 📁 Verifique PASTA DE SPAM/LIXO primeiro!');
-      console.log('2. 📊 SendGrid Dashboard → Activity → busque por:', messageId);
-      console.log('3. ⏱️ Aguarde até 10 minutos para entrega');
-    }
-    
-  } catch (error: any) {
-    console.log('❌ TESTE FALHOU!');
-    
-    if (error.response) {
-      console.error('📍 Status:', error.response.statusCode);
-      console.error('📍 Body:', error.response.body);
-      
-      // Diagnóstico específico baseado no guia
-      if (error.response.statusCode === 403) {
-        console.log('\n🚨 ERRO 403 FORBIDDEN - POSSÍVEIS CAUSAS:');
-        console.log('1. ❌ API Key inválida ou com caracteres extras');
-        console.log('2. ❌ API Key sem permissão "Mail Send: Full Access"');
-        console.log('3. ❌ Email "from" não verificado no SendGrid');
-        console.log('4. ❌ Domínio não autorizado no SendGrid');
-        console.log('\n💡 SOLUÇÕES:');
-        console.log('• Vá no SendGrid Dashboard → Settings → API Keys');
-        console.log('• Crie nova chave com "Mail Send: Full Access"');
-        console.log('• Verifique o email em Settings → Sender Authentication');
-      }
-    } else {
-      console.error('❌ Erro geral:', error);
-    }
-  }
-  
-  console.log('='.repeat(80) + '\n');
+
+  const sent = await sendEmail({
+    to: "teste@exemplo.com",
+    from: "invistapro_group@outlook.com",
+    subject: "Teste SendGrid - InvistaPRO",
+    text: "Este é um teste básico do SendGrid.",
+    html: "<strong>Este é um teste em HTML do SendGrid</strong>",
+  });
+  console.log(sent
+    ? "✅ SendGrid aceitou a solicitação de envio."
+    : "❌ SendGrid não aceitou a solicitação de envio.");
+  console.log("=".repeat(80) + "\n");
 }
 
 // Função específica para envio de emails de recuperação de senha
