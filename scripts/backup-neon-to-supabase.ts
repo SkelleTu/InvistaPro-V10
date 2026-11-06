@@ -37,7 +37,9 @@ async function main() {
   });
   const buckets = await supabase.storage.listBuckets();
   if (buckets.error) throw buckets.error;
-  if (!buckets.data.some(item => item.name === bucket)) {
+  const existingBucket = buckets.data.find(item => item.name === bucket);
+  if (existingBucket?.public) throw new Error("BACKUP_BUCKET_MUST_BE_PRIVATE");
+  if (!existingBucket) {
     const created = await supabase.storage.createBucket(bucket, {
       public: false, fileSizeLimit: "500MB",
       allowedMimeTypes: ["application/octet-stream", "application/json"],
