@@ -218,7 +218,7 @@ export class DualStorage implements IStorage {
 
   // ─── Movimentos ───────────────────────────────────────────────────────────
 
-  async createMovimento(_m: InsertMovimento) {
+  async createMovimento(_m: InsertMovimento): Promise<Movimento> {
     throw new Error("LEGACY_FINANCIAL_MOVEMENT_WRITE_DISABLED: post financial movements through the durable ledger.");
   }
   async getUserMovimentos(uid: string, limit?: number) {
