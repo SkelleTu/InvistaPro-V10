@@ -20,7 +20,7 @@ function requirePostgres() {
 function assertCents(value: number) { assertPositiveCents(value); }
 
 function encryptWithdrawalDestination(destinationKey: string, destinationType: string) {
-  const secret = String(process.env.ENCRYPTION_KEY || "").trim();
+  const secret = String(process.env.WITHDRAWAL_DESTINATION_ENCRYPTION_KEY || "").trim();
   if (!/^[0-9a-fA-F]{64}$/.test(secret)) throw new Error("WITHDRAWAL_DESTINATION_ENCRYPTION_NOT_CONFIGURED");
   if (!destinationKey.trim() || !destinationType.trim()) throw new Error("WITHDRAWAL_DESTINATION_REQUIRED");
   const iv = randomBytes(12);
