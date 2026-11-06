@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
 import { pgDb, pgSchema, isPostgresAvailable } from "../db-postgres";
-import { storePrivateReport, readPrivateReport } from "./private-document-storage";
+import { storePrivateReport, readPrivateReport, deletePrivateReport } from "./private-document-storage";
 
 function dbOrThrow() {
   if (!isPostgresAvailable || !pgDb) throw new Error("DURABLE_POSTGRES_REQUIRED");
@@ -186,6 +186,11 @@ export async function generateAdminFinancialReport(input: {
   const pdf = buildPdf(lines);
   const hash = createHash("sha256").update(pdf).digest("hex");
   const storageRef = await storePrivateReport(reportId, pdf);
+  const storedPdf = await readPrivateReport(storageRef);
+  if (createHash("sha256").update(storedPdf).digest("hex") !== hash) {
+    await deletePrivateReport(storageRef).catch(() => {});
+    throw new Error("REPORT_STORAGE_HASH_MISMATCH");
+  }
   const rowCount = users.length + movements.length + trades.length + documents.length + relevantTransactions.length + relevantEntries.length + paymentIntents.length + relevantProviderPayments.length + withdrawals.length + audit.length + relevantWebhookEvents.length;
   try {
     await db.transaction(async (tx: any) => {
@@ -203,6 +208,7 @@ export async function generateAdminFinancialReport(input: {
       });
     });
   } catch (error) {
+    await deletePrivateReport(storageRef).catch(() => {});
     throw error;
   }
   return { id: reportId, rowCount, contentSha256: hash, createdAt: generatedAt.toISOString(), scope: input.scope };
