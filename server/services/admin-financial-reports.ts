@@ -61,7 +61,7 @@ function parsePeriod(from?: string, to?: string) {
 }
 
 function periodConditions(column: any, start: Date | null, end: Date | null) {
-  const conditions = [];
+  const conditions: any[] = [];
   if (start) conditions.push(gte(column, start));
   if (end) conditions.push(lte(column, end));
   return conditions;
@@ -79,7 +79,7 @@ export async function generateAdminFinancialReport(input: {
   if (input.scope === "client" && !input.userId) throw new Error("REPORT_CLIENT_REQUIRED");
   const { start, end } = parsePeriod(input.from, input.to);
   const conditionsFor = (column: any, userColumn?: any) => {
-    const conditions = periodConditions(column, start, end);
+    const conditions: any[] = periodConditions(column, start, end);
     if (input.scope === "client" && userColumn) conditions.push(eq(userColumn, input.userId!));
     return conditions.length ? and(...conditions) : undefined;
   };
