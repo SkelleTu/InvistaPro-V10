@@ -199,7 +199,7 @@ router.get('/documents/pending', isAuthenticated, isAdmin, async (_req, res) => 
 router.get('/movements', isAuthenticated, isAdmin, async (_req, res) => {
   try {
     const [storedMovements, allUsers] = await Promise.all([
-      dualStorage.getAllMovimentos(100),
+      dualStorage.getAllMovimentos(),
       dualStorage.getAllUsers(),
     ]);
     const usersById = new Map(allUsers.map(user => [user.id, user]));
@@ -255,8 +255,8 @@ router.get('/user/:userId', isAuthenticated, isAdmin, async (req, res) => {
 
     // Read the customer's complete history from the same durable source as their identity.
     const [storedMovements, storedTrades, storedDocuments] = await Promise.all([
-      dualStorage.getUserMovimentos(userId, 500),
-      dualStorage.getUserTradeOperations(userId, 200),
+      dualStorage.getUserMovimentos(userId, 100000),
+      dualStorage.getUserTradeOperations(userId, 100000),
       dualStorage.getUserDocumentos(userId),
     ]);
     const userMovements = storedMovements.map(mov => ({
