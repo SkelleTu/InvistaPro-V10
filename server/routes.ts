@@ -21,6 +21,7 @@ import crypto from "crypto";
 import kycRoutes from "./routes/kyc";
 import adminRoutes from "./routes/admin";
 import clientFinanceRoutes from "./routes/client-finance";
+import providerWebhookRoutes from "./routes/provider-webhooks";
 import monitorRoutes from "./routes/monitor-routes";
 import learningRoutes from "./routes/learning-routes";
 import metaTraderRoutes from "./routes/metatrader-routes";
@@ -2041,6 +2042,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   // Admin routes  
   app.use('/api/admin', adminRoutes);
   app.use('/api/client/finance', clientFinanceRoutes);
+  app.use('/api/webhooks', providerWebhookRoutes);
   
   // Auto Trading Routes
   const { autoTradingRoutes } = await import('./routes/auto-trading-routes');
