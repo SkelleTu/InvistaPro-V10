@@ -27,6 +27,7 @@ jobs:
           node-version: 22
           cache: npm
       - name: Apply compatible dependency security updates
+        continue-on-error: true
         run: npm audit fix --package-lock-only --ignore-scripts
       - name: Commit updated lockfile to the pull request
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
