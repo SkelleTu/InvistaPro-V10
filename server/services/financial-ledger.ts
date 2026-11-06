@@ -126,6 +126,11 @@ export async function reserveWithdrawal(input: {
       { transactionId: transaction.id, accountId: available.id, direction: "debit", amountCents: input.amountCents, currency: "BRL" },
       { transactionId: transaction.id, accountId: reserved.id, direction: "credit", amountCents: input.amountCents, currency: "BRL" },
     ]);
+    await tx.insert(pgSchema.financialAuditEvents).values({
+      actorUserId: input.actorUserId, subjectUserId: input.userId,
+      action: "withdrawal_reserved", entityType: "withdrawal_request", entityId: withdrawal.id,
+      afterState: { amountCents: input.amountCents, feeCents: input.feeCents, netAmountCents },
+    });
     return { withdrawal, duplicate: false };
   });
 }
