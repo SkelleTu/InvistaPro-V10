@@ -1,0 +1,40 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+
+const read = (path: string) => readFileSync(path, "utf8");
+const clientFinance = read("server/routes/client-finance.ts");
+const webhook = read("server/routes/provider-webhooks.ts");
+const index = read("server/index.ts");
+const ledger = read("server/services/financial-ledger.ts");
+const adapter = read("server/services/payment-provider-adapter.ts");
+const migration = read("migrations/0001_financial_ledger_foundation.sql");
+const env = read("render-invista-pro-v10.env.example");
+
+assert.match(clientFinance, /DEPOSITS_ENABLED !== "true"/);
+assert.match(clientFinance, /WITHDRAWALS_ENABLED !== "true"/);
+assert.match(clientFinance, /Idempotency-Key/);
+assert.match(clientFinance, /MAX_DEPOSIT_CENTS/);
+assert.match(clientFinance, /MAX_WITHDRAWAL_CENTS/);
+assert.match(clientFinance, /documentosVerificados/);
+assert.match(clientFinance, /reserveWithdrawal/);
+assert.match(clientFinance, /attachProviderPayment/);
+assert.match(webhook, /adapter\.verifyWebhook/);
+assert.match(webhook, /rawBody/);
+assert.match(webhook, /confirmVerifiedProviderPayment/);
+assert.match(webhook, /settleVerifiedWithdrawal/);
+assert.match(webhook, /markProviderWebhookProcessed/);
+assert.match(index, /rawBody = Buffer\.from\(buffer\)/);
+assert.match(ledger, /createCipheriv\("aes-256-gcm"/);
+assert.match(ledger, /destinationFingerprint/);
+assert.match(ledger, /reconcileVerifiedPayment/);
+assert.match(adapter, /createPixPayment/);
+assert.match(adapter, /createPixTransfer/);
+assert.match(migration, /PAYMENT_INTENT_INVALID_TRANSITION/);
+assert.match(migration, /WITHDRAWAL_INVALID_TRANSITION/);
+assert.match(migration, /WITHDRAWAL_IMMUTABLE_TERMS/);
+assert.match(env, /DEPOSITS_ENABLED=false/);
+assert.match(env, /WITHDRAWALS_ENABLED=false/);
+assert.match(env, /MAX_DEPOSIT_CENTS=/);
+assert.match(env, /MAX_WITHDRAWAL_CENTS=/);
+
+console.log("✓ financial API policy: disabled-by-default money movement, idempotency, provider verification and encrypted payout destination");
