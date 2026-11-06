@@ -68,3 +68,6 @@ Thumbs.db
 # Secrets management
 SECRETS-ESSENCIAIS.md
 COMO-USAR-DATABASE-URL.md
+
+# Private customer identity documents must never be committed
+uploads/documents/
