@@ -104,3 +104,10 @@ Keep all live deposit and withdrawal features disabled until all of the followin
 - Explicit production enablement flag is reviewed and switched by an authorized operator.
 
 Payment acceptance and investment/trading authorization are separate decisions. A successful deposit must not automatically enable trading or promise returns. The platform must clearly disclose risk, fees, withdrawal conditions and applicable regulatory requirements before accepting customer funds.
+
+
+## Operational secret separation
+
+- PIX destination snapshots use a dedicated `WITHDRAWAL_DESTINATION_ENCRYPTION_KEY` (32-byte hexadecimal AES-256 key), separate from the application encryption key and the database-backup encryption key.
+- Generate each key independently with `openssl rand -hex 32` and store it only in the hosting provider's secret manager. Never commit keys or paste them into chat.
+- Key rotation requires a planned decrypt/re-encrypt migration of existing destination snapshots; do not rotate this key blindly while pending withdrawals exist.
