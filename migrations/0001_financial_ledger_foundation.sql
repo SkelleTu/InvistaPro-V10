@@ -180,7 +180,11 @@ DECLARE
   entry_count integer;
   invalid_currency boolean;
 BEGIN
-  target_id := CASE WHEN TG_TABLE_NAME = 'ledger_transactions' THEN NEW.id ELSE NEW.transaction_id END;
+  IF TG_TABLE_NAME = 'ledger_transactions' THEN
+    target_id := NEW.id;
+  ELSE
+    target_id := NEW.transaction_id;
+  END IF;
   SELECT
     COALESCE(SUM(amount_cents) FILTER (WHERE direction = 'debit'), 0),
     COALESCE(SUM(amount_cents) FILTER (WHERE direction = 'credit'), 0),
