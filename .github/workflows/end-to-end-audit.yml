@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: audit-${{ github.workflow }}-${{ github.ref }}
@@ -26,6 +26,20 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Apply compatible dependency security updates
+        run: npm audit fix --package-lock-only --ignore-scripts
+      - name: Commit updated lockfile to the pull request
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          BRANCH_NAME: ${{ github.head_ref }}
+        run: |
+          if ! git diff --quiet -- package-lock.json; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add package-lock.json
+            git commit -m "chore: apply compatible dependency security updates"
+            git push origin "HEAD:${BRANCH_NAME}"
+          fi
       - name: Install locked dependencies
         run: npm ci --include=dev
       - name: TypeScript check
