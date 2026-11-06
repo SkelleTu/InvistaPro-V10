@@ -97,15 +97,20 @@ export async function reserveWithdrawal(input: {
     const available = accounts.client_available;
     const reserved = accounts.client_reserved;
     await tx.execute(sql`SELECT id FROM financial_accounts WHERE id = ${available.id}::uuid FOR UPDATE`);
+    const [existing] = await tx.select().from(pgSchema.withdrawalRequests)
+      .where(eq(pgSchema.withdrawalRequests.idempotencyKey, input.idempotencyKey)).limit(1);
+    if (existing) {
+      if (existing.userId !== input.userId || Number(existing.amountCents) !== input.amountCents || Number(existing.feeCents) !== input.feeCents) {
+        throw new Error("IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST");
+      }
+      return { withdrawal: existing, duplicate: true };
+    }
     const [totals] = await tx.select({
       credit: sql<string>`COALESCE(SUM(amount_cents) FILTER (WHERE direction='credit'),0)::text`,
       debit: sql<string>`COALESCE(SUM(amount_cents) FILTER (WHERE direction='debit'),0)::text`,
     }).from(pgSchema.ledgerEntries).where(eq(pgSchema.ledgerEntries.accountId, available.id));
     const availableCents = Number(totals.credit) - Number(totals.debit);
     if (availableCents < input.amountCents) throw new Error("INSUFFICIENT_AVAILABLE_BALANCE");
-    const [existing] = await tx.select().from(pgSchema.withdrawalRequests)
-      .where(eq(pgSchema.withdrawalRequests.idempotencyKey, input.idempotencyKey)).limit(1);
-    if (existing) return { withdrawal: existing, duplicate: true };
     const netAmountCents = input.amountCents - input.feeCents;
     const [withdrawal] = await tx.insert(pgSchema.withdrawalRequests).values({
       userId: input.userId, amountCents: input.amountCents, feeCents: input.feeCents,
@@ -155,7 +160,10 @@ export async function confirmVerifiedProviderPayment(input: {
       .where(eq(pgSchema.paymentIntents.id, input.paymentIntentId)).limit(1);
     if (!intent) throw new Error("PAYMENT_INTENT_NOT_FOUND");
     if (Number(intent.amountCents) !== input.amountCents) throw new Error("PAYMENT_AMOUNT_MISMATCH");
-    if (intent.status === "approved") return { intent, duplicate: true };
+    if (intent.status === "approved") {
+      if (intent.provider !== input.provider || intent.providerPaymentId !== input.providerPaymentId) throw new Error("PAYMENT_INTENT_ALREADY_SETTLED_BY_DIFFERENT_PAYMENT");
+      return { intent, duplicate: true };
+    }
     if (["cancelled", "expired", "rejected", "refunded"].includes(intent.status)) throw new Error("PAYMENT_INTENT_NOT_PAYABLE");
 
     const [existingProviderPayment] = await tx.select().from(pgSchema.providerPayments)
@@ -231,7 +239,10 @@ export async function settleVerifiedWithdrawal(input: {
     const [withdrawal] = await tx.select().from(pgSchema.withdrawalRequests)
       .where(eq(pgSchema.withdrawalRequests.id, input.withdrawalId)).limit(1);
     if (!withdrawal) throw new Error("WITHDRAWAL_NOT_FOUND");
-    if (withdrawal.status === "paid") return { withdrawal, duplicate: true };
+    if (withdrawal.status === "paid") {
+      if (withdrawal.provider !== input.provider || withdrawal.providerTransferId !== input.providerTransferId) throw new Error("WITHDRAWAL_ALREADY_SETTLED_BY_DIFFERENT_TRANSFER");
+      return { withdrawal, duplicate: true };
+    }
     if (withdrawal.status !== "submitted" || withdrawal.provider !== input.provider ||
         withdrawal.providerTransferId !== input.providerTransferId) throw new Error("WITHDRAWAL_PROVIDER_REFERENCE_MISMATCH");
     const accounts = await ensureClientFinancialAccounts(withdrawal.userId, tx);
