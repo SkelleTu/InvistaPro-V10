@@ -73,6 +73,9 @@ router.post("/deposits", isAuthenticated, async (req, res) => {
     const idempotencyKey = String(req.header("Idempotency-Key") || req.body?.idempotencyKey || "");
     if (!idempotencyKey || idempotencyKey.length > 160) return res.status(400).json({ message: "Chave Idempotency-Key obrigatória." });
     const amountCents = Number.isSafeInteger(req.body?.amountCents) ? Number(req.body.amountCents) : parseAmountToCents(req.body?.amount);
+    const maxDepositCents = Number.parseInt(String(process.env.MAX_DEPOSIT_CENTS || "0"), 10);
+    if (!Number.isSafeInteger(maxDepositCents) || maxDepositCents <= 0) return res.status(503).json({ message: "Limite máximo de aporte não configurado." });
+    if (amountCents > maxDepositCents) return res.status(400).json({ message: "Valor acima do limite permitido por aporte." });
     const user = await dualStorage.getUser(userId);
     if (!user?.email) return res.status(404).json({ message: "Cadastro do cliente não encontrado." });
     const intentResult = await createPaymentIntent({ userId, amountCents, idempotencyKey });
@@ -134,13 +137,17 @@ router.post("/withdrawals", isAuthenticated, async (req, res) => {
     const idempotencyKey = String(req.header("Idempotency-Key") || req.body?.idempotencyKey || "");
     if (!idempotencyKey || idempotencyKey.length > 160) return res.status(400).json({ message: "Chave Idempotency-Key obrigatória." });
     const amountCents = Number.isSafeInteger(req.body?.amountCents) ? Number(req.body.amountCents) : parseAmountToCents(req.body?.amount);
+    const maxWithdrawalCents = Number.parseInt(String(process.env.MAX_WITHDRAWAL_CENTS || "0"), 10);
+    if (!Number.isSafeInteger(maxWithdrawalCents) || maxWithdrawalCents <= 0) return res.status(503).json({ message: "Limite máximo de saque não configurado." });
+    if (amountCents > maxWithdrawalCents) return res.status(400).json({ message: "Valor acima do limite permitido por saque." });
     const user = await dualStorage.getUser(userId);
     if (!user) return res.status(404).json({ message: "Cadastro do cliente não encontrado." });
     if (!user.contaAprovada || !user.documentosVerificados) return res.status(403).json({ message: "Conta e documentação precisam estar aprovadas para solicitar saque." });
     const destinationKey = String(user.chavePix || "").trim();
     const destinationType = String(user.tipoChavePix || "").trim();
     if (!destinationKey || !destinationType) return res.status(400).json({ message: "Cadastre uma chave PIX válida antes de solicitar saque." });
-    const feeCents = Number.parseInt(String(process.env.WITHDRAWAL_FEE_CENTS || "0"), 10);
+    if (process.env.WITHDRAWAL_FEE_CENTS === undefined) return res.status(503).json({ message: "Política de taxas de saque não configurada." });
+    const feeCents = Number.parseInt(String(process.env.WITHDRAWAL_FEE_CENTS), 10);
     if (!Number.isSafeInteger(feeCents) || feeCents < 0 || feeCents >= amountCents) return res.status(503).json({ message: "Política de taxas de saque não configurada." });
     const reservation = await reserveWithdrawal({
       userId, amountCents, feeCents, idempotencyKey, actorUserId: userId,
