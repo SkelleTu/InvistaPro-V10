@@ -93,7 +93,7 @@ export async function generateAdminFinancialReport(input: {
       : db.select({ id: pgSchema.users.id, nomeCompleto: pgSchema.users.nomeCompleto, email: pgSchema.users.email, isAdmin: pgSchema.users.isAdmin, contaAprovada: pgSchema.users.contaAprovada, documentosVerificados: pgSchema.users.documentosVerificados, createdAt: pgSchema.users.createdAt }).from(pgSchema.users),
     db.select().from(pgSchema.movimentos).where(conditionsFor(pgSchema.movimentos.createdAt, pgSchema.movimentos.userId)).orderBy(desc(pgSchema.movimentos.createdAt)),
     db.select().from(pgSchema.tradeOperations).where(conditionsFor(pgSchema.tradeOperations.createdAt, pgSchema.tradeOperations.userId)).orderBy(desc(pgSchema.tradeOperations.createdAt)),
-    db.select().from(pgSchema.documentos).where(input.scope === "client" ? eq(pgSchema.documentos.userId, input.userId!) : (periodConditions(pgSchema.documentos.createdAt, start, end).length ? and(...periodConditions(pgSchema.documentos.createdAt, start, end)) : undefined)).orderBy(desc(pgSchema.documentos.createdAt)),
+    db.select().from(pgSchema.documentos).where(conditionsFor(pgSchema.documentos.createdAt, pgSchema.documentos.userId)).orderBy(desc(pgSchema.documentos.createdAt)),
     db.select().from(pgSchema.ledgerTransactions).where(periodConditions(pgSchema.ledgerTransactions.createdAt, start, end).length ? and(...periodConditions(pgSchema.ledgerTransactions.createdAt, start, end)) : undefined).orderBy(desc(pgSchema.ledgerTransactions.createdAt)),
     db.select().from(pgSchema.ledgerEntries).orderBy(desc(pgSchema.ledgerEntries.createdAt)),
     db.select().from(pgSchema.paymentIntents).where(conditionsFor(pgSchema.paymentIntents.createdAt, pgSchema.paymentIntents.userId)).orderBy(desc(pgSchema.paymentIntents.createdAt)),
@@ -105,11 +105,13 @@ export async function generateAdminFinancialReport(input: {
 
   const user = input.scope === "client" ? users[0] as any : null;
   if (input.scope === "client" && !user) throw new Error("REPORT_CLIENT_NOT_FOUND");
-  const subjectIds = new Set(users.map((u: any) => u.id));
   const relevantAccounts = await db.select().from(pgSchema.financialAccounts)
     .where(input.scope === "client" ? eq(pgSchema.financialAccounts.ownerUserId, input.userId!) : undefined);
   const relevantAccountIds = new Set(relevantAccounts.map((a: any) => a.id));
-  const relevantEntries = entries.filter((entry: any) => relevantAccountIds.has(entry.accountId));
+  const relevantEntries = entries.filter((entry: any) => {
+    const timestamp = new Date(entry.createdAt as any).getTime();
+    return relevantAccountIds.has(entry.accountId) && (!start || timestamp >= start.getTime()) && (!end || timestamp <= end.getTime());
+  });
   const transactionIds = new Set(relevantEntries.map((entry: any) => entry.transactionId));
   const relevantTransactions = transactions.filter((tx: any) => transactionIds.has(tx.id));
   const audit = auditEvents.filter((event: any) => input.scope === "platform" || !event.subjectUserId || event.subjectUserId === input.userId);
