@@ -3,7 +3,6 @@ const hasSendGridKey = !!process.env.SENDGRID_API_KEY;
 
 // Configurar SendGrid se a chave estiver presente
 if (hasSendGridKey) {
-  sgMail.setApiKey(process.env.SENDGRID_API_KEY!);
   console.log('✅ SendGrid configurado com API key');
   console.log('🔑 SendGrid API Key configurada com sucesso');
   console.log('📧 Emails serão enviados via SendGrid real!');
