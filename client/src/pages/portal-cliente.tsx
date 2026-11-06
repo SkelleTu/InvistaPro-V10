@@ -47,6 +47,7 @@ const dateLabel = (value?: string) => value
 const navItems = [
   { id: "inicio", label: "Visão geral", icon: LayoutDashboard },
   { id: "carteira", label: "Minha carteira", icon: Wallet },
+  { id: "aportes", label: "Aportes e pagamentos", icon: CircleDollarSign },
   { id: "evolucao", label: "Minha evolução", icon: BarChart3 },
   { id: "afiliados", label: "Afiliados", icon: Network },
   { id: "historico", label: "Histórico", icon: History },
@@ -325,6 +326,20 @@ export default function PortalCliente() {
         <h2 className="font-semibold text-white">Saques</h2>
         <p className="text-sm text-slate-400 mt-2">A consulta de saldo e o histórico continuam disponíveis. Solicitações e transferências de saque estão desativadas até a integração real com o provedor financeiro.</p>
       </div>
+    </>;
+
+    if (active === "aportes") return <>
+      <PageTitle title="Aportes e pagamentos" subtitle="Área preparada para receber pagamentos confirmados pelo provedor financeiro." />
+      <section className="rounded-2xl border border-amber-400/20 bg-slate-900/70 p-6">
+        <div className="flex items-center gap-3 mb-3"><CircleDollarSign className="h-7 w-7 text-amber-300" /><h2 className="font-semibold text-white text-lg">Integração de pagamentos</h2></div>
+        <div className="inline-flex items-center rounded-full border border-amber-400/30 bg-amber-950/30 px-3 py-1 text-xs font-medium text-amber-200">Aguardando Mercado Pago</div>
+        <p className="text-sm leading-6 text-slate-300 mt-4">A geração de cobranças PIX ainda não está habilitada. Esta área será conectada ao Mercado Pago para criar cobranças individualizadas e acompanhar a confirmação diretamente pelo provedor.</p>
+        <div className="mt-5 rounded-xl border border-white/10 bg-black/20 p-4">
+          <p className="text-sm font-medium text-white">Proteção do saldo</p>
+          <p className="text-xs leading-5 text-slate-400 mt-1">Nenhum comprovante enviado pelo cliente, clique ou confirmação manual altera a carteira. O crédito só poderá ocorrer após validação autenticada do pagamento, conferência do valor e processamento idempotente no servidor.</p>
+        </div>
+        <p className="text-xs text-slate-500 mt-4">Nenhuma cobrança foi criada e nenhuma transferência foi solicitada.</p>
+      </section>
     </>;
 
     if (active === "evolucao") return <>
