@@ -220,14 +220,6 @@ export class DualStorage implements IStorage {
 
   async createMovimento(_m: InsertMovimento) {
     throw new Error("LEGACY_FINANCIAL_MOVEMENT_WRITE_DISABLED: post financial movements through the durable ledger.");
-    /* Legacy implementation intentionally unreachable; historical rows remain readable.
-    const payload = { ...m, id: (m as any).id ?? randomBytes(16).toString("hex") } as InsertMovimento;
-    return this.writeEssential(
-      () => this.neon!.createMovimento(payload),
-      () => this.sqlite.createMovimento(payload),
-      "createMovimento"
-    );
-    */
   }
   async getUserMovimentos(uid: string, limit?: number) {
     return this.read(
