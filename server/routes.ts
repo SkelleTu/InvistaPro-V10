@@ -1318,42 +1318,14 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
   });
 
-  // Development only: Reset user data for testing
-  app.post('/api/dev/reset-user', async (req, res) => {
-    // Only allow in development
-    if (process.env.NODE_ENV !== 'development') {
-      return res.status(404).json({ message: "Not found" });
-    }
-
-    try {
-      const { email } = req.body;
-      
-      if (!email) {
-        return res.status(400).json({ message: "Email é obrigatório" });
-      }
-
-      // Find and delete user
-      const user = await dbStorage.getUserByEmail(email);
-      if (user) {
-        // Delete related data first
-        await db.delete(movimentos).where(eq(movimentos.userId, user.id));
-        await db.delete(documentos).where(eq(documentos.userId, user.id));
-        await db.delete(users).where(eq(users.id, user.id));
-        
-        res.json({ 
-          message: `Usuário ${email} removido com sucesso. Pode cadastrar novamente.`,
-          removed: true
-        });
-      } else {
-        res.json({ 
-          message: `Usuário ${email} não encontrado`,
-          removed: false
-        });
-      }
-    } catch (error) {
-      console.error("Dev reset user error:", error);
-      res.status(500).json({ message: "Erro interno do servidor" });
-    }
+  // Financial records are retained; destructive account reset is disabled.
+  // Use an isolated Neon child branch for disposable development/test data.
+  app.post('/api/dev/reset-user', async (_req, res) => {
+    if (process.env.NODE_ENV !== 'development') return res.status(404).json({ message: "Not found" });
+    return res.status(410).json({
+      code: "FINANCIAL_HISTORY_RETENTION_REQUIRED",
+      message: "A exclusão destrutiva de contas foi desativada. O histórico financeiro, documental e de auditoria deve ser preservado; use uma branch isolada do Neon para testes descartáveis.",
+    });
   });
 
   // Logout routes (both GET and POST for compatibility)
