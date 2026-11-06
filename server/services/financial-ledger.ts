@@ -1,4 +1,5 @@
 import { and, desc, eq, sql } from "drizzle-orm";
+import { createCipheriv, createHash, randomBytes } from "node:crypto";
 import { reconcileVerifiedPayment } from "./payment-domain";
 import { assertPositiveCents, calculateLiabilityBalance, splitWithdrawal, validateBalancedLedgerLines } from "./financial-ledger-policy";
 import { pgDb, pgSchema, isPostgresAvailable } from "../db-postgres";
@@ -17,6 +18,21 @@ function requirePostgres() {
 }
 
 function assertCents(value: number) { assertPositiveCents(value); }
+
+function encryptWithdrawalDestination(destinationKey: string, destinationType: string) {
+  const secret = String(process.env.ENCRYPTION_KEY || "").trim();
+  if (!/^[0-9a-fA-F]{64}$/.test(secret)) throw new Error("WITHDRAWAL_DESTINATION_ENCRYPTION_NOT_CONFIGURED");
+  if (!destinationKey.trim() || !destinationType.trim()) throw new Error("WITHDRAWAL_DESTINATION_REQUIRED");
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", Buffer.from(secret, "hex"), iv);
+  const plaintext = JSON.stringify({ key: destinationKey.trim(), type: destinationType.trim() });
+  const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return {
+    fingerprint: createHash("sha256").update(`${destinationType.trim()}:${destinationKey.trim()}`).digest("hex"),
+    encrypted: `v1:${iv.toString("hex")}:${tag.toString("hex")}:${ciphertext.toString("hex")}`,
+  };
+}
 
 export async function ensureClientFinancialAccounts(userId: string, txArg?: any) {
   if (!userId) throw new Error("USER_REQUIRED");
@@ -80,8 +96,10 @@ export async function getClientFinancialSummary(userId: string) {
 
 export async function reserveWithdrawal(input: {
   userId: string; amountCents: number; feeCents: number; idempotencyKey: string; actorUserId: string;
+  destinationKey: string; destinationType: string;
 }) {
   assertCents(input.amountCents);
+  const destination = encryptWithdrawalDestination(input.destinationKey, input.destinationType);
   const split = splitWithdrawal(input.amountCents, input.feeCents);
   const db = requirePostgres();
   return db.transaction(async (tx: any) => {
@@ -107,6 +125,7 @@ export async function reserveWithdrawal(input: {
     const [withdrawal] = await tx.insert(pgSchema.withdrawalRequests).values({
       userId: input.userId, amountCents: input.amountCents, feeCents: input.feeCents,
       netAmountCents, status: "reserved", idempotencyKey: input.idempotencyKey,
+      destinationFingerprint: destination.fingerprint, destinationEncrypted: destination.encrypted,
     }).returning();
     const [transaction] = await tx.insert(pgSchema.ledgerTransactions).values({
       idempotencyKey: `withdrawal-reserve:${input.idempotencyKey}`,
