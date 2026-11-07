@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { pgDb, pgSchema } from './db-postgres';
 import { eq, sql } from 'drizzle-orm';
 
@@ -494,11 +496,42 @@ async function migratePostgres() {
   }
 }
 
+async function applyFinancialLedgerMigration() {
+  if (!pgDb?.$client?.begin) throw new Error("POSTGRES_TRANSACTION_CLIENT_REQUIRED");
+  const migrationPath = path.resolve(process.cwd(), "migrations/0001_financial_ledger_foundation.sql");
+  const migrationSql = await readFile(migrationPath, "utf8");
+  if (!migrationSql.trim()) throw new Error("FINANCIAL_LEDGER_MIGRATION_EMPTY");
+
+  await pgDb.$client.begin(async (tx: any) => {
+    await tx.unsafe("SELECT pg_advisory_xact_lock(7419051106)");
+    await tx.unsafe(`CREATE TABLE IF NOT EXISTS schema_migrations (
+      version varchar(160) PRIMARY KEY,
+      applied_at timestamptz NOT NULL DEFAULT NOW()
+    )`);
+    const applied = await tx.unsafe(
+      "SELECT version FROM schema_migrations WHERE version = $1 LIMIT 1",
+      ["0001_financial_ledger_foundation"]
+    );
+    if (applied.length) {
+      console.log("ℹ️ Migração financeira 0001 já aplicada.");
+      return;
+    }
+    // The SQL migration is additive, transactional and safe to retry.
+    await tx.unsafe(migrationSql);
+    await tx.unsafe(
+      "INSERT INTO schema_migrations (version) VALUES ($1)",
+      ["0001_financial_ledger_foundation"]
+    );
+    console.log("✅ Migração financeira 0001 aplicada no PostgreSQL durável.");
+  });
+}
+
 // Exportar função para ser chamada ao inicializar o servidor
 export async function runPostgresMigration() {
   // Let the boot coordinator classify failures and retry transient database outages.
   // Returning false here hid the original cause and prevented reliable recovery.
   await migratePostgres();
-  console.log('🎉 Migração PostgreSQL concluída com sucesso!');
+  await applyFinancialLedgerMigration();
+  console.log('🎉 Migração PostgreSQL e ledger financeiro concluídos com sucesso!');
   return true;
 }
