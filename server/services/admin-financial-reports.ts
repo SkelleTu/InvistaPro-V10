@@ -91,46 +91,66 @@ export async function generateAdminFinancialReport(input: {
     if (input.scope === "client" && userColumn) conditions.push(eq(userColumn, input.userId!));
     return conditions.length ? and(...conditions) : undefined;
   };
-  const [requestedBy] = await db.select({ id: pgSchema.users.id, email: pgSchema.users.email, name: pgSchema.users.nomeCompleto })
-    .from(pgSchema.users).where(eq(pgSchema.users.id, input.requestedBy)).limit(1);
-  if (!requestedBy) throw new Error("ADMIN_NOT_FOUND");
+  const snapshot = await db.transaction(async (tx: any) => {
+    await tx.execute(sql`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ`);
+    const [requestedBy] = await tx.select({ id: pgSchema.users.id, email: pgSchema.users.email, name: pgSchema.users.nomeCompleto })
+      .from(pgSchema.users).where(eq(pgSchema.users.id, input.requestedBy)).limit(1);
+    if (!requestedBy) throw new Error("ADMIN_NOT_FOUND");
 
-  const [users, movements, trades, documents, transactions, entries, paymentIntents, providerPayments, withdrawals, auditEvents, webhookEvents] = await Promise.all([
-    input.scope === "client"
-      ? db.select().from(pgSchema.users).where(eq(pgSchema.users.id, input.userId!))
-      : db.select({ id: pgSchema.users.id, nomeCompleto: pgSchema.users.nomeCompleto, email: pgSchema.users.email, isAdmin: pgSchema.users.isAdmin, contaAprovada: pgSchema.users.contaAprovada, documentosVerificados: pgSchema.users.documentosVerificados, createdAt: pgSchema.users.createdAt }).from(pgSchema.users),
-    db.select().from(pgSchema.movimentos).where(conditionsFor(pgSchema.movimentos.createdAt, pgSchema.movimentos.userId)).orderBy(desc(pgSchema.movimentos.createdAt)),
-    db.select().from(pgSchema.tradeOperations).where(conditionsFor(pgSchema.tradeOperations.createdAt, pgSchema.tradeOperations.userId)).orderBy(desc(pgSchema.tradeOperations.createdAt)),
-    db.select().from(pgSchema.documentos).where(conditionsFor(pgSchema.documentos.createdAt, pgSchema.documentos.userId)).orderBy(desc(pgSchema.documentos.createdAt)),
-    db.select().from(pgSchema.ledgerTransactions).where(periodConditions(pgSchema.ledgerTransactions.createdAt, start, end).length ? and(...periodConditions(pgSchema.ledgerTransactions.createdAt, start, end)) : undefined).orderBy(desc(pgSchema.ledgerTransactions.createdAt)),
-    db.select().from(pgSchema.ledgerEntries).where(periodConditions(pgSchema.ledgerEntries.createdAt, start, end).length ? and(...periodConditions(pgSchema.ledgerEntries.createdAt, start, end)) : undefined).orderBy(desc(pgSchema.ledgerEntries.createdAt)),
-    db.select().from(pgSchema.paymentIntents).where(conditionsFor(pgSchema.paymentIntents.createdAt, pgSchema.paymentIntents.userId)).orderBy(desc(pgSchema.paymentIntents.createdAt)),
-    db.select().from(pgSchema.providerPayments).where(periodConditions(pgSchema.providerPayments.createdAt, start, end).length ? and(...periodConditions(pgSchema.providerPayments.createdAt, start, end)) : undefined).orderBy(desc(pgSchema.providerPayments.createdAt)),
-    db.select().from(pgSchema.withdrawalRequests).where(conditionsFor(pgSchema.withdrawalRequests.requestedAt, pgSchema.withdrawalRequests.userId)).orderBy(desc(pgSchema.withdrawalRequests.requestedAt)),
-    db.select().from(pgSchema.financialAuditEvents).where(conditionsFor(pgSchema.financialAuditEvents.createdAt, pgSchema.financialAuditEvents.subjectUserId)).orderBy(desc(pgSchema.financialAuditEvents.createdAt)),
-    input.scope === "platform"
-      ? db.select().from(pgSchema.providerWebhookEvents).where(periodConditions(pgSchema.providerWebhookEvents.receivedAt, start, end).length ? and(...periodConditions(pgSchema.providerWebhookEvents.receivedAt, start, end)) : undefined).orderBy(desc(pgSchema.providerWebhookEvents.receivedAt))
-      : Promise.resolve([]),
-  ]);
+    const [users, movements, trades, documents, transactions, entries, paymentIntents, providerPayments, withdrawals, auditEvents, webhookEvents] = await Promise.all([
+      input.scope === "client"
+        ? tx.select().from(pgSchema.users).where(eq(pgSchema.users.id, input.userId!))
+        : tx.select({ id: pgSchema.users.id, nomeCompleto: pgSchema.users.nomeCompleto, email: pgSchema.users.email, isAdmin: pgSchema.users.isAdmin, contaAprovada: pgSchema.users.contaAprovada, documentosVerificados: pgSchema.users.documentosVerificados, createdAt: pgSchema.users.createdAt }).from(pgSchema.users),
+      tx.select().from(pgSchema.movimentos).where(conditionsFor(pgSchema.movimentos.createdAt, pgSchema.movimentos.userId)).orderBy(desc(pgSchema.movimentos.createdAt)),
+      tx.select().from(pgSchema.tradeOperations).where(conditionsFor(pgSchema.tradeOperations.createdAt, pgSchema.tradeOperations.userId)).orderBy(desc(pgSchema.tradeOperations.createdAt)),
+      tx.select().from(pgSchema.documentos).where(conditionsFor(pgSchema.documentos.createdAt, pgSchema.documentos.userId)).orderBy(desc(pgSchema.documentos.createdAt)),
+      tx.select().from(pgSchema.ledgerTransactions).where(periodConditions(pgSchema.ledgerTransactions.createdAt, start, end).length ? and(...periodConditions(pgSchema.ledgerTransactions.createdAt, start, end)) : undefined).orderBy(desc(pgSchema.ledgerTransactions.createdAt)),
+      tx.select().from(pgSchema.ledgerEntries).where(periodConditions(pgSchema.ledgerEntries.createdAt, start, end).length ? and(...periodConditions(pgSchema.ledgerEntries.createdAt, start, end)) : undefined).orderBy(desc(pgSchema.ledgerEntries.createdAt)),
+      tx.select().from(pgSchema.paymentIntents).where(conditionsFor(pgSchema.paymentIntents.createdAt, pgSchema.paymentIntents.userId)).orderBy(desc(pgSchema.paymentIntents.createdAt)),
+      tx.select().from(pgSchema.providerPayments).where(periodConditions(pgSchema.providerPayments.createdAt, start, end).length ? and(...periodConditions(pgSchema.providerPayments.createdAt, start, end)) : undefined).orderBy(desc(pgSchema.providerPayments.createdAt)),
+      tx.select().from(pgSchema.withdrawalRequests).where(conditionsFor(pgSchema.withdrawalRequests.requestedAt, pgSchema.withdrawalRequests.userId)).orderBy(desc(pgSchema.withdrawalRequests.requestedAt)),
+      tx.select().from(pgSchema.financialAuditEvents).where(conditionsFor(pgSchema.financialAuditEvents.createdAt, pgSchema.financialAuditEvents.subjectUserId)).orderBy(desc(pgSchema.financialAuditEvents.createdAt)),
+      input.scope === "platform"
+        ? tx.select().from(pgSchema.providerWebhookEvents).where(periodConditions(pgSchema.providerWebhookEvents.receivedAt, start, end).length ? and(...periodConditions(pgSchema.providerWebhookEvents.receivedAt, start, end)) : undefined).orderBy(desc(pgSchema.providerWebhookEvents.receivedAt))
+        : Promise.resolve([]),
+    ]);
 
-  const user = input.scope === "client" ? users[0] as any : null;
-  const clientUsers = (users as any[]).filter((item: any) => !item.isAdmin);
-  if (input.scope === "client" && !user) throw new Error("REPORT_CLIENT_NOT_FOUND");
-  const relevantAccounts = await db.select().from(pgSchema.financialAccounts)
-    .where(input.scope === "client" ? eq(pgSchema.financialAccounts.ownerUserId, input.userId!) : undefined);
-  const relevantAccountIds = new Set(relevantAccounts.map((a: any) => a.id));
-  const paymentIntentIds = new Set(paymentIntents.map((intent: any) => intent.id));
-  const relevantProviderPayments = providerPayments.filter((payment: any) => paymentIntentIds.has(payment.paymentIntentId));
-  const relevantWebhookEvents = input.scope === "platform" ? webhookEvents : [];
-  const clientBalanceSnapshot = (input.scope === "client" ? await getClientFinancialSummary(input.userId!) : null) as Awaited<ReturnType<typeof getClientFinancialSummary>> | null;
-  const platformBalanceSnapshot = (input.scope === "platform" ? await getPlatformFinancialSummary(clientUsers.map((item: any) => item.id)) : null) as Awaited<ReturnType<typeof getPlatformFinancialSummary>> | null;
-  const relevantEntries = entries.filter((entry: any) => {
-    const timestamp = new Date(entry.createdAt as any).getTime();
-    return relevantAccountIds.has(entry.accountId) && (!start || timestamp >= start.getTime()) && (!end || timestamp <= end.getTime());
-  });
-  const transactionIds = new Set(relevantEntries.map((entry: any) => entry.transactionId));
-  const relevantTransactions = transactions.filter((tx: any) => transactionIds.has(tx.id));
-  const audit = auditEvents.filter((event: any) => input.scope === "platform" || !event.subjectUserId || event.subjectUserId === input.userId);
+    const user = input.scope === "client" ? users[0] as any : null;
+    const clientUsers = (users as any[]).filter((item: any) => !item.isAdmin);
+    if (input.scope === "client" && (!user || user.isAdmin)) throw new Error("REPORT_CLIENT_NOT_FOUND");
+    const relevantAccounts = await tx.select().from(pgSchema.financialAccounts)
+      .where(input.scope === "client" ? eq(pgSchema.financialAccounts.ownerUserId, input.userId!) : undefined);
+    const paymentIntentIds = new Set(paymentIntents.map((intent: any) => intent.id));
+    const relevantProviderPayments = providerPayments.filter((payment: any) => paymentIntentIds.has(payment.paymentIntentId));
+    const relevantWebhookEvents = input.scope === "platform" ? webhookEvents : [];
+    const clientBalanceSnapshot = input.scope === "client" ? await getClientFinancialSummary(input.userId!, tx) : null;
+    const platformBalanceSnapshot = input.scope === "platform" ? await getPlatformFinancialSummary(clientUsers.map((item: any) => item.id), tx) : null;
+    const relevantAccountIds = new Set(relevantAccounts.map((account: any) => account.id));
+    const relevantEntries = entries.filter((entry: any) => {
+      const timestamp = new Date(entry.createdAt as any).getTime();
+      return relevantAccountIds.has(entry.accountId) && (!start || timestamp >= start.getTime()) && (!end || timestamp <= end.getTime());
+    });
+    const transactionIds = new Set(relevantEntries.map((entry: any) => entry.transactionId));
+    const relevantTransactions = transactions.filter((item: any) => transactionIds.has(item.id));
+    const audit = auditEvents.filter((event: any) => input.scope === "platform" || !event.subjectUserId || event.subjectUserId === input.userId);
+    const userById = new Map<string, any>();
+    for (const item of users as any[]) userById.set(item.id, item);
+    const accountById = new Map<string, any>();
+    for (const item of relevantAccounts as any[]) accountById.set(item.id, item);
+    return {
+      requestedBy, users, movements, trades, documents, transactions, entries, paymentIntents,
+      providerPayments, withdrawals, auditEvents, webhookEvents, user, clientUsers,
+      relevantAccounts, relevantProviderPayments, relevantWebhookEvents, relevantEntries,
+      relevantTransactions, audit, clientBalanceSnapshot, platformBalanceSnapshot, userById, accountById,
+    };
+  }, { isolationLevel: "repeatable read" });
+
+  const {
+    requestedBy, users, movements, trades, documents, transactions, entries, paymentIntents,
+    providerPayments, withdrawals, auditEvents, webhookEvents, user, clientUsers,
+    relevantAccounts, relevantProviderPayments, relevantWebhookEvents, relevantEntries,
+    relevantTransactions, audit, clientBalanceSnapshot, platformBalanceSnapshot, userById, accountById,
+  } = snapshot;
   const generatedAt = new Date();
   const reportId = randomUUID();
   const title = input.scope === "client" ? "DOSSIÊ FINANCEIRO INDIVIDUAL" : "RELATÓRIO CONSOLIDADO DA PLATAFORMA";
