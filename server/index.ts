@@ -79,7 +79,7 @@ let routesReady = false;
 let persistenceReady = false;
 let routeRegistrationError: string | null = null;
 let bootFailureEventId: string | null = null;
-app.use(express.json());
+app.use(express.json({ verify: (req, _res, buffer) => { (req as any).rawBody = Buffer.from(buffer); } }));
 app.use(express.urlencoded({ extended: false }));
 app.use(cookieParser());
 

@@ -6,7 +6,7 @@ import path from "node:path";
 const ALLOWED_MIME_TYPES = ["image/jpeg", "image/png", "application/pdf"] as const;
 const DEFAULT_BUCKET = "kyc-documents";
 let supabaseClient: SupabaseClient | null = null;
-let bucketReady: Promise<void> | null = null;
+const bucketReady = new Map<string, Promise<void>>();
 
 function getStorageConfig() {
   const url = String(process.env.SUPABASE_URL || "").trim();
@@ -26,26 +26,28 @@ function getSupabase(): SupabaseClient | null {
   return supabaseClient;
 }
 
-async function ensurePrivateBucket(client: SupabaseClient): Promise<void> {
-  if (!bucketReady) {
-    bucketReady = (async () => {
-      const { bucket } = getStorageConfig();
+async function ensurePrivateBucket(client: SupabaseClient, bucket = getStorageConfig().bucket, allowedMimeTypes: string[] = [...ALLOWED_MIME_TYPES], fileSizeLimit = "5MB"): Promise<void> {
+  if (!bucketReady.has(bucket)) {
+    const ready = (async () => {
       const listed = await client.storage.listBuckets();
       if (listed.error) throw listed.error;
-      if (!listed.data.some(item => item.name === bucket)) {
+      const existingBucket = listed.data.find(item => item.name === bucket);
+      if (existingBucket && existingBucket.public !== false) throw new Error(`PRIVATE_BUCKET_REQUIRED:${bucket}`);
+      if (!existingBucket) {
         const created = await client.storage.createBucket(bucket, {
           public: false,
-          fileSizeLimit: "5MB",
-          allowedMimeTypes: [...ALLOWED_MIME_TYPES],
+          fileSizeLimit,
+          allowedMimeTypes,
         });
         if (created.error) throw created.error;
       }
     })().catch(error => {
-      bucketReady = null;
+      bucketReady.delete(bucket);
       throw error;
     });
+    bucketReady.set(bucket, ready);
   }
-  await bucketReady;
+  await bucketReady.get(bucket);
 }
 
 export function validatePrivateDocument(file: { buffer: Buffer; mimetype: string; originalname: string }): string {
@@ -152,6 +154,81 @@ export async function deletePrivateDocument(reference: string): Promise<void> {
     const localPath = reference.slice("local://".length);
     const directory = path.resolve(process.env.DOCUMENT_UPLOAD_DIR || path.join(process.cwd(), "uploads", "documents"));
     const resolved = path.resolve(localPath);
+    const relative = path.relative(directory, resolved);
+    if (relative && !relative.startsWith("..") && !path.isAbsolute(relative)) await unlink(resolved).catch(() => {});
+  }
+}
+
+
+const REPORT_BUCKET = String(process.env.SUPABASE_REPORTS_BUCKET || "admin-reports").trim();
+
+export async function storePrivateReport(reportId: string, buffer: Buffer): Promise<string> {
+  if (!/^[-a-zA-Z0-9_]{8,80}$/.test(reportId) || !buffer.subarray(0, 5).toString("ascii").startsWith("%PDF-")) {
+    throw new Error("INVALID_REPORT_FILE");
+  }
+  if (REPORT_BUCKET === getStorageConfig().bucket) throw new Error("REPORT_BUCKET_MUST_BE_SEPARATE_FROM_KYC_BUCKET");
+  const client = getSupabase();
+  const objectPath = `reports/${reportId}.pdf`;
+  if (client) {
+    await ensurePrivateBucket(client, REPORT_BUCKET, ["application/pdf"], "50MB");
+    const { error } = await client.storage.from(REPORT_BUCKET).upload(objectPath, buffer, {
+      contentType: "application/pdf", cacheControl: "0", upsert: false,
+    });
+    if (error) throw error;
+    return `supabase-report://${REPORT_BUCKET}/${objectPath}`;
+  }
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("PRIVATE_REPORT_STORAGE_NOT_CONFIGURED: configure Supabase private storage before generating archived reports.");
+  }
+  const directory = path.resolve(process.env.REPORT_UPLOAD_DIR || path.join(process.cwd(), "uploads", "reports"));
+  await mkdir(directory, { recursive: true });
+  const destination = path.resolve(directory, `${reportId}.pdf`);
+  await writeFile(destination, buffer, { flag: "wx", mode: 0o600 });
+  return `local-report://${destination}`;
+}
+
+export async function readPrivateReport(reference: string): Promise<Buffer> {
+  if (reference.startsWith("supabase-report://")) {
+    const client = getSupabase();
+    if (!client) throw new Error("PRIVATE_REPORT_STORAGE_NOT_CONFIGURED");
+    const remainder = reference.slice("supabase-report://".length);
+    const separator = remainder.indexOf("/");
+    if (separator < 1 || remainder.slice(0, separator) !== REPORT_BUCKET) throw new Error("INVALID_PRIVATE_REPORT_REFERENCE");
+    const objectPath = remainder.slice(separator + 1);
+    if (!objectPath.startsWith("reports/") || objectPath.includes("..")) throw new Error("INVALID_PRIVATE_REPORT_REFERENCE");
+    const { data, error } = await client.storage.from(REPORT_BUCKET).download(objectPath);
+    if (error || !data) throw error || new Error("REPORT_NOT_FOUND");
+    const buffer = Buffer.from(await data.arrayBuffer());
+    if (!buffer.subarray(0, 5).toString("ascii").startsWith("%PDF-")) throw new Error("INVALID_REPORT_FILE");
+    return buffer;
+  }
+  if (!reference.startsWith("local-report://")) throw new Error("INVALID_PRIVATE_REPORT_REFERENCE");
+  const directory = path.resolve(process.env.REPORT_UPLOAD_DIR || path.join(process.cwd(), "uploads", "reports"));
+  const resolved = path.resolve(reference.slice("local-report://".length));
+  const relative = path.relative(directory, resolved);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) throw new Error("REPORT_PATH_OUTSIDE_PRIVATE_DIRECTORY");
+  const buffer = await readFile(resolved);
+  if (!buffer.subarray(0, 5).toString("ascii").startsWith("%PDF-")) throw new Error("INVALID_REPORT_FILE");
+  return buffer;
+}
+
+
+export async function deletePrivateReport(reference: string): Promise<void> {
+  if (reference.startsWith("supabase-report://")) {
+    const client = getSupabase();
+    if (!client) throw new Error("PRIVATE_REPORT_STORAGE_NOT_CONFIGURED");
+    const remainder = reference.slice("supabase-report://".length);
+    const separator = remainder.indexOf("/");
+    if (separator < 1 || remainder.slice(0, separator) !== REPORT_BUCKET) throw new Error("INVALID_PRIVATE_REPORT_REFERENCE");
+    const objectPath = remainder.slice(separator + 1);
+    if (!objectPath.startsWith("reports/") || objectPath.includes("..")) throw new Error("INVALID_PRIVATE_REPORT_REFERENCE");
+    const { error } = await client.storage.from(REPORT_BUCKET).remove([objectPath]);
+    if (error) throw error;
+    return;
+  }
+  if (reference.startsWith("local-report://")) {
+    const directory = path.resolve(process.env.REPORT_UPLOAD_DIR || path.join(process.cwd(), "uploads", "reports"));
+    const resolved = path.resolve(reference.slice("local-report://".length));
     const relative = path.relative(directory, resolved);
     if (relative && !relative.startsWith("..") && !path.isAbsolute(relative)) await unlink(resolved).catch(() => {});
   }

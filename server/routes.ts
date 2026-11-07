@@ -20,6 +20,9 @@ import path from "path";
 import crypto from "crypto";
 import kycRoutes from "./routes/kyc";
 import adminRoutes from "./routes/admin";
+import clientFinanceRoutes from "./routes/client-finance";
+import providerWebhookRoutes from "./routes/provider-webhooks";
+import { getClientFinancialSummary } from "./services/financial-ledger";
 import monitorRoutes from "./routes/monitor-routes";
 import learningRoutes from "./routes/learning-routes";
 import metaTraderRoutes from "./routes/metatrader-routes";
@@ -138,43 +141,50 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     res.json({ role, destination: role === "master" ? "/dashboard" : role === "admin" ? "/central-admin" : "/portal-cliente" });
   });
 
-  // Withdrawal quote only: does not reserve balance, create a withdrawal, or send PIX.
-  // The 7.8% service fee is calculated server-side and rounded to cents.
+  // Withdrawal quote only: uses the ledger's available balance and configured fee.
+  // It does not reserve balance, create a withdrawal, or send PIX.
   app.post("/api/withdrawal/quote", isAuthenticated, isApproved, async (req: any, res: any) => {
     try {
       const requested = Number(req.body?.valor);
       if (!Number.isFinite(requested) || requested <= 0) {
         return res.status(400).json({ message: "Informe um valor de saque válido." });
       }
-
       const amountCents = Math.round(requested * 100);
       if (amountCents < 1 || Math.abs(requested * 100 - amountCents) > 0.000001) {
         return res.status(400).json({ message: "O valor deve ter no máximo duas casas decimais." });
       }
-
-      const user = await dbStorage.getUser(req.user.id);
-      if (!user) return res.status(404).json({ message: "Usuário não encontrado." });
-
-      const balanceCents = Math.max(0, Math.round(Number(user.saldo || 0) * 100));
-      if (amountCents > balanceCents) {
-        return res.status(400).json({ message: "O valor solicitado excede o saldo registrado." });
+      const maxWithdrawalCents = Number.parseInt(String(process.env.MAX_WITHDRAWAL_CENTS || "0"), 10);
+      if (!Number.isSafeInteger(maxWithdrawalCents) || maxWithdrawalCents <= 0) {
+        return res.status(503).json({ message: "Limite máximo de saque não configurado." });
       }
-
-      const feeCents = Math.round(amountCents * 780 / 10000);
+      if (amountCents > maxWithdrawalCents) return res.status(400).json({ message: "Valor acima do limite permitido por saque." });
+      if (process.env.WITHDRAWAL_FEE_CENTS === undefined) {
+        return res.status(503).json({ message: "Política de taxas de saque não configurada." });
+      }
+      const feeCents = Number.parseInt(String(process.env.WITHDRAWAL_FEE_CENTS), 10);
+      if (!Number.isSafeInteger(feeCents) || feeCents < 0 || feeCents >= amountCents) {
+        return res.status(503).json({ message: "Política de taxas de saque não configurada." });
+      }
+      const summary = await getClientFinancialSummary(String(req.user.id));
+      const availableCents = Number(summary.availableBalanceCents || 0);
+      if (amountCents > availableCents) {
+        return res.status(409).json({ message: "O valor solicitado excede o saldo disponível no ledger." });
+      }
       const netCents = amountCents - feeCents;
       res.setHeader("Cache-Control", "no-store, max-age=0");
       return res.json({
         valorSolicitado: amountCents / 100,
-        taxaPercentual: 7.8,
+        taxaPercentual: Number(((feeCents / amountCents) * 100).toFixed(4)),
         taxaServico: feeCents / 100,
         valorLiquido: netCents / 100,
+        saldoDisponivel: availableCents / 100,
         moeda: "BRL",
         status: "cotacao",
-        aviso: "Cotação informativa. Não cria pedido, não reserva saldo e não realiza transferência PIX."
+        aviso: "Cotação informativa baseada no ledger. Não cria pedido, não reserva saldo e não realiza transferência PIX."
       });
     } catch (error) {
       console.error("Erro ao calcular cotação de saque:", error);
-      return res.status(500).json({ message: "Não foi possível calcular a cotação do saque." });
+      return res.status(503).json({ message: "Não foi possível consultar o saldo contábil durável." });
     }
   });
 
@@ -529,11 +539,13 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       const lastMovementAt = movements[0]?.createdAt ?? null;
       res.setHeader("Cache-Control", "no-store, max-age=0");
       return res.json({
-        balance: Number(account?.saldo || 0),
+        legacyBalance: Number(account?.saldo || 0),
         ...summary,
         netRecordedFlow: summary.totalDeposits + summary.totalYields - summary.totalWithdrawals,
         movementCount: movements.length,
         lastMovementAt,
+        source: "legacy_movimentos_not_reconciled",
+        isOfficialBalance: false,
       });
     } catch (error) {
       console.error("[CLIENT FINANCIAL SUMMARY] Failed to aggregate account movements:", error instanceof Error ? error.message : String(error));
@@ -1306,42 +1318,14 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
   });
 
-  // Development only: Reset user data for testing
-  app.post('/api/dev/reset-user', async (req, res) => {
-    // Only allow in development
-    if (process.env.NODE_ENV !== 'development') {
-      return res.status(404).json({ message: "Not found" });
-    }
-
-    try {
-      const { email } = req.body;
-      
-      if (!email) {
-        return res.status(400).json({ message: "Email é obrigatório" });
-      }
-
-      // Find and delete user
-      const user = await dbStorage.getUserByEmail(email);
-      if (user) {
-        // Delete related data first
-        await db.delete(movimentos).where(eq(movimentos.userId, user.id));
-        await db.delete(documentos).where(eq(documentos.userId, user.id));
-        await db.delete(users).where(eq(users.id, user.id));
-        
-        res.json({ 
-          message: `Usuário ${email} removido com sucesso. Pode cadastrar novamente.`,
-          removed: true
-        });
-      } else {
-        res.json({ 
-          message: `Usuário ${email} não encontrado`,
-          removed: false
-        });
-      }
-    } catch (error) {
-      console.error("Dev reset user error:", error);
-      res.status(500).json({ message: "Erro interno do servidor" });
-    }
+  // Financial records are retained; destructive account reset is disabled.
+  // Use an isolated Neon child branch for disposable development/test data.
+  app.post('/api/dev/reset-user', async (_req, res) => {
+    if (process.env.NODE_ENV !== 'development') return res.status(404).json({ message: "Not found" });
+    return res.status(410).json({
+      code: "FINANCIAL_HISTORY_RETENTION_REQUIRED",
+      message: "A exclusão destrutiva de contas foi desativada. O histórico financeiro, documental e de auditoria deve ser preservado; use uma branch isolada do Neon para testes descartáveis.",
+    });
   });
 
   // Logout routes (both GET and POST for compatibility)
@@ -1459,70 +1443,70 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     });
   });
 
-  // Calculate current yield
+  // Yield shown to the client is only the amount already posted to the durable ledger.
   app.get('/api/yield/current', isAuthenticated, isApproved, async (req: any, res) => {
     try {
-      const userId = req.user.id;
-      const user = await dbStorage.getUser(userId);
-      
-      if (!user) {
-        return res.status(404).json({ message: "User not found" });
-      }
-
-      const rendimento = await dbStorage.calcularRendimento(Number(user.saldo));
-      res.json({ rendimento });
+      const summary = await getClientFinancialSummary(String(req.user.id));
+      res.setHeader("Cache-Control", "no-store, max-age=0");
+      return res.json({
+        rendimento: Number(summary.yieldBalanceCents || 0) / 100,
+        source: "durable_ledger",
+        isRealized: true,
+        message: "Mostra somente rendimentos efetivamente registrados no ledger; não é projeção nem promessa de retorno.",
+      });
     } catch (error) {
-      console.error("Error calculating yield:", error);
-      res.status(500).json({ message: "Failed to calculate yield" });
+      console.error("Error reading ledger yield:", error);
+      return res.status(503).json({ message: "Rendimento contábil indisponível no momento." });
     }
   });
 
-  // Complete variable income dashboard data
+  // Variable-income dashboard reads official wallet balances from the ledger.
   app.get('/api/dashboard/variable-income', isAuthenticated, isApproved, async (req: any, res) => {
     try {
-      const userId = req.user.id;
-      const user = await dbStorage.getUser(userId);
-      
-      if (!user) {
-        return res.status(404).json({ message: "User not found" });
-      }
+      const userId = String(req.user.id);
+      const [user, summary, stats, legacyMovements] = await Promise.all([
+        dbStorage.getUser(userId),
+        getClientFinancialSummary(userId),
+        dbStorage.getTradingStats(userId),
+        dbStorage.getUserMovimentos(userId, 10),
+      ]);
+      if (!user) return res.status(404).json({ message: "User not found" });
 
-      const saldo = Number(user.saldo) || 0;
-      const rendimento = await dbStorage.calcularRendimento(saldo);
-      const ultimoDiaMes = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
-      
-      // Get trading statistics directly from database
-      const stats = await dbStorage.getTradingStats(userId);
-      const movimentos = await dbStorage.getUserMovimentos(userId, 10);
-
-      console.log('📊 [DASHBOARD] Stats completos:', {
-        totalTrades: stats?.totalTrades,
-        wonTrades: stats?.wonTrades,
-        winRate: stats?.winRate,
-        totalProfit: stats?.totalProfit
-      });
-
+      const available = Number(summary.availableBalanceCents || 0) / 100;
+      const reserved = Number(summary.reservedBalanceCents || 0) / 100;
+      const capital = Number(summary.capitalBalanceCents || 0) / 100;
+      const realizedYield = Number(summary.yieldBalanceCents || 0) / 100;
+      const legacyDeposits = legacyMovements.filter(m => m.tipo === "deposito").reduce((sum, m) => sum + Number(m.valor || 0), 0);
       const responseData = {
-        saldo: Math.round(saldo * 100) / 100,
-        rendimento: Math.round(rendimento * 100) / 100,
-        proximoSaque: ultimoDiaMes,
+        saldo: available,
+        saldoDisponivel: available,
+        saldoReservado: reserved,
+        capitalContabilizado: capital,
+        rendimento: realizedYield,
+        rendimentoContabilizado: realizedYield,
+        saldoLegado: Number(user.saldo || 0),
+        financialSource: "durable_ledger",
+        isOfficialBalance: true,
+        rendimentoIsRealized: true,
+        proximoSaque: null,
         totalTrades: Math.max(0, parseInt(String(stats?.totalTrades || 0))),
         wonTrades: Math.max(0, parseInt(String(stats?.wonTrades || 0))),
         winRate: Math.max(0, parseFloat(String(stats?.winRate || 0))),
         totalPnL: parseFloat(String(stats?.totalProfit || 0)),
-        investidoMesAtual: movimentos.filter(m => m.tipo === 'deposito').reduce((sum, m) => sum + Number(m.valor), 0),
-        movimentos: movimentos.map(m => ({
+        investidoMesAtual: 0,
+        depositosLegadosRecentes: legacyDeposits,
+        movimentos: legacyMovements.map(m => ({
           tipo: m.tipo,
           valor: m.valor,
-          data: m.createdAt
-        }))
+          data: m.createdAt,
+          source: "legacy_not_reconciled",
+        })),
       };
-
-      console.log('✅ [DASHBOARD] Resposta enviada:', responseData);
-      res.json(responseData);
+      res.setHeader("Cache-Control", "no-store, max-age=0");
+      return res.json(responseData);
     } catch (error) {
       console.error("❌ Error fetching variable income dashboard:", error);
-      res.status(500).json({ message: "Failed to fetch dashboard data", error: (error as any).message });
+      return res.status(503).json({ message: "Dashboard financeiro indisponível no ledger durável." });
     }
   });
 
@@ -2039,6 +2023,8 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
 
   // Admin routes  
   app.use('/api/admin', adminRoutes);
+  app.use('/api/client/finance', clientFinanceRoutes);
+  app.use('/api/webhooks', providerWebhookRoutes);
   
   // Auto Trading Routes
   const { autoTradingRoutes } = await import('./routes/auto-trading-routes');

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { parseAmountToCents, reconcileVerifiedPayment } from "../server/services/payment-domain";
 import { readFileSync } from "node:fs";
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
@@ -43,6 +44,9 @@ assert.match(affiliate, /referredUserId === referrerUserId/, "self-referral must
 
 assert.match(auth, /registerForm\.register\("referralCode"\)/, "registration must accept a referral code");
 assert.match(portal, /queryKey: \["\/api\/affiliates"\]/, "client affiliate screen must use authenticated API");
+assert.match(portal, /id: "aportes", label: "Aportes e pagamentos"/, "client deposits must have a dedicated navigation entry separate from the AI assistant");
+assert.match(portal, /Aguardando Mercado Pago/, "client portal must clearly disclose that payment provider integration is pending");
+assert.match(portal, /Nenhum comprovante enviado pelo cliente, clique ou confirmação manual altera a carteira/, "client UI must explain that manual evidence cannot credit wallet balance");
 assert.match(portal, /\/api\/documents\/upload/, "client profile must support document upload");
 assert.match(routes, /storage: multer\.memoryStorage\(\)/, "KYC uploads must be buffered for private object storage");
 assert.match(routes, /saveKycDocument\(String\(userId\), String\(tipo\), req\.file\)/, "KYC uploads must use the private storage adapter");
@@ -61,15 +65,41 @@ assert.match(adminRoutes, /readPrivateDocument\(String\(document\.arquivo\)\)/, 
 assert.match(admin, /\/api\/admin\/documents\/\$\{encodeURIComponent\(doc\.id\)\}\/file/, "admin customer profile must link to protected KYC document viewer");
 assert.match(adminRoutes, /hasApprovedAddress/, "proof of residence must be independently approved");
 assert.match(adminRoutes, /const userDocs = await dualStorage\.getUserDocumentos\(document\.userId\)/, "KYC must reload the updated user document set from durable storage before computing completeness");
-assert.match(adminRoutes, /const \[durableUsers, storedMovements\] = await Promise\.all\(\[[\s\S]*?dualStorage\.getAllUsers\(\)/, "admin dashboard must read account balances from durable user storage");
-assert.match(adminRoutes, /const totalCurrentBalance = usersWithFinancials\.reduce/, "admin global balance must be derived from durable user records");
+assert.match(adminRoutes, /const \[storedUsers, storedMovements\] = await Promise\.all\(\[[\s\S]*?dualStorage\.getAllUsers\(\)/, "admin dashboard must read customer identities from durable storage");
+assert.match(adminRoutes, /getPlatformFinancialSummary\(durableUsers\.map\(user => user\.id\)\)/, "admin dashboard must read account balances from the durable financial ledger");
+assert.match(adminRoutes, /const totalCurrentBalance = Number\(ledger\.totalsCents\.client_available/, "admin global balance must be derived from durable ledger entries");
 assert.match(adminRoutes, /dualStorage\.updateUser\(document\.userId/, "KYC verification must update durable Neon-backed user storage");
 assert.match(adminRoutes, /catch \(userUpdateError\)[\s\S]*?updateDocumento\(String\(documentId\), previousDecision\)[\s\S]*?throw userUpdateError/, "KYC document decision must roll back if durable account update fails");
 assert.match(adminRoutes, /dualStorage\.getUser\(String\(userId\)\)/, "admin authorization must read the durable user record");
-assert.match(adminRoutes, /const allUsers = await dualStorage\.getAllUsers\(\)/, "admin totals and customer list must use durable user records");
+assert.match(adminRoutes, /const allUsers = \(await dualStorage\.getAllUsers\(\)\)\.filter/, "admin totals and customer list must use durable non-admin user records");
 assert.match(adminRoutes, /Cache-Control", "no-store, max-age=0"/, "admin customer data must not be cached");
 assert.match(ai, /requestedAction && !canControlTrading/, "client AI must reject central motor control requests");
 assert.match(ai, /somente consulta/, "client AI context must be read-only");
 assert.ok(assistantUi.includes('replace(/</g, "&lt;")'), "assistant output must escape HTML before formatting");
+
+
+const paymentIntent = { id: "intent-test", userId: "user-test", amountCents: 13000, currency: "BRL" as const, status: "pending" as const };
+assert.equal(parseAmountToCents("130,00"), 13000);
+assert.throws(() => parseAmountToCents(0), /PAYMENT_AMOUNT_INVALID/);
+const verifiedPayment = {
+  providerPaymentId: "provider-test-1", externalReference: paymentIntent.id,
+  amountCents: 13000, currency: "BRL", status: "approved",
+  webhookVerified: true, providerLookupVerified: true,
+};
+assert.deepEqual(reconcileVerifiedPayment(paymentIntent, verifiedPayment), {
+  status: "approved", shouldCredit: true, duplicate: false,
+});
+assert.deepEqual(reconcileVerifiedPayment({
+  ...paymentIntent, status: "approved", providerPaymentId: "provider-test-1",
+}, verifiedPayment), { status: "approved", shouldCredit: false, duplicate: true });
+assert.throws(() => reconcileVerifiedPayment(paymentIntent, {
+  ...verifiedPayment, webhookVerified: false,
+}), /PAYMENT_PROVIDER_VERIFICATION_REQUIRED/);
+assert.throws(() => reconcileVerifiedPayment(paymentIntent, {
+  ...verifiedPayment, amountCents: 12999,
+}), /PAYMENT_AMOUNT_MISMATCH/);
+assert.throws(() => reconcileVerifiedPayment(paymentIntent, {
+  ...verifiedPayment, externalReference: "different-intent",
+}), /PAYMENT_REFERENCE_MISMATCH/);
 
 console.log("Client portal, affiliate, AI permission and payment-boundary policy checks passed.");

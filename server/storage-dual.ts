@@ -208,20 +208,18 @@ export class DualStorage implements IStorage {
     return this.read(() => this.neon!.getAllUsers(), () => this.turso!.getAllUsers(), () => this.sqlite.getAllUsers(), 'getAllUsers');
   }
   async createUser(user: InsertUser) { const payload = { ...user, id: user.id ?? randomBytes(16).toString('hex') } as InsertUser; return this.writeEssential(() => this.neon!.createUser(payload), () => this.sqlite.createUser(payload), 'createUser'); }
-  async updateUser(id: string, data: UpdateUser) { return this.writeEssential(() => this.neon!.updateUser(id, data), () => this.sqlite.updateUser(id, data), 'updateUser'); }
+  async updateUser(id: string, data: UpdateUser) {
+    if (Object.prototype.hasOwnProperty.call(data, "saldo")) throw new Error("LEGACY_BALANCE_MUTATION_DISABLED: use the financial ledger service.");
+    return this.writeEssential(() => this.neon!.updateUser(id, data), () => this.sqlite.updateUser(id, data), "updateUser");
+  }
   async updateVerificationCode(uid: string, code: string, exp: Date) { return this.writeEssential(() => this.neon!.updateVerificationCode(uid, code, exp), () => this.sqlite.updateVerificationCode(uid, code, exp), 'updateVerificationCode'); }
   async verifyPhone(uid: string) { return this.writeEssential(() => this.neon!.verifyPhone(uid), () => this.sqlite.verifyPhone(uid), 'verifyPhone'); }
   async approveAccount(uid: string, by: string) { return this.writeEssential(() => this.neon!.approveAccount(uid, by), () => this.sqlite.approveAccount(uid, by), 'approveAccount'); }
 
   // ─── Movimentos ───────────────────────────────────────────────────────────
 
-  async createMovimento(m: InsertMovimento) {
-    const payload = { ...m, id: (m as any).id ?? randomBytes(16).toString("hex") } as InsertMovimento;
-    return this.writeEssential(
-      () => this.neon!.createMovimento(payload),
-      () => this.sqlite.createMovimento(payload),
-      "createMovimento"
-    );
+  async createMovimento(_m: InsertMovimento): Promise<Movimento> {
+    throw new Error("LEGACY_FINANCIAL_MOVEMENT_WRITE_DISABLED: post financial movements through the durable ledger.");
   }
   async getUserMovimentos(uid: string, limit?: number) {
     return this.read(

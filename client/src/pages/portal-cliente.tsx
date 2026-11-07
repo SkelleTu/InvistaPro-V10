@@ -32,8 +32,19 @@ type TradeActivity = {
   profit?: number | string | null; createdAt?: string; completedAt?: string;
 };
 type FinancialSummary = {
-  balance: number; totalDeposits: number; totalYields: number; totalWithdrawals: number;
+  currency: "BRL"; unit: "centavos"; balancesCents: {
+    client_available: number; client_reserved: number; client_capital: number; client_yield: number;
+  }; legacyBalanceNotReconciled: boolean;
+};
+type LegacyMovementSummary = {
+  totalDeposits: number; totalYields: number; totalWithdrawals: number;
   netRecordedFlow: number; movementCount: number; lastMovementAt?: string | null;
+  legacyBalance?: number; isOfficialBalance?: false; source?: string;
+};
+type LedgerEntry = {
+  entry: { id: string; direction: "debit" | "credit"; amountCents: number; currency: string; createdAt?: string };
+  transaction: { id: string; eventType: string; description: string; idempotencyKey: string; createdAt?: string };
+  account: { accountKind: string; accountCode: string };
 };
 
 const money = (value: unknown) => new Intl.NumberFormat("pt-BR", {
@@ -47,6 +58,7 @@ const dateLabel = (value?: string) => value
 const navItems = [
   { id: "inicio", label: "Visão geral", icon: LayoutDashboard },
   { id: "carteira", label: "Minha carteira", icon: Wallet },
+  { id: "aportes", label: "Aportes e pagamentos", icon: CircleDollarSign },
   { id: "evolucao", label: "Minha evolução", icon: BarChart3 },
   { id: "afiliados", label: "Afiliados", icon: Network },
   { id: "historico", label: "Histórico", icon: History },
@@ -75,6 +87,16 @@ export default function PortalCliente() {
     refetchInterval: 60_000,
   });
   const financialSummaryQuery = useQuery<FinancialSummary>({
+    queryKey: ["/api/client/finance/summary"],
+    enabled: !!user,
+    refetchInterval: 60_000,
+  });
+  const ledgerQuery = useQuery<{ entries: LedgerEntry[] }>({
+    queryKey: ["/api/client/finance/ledger?limit=500"],
+    enabled: !!user,
+    refetchInterval: 60_000,
+  });
+  const legacySummaryQuery = useQuery<LegacyMovementSummary>({
     queryKey: ["/api/client/financial-summary"],
     enabled: !!user,
     refetchInterval: 60_000,
@@ -86,6 +108,7 @@ export default function PortalCliente() {
   });
   const tradeOperations = tradeActivityQuery.data?.operations ?? [];
   const movements = movementsQuery.data ?? [];
+  const ledgerEntries = ledgerQuery.data?.entries ?? [];
   const documentsQuery = useQuery<any[]>({
     queryKey: ["/api/documents"],
     enabled: !!user && active === "perfil",
@@ -141,31 +164,28 @@ export default function PortalCliente() {
     retry: false,
   });
   const evolutionData = useMemo(() => {
-    const sorted = [...movements]
-      .filter((item) => item.createdAt && Number.isFinite(Number(item.valor)))
-      .sort((a, b) => new Date(a.createdAt!).getTime() - new Date(b.createdAt!).getTime());
+    const sorted = ledgerEntries
+      .filter(item => item.account.accountKind === "client_available" && item.entry.createdAt)
+      .sort((a, b) => new Date(a.entry.createdAt!).getTime() - new Date(b.entry.createdAt!).getTime());
     const byDay = new Map<string, number>();
-    let running = 0;
     for (const item of sorted) {
-      const kind = String(item.tipo || "").toLowerCase();
-      const value = Number(item.valor || 0);
-      if (kind === "deposito") running += value;
-      else if (kind === "rendimento") running += value;
-      else if (kind === "saque") running -= value;
-      else continue;
-      const day = new Date(item.createdAt!).toLocaleDateString("pt-BR");
-      byDay.set(day, running);
+      const day = new Date(item.entry.createdAt!).toLocaleDateString("pt-BR");
+      const netCents = item.entry.direction === "credit" ? Number(item.entry.amountCents) : -Number(item.entry.amountCents);
+      byDay.set(day, (byDay.get(day) || 0) + netCents / 100);
     }
     return Array.from(byDay, ([data, valor]) => ({ data, valor: Number(valor.toFixed(2)) })).slice(-30);
-  }, [movements]);
+  }, [ledgerEntries]);
   const recentDeposits = useMemo(() => movements.filter((item) => item.tipo === "deposito").reduce((sum, item) => sum + Number(item.valor || 0), 0), [movements]);
   const recentWithdrawals = useMemo(() => movements.filter((item) => item.tipo === "saque").reduce((sum, item) => sum + Number(item.valor || 0), 0), [movements]);
   const recentYields = useMemo(() => movements.filter((item) => item.tipo === "rendimento").reduce((sum, item) => sum + Number(item.valor || 0), 0), [movements]);
-  const totalDeposits = Number(financialSummaryQuery.data?.totalDeposits ?? recentDeposits);
-  const totalWithdrawals = Number(financialSummaryQuery.data?.totalWithdrawals ?? recentWithdrawals);
-  const totalYields = Number(financialSummaryQuery.data?.totalYields ?? recentYields);
-  const recordedNetFlow = Number(financialSummaryQuery.data?.netRecordedFlow ?? (totalDeposits + totalYields - totalWithdrawals));
-  const balance = Number(financialSummaryQuery.data?.balance ?? dashboardQuery.data?.saldo ?? user?.saldo ?? 0);
+  const totalDeposits = Number(legacySummaryQuery.data?.totalDeposits ?? recentDeposits);
+  const totalWithdrawals = Number(legacySummaryQuery.data?.totalWithdrawals ?? recentWithdrawals);
+  const totalYields = Number(legacySummaryQuery.data?.totalYields ?? recentYields);
+  const recordedNetFlow = Number(legacySummaryQuery.data?.netRecordedFlow ?? (totalDeposits + totalYields - totalWithdrawals));
+  const balance = financialSummaryQuery.data ? Number(financialSummaryQuery.data.balancesCents.client_available || 0) / 100 : null;
+  const reservedBalance = Number(financialSummaryQuery.data?.balancesCents.client_reserved || 0) / 100;
+  const capitalBalance = Number(financialSummaryQuery.data?.balancesCents.client_capital || 0) / 100;
+  const yieldBalance = Number(financialSummaryQuery.data?.balancesCents.client_yield || 0) / 100;
 
   const logout = async () => {
     try {
@@ -241,6 +261,21 @@ export default function PortalCliente() {
     </div>
   );
 
+  const LedgerList = ({ limit }: { limit?: number }) => {
+    const list = limit ? ledgerEntries.slice(0, limit) : ledgerEntries;
+    if (ledgerQuery.isLoading) return <div className="p-6 text-sm text-slate-400">Carregando extrato contábil…</div>;
+    if (ledgerQuery.isError) return <div className="p-6 text-sm text-rose-300">Extrato contábil indisponível. O saldo não será substituído pelo saldo legado.</div>;
+    if (!list.length) return <div className="p-8 text-center text-sm text-slate-500">Nenhum lançamento contábil nesta conta.</div>;
+    return <div className="divide-y divide-white/5">{list.map(item => {
+      const isCredit = item.entry.direction === "credit";
+      return <div key={item.entry.id} className="flex items-center gap-3 px-5 py-4">
+        <div className={`h-9 w-9 rounded-xl flex items-center justify-center ${isCredit ? "bg-emerald-500/10 text-emerald-300" : "bg-amber-500/10 text-amber-300"}`}>{isCredit ? <ArrowDownLeft className="h-4 w-4" /> : <ArrowUpRight className="h-4 w-4" />}</div>
+        <div className="min-w-0 flex-1"><p className="text-sm font-medium text-slate-200">{item.transaction.description || item.transaction.eventType}</p><p className="text-xs text-slate-500">{dateLabel(item.entry.createdAt)} · {item.account.accountKind} · {item.transaction.idempotencyKey}</p></div>
+        <p className={`text-sm font-semibold ${isCredit ? "text-emerald-300" : "text-slate-300"}`}>{isCredit ? "+" : "−"}{money(Number(item.entry.amountCents) / 100)}</p>
+      </div>;
+    })}</div>;
+  };
+
   const MovementList = ({ limit }: { limit?: number }) => {
     const list = limit ? movements.slice(0, limit) : movements;
     if (movementsQuery.isLoading) return <div className="p-6 text-sm text-slate-400">Carregando movimentações…</div>;
@@ -266,9 +301,9 @@ export default function PortalCliente() {
     if (active === "inicio") return <>
       <PageTitle title={`Olá, ${user?.nomeCompleto?.split(" ")[0] || "cliente"}.`} subtitle="Aqui está o resumo das informações registradas na sua conta." />
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 mb-6">
-        <Metric label="Saldo atual" value={money(balance)} icon={Wallet} detail="Valor informado pelo backend da sua conta" />
-        <Metric label="Aportes registrados" value={money(totalDeposits)} icon={ArrowDownLeft} detail="Soma das movimentações classificadas como aporte" />
-        <Metric label="Saques registrados" value={money(totalWithdrawals)} icon={ArrowUpRight} detail="Soma das movimentações classificadas como saque" />
+        <Metric label="Saldo disponível" value={balance === null ? "—" : money(balance)} icon={Wallet} detail="Saldo calculado pelo ledger contábil do PostgreSQL" />
+        <Metric label="Aportes legados" value={money(totalDeposits)} icon={ArrowDownLeft} detail="Histórico anterior ainda não conciliado ao ledger" />
+        <Metric label="Saques legados" value={money(totalWithdrawals)} icon={ArrowUpRight} detail="Histórico anterior ainda não conciliado ao ledger" />
         <Metric label="Operações registradas" value={String(dashboardQuery.data?.totalTrades ?? "—")} icon={Activity} detail="Quantidade retornada pelo motor" />
         <Metric label="Operações vencedoras" value={String(dashboardQuery.data?.wonTrades ?? "—")} icon={BarChart3} detail="Operações concluídas com resultado positivo" />
         <Metric label="Taxa de acerto" value={dashboardQuery.data?.winRate == null ? "—" : `${Number(dashboardQuery.data.winRate).toFixed(2)}%`} icon={Activity} detail="Percentual calculado pelo backend" />
@@ -276,8 +311,8 @@ export default function PortalCliente() {
       </div>
       <div className="grid grid-cols-1 xl:grid-cols-[1.4fr_1fr] gap-4">
         <section className="rounded-2xl border border-white/10 bg-slate-900/70 overflow-hidden">
-          <div className="flex items-center justify-between p-5 border-b border-white/5"><div><h2 className="font-semibold text-white">Movimentações recentes</h2><p className="text-xs text-slate-500 mt-1">Dados vinculados à sua conta</p></div><button onClick={() => selectTab("historico")} className="text-xs text-violet-300 hover:text-white">Ver histórico</button></div>
-          <MovementList limit={5} />
+          <div className="flex items-center justify-between p-5 border-b border-white/5"><div><h2 className="font-semibold text-white">Lançamentos contábeis recentes</h2><p className="text-xs text-slate-500 mt-1">Extrato oficial da carteira</p></div><button onClick={() => selectTab("historico")} className="text-xs text-violet-300 hover:text-white">Ver histórico</button></div>
+          <LedgerList limit={5} />
         </section>
         <section className="rounded-2xl border border-violet-400/20 bg-gradient-to-br from-violet-950/60 to-slate-900 p-5">
           <div className="h-10 w-10 rounded-xl bg-violet-400/15 flex items-center justify-center mb-4"><Sparkles className="h-5 w-5 text-violet-200" /></div>
@@ -291,23 +326,23 @@ export default function PortalCliente() {
     if (active === "carteira") return <>
       <PageTitle title="Minha carteira" subtitle="Visão dos valores registrados no sistema para sua conta." />
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
-        <Metric label="Saldo registrado" value={money(balance)} icon={Wallet} detail="Saldo retornado pelo backend" />
-        <Metric label="Aportes registrados" value={money(totalDeposits)} icon={CreditCard} detail="Resumo completo do banco" />
-        <Metric label="Rendimentos registrados" value={money(totalYields)} icon={Activity} detail="Movimentações classificadas como rendimento" />
-        <Metric label="Saques históricos" value={money(totalWithdrawals)} icon={ArrowUpRight} detail="Movimentações classificadas como saque" />
+        <Metric label="Saldo disponível" value={balance === null ? "—" : money(balance)} icon={Wallet} detail="Saldo livre no ledger" />
+        <Metric label="Saldo reservado" value={money(reservedBalance)} icon={ShieldCheck} detail="Valor bloqueado por solicitações de saque" />
+        <Metric label="Capital contabilizado" value={money(capitalBalance)} icon={CreditCard} detail="Conta contábil separada" />
+        <Metric label="Rendimentos contabilizados" value={money(yieldBalance)} icon={Activity} detail="Conta contábil separada; não é promessa de retorno" />
       </div>
       <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-5">
-        <h2 className="font-semibold text-white mb-2">Conferência do histórico</h2>
-        <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-sm text-slate-400">Fluxo líquido histórico registrado</span><strong className="text-lg text-white">{money(recordedNetFlow)}</strong></div>
-        <p className="text-xs text-slate-500 mt-2">A soma considera aportes + rendimentos − saques. O resumo completo vem do banco; se estiver indisponível, a tela usa os últimos 500 registros. Não substitui conciliação contábil nem determina o valor disponível.</p>
+        <h2 className="font-semibold text-white mb-2">Histórico legado não conciliado</h2>
+        <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-sm text-slate-400">Fluxo líquido legado (aportes + rendimentos − saques)</span><strong className="text-lg text-white">{money(recordedNetFlow)}</strong></div>
+        <p className="text-xs text-slate-500 mt-2">Estes totais vêm da tabela histórica antiga e ainda não foram conciliados com os lançamentos de dupla entrada. Não alteram o saldo disponível calculado pelo ledger.</p>
       </div>
       <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-5 mt-4">
-        <h2 className="font-semibold text-white mb-2">Composição e disponibilidade</h2>
-        <p className="text-sm leading-6 text-slate-400">O backend atual ainda não fornece uma separação auditável entre principal, lucro realizado, capital comprometido e valor efetivamente disponível para saque. Por isso, esta tela não estima nem promete esses valores.</p>
+        <h2 className="font-semibold text-white mb-2">Composição contábil</h2>
+        <p className="text-sm leading-6 text-slate-400">O ledger mantém saldo disponível, saldo reservado, capital e rendimentos em contas separadas. Valores antigos permanecem identificados como legado até sua conciliação; não são importados automaticamente.</p>
       </div>
       <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-5 mt-4">
         <h2 className="font-semibold text-white mb-2">Simular taxa de serviço do saque</h2>
-        <p className="text-xs text-slate-500 mb-4">A taxa informativa aprovada é de 7,8%. Esta simulação não solicita saque, não reserva saldo e não transfere dinheiro.</p>
+        <p className="text-xs text-slate-500 mb-4">A taxa e os limites vêm da configuração do servidor. Esta simulação não solicita saque, não reserva saldo e não transfere dinheiro.</p>
         <div className="flex flex-col sm:flex-row gap-3">
           <label className="flex-1 text-xs text-slate-400">Valor bruto solicitado (R$)
             <input inputMode="decimal" type="number" min="0.01" step="0.01" value={withdrawalAmount} onChange={e=>{setWithdrawalAmount(e.target.value);withdrawalQuoteMutation.reset();}} className="mt-2 w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-base text-white outline-none focus:border-violet-400" />
@@ -317,7 +352,7 @@ export default function PortalCliente() {
         {withdrawalQuoteMutation.isError && <p className="text-sm text-rose-300 mt-3">{withdrawalQuoteMutation.error instanceof Error ? withdrawalQuoteMutation.error.message : "Não foi possível calcular a taxa."}</p>}
         {withdrawalQuoteMutation.data && <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
           <div className="rounded-xl bg-black/20 p-3"><p className="text-xs text-slate-500">Valor bruto</p><p className="text-lg text-white font-semibold">{money(withdrawalQuoteMutation.data.valorSolicitado)}</p></div>
-          <div className="rounded-xl bg-black/20 p-3"><p className="text-xs text-slate-500">Taxa de 7,8%</p><p className="text-lg text-amber-300 font-semibold">{money(withdrawalQuoteMutation.data.taxaServico)}</p></div>
+          <div className="rounded-xl bg-black/20 p-3"><p className="text-xs text-slate-500">Taxa configurada ({withdrawalQuoteMutation.data.taxaPercentual.toFixed(2)}%)</p><p className="text-lg text-amber-300 font-semibold">{money(withdrawalQuoteMutation.data.taxaServico)}</p></div>
           <div className="rounded-xl bg-black/20 p-3"><p className="text-xs text-slate-500">Líquido estimado</p><p className="text-lg text-emerald-300 font-semibold">{money(withdrawalQuoteMutation.data.valorLiquido)}</p></div>
         </div>}
       </div>
@@ -327,21 +362,35 @@ export default function PortalCliente() {
       </div>
     </>;
 
+    if (active === "aportes") return <>
+      <PageTitle title="Aportes e pagamentos" subtitle="Área preparada para receber pagamentos confirmados pelo provedor financeiro." />
+      <section className="rounded-2xl border border-amber-400/20 bg-slate-900/70 p-6">
+        <div className="flex items-center gap-3 mb-3"><CircleDollarSign className="h-7 w-7 text-amber-300" /><h2 className="font-semibold text-white text-lg">Integração de pagamentos</h2></div>
+        <div className="inline-flex items-center rounded-full border border-amber-400/30 bg-amber-950/30 px-3 py-1 text-xs font-medium text-amber-200">Aguardando Mercado Pago</div>
+        <p className="text-sm leading-6 text-slate-300 mt-4">A geração de cobranças PIX ainda não está habilitada. Esta área será conectada ao Mercado Pago para criar cobranças individualizadas e acompanhar a confirmação diretamente pelo provedor.</p>
+        <div className="mt-5 rounded-xl border border-white/10 bg-black/20 p-4">
+          <p className="text-sm font-medium text-white">Proteção do saldo</p>
+          <p className="text-xs leading-5 text-slate-400 mt-1">Nenhum comprovante enviado pelo cliente, clique ou confirmação manual altera a carteira. O crédito só poderá ocorrer após validação autenticada do pagamento, conferência do valor e processamento idempotente no servidor.</p>
+        </div>
+        <p className="text-xs text-slate-500 mt-4">Nenhuma cobrança foi criada e nenhuma transferência foi solicitada.</p>
+      </section>
+    </>;
+
     if (active === "evolucao") return <>
-      <PageTitle title="Minha evolução" subtitle="Linha histórica calculada exclusivamente a partir das movimentações disponíveis nesta conta." />
+      <PageTitle title="Minha evolução" subtitle="Variação líquida diária (créditos menos débitos) nos últimos lançamentos contábeis carregados." />
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <Metric label="Aportes registrados" value={money(totalDeposits)} icon={ArrowDownLeft} detail="Total no histórico carregado" />
-        <Metric label="Saques registrados" value={money(totalWithdrawals)} icon={ArrowUpRight} detail="Total no histórico carregado" />
+        <Metric label="Aportes legados" value={money(totalDeposits)} icon={ArrowDownLeft} detail="Histórico antigo, ainda não conciliado" />
+        <Metric label="Saques legados" value={money(totalWithdrawals)} icon={ArrowUpRight} detail="Histórico antigo, ainda não conciliado" />
         <Metric label="Operações registradas" value={String(dashboardQuery.data?.totalTrades ?? "—")} icon={Activity} detail="Estatística da API da conta" />
         <Metric label="Resultado operacional" value={money(dashboardQuery.data?.totalPnL ?? 0)} icon={BarChart3} detail="Lucros e perdas registrados pelo motor" />
       </div>
       <section className="rounded-2xl border border-white/10 bg-slate-900/70 p-5">
         <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
-          <div><h2 className="font-semibold text-white">Fluxo líquido acumulado</h2><p className="text-xs text-slate-500 mt-1">Depósitos + rendimentos − saques, conforme registros retornados pela API.</p></div>
-          <span className="text-xs text-slate-500">Até 30 datas do histórico carregado</span>
+          <div><h2 className="font-semibold text-white">Variação líquida diária do ledger</h2><p className="text-xs text-slate-500 mt-1">Créditos menos débitos da conta disponível em cada dia; não representa saldo de abertura.</p></div>
+          <span className="text-xs text-slate-500">Até 30 dias dos últimos 500 lançamentos</span>
         </div>
-        {movementsQuery.isLoading ? <p className="text-sm text-slate-400 p-8 text-center">Carregando histórico…</p> :
-          movementsQuery.isError ? <p className="text-sm text-rose-300 p-8 text-center">Não foi possível carregar a evolução.</p> :
+        {ledgerQuery.isLoading ? <p className="text-sm text-slate-400 p-8 text-center">Carregando extrato contábil…</p> :
+          ledgerQuery.isError ? <p className="text-sm text-rose-300 p-8 text-center">Não foi possível carregar a evolução contábil.</p> :
           evolutionData.length < 2 ? <p className="text-sm text-slate-400 p-8 text-center">Ainda não há movimentações suficientes para formar uma linha histórica.</p> :
           <div className="h-72 w-full">
             <ResponsiveContainer width="100%" height="100%">
@@ -354,7 +403,7 @@ export default function PortalCliente() {
               </LineChart>
             </ResponsiveContainer>
           </div>}
-        <p className="text-[11px] leading-5 text-amber-300/80 mt-3">O gráfico usa até 500 movimentações recentes. Os totais de aportes, rendimentos e saques vêm do resumo completo do banco. Nenhum dos dois substitui conciliação patrimonial ou define capital disponível.</p>
+        <p className="text-[11px] leading-5 text-slate-500 mt-3">O gráfico considera somente lançamentos da conta disponível. O histórico legado aparece separado e não altera esta linha.</p>
       </section>
     </>;
 
@@ -390,7 +439,11 @@ export default function PortalCliente() {
     if (active === "historico") return <>
       <PageTitle title="Histórico completo" subtitle="Movimentações financeiras e operações registradas na sua própria conta." />
       <div className="rounded-2xl border border-white/10 bg-slate-900/70 overflow-hidden mb-5">
-        <div className="p-5 border-b border-white/10"><h2 className="font-semibold text-white">Movimentações financeiras</h2></div>
+        <div className="p-5 border-b border-white/10"><h2 className="font-semibold text-white">Extrato contábil oficial</h2><p className="text-xs text-slate-500 mt-1">Lançamentos de dupla entrada persistidos no PostgreSQL; débitos e créditos aparecem separados por conta.</p></div>
+        <LedgerList />
+      </div>
+      <div className="rounded-2xl border border-white/10 bg-slate-900/70 overflow-hidden mb-5">
+        <div className="p-5 border-b border-white/10"><h2 className="font-semibold text-white">Histórico legado não conciliado</h2><p className="text-xs text-slate-500 mt-1">Registros antigos preservados para conferência. Não compõem o saldo oficial do ledger.</p></div>
         <MovementList />
       </div>
       <section className="rounded-2xl border border-white/10 bg-slate-900/70 overflow-hidden">
@@ -476,9 +529,9 @@ export default function PortalCliente() {
         </div>
       </header>
       <div className="max-w-7xl mx-auto p-4 sm:p-7 lg:p-9">
-        <div className="flex items-center justify-between mb-6"><div className="flex items-center gap-2 text-xs text-slate-500"><span className="h-2 w-2 rounded-full bg-emerald-400" /> Conectado à sua conta</div><Button variant="ghost" size="sm" onClick={() => { dashboardQuery.refetch(); movementsQuery.refetch(); financialSummaryQuery.refetch(); tradeActivityQuery.refetch(); affiliatesQuery.refetch(); documentsQuery.refetch(); }} className="text-slate-400 hover:text-white"><RefreshCw className="h-4 w-4 mr-2" />Atualizar</Button></div>
+        <div className="flex items-center justify-between mb-6"><div className="flex items-center gap-2 text-xs text-slate-500"><span className="h-2 w-2 rounded-full bg-emerald-400" /> Conectado à sua conta</div><Button variant="ghost" size="sm" onClick={() => { dashboardQuery.refetch(); movementsQuery.refetch(); financialSummaryQuery.refetch(); ledgerQuery.refetch(); legacySummaryQuery.refetch(); tradeActivityQuery.refetch(); affiliatesQuery.refetch(); documentsQuery.refetch(); }} className="text-slate-400 hover:text-white"><RefreshCw className="h-4 w-4 mr-2" />Atualizar</Button></div>
         {dashboardQuery.isError && <div className="mb-5 rounded-xl border border-rose-400/20 bg-rose-950/30 p-4 text-sm text-rose-200">Não foi possível atualizar o saldo pelo backend. Os dados exibidos podem estar desatualizados.</div>}
-        {financialSummaryQuery.isError && <div className="mb-5 rounded-xl border border-amber-400/20 bg-amber-950/20 p-4 text-sm text-amber-200">O resumo financeiro completo não está disponível. Os totais podem refletir apenas as movimentações recentes carregadas.</div>}
+        {financialSummaryQuery.isError && <div className="mb-5 rounded-xl border border-amber-400/20 bg-amber-950/20 p-4 text-sm text-amber-200">O saldo contábil oficial está indisponível. Por segurança, o portal não substitui esse valor pelo saldo legado; os totais históricos antigos permanecem separados.</div>}
         {renderContent()}
         <footer className="mt-10 border-t border-white/10 pt-5 text-[11px] text-slate-600 flex flex-wrap justify-between gap-2"><span>Invista Pro · Portal do Cliente</span><span>Informações financeiras sujeitas à conciliação do sistema.</span></footer>
       </div>

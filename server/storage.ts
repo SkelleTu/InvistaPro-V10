@@ -320,6 +320,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateUser(id: string, data: UpdateUser): Promise<User> {
+    if (Object.prototype.hasOwnProperty.call(data, "saldo")) throw new Error("LEGACY_BALANCE_MUTATION_DISABLED: use the financial ledger service.");
     const [user] = await db
       .update(users)
       .set({ ...data, updatedAt: new Date().toISOString() })
@@ -394,13 +395,8 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Movement operations
-  async createMovimento(movimento: InsertMovimento): Promise<Movimento> {
-    const [newMovimento] = await db
-      .insert(movimentos)
-      .values(movimento)
-      .returning();
-    
-    return newMovimento;
+  async createMovimento(_movimento: InsertMovimento): Promise<Movimento> {
+    throw new Error("LEGACY_FINANCIAL_MOVEMENT_WRITE_DISABLED: post financial movements through the durable ledger.");
   }
 
   async getUserMovimentos(userId: string, limit = 10): Promise<Movimento[]> {

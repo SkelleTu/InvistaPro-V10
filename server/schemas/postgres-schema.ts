@@ -10,6 +10,11 @@ import {
   jsonb,
   varchar,
   serial,
+  uuid,
+  bigint,
+  char,
+  inet,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 // One shared Neon database backs both V10 and Aura visual deployments.
@@ -410,3 +415,184 @@ export const tradingControl = pgTable('trading_control', {
   resumedAt: timestamp('resumed_at'),
   updatedAt: timestamp('updated_at').defaultNow(),
 });
+
+
+// ─── Durable financial ledger (Neon/PostgreSQL only) ────────────────────────
+// Monetary values are integer cents. Posted ledger rows are append-only at the
+// database layer; corrections must be represented by new reversing entries.
+export const financialAccounts = pgTable("financial_accounts", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  accountCode: varchar("account_code", { length: 100 }).notNull().unique(),
+  ownerUserId: varchar("owner_user_id", { length: 32 }).references(() => users.id, { onDelete: "restrict" }),
+  accountKind: varchar("account_kind", { length: 32 }).notNull(),
+  currency: char("currency", { length: 3 }).notNull().default("BRL"),
+  status: varchar("status", { length: 16 }).notNull().default("active"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("idx_financial_accounts_owner_kind_currency").on(table.ownerUserId, table.accountKind, table.currency),
+]);
+
+export const ledgerTransactions = pgTable("ledger_transactions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  idempotencyKey: varchar("idempotency_key", { length: 160 }).notNull().unique(),
+  eventType: varchar("event_type", { length: 48 }).notNull(),
+  referenceType: varchar("reference_type", { length: 48 }),
+  referenceId: varchar("reference_id", { length: 160 }),
+  description: text("description").notNull(),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+  createdBy: varchar("created_by", { length: 32 }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  postedAt: timestamp("posted_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("idx_ledger_transactions_created_at").on(table.createdAt),
+  index("idx_ledger_transactions_reference").on(table.referenceType, table.referenceId),
+]);
+
+export const ledgerEntries = pgTable("ledger_entries", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  transactionId: uuid("transaction_id").notNull().references(() => ledgerTransactions.id, { onDelete: "restrict" }),
+  accountId: uuid("account_id").notNull().references(() => financialAccounts.id, { onDelete: "restrict" }),
+  direction: varchar("direction", { length: 6 }).notNull(),
+  amountCents: bigint("amount_cents", { mode: "number" }).notNull(),
+  currency: char("currency", { length: 3 }).notNull().default("BRL"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("idx_ledger_entries_transaction").on(table.transactionId),
+  index("idx_ledger_entries_account_created").on(table.accountId, table.createdAt),
+]);
+
+export const paymentIntents = pgTable("payment_intents", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: varchar("user_id", { length: 32 }).notNull().references(() => users.id, { onDelete: "restrict" }),
+  amountCents: bigint("amount_cents", { mode: "number" }).notNull(),
+  currency: char("currency", { length: 3 }).notNull().default("BRL"),
+  status: varchar("status", { length: 20 }).notNull().default("created"),
+  provider: varchar("provider", { length: 40 }),
+  providerPaymentId: varchar("provider_payment_id", { length: 160 }),
+  idempotencyKey: varchar("idempotency_key", { length: 160 }).notNull().unique(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+  approvedAt: timestamp("approved_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("idx_payment_intents_user_created").on(table.userId, table.createdAt),
+  uniqueIndex("idx_payment_intents_provider_payment").on(table.provider, table.providerPaymentId),
+]);
+
+export const providerPayments = pgTable("provider_payments", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  paymentIntentId: uuid("payment_intent_id").notNull().unique().references(() => paymentIntents.id, { onDelete: "restrict" }),
+  provider: varchar("provider", { length: 40 }).notNull(),
+  providerPaymentId: varchar("provider_payment_id", { length: 160 }).notNull(),
+  externalReference: varchar("external_reference", { length: 160 }).notNull(),
+  amountCents: bigint("amount_cents", { mode: "number" }).notNull(),
+  currency: char("currency", { length: 3 }).notNull(),
+  providerStatus: varchar("provider_status", { length: 40 }).notNull(),
+  verifiedAt: timestamp("verified_at", { withTimezone: true }).notNull(),
+  rawSnapshot: jsonb("raw_snapshot").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("idx_provider_payments_provider_id").on(table.provider, table.providerPaymentId),
+]);
+
+export const withdrawalRequests = pgTable("withdrawal_requests", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: varchar("user_id", { length: 32 }).notNull().references(() => users.id, { onDelete: "restrict" }),
+  amountCents: bigint("amount_cents", { mode: "number" }).notNull(),
+  feeCents: bigint("fee_cents", { mode: "number" }).notNull().default(0),
+  netAmountCents: bigint("net_amount_cents", { mode: "number" }).notNull(),
+  currency: char("currency", { length: 3 }).notNull().default("BRL"),
+  status: varchar("status", { length: 20 }).notNull().default("requested"),
+  provider: varchar("provider", { length: 40 }),
+  providerTransferId: varchar("provider_transfer_id", { length: 160 }),
+  idempotencyKey: varchar("idempotency_key", { length: 160 }).notNull().unique(),
+  destinationFingerprint: varchar("destination_fingerprint", { length: 160 }),
+  destinationEncrypted: text("destination_encrypted"),
+  failureReason: text("failure_reason"),
+  requestedAt: timestamp("requested_at", { withTimezone: true }).notNull().defaultNow(),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("idx_withdrawal_requests_user_created").on(table.userId, table.requestedAt),
+]);
+
+export const providerWebhookEvents = pgTable("provider_webhook_events", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  provider: varchar("provider", { length: 40 }).notNull(),
+  providerEventId: varchar("provider_event_id", { length: 160 }).notNull(),
+  eventType: varchar("event_type", { length: 100 }).notNull(),
+  signatureVerified: boolean("signature_verified").notNull().default(false),
+  payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+  receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+  processedAt: timestamp("processed_at", { withTimezone: true }),
+  processingStatus: varchar("processing_status", { length: 20 }).notNull().default("received"),
+  processingError: text("processing_error"),
+}, (table) => [
+  uniqueIndex("idx_provider_webhook_events_provider_id").on(table.provider, table.providerEventId),
+  index("idx_provider_webhook_events_received").on(table.receivedAt),
+]);
+
+export const financialAuditEvents = pgTable("financial_audit_events", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  actorUserId: varchar("actor_user_id", { length: 32 }),
+  subjectUserId: varchar("subject_user_id", { length: 32 }),
+  action: varchar("action", { length: 80 }).notNull(),
+  entityType: varchar("entity_type", { length: 48 }).notNull(),
+  entityId: varchar("entity_id", { length: 160 }).notNull(),
+  beforeState: jsonb("before_state").$type<Record<string, unknown>>(),
+  afterState: jsonb("after_state").$type<Record<string, unknown>>(),
+  reason: text("reason"),
+  requestId: varchar("request_id", { length: 160 }),
+  ipAddress: inet("ip_address"),
+  userAgent: text("user_agent"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("idx_financial_audit_subject_created").on(table.subjectUserId, table.createdAt),
+  index("idx_financial_audit_created").on(table.createdAt),
+]);
+
+export const adminReportExports = pgTable("admin_report_exports", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  requestedBy: varchar("requested_by", { length: 32 }).notNull().references(() => users.id, { onDelete: "restrict" }),
+  reportScope: varchar("report_scope", { length: 24 }).notNull(),
+  subjectUserId: varchar("subject_user_id", { length: 32 }).references(() => users.id, { onDelete: "restrict" }),
+  periodStart: timestamp("period_start", { withTimezone: true }),
+  periodEnd: timestamp("period_end", { withTimezone: true }),
+  rowCount: bigint("row_count", { mode: "number" }).notNull().default(0),
+  contentSha256: char("content_sha256", { length: 64 }).notNull(),
+  privateStorageRef: text("private_storage_ref").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("idx_admin_report_exports_subject_created").on(table.subjectUserId, table.createdAt),
+]);
+
+
+// Affiliate attribution and pending commissions are persisted in the same durable PostgreSQL database.
+export const affiliateProfiles = pgTable("affiliate_profiles", {
+  userId: varchar("user_id", { length: 32 }).primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  referralCode: varchar("referral_code", { length: 20 }).notNull().unique(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const affiliateReferrals = pgTable("affiliate_referrals", {
+  id: varchar("id", { length: 32 }).primaryKey(),
+  referrerUserId: varchar("referrer_user_id", { length: 32 }).notNull().references(() => users.id, { onDelete: "cascade" }),
+  referredUserId: varchar("referred_user_id", { length: 32 }).notNull().unique().references(() => users.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("idx_affiliate_referrals_referrer").on(table.referrerUserId),
+]);
+
+export const affiliateCommissions = pgTable("affiliate_commissions", {
+  id: varchar("id", { length: 32 }).primaryKey(),
+  referrerUserId: varchar("referrer_user_id", { length: 32 }).notNull().references(() => users.id),
+  referredUserId: varchar("referred_user_id", { length: 32 }).notNull().references(() => users.id),
+  paymentReference: varchar("payment_reference", { length: 160 }).notNull().unique(),
+  eligibleBaseCents: bigint("eligible_base_cents", { mode: "number" }).notNull(),
+  rateBps: integer("rate_bps").notNull().default(150),
+  commissionAmountCents: bigint("commission_amount_cents", { mode: "number" }).notNull(),
+  status: varchar("status", { length: 20 }).notNull().default("pending"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("idx_affiliate_commissions_referrer").on(table.referrerUserId),
+]);

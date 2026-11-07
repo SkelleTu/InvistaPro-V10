@@ -4,6 +4,8 @@ import { isAuthenticated } from "../auth";
 import { isAuthorizedEmail, ACCESS_DENIED_MESSAGE } from "../config/access";
 import { getAffiliateAdminSummary, getAffiliateAdminNetwork } from "../services/affiliate-program";
 import { readPrivateDocument } from "../services/private-document-storage";
+import { generateAdminFinancialReport, getAdminReport, listAdminReports, recordAdminReportDownload, recordAdminReportFailure } from "../services/admin-financial-reports";
+import { getClientFinancialSummary, getPlatformFinancialSummary, listClientLedger, listClientWithdrawals } from "../services/financial-ledger";
 
 // Extend session type
 declare module 'express-session' {
@@ -144,19 +146,30 @@ router.get('/trading/summary', isAuthenticated, isAdmin, async (_req, res) => {
 // Get all users
 router.get('/users', isAuthenticated, isAdmin, async (req, res) => {
   try {
-    const allUsers = await dualStorage.getAllUsers();
+    const allUsers = (await dualStorage.getAllUsers()).filter((user: any) => !user.isAdmin);
+    const ledger = await getPlatformFinancialSummary(allUsers.map(user => user.id));
+    const ledgerByUser = new Map<string, Record<string, number>>();
+    for (const item of ledger.clients) ledgerByUser.set(item.userId, item.balancesCents);
     const safeUsers = allUsers
-      .map(user => ({
+      .map(user => {
+        const balances: any = ledgerByUser.get(user.id) || { client_available: 0, client_reserved: 0, client_capital: 0, client_yield: 0 };
+        return ({
         id: user.id,
         nomeCompleto: user.nomeCompleto,
         email: user.email,
         cpf: user.cpf,
         telefone: user.telefone,
-        saldo: user.saldo,
+        saldoLegado: user.saldo,
+        saldoDisponivel: Number(balances.client_available || 0) / 100,
+        saldoReservado: Number(balances.client_reserved || 0) / 100,
+        saldoCapital: Number(balances.client_capital || 0) / 100,
+        saldoRendimentos: Number(balances.client_yield || 0) / 100,
+        ledgerOfficial: true,
         documentosVerificados: user.documentosVerificados,
         contaAprovada: user.contaAprovada,
         createdAt: user.createdAt,
-      }))
+      });
+      })
       .sort((a, b) => new Date(String(b.createdAt || 0)).getTime() - new Date(String(a.createdAt || 0)).getTime());
 
     res.setHeader("Cache-Control", "no-store, max-age=0");
@@ -198,7 +211,7 @@ router.get('/documents/pending', isAuthenticated, isAdmin, async (_req, res) => 
 router.get('/movements', isAuthenticated, isAdmin, async (_req, res) => {
   try {
     const [storedMovements, allUsers] = await Promise.all([
-      dualStorage.getAllMovimentos(100),
+      dualStorage.getAllMovimentos(),
       dualStorage.getAllUsers(),
     ]);
     const usersById = new Map(allUsers.map(user => [user.id, user]));
@@ -253,10 +266,13 @@ router.get('/user/:userId', isAuthenticated, isAdmin, async (req, res) => {
     }
 
     // Read the customer's complete history from the same durable source as their identity.
-    const [storedMovements, storedTrades, storedDocuments] = await Promise.all([
-      dualStorage.getUserMovimentos(userId, 500),
-      dualStorage.getUserTradeOperations(userId, 200),
+    const [storedMovements, storedTrades, storedDocuments, financialSummary, ledgerEntries, withdrawals] = await Promise.all([
+      dualStorage.getUserMovimentos(userId, 100000),
+      dualStorage.getUserTradeOperations(userId, 100000),
       dualStorage.getUserDocumentos(userId),
+      getClientFinancialSummary(userId),
+      listClientLedger(userId, 1000, 0),
+      listClientWithdrawals(userId, 500),
     ]);
     const userMovements = storedMovements.map(mov => ({
       id: mov.id, tipo: mov.tipo, valor: Number(mov.valor || 0),
@@ -295,12 +311,19 @@ router.get('/user/:userId', isAuthenticated, isAdmin, async (req, res) => {
         cidade: user.cidade,
         estado: user.estado,
         cep: user.cep,
-        saldo: user.saldo,
+        saldoLegado: user.saldo,
+        saldoDisponivel: Number(financialSummary.availableBalanceCents || 0) / 100,
+        saldoReservado: Number(financialSummary.reservedBalanceCents || 0) / 100,
+        saldoCapital: Number(financialSummary.capitalBalanceCents || 0) / 100,
+        saldoRendimentos: Number(financialSummary.yieldBalanceCents || 0) / 100,
         contaAprovada: user.contaAprovada,
         documentosVerificados: user.documentosVerificados,
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
       },
+      financialSummary,
+      ledgerEntries,
+      withdrawals,
       movements: userMovements,
       tradeOperations: userTradeOperations,
       documents: userDocuments,
@@ -395,22 +418,26 @@ router.post('/documents/review', isAuthenticated, isAdmin, async (req, res) => {
 // Get admin dashboard statistics
 router.get('/stats', isAuthenticated, isAdmin, async (_req, res) => {
   try {
-    const [allUsers, allDocuments, allMovements] = await Promise.all([
+    const [storedUsers, allDocuments, allMovements] = await Promise.all([
       dualStorage.getAllUsers(),
       dualStorage.getAllDocumentos(),
       dualStorage.getAllMovimentos(),
     ]);
-    const sumType = (type: string) => allMovements
+    const allUsers = storedUsers.filter((user: any) => !user.isAdmin);
+    const ledger = await getPlatformFinancialSummary(allUsers.map(user => user.id));
+    const clientIds = new Set(allUsers.map(user => user.id));
+    const clientMovements = allMovements.filter(movement => clientIds.has(movement.userId));
+    const sumType = (type: string) => clientMovements
       .filter(movement => movement.tipo === type)
       .reduce((sum, movement) => sum + Number(movement.valor || 0), 0);
     const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
-    const recent = allMovements.filter(movement => {
+    const recent = clientMovements.filter(movement => {
       const timestamp = new Date(String(movement.createdAt || "")).getTime();
       return Number.isFinite(timestamp) && timestamp >= cutoff;
     });
 
     const breakdown = new Map<string, { tipo: string; total: number; count: number }>();
-    for (const movement of allMovements) {
+    for (const movement of clientMovements) {
       const key = String(movement.tipo || "outro");
       const item = breakdown.get(key) || { tipo: key, total: 0, count: 0 };
       item.total += Number(movement.valor || 0);
@@ -431,8 +458,12 @@ router.get('/stats', isAuthenticated, isAdmin, async (_req, res) => {
     return res.json({
       totalUsers: allUsers.length,
       verifiedUsers: allUsers.filter(user => Boolean(user.documentosVerificados)).length,
-      pendingDocuments: allDocuments.filter(document => document.status === "pendente").length,
-      totalBalance: allUsers.reduce((sum, user) => sum + Number(user.saldo || 0), 0),
+      pendingDocuments: allDocuments.filter(document => clientIds.has(document.userId) && document.status === "pendente").length,
+      totalBalance: Number(ledger.totalsCents.client_available || 0) / 100,
+      totalReserved: Number(ledger.totalsCents.client_reserved || 0) / 100,
+      totalCapital: Number(ledger.totalsCents.client_capital || 0) / 100,
+      totalLedgerYields: Number(ledger.totalsCents.client_yield || 0) / 100,
+      ledgerOfficial: true,
       totalInvested: sumType("deposito"),
       totalYields: sumType("rendimento"),
       totalWithdrawals: sumType("saque"),
@@ -449,19 +480,31 @@ router.get('/stats', isAuthenticated, isAdmin, async (_req, res) => {
 // Get comprehensive dashboard data
 router.get('/dashboard-data', isAuthenticated, isAdmin, async (_req, res) => {
   try {
-    const [durableUsers, storedMovements] = await Promise.all([
+    const [storedUsers, storedMovements] = await Promise.all([
       dualStorage.getAllUsers(),
       dualStorage.getAllMovimentos(),
     ]);
+    const durableUsers = storedUsers.filter((user: any) => !user.isAdmin);
+    const ledger = await getPlatformFinancialSummary(durableUsers.map(user => user.id));
+    const ledgerByUser = new Map<string, Record<string, number>>();
+    for (const item of ledger.clients) ledgerByUser.set(item.userId, item.balancesCents);
     const usersWithFinancials = durableUsers
-      .map(user => ({
+      .map(user => {
+        const balances: any = ledgerByUser.get(user.id) || { client_available: 0, client_reserved: 0, client_capital: 0, client_yield: 0 };
+        return ({
         id: user.id, nomeCompleto: user.nomeCompleto, email: user.email, cpf: user.cpf,
-        saldo: Number(user.saldo || 0), documentosVerificados: Boolean(user.documentosVerificados),
-        contaAprovada: Boolean(user.contaAprovada), createdAt: user.createdAt, updatedAt: user.updatedAt,
-      }))
+        saldoLegado: Number(user.saldo || 0),
+        saldoDisponivel: Number(balances.client_available || 0) / 100,
+        saldoReservado: Number(balances.client_reserved || 0) / 100,
+        saldoCapital: Number(balances.client_capital || 0) / 100,
+        saldoRendimentos: Number(balances.client_yield || 0) / 100,
+        contaAprovada: Boolean(user.contaAprovada), documentosVerificados: Boolean(user.documentosVerificados), createdAt: user.createdAt, updatedAt: user.updatedAt,
+      });
+      })
       .sort((a, b) => new Date(String(b.createdAt || 0)).getTime() - new Date(String(a.createdAt || 0)).getTime());
     const usersById = new Map(usersWithFinancials.map(user => [user.id, user]));
-    const allMovements = storedMovements
+    const clientUserIds = new Set(usersWithFinancials.map(user => user.id));
+    const allMovements = storedMovements.filter(movement => clientUserIds.has(movement.userId))
       .map(movement => {
         const user = usersById.get(movement.userId);
         return {
@@ -479,7 +522,7 @@ router.get('/dashboard-data', isAuthenticated, isAdmin, async (_req, res) => {
     const totalInvested = sumType("deposito");
     const totalYields = sumType("rendimento");
     const totalWithdrawals = sumType("saque");
-    const totalCurrentBalance = usersWithFinancials.reduce((sum, user) => sum + user.saldo, 0);
+    const totalCurrentBalance = Number(ledger.totalsCents.client_available || 0) / 100;
 
     const movementTypes = new Map<string, { tipo: string; count: number; total: number }>();
     for (const movement of allMovements) {
@@ -524,6 +567,10 @@ router.get('/dashboard-data', isAuthenticated, isAdmin, async (_req, res) => {
     return res.json({
       platformTotals: {
         totalInvested, totalYields, totalWithdrawals, totalCurrentBalance,
+        totalReserved: Number(ledger.totalsCents.client_reserved || 0) / 100,
+        totalCapital: Number(ledger.totalsCents.client_capital || 0) / 100,
+        totalLedgerYields: Number(ledger.totalsCents.client_yield || 0) / 100,
+        ledgerOfficial: true,
         totalUsers: usersWithFinancials.length,
         verifiedUsers: usersWithFinancials.filter(user => user.documentosVerificados).length,
       },
@@ -535,6 +582,96 @@ router.get('/dashboard-data', isAuthenticated, isAdmin, async (_req, res) => {
   } catch (error) {
     console.error("Error getting dashboard data:", error);
     return res.status(500).json({ message: "Erro interno do servidor" });
+  }
+});
+
+
+// Generate a complete, archived PDF from the durable PostgreSQL source of truth.
+router.post('/reports', isAuthenticated, isAdmin, async (req, res) => {
+  try {
+    const actorUserId = String((req as any).session.passport?.user || "");
+    const scope = req.body?.scope;
+    if (scope !== "client" && scope !== "platform") {
+      await recordAdminReportFailure({ requestedBy: actorUserId, reason: "INVALID_REPORT_SCOPE", requestId: String(req.headers["x-request-id"] || ""), ip: req.ip, userAgent: String(req.headers["user-agent"] || "") }).catch(auditError => console.error("Failed to audit invalid report scope:", auditError));
+      return res.status(400).json({ message: "Escopo de relatório inválido." });
+    }
+    const userId = scope === "client" ? String(req.body?.userId || "") : undefined;
+    if (scope === "client" && (!userId || userId.length > 32)) {
+      await recordAdminReportFailure({ requestedBy: actorUserId, scope: "client", reason: "INVALID_REPORT_CLIENT", requestId: String(req.headers["x-request-id"] || ""), ip: req.ip, userAgent: String(req.headers["user-agent"] || "") }).catch(auditError => console.error("Failed to audit invalid report client:", auditError));
+      return res.status(400).json({ message: "Selecione um cliente válido." });
+    }
+    const report = await generateAdminFinancialReport({
+      requestedBy: actorUserId,
+      scope,
+      userId,
+      from: req.body?.from ? String(req.body.from) : undefined,
+      to: req.body?.to ? String(req.body.to) : undefined,
+      reason: req.body?.reason ? String(req.body.reason).slice(0, 500) : undefined,
+      requestId: String(req.headers["x-request-id"] || ""),
+      ip: req.ip,
+      userAgent: String(req.headers["user-agent"] || ""),
+    });
+    res.setHeader("Cache-Control", "private, no-store, max-age=0");
+    return res.status(201).json({ ...report, downloadUrl: `/api/admin/reports/${report.id}/download` });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("Admin financial report generation failed:", message);
+    await recordAdminReportFailure({
+      requestedBy: String((req as any).session?.passport?.user || ""),
+      scope: req.body?.scope === "client" || req.body?.scope === "platform" ? req.body.scope : undefined,
+      userId: req.body?.scope === "client" ? String(req.body?.userId || "").slice(0, 32) : undefined,
+      reason: message,
+      requestId: String(req.headers["x-request-id"] || ""),
+      ip: req.ip,
+      userAgent: String(req.headers["user-agent"] || ""),
+    }).catch(auditError => console.error("Failed to audit report export failure:", auditError));
+    if (message === "REPORT_CLIENT_NOT_FOUND") return res.status(404).json({ message: "Cliente não encontrado." });
+    if (message === "INVALID_REPORT_PERIOD") return res.status(400).json({ message: "Período inválido." });
+    if (message === "DURABLE_POSTGRES_REQUIRED" || message.includes("PRIVATE_REPORT_STORAGE_NOT_CONFIGURED")) {
+      return res.status(503).json({ message: "Relatórios arquivados indisponíveis: banco durável ou armazenamento privado não configurado." });
+    }
+    return res.status(500).json({ message: "Não foi possível gerar e arquivar o relatório." });
+  }
+});
+
+// Report archive index; metadata only, never exposes storage references.
+router.get('/reports', isAuthenticated, isAdmin, async (req, res) => {
+  try {
+    const requested = Number.parseInt(String(req.query.limit || "100"), 10);
+    const reports = await listAdminReports(Number.isFinite(requested) ? requested : 100);
+    return res.json(reports.map((report: any) => ({
+      id: report.id, scope: report.reportScope, subjectUserId: report.subjectUserId,
+      periodStart: report.periodStart, periodEnd: report.periodEnd, rowCount: report.rowCount,
+      contentSha256: report.contentSha256, createdAt: report.createdAt,
+      downloadUrl: `/api/admin/reports/${report.id}/download`,
+    })));
+  } catch (error) {
+    console.error("Admin report archive listing failed:", error);
+    return res.status(503).json({ message: "Não foi possível consultar o arquivo de relatórios." });
+  }
+});
+
+// Every report download is authorized and written to the financial audit trail.
+router.get('/reports/:reportId/download', isAuthenticated, isAdmin, async (req, res) => {
+  try {
+    const reportId = String(req.params.reportId || "");
+    if (!/^[0-9a-f-]{36}$/i.test(reportId)) return res.status(400).json({ message: "Relatório inválido." });
+    const report = await getAdminReport(reportId);
+    if (!report) return res.status(404).json({ message: "Relatório não encontrado." });
+    const actorUserId = String((req as any).session.passport?.user || "");
+    const buffer = await recordAdminReportDownload(report, actorUserId, {
+      requestId: String(req.headers["x-request-id"] || ""), ip: req.ip,
+      userAgent: String(req.headers["user-agent"] || ""),
+    });
+    res.setHeader("Cache-Control", "private, no-store, max-age=0");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Length", String(buffer.length));
+    res.setHeader("Content-Disposition", `attachment; filename="invistapro-relatorio-${report.id}.pdf"`);
+    return res.status(200).send(buffer);
+  } catch (error) {
+    console.error("Admin report download failed:", error);
+    return res.status(503).json({ message: "Não foi possível validar e recuperar o PDF arquivado." });
   }
 });
 

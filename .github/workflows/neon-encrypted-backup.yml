@@ -1,0 +1,47 @@
+name: Encrypted Neon database backup
+
+on:
+  schedule:
+    - cron: "30 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: invistapro-neon-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+      - name: Install project dependencies
+        run: npm ci --include=dev
+      - name: Create encrypted backup
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+          BACKUP_BUCKET: invistapro-database-backups
+          BACKUP_DUMP_PATH: /tmp/invistapro.dump
+        run: |
+          test -n "$DATABASE_URL"
+          test -n "$SUPABASE_URL"
+          test -n "$SUPABASE_SERVICE_ROLE_KEY"
+          test -n "$BACKUP_ENCRYPTION_KEY"
+          pg_dump "$DATABASE_URL" --format=custom --no-owner --no-privileges --file "$BACKUP_DUMP_PATH"
+          npx tsx scripts/backup-neon-to-supabase.ts
