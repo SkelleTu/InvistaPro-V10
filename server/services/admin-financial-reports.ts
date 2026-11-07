@@ -79,6 +79,30 @@ function brlFromCents(value: number) {
   return (value / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
+export async function recordAdminReportFailure(input: {
+  requestedBy: string;
+  scope?: "client" | "platform";
+  userId?: string;
+  reason: string;
+  requestId?: string;
+  ip?: string;
+  userAgent?: string;
+}) {
+  const db = dbOrThrow();
+  await db.insert(pgSchema.financialAuditEvents).values({
+    actorUserId: input.requestedBy || null,
+    subjectUserId: input.userId || null,
+    action: "admin_report_generation_failed",
+    entityType: "admin_report_export_attempt",
+    entityId: randomUUID(),
+    afterState: { scope: input.scope || "unknown" },
+    reason: String(input.reason || "unknown").slice(0, 500),
+    requestId: input.requestId || null,
+    ipAddress: input.ip || null,
+    userAgent: String(input.userAgent || "").slice(0, 1000) || null,
+  });
+}
+
 export async function generateAdminFinancialReport(input: {
   requestedBy: string; scope: "client" | "platform"; userId?: string;
   from?: string; to?: string; reason?: string; requestId?: string; ip?: string; userAgent?: string;
