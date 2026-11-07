@@ -159,6 +159,7 @@ export async function generateAdminFinancialReport(input: {
     title,
     `Relatorio: ${reportId}`,
     `Gerado em UTC: ${generatedAt.toISOString()}`,
+    `Gerado em horario local: ${generatedAt.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })} (America/Sao_Paulo)`,
     `Solicitante: ${requestedBy.name} <${requestedBy.email}>`,
     `Periodo UTC: ${start?.toISOString() || "inicio do historico"} ate ${end?.toISOString() || "agora"}`,
     `Escopo: ${input.scope === "client" ? "cliente individual" : "plataforma consolidada"}`,
