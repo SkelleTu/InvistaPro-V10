@@ -116,7 +116,6 @@ export async function generateAdminFinancialReport(input: {
     return conditions.length ? and(...conditions) : undefined;
   };
   const snapshot = await db.transaction(async (tx: any) => {
-    await tx.execute(sql`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ`);
     const [requestedBy] = await tx.select({ id: pgSchema.users.id, email: pgSchema.users.email, name: pgSchema.users.nomeCompleto })
       .from(pgSchema.users).where(eq(pgSchema.users.id, input.requestedBy)).limit(1);
     if (!requestedBy) throw new Error("ADMIN_NOT_FOUND");
