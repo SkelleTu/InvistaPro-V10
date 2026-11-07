@@ -592,10 +592,12 @@ router.post('/reports', isAuthenticated, isAdmin, async (req, res) => {
     const actorUserId = String((req as any).session.passport?.user || "");
     const scope = req.body?.scope;
     if (scope !== "client" && scope !== "platform") {
+      await recordAdminReportFailure({ requestedBy: actorUserId, reason: "INVALID_REPORT_SCOPE", requestId: String(req.headers["x-request-id"] || ""), ip: req.ip, userAgent: String(req.headers["user-agent"] || "") }).catch(auditError => console.error("Failed to audit invalid report scope:", auditError));
       return res.status(400).json({ message: "Escopo de relatório inválido." });
     }
     const userId = scope === "client" ? String(req.body?.userId || "") : undefined;
     if (scope === "client" && (!userId || userId.length > 32)) {
+      await recordAdminReportFailure({ requestedBy: actorUserId, scope: "client", reason: "INVALID_REPORT_CLIENT", requestId: String(req.headers["x-request-id"] || ""), ip: req.ip, userAgent: String(req.headers["user-agent"] || "") }).catch(auditError => console.error("Failed to audit invalid report client:", auditError));
       return res.status(400).json({ message: "Selecione um cliente válido." });
     }
     const report = await generateAdminFinancialReport({
