@@ -148,7 +148,8 @@ router.get('/users', isAuthenticated, isAdmin, async (req, res) => {
   try {
     const allUsers = (await dualStorage.getAllUsers()).filter((user: any) => !user.isAdmin);
     const ledger = await getPlatformFinancialSummary(allUsers.map(user => user.id));
-    const ledgerByUser = new Map(ledger.clients.map((item: any) => [item.userId, item.balancesCents]));
+    const ledgerByUser = new Map<string, Record<string, number>>();
+    for (const item of ledger.clients) ledgerByUser.set(item.userId, item.balancesCents);
     const safeUsers = allUsers
       .map(user => {
         const balances: any = ledgerByUser.get(user.id) || { client_available: 0, client_reserved: 0, client_capital: 0, client_yield: 0 };
@@ -485,7 +486,8 @@ router.get('/dashboard-data', isAuthenticated, isAdmin, async (_req, res) => {
     ]);
     const durableUsers = storedUsers.filter((user: any) => !user.isAdmin);
     const ledger = await getPlatformFinancialSummary(durableUsers.map(user => user.id));
-    const ledgerByUser = new Map(ledger.clients.map((item: any) => [item.userId, item.balancesCents]));
+    const ledgerByUser = new Map<string, Record<string, number>>();
+    for (const item of ledger.clients) ledgerByUser.set(item.userId, item.balancesCents);
     const usersWithFinancials = durableUsers
       .map(user => {
         const balances: any = ledgerByUser.get(user.id) || { client_available: 0, client_reserved: 0, client_capital: 0, client_yield: 0 };
@@ -496,7 +498,7 @@ router.get('/dashboard-data', isAuthenticated, isAdmin, async (_req, res) => {
         saldoReservado: Number(balances.client_reserved || 0) / 100,
         saldoCapital: Number(balances.client_capital || 0) / 100,
         saldoRendimentos: Number(balances.client_yield || 0) / 100,
-        contaAprovada: Boolean(user.contaAprovada), createdAt: user.createdAt, updatedAt: user.updatedAt,
+        contaAprovada: Boolean(user.contaAprovada), documentosVerificados: Boolean(user.documentosVerificados), createdAt: user.createdAt, updatedAt: user.updatedAt,
       });
       })
       .sort((a, b) => new Date(String(b.createdAt || 0)).getTime() - new Date(String(a.createdAt || 0)).getTime());
