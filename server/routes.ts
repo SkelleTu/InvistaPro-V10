@@ -1443,70 +1443,70 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     });
   });
 
-  // Calculate current yield
+  // Yield shown to the client is only the amount already posted to the durable ledger.
   app.get('/api/yield/current', isAuthenticated, isApproved, async (req: any, res) => {
     try {
-      const userId = req.user.id;
-      const user = await dbStorage.getUser(userId);
-      
-      if (!user) {
-        return res.status(404).json({ message: "User not found" });
-      }
-
-      const rendimento = await dbStorage.calcularRendimento(Number(user.saldo));
-      res.json({ rendimento });
+      const summary = await getClientFinancialSummary(String(req.user.id));
+      res.setHeader("Cache-Control", "no-store, max-age=0");
+      return res.json({
+        rendimento: Number(summary.yieldBalanceCents || 0) / 100,
+        source: "durable_ledger",
+        isRealized: true,
+        message: "Mostra somente rendimentos efetivamente registrados no ledger; não é projeção nem promessa de retorno.",
+      });
     } catch (error) {
-      console.error("Error calculating yield:", error);
-      res.status(500).json({ message: "Failed to calculate yield" });
+      console.error("Error reading ledger yield:", error);
+      return res.status(503).json({ message: "Rendimento contábil indisponível no momento." });
     }
   });
 
-  // Complete variable income dashboard data
+  // Variable-income dashboard reads official wallet balances from the ledger.
   app.get('/api/dashboard/variable-income', isAuthenticated, isApproved, async (req: any, res) => {
     try {
-      const userId = req.user.id;
-      const user = await dbStorage.getUser(userId);
-      
-      if (!user) {
-        return res.status(404).json({ message: "User not found" });
-      }
+      const userId = String(req.user.id);
+      const [user, summary, stats, legacyMovements] = await Promise.all([
+        dbStorage.getUser(userId),
+        getClientFinancialSummary(userId),
+        dbStorage.getTradingStats(userId),
+        dbStorage.getUserMovimentos(userId, 10),
+      ]);
+      if (!user) return res.status(404).json({ message: "User not found" });
 
-      const saldo = Number(user.saldo) || 0;
-      const rendimento = await dbStorage.calcularRendimento(saldo);
-      const ultimoDiaMes = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
-      
-      // Get trading statistics directly from database
-      const stats = await dbStorage.getTradingStats(userId);
-      const movimentos = await dbStorage.getUserMovimentos(userId, 10);
-
-      console.log('📊 [DASHBOARD] Stats completos:', {
-        totalTrades: stats?.totalTrades,
-        wonTrades: stats?.wonTrades,
-        winRate: stats?.winRate,
-        totalProfit: stats?.totalProfit
-      });
-
+      const available = Number(summary.availableBalanceCents || 0) / 100;
+      const reserved = Number(summary.reservedBalanceCents || 0) / 100;
+      const capital = Number(summary.capitalBalanceCents || 0) / 100;
+      const realizedYield = Number(summary.yieldBalanceCents || 0) / 100;
+      const legacyDeposits = legacyMovements.filter(m => m.tipo === "deposito").reduce((sum, m) => sum + Number(m.valor || 0), 0);
       const responseData = {
-        saldo: Math.round(saldo * 100) / 100,
-        rendimento: Math.round(rendimento * 100) / 100,
-        proximoSaque: ultimoDiaMes,
+        saldo: available,
+        saldoDisponivel: available,
+        saldoReservado: reserved,
+        capitalContabilizado: capital,
+        rendimento: realizedYield,
+        rendimentoContabilizado: realizedYield,
+        saldoLegado: Number(user.saldo || 0),
+        financialSource: "durable_ledger",
+        isOfficialBalance: true,
+        rendimentoIsRealized: true,
+        proximoSaque: null,
         totalTrades: Math.max(0, parseInt(String(stats?.totalTrades || 0))),
         wonTrades: Math.max(0, parseInt(String(stats?.wonTrades || 0))),
         winRate: Math.max(0, parseFloat(String(stats?.winRate || 0))),
         totalPnL: parseFloat(String(stats?.totalProfit || 0)),
-        investidoMesAtual: movimentos.filter(m => m.tipo === 'deposito').reduce((sum, m) => sum + Number(m.valor), 0),
-        movimentos: movimentos.map(m => ({
+        investidoMesAtual: 0,
+        investidoMesAtualLegado: legacyDeposits,
+        movimentos: legacyMovements.map(m => ({
           tipo: m.tipo,
           valor: m.valor,
-          data: m.createdAt
-        }))
+          data: m.createdAt,
+          source: "legacy_not_reconciled",
+        })),
       };
-
-      console.log('✅ [DASHBOARD] Resposta enviada:', responseData);
-      res.json(responseData);
+      res.setHeader("Cache-Control", "no-store, max-age=0");
+      return res.json(responseData);
     } catch (error) {
       console.error("❌ Error fetching variable income dashboard:", error);
-      res.status(500).json({ message: "Failed to fetch dashboard data", error: (error as any).message });
+      return res.status(503).json({ message: "Dashboard financeiro indisponível no ledger durável." });
     }
   });
 
