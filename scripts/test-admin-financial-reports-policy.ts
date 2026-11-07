@@ -39,6 +39,9 @@ assert.match(schema, /export const adminReportExports = pgTable\("admin_report_e
 assert.match(ui, /Imprimir \/ arquivar dossiê/);
 assert.match(ui, /PDF geral da plataforma/);
 assert.match(ui, /Arquivo de relatórios PDF/);
+assert.match(ui, /Extrato contábil oficial/);
+assert.match(ui, /Solicitações de saque/);
+assert.match(ui, /Saldo disponível \(ledger\)/);
 assert.match(env, /SUPABASE_REPORTS_BUCKET=admin-reports/);
 assert.match(migration, /trg_admin_report_exports_immutable/);
 assert.match(migration, /FINANCIAL_ARCHIVE_APPEND_ONLY/);
