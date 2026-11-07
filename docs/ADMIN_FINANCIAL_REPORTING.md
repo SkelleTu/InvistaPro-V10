@@ -43,13 +43,25 @@ Disponibilizar ao administrador autorizado relatórios imprimíveis e arquiváve
 - Política de retenção, descarte e atendimento a solicitações de titulares definida conforme obrigações legais e orientação jurídica/contábil. Não apagar registros financeiros por rotina operacional.
 - Backup independente do banco e teste periódico de restauração. A janela de histórico informada pelo projeto Neon não deve ser tratada como arquivo permanente nem como única cópia de segurança.
 
-## Lacunas identificadas na implementação atual
+## Estado da implementação nesta branch
 
-- A listagem administrativa global de movimentações consulta somente 100 registros.
-- A ficha individual consulta no máximo 500 movimentações e 200 operações; a interface ainda exibe apenas 50 linhas em cada tabela.
-- O modelo legado `movimentos.valor` usa ponto flutuante (`REAL`), não centavos inteiros. Esses registros devem ser preservados como legado e reconciliados antes de qualquer conversão contábil.
-- O campo `users.saldo` também é legado e não substitui saldo derivado de lançamentos balanceados.
-- A tabela de exportações e o ledger desta etapa fornecem a fundação; as rotas de snapshot, geração de PDF, upload privado, hash e histórico de downloads ainda precisam ser conectadas antes de anunciar a função como pronta.
+- A Central Administrativa possui exportação de PDF individual e consolidado, além de arquivo dos relatórios já gerados.
+- A consulta que compõe cada PDF roda em uma transação PostgreSQL com isolamento `REPEATABLE READ`, para que as seções do relatório sejam lidas a partir do mesmo snapshot.
+- O PDF inclui identificador, data/hora UTC e horário de São Paulo, solicitante, escopo, período, quantidade de registros, identificação do cliente (CPF mascarado), saldos atuais do ledger, lançamentos contábeis, movimentos legados, operações de trading, intenções/pagamentos, saques, metadados de documentos e eventos de auditoria.
+- O relatório global inclui saldos disponíveis, reservados, capital e rendimentos por cliente e total da plataforma. Contas administrativas são excluídas dos totais de clientes.
+- O arquivo é enviado a bucket privado, lido novamente para validar o SHA-256 e registrado em `admin_report_exports`. O download exige autenticação administrativa, revalida o hash e registra evento de auditoria.
+- O painel individual mostra extrato contábil, solicitações de saque, operações e histórico legado. O extrato visual carrega até 1.000 lançamentos e 500 solicitações de saque por consulta; o PDF não usa esse limite visual.
+- Os arquivos KYC originais não são incorporados ao PDF. Permanecem em armazenamento privado e são acessados separadamente pelo visualizador administrativo protegido. O PDF registra tipo, estado, datas e decisão do documento.
+- A lista do arquivo administrativo mostra os 100 relatórios mais recentes; a retenção dos objetos não é apagada automaticamente.
+
+## Pendências para ativação em produção
+
+- Configurar `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` e o bucket privado de relatórios no ambiente de produção. O serviço deve falhar fechado se o armazenamento privado não estiver disponível.
+- Configurar os quatro GitHub Actions Secrets do backup Neon (`DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `BACKUP_ENCRYPTION_KEY`) e verificar ao menos um backup e uma restauração em banco isolado.
+- Aplicar a migração financeira no Neon por meio do boot da versão publicada. A migração é aditiva; nenhum saldo legado é convertido automaticamente para o ledger.
+- Conciliar formalmente o histórico antigo antes de tratar valores legados como saldo oficial. Até essa conciliação, `users.saldo` e `movimentos` são exibidos como legado e não alimentam o ledger.
+- Definir política jurídica/contábil de retenção, descarte, exportação e atendimento a titulares. O arquivo atual não substitui controles legais nem aconselhamento jurídico/contábil.
+- A integração Mercado Pago ainda não está registrada. PIX, liquidação e saques reais permanecem desativados até credenciais, webhooks, sandbox, conciliação e aprovação explícita.
 
 ## Critérios de aceite
 
