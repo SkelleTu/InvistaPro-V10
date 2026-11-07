@@ -206,8 +206,6 @@ export async function generateAdminFinancialReport(input: {
       `Operacoes de trading: ${trades.length}`, `Lancamentos contabeis: ${relevantTransactions.length}`,
       `Solicitacoes de saque: ${withdrawals.length}`, " ");
   }
-  const userById = new Map((users as any[]).map((item: any) => [item.id, item]));
-  const accountById = new Map((relevantAccounts as any[]).map((item: any) => [item.id, item]));
   lines.push(" ", "SALDOS CONTABEIS ATUAIS (fonte: ledger PostgreSQL)");
   if (input.scope === "client") {
     lines.push(
