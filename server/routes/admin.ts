@@ -424,17 +424,19 @@ router.get('/stats', isAuthenticated, isAdmin, async (_req, res) => {
     ]);
     const allUsers = storedUsers.filter((user: any) => !user.isAdmin);
     const ledger = await getPlatformFinancialSummary(allUsers.map(user => user.id));
-    const sumType = (type: string) => allMovements
+    const clientIds = new Set(allUsers.map(user => user.id));
+    const clientMovements = allMovements.filter(movement => clientIds.has(movement.userId));
+    const sumType = (type: string) => clientMovements
       .filter(movement => movement.tipo === type)
       .reduce((sum, movement) => sum + Number(movement.valor || 0), 0);
     const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
-    const recent = allMovements.filter(movement => {
+    const recent = clientMovements.filter(movement => {
       const timestamp = new Date(String(movement.createdAt || "")).getTime();
       return Number.isFinite(timestamp) && timestamp >= cutoff;
     });
 
     const breakdown = new Map<string, { tipo: string; total: number; count: number }>();
-    for (const movement of allMovements) {
+    for (const movement of clientMovements) {
       const key = String(movement.tipo || "outro");
       const item = breakdown.get(key) || { tipo: key, total: 0, count: 0 };
       item.total += Number(movement.valor || 0);
@@ -455,7 +457,7 @@ router.get('/stats', isAuthenticated, isAdmin, async (_req, res) => {
     return res.json({
       totalUsers: allUsers.length,
       verifiedUsers: allUsers.filter(user => Boolean(user.documentosVerificados)).length,
-      pendingDocuments: allDocuments.filter(document => document.status === "pendente").length,
+      pendingDocuments: allDocuments.filter(document => clientIds.has(document.userId) && document.status === "pendente").length,
       totalBalance: Number(ledger.totalsCents.client_available || 0) / 100,
       totalReserved: Number(ledger.totalsCents.client_reserved || 0) / 100,
       totalCapital: Number(ledger.totalsCents.client_capital || 0) / 100,
@@ -499,7 +501,8 @@ router.get('/dashboard-data', isAuthenticated, isAdmin, async (_req, res) => {
       })
       .sort((a, b) => new Date(String(b.createdAt || 0)).getTime() - new Date(String(a.createdAt || 0)).getTime());
     const usersById = new Map(usersWithFinancials.map(user => [user.id, user]));
-    const allMovements = storedMovements
+    const clientUserIds = new Set(usersWithFinancials.map(user => user.id));
+    const allMovements = storedMovements.filter(movement => clientUserIds.has(movement.userId))
       .map(movement => {
         const user = usersById.get(movement.userId);
         return {
