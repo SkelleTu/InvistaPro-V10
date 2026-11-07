@@ -24,6 +24,8 @@ assert.match(reportService, /REPORT_HASH_MISMATCH/);
 assert.match(reportService, /REPORT_STORAGE_HASH_MISMATCH/);
 assert.match(reportService, /recordAdminReportFailure/);
 assert.match(adminRoutes, /recordAdminReportFailure\(/);
+assert.match(adminRoutes, /INVALID_REPORT_SCOPE/);
+assert.match(adminRoutes, /INVALID_REPORT_CLIENT/);
 assert.match(reportService, /deletePrivateReport\(storageRef\)/);
 assert.match(reportService, /wrappedLines/);
 assert.match(reportService, /financialAuditEvents/);
