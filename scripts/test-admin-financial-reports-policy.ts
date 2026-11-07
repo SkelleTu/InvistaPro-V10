@@ -32,7 +32,7 @@ assert.match(reportService, /pgSchema\.tradeOperations/);
 assert.match(reportService, /SALDOS CONTABEIS ATUAIS/);
 assert.match(reportService, /getPlatformFinancialSummary/);
 assert.match(reportService, /TOTAL PLATAFORMA/);
-assert.match(reportService, /REPEATABLE READ/);
+assert.match(reportService, /isolationLevel: "repeatable read"/);
 assert.match(reportService, /America\/Sao_Paulo/);
 assert.match(storage, /SUPABASE_REPORTS_BUCKET/);
 assert.match(storage, /public: false/);
