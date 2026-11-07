@@ -261,6 +261,16 @@ export async function generateAdminFinancialReport(input: {
     lines.push(" ", "EVENTOS DE WEBHOOK DO PROVEDOR");
     for (const row of relevantWebhookEvents as any[]) lines.push(`${row.receivedAt?.toISOString?.() || row.receivedAt || ""} | ${row.provider} | ${row.eventType} | ${row.processingStatus} | assinatura verificada: ${row.signatureVerified ? "sim" : "nao"} | ${row.providerEventId}`);
   }
+  lines.push(" ", "REDE DE AFILIADOS (atribuicao, nao significa saldo pago)");
+  for (const referral of affiliateReferrals as any[]) {
+    const referrer: any = userById.get(referral.referrerUserId);
+    const referred: any = userById.get(referral.referredUserId);
+    lines.push(`Indicacao ${referral.id} | indicador ${referrer?.nomeCompleto || referral.referrerUserId} | indicado ${referred?.nomeCompleto || referral.referredUserId} | data ${referral.createdAt || "nao informada"}`);
+  }
+  lines.push("COMISSOES DE AFILIADOS (pendentes/registradas; nao creditadas no ledger automaticamente)");
+  for (const commission of affiliateCommissions as any[]) {
+    lines.push(`Comissao ${commission.id} | ref ${commission.paymentReference} | base ${brlFromCents(Number(commission.eligibleBaseCents))} | taxa bps ${commission.rateBps} | valor ${brlFromCents(Number(commission.commissionAmountCents))} | status ${commission.status}`);
+  }
   lines.push(" ", "SOLICITACOES DE SAQUE");
   for (const row of withdrawals as any[]) {
     const owner: any = userById.get(row.userId);
