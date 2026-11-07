@@ -111,3 +111,14 @@ Payment acceptance and investment/trading authorization are separate decisions. 
 - PIX destination snapshots use a dedicated `WITHDRAWAL_DESTINATION_ENCRYPTION_KEY` (32-byte hexadecimal AES-256 key), separate from the application encryption key and the database-backup encryption key.
 - Generate each key independently with `openssl rand -hex 32` and store it only in the hosting provider's secret manager. Never commit keys or paste them into chat.
 - Key rotation requires a planned decrypt/re-encrypt migration of existing destination snapshots; do not rotate this key blindly while pending withdrawals exist.
+
+
+## Implementation status on the current foundation branch
+
+- `migrations/0001_financial_ledger_foundation.sql` defines the durable PostgreSQL accounts, balanced ledger, payment intents, provider payments, withdrawal requests, webhook events, financial audit events and immutable report archive metadata.
+- Server startup applies that migration after the existing base PostgreSQL schema, under a PostgreSQL advisory transaction lock and a `schema_migrations` version record. The migration has not been applied to production by this code change alone; it runs only when the branch is deployed and the PostgreSQL boot sequence succeeds.
+- The ledger service uses integer BRL cents, database transactions, idempotency keys, row locks for withdrawal reservations, immutable posted entries and verification gates for provider settlement.
+- Legacy direct balance updates and movement inserts are blocked across the storage adapters. Legacy rows remain readable and are explicitly marked as not reconciled; they are not imported into the new ledger automatically.
+- The client and administrator views read official balances from the ledger. Individual and platform PDF reports include current ledger balances, ledger entries, legacy history, trading records, withdrawal requests, document metadata and audit events. PDFs are stored in private object storage, SHA-256 checked and downloads are audited.
+- No Mercado Pago adapter is registered in this branch. PIX deposits and withdrawals remain disabled by default and cannot move money until a provider adapter, credentials, webhook verification, sandbox validation and activation gates are completed.
+- The encrypted Neon backup workflow is prepared, but its GitHub Actions secrets must be configured and a successful backup/restore drill must be verified before the production migration is deployed.
