@@ -29,7 +29,7 @@ assert.match(reportService, /pgSchema\.ledgerEntries/);
 assert.match(reportService, /pgSchema\.tradeOperations/);
 assert.match(storage, /SUPABASE_REPORTS_BUCKET/);
 assert.match(storage, /public: false/);
-assert.match(storage, /existingBucket\?\.public/);
+assert.match(storage, /existingBucket && existingBucket\.public !== false/);
 assert.match(storage, /REPORT_BUCKET_MUST_BE_SEPARATE_FROM_KYC_BUCKET/);
 assert.match(storage, /supabase-report:\/\//);
 assert.match(adminRoutes, /router\.post\('\/reports', isAuthenticated, isAdmin/);
