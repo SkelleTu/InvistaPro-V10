@@ -122,8 +122,8 @@ export async function generateAdminFinancialReport(input: {
   const paymentIntentIds = new Set(paymentIntents.map((intent: any) => intent.id));
   const relevantProviderPayments = providerPayments.filter((payment: any) => paymentIntentIds.has(payment.paymentIntentId));
   const relevantWebhookEvents = input.scope === "platform" ? webhookEvents : [];
-  const clientBalanceSnapshot = input.scope === "client" ? await getClientFinancialSummary(input.userId!) : null;
-  const platformBalanceSnapshot = input.scope === "platform" ? await getPlatformFinancialSummary(clientUsers.map((item: any) => item.id)) : null;
+  const clientBalanceSnapshot = (input.scope === "client" ? await getClientFinancialSummary(input.userId!) : null) as Awaited<ReturnType<typeof getClientFinancialSummary>> | null;
+  const platformBalanceSnapshot = (input.scope === "platform" ? await getPlatformFinancialSummary(clientUsers.map((item: any) => item.id)) : null) as Awaited<ReturnType<typeof getPlatformFinancialSummary>> | null;
   const relevantEntries = entries.filter((entry: any) => {
     const timestamp = new Date(entry.createdAt as any).getTime();
     return relevantAccountIds.has(entry.accountId) && (!start || timestamp >= start.getTime()) && (!end || timestamp <= end.getTime());
