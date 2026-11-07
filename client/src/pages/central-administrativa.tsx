@@ -172,10 +172,10 @@ export default function CentralAdministrativa() {
         <div className="p-5 border-b border-white/10 flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-semibold text-white">Ficha completa do cliente</h2><p className="text-xs text-slate-500 mt-1">Dados cadastrais, documentos e movimentações da conta selecionada.</p></div><div className="flex gap-2"><Button variant="outline" disabled={reportBusy} onClick={()=>generateReport("client",selectedUserId || undefined)} className="border-violet-400/30 text-violet-200">{reportBusy ? "Gerando PDF…" : "Imprimir / arquivar dossiê"}</Button><Button variant="ghost" onClick={()=>setSelectedUserId(null)} className="text-slate-300">Fechar</Button></div></div>
         {userDetail.isLoading ? <p className="p-6 text-sm text-slate-400">Carregando ficha…</p> : userDetail.isError || !userDetail.data ? <p className="p-6 text-sm text-rose-200">Não foi possível consultar a ficha deste cliente.</p> : <>
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 p-5">
-            <Stat label="Saldo registrado" value={money(userDetail.data.user.saldo)} icon={Wallet} sub="Campo atual da conta" />
-            <Stat label="Aportes" value={money(userDetail.data.summary.totalDeposited)} icon={ArrowDownLeft} sub="Histórico registrado" />
-            <Stat label="Rendimentos" value={money(userDetail.data.summary.totalYield)} icon={Activity} sub="Histórico registrado" />
-            <Stat label="Saques" value={money(userDetail.data.summary.totalWithdrawn)} icon={ArrowUpRight} sub="Histórico registrado" />
+            <Stat label="Saldo disponível" value={money(userDetail.data.user.saldoDisponivel)} icon={Wallet} sub="Saldo oficial do ledger" />
+             <Stat label="Saldo reservado" value={money(userDetail.data.user.saldoReservado)} icon={ShieldCheck} sub="Valores em reserva" />
+             <Stat label="Capital contábil" value={money(userDetail.data.user.saldoCapital)} icon={ArrowDownLeft} sub="Conta de capital separada" />
+             <Stat label="Rendimentos contábeis" value={money(userDetail.data.user.saldoRendimentos)} icon={Activity} sub="Conta de rendimentos" />
           </div>
           <div className="px-5 pb-5 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
             <div className="rounded-xl border border-white/10 p-4"><h3 className="font-semibold text-white mb-3">Cadastro</h3><p className="text-slate-300">{userDetail.data.user.nomeCompleto}</p><p className="text-slate-400">{userDetail.data.user.email}</p><p className="text-slate-400">{userDetail.data.user.telefone || "Telefone não informado"}</p><p className="text-slate-400 mt-2">{[userDetail.data.user.endereco,userDetail.data.user.cidade,userDetail.data.user.estado,userDetail.data.user.cep].filter(Boolean).join(" · ")}</p><p className="text-xs text-slate-500 mt-3">CPF: {userDetail.data.user.cpf || "Não informado"}</p></div>
