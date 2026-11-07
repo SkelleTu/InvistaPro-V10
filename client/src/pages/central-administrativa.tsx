@@ -101,12 +101,15 @@ export default function CentralAdministrativa() {
       {stats.isError && <div className="rounded-xl border border-rose-400/20 bg-rose-950/30 p-4 text-sm text-rose-200 mb-5">Não foi possível consultar as estatísticas administrativas. A API pode não reconhecer este perfil como administrador.</div>}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-8">
         <Stat label="Clientes cadastrados" value={String(stats.data?.totalUsers ?? "—")} icon={Users} sub="Total de usuários registrados"/>
-        <Stat label="Saldo total registrado" value={money(stats.data?.totalBalance)} icon={Wallet} sub="Soma do campo saldo dos usuários"/>
-        <Stat label="Aportes registrados" value={money(stats.data?.totalInvested)} icon={ArrowDownLeft} sub="Movimentações classificadas como depósito"/>
-        <Stat label="Saques registrados" value={money(stats.data?.totalWithdrawals)} icon={ArrowUpRight} sub="Movimentações classificadas como saque"/>
+        <Stat label="Saldo disponível (ledger)" value={money(stats.data?.totalBalance)} icon={Wallet} sub="Somatório oficial das contas disponíveis no PostgreSQL"/>
+        <Stat label="Saldo reservado" value={money(stats.data?.totalReserved)} icon={ShieldCheck} sub="Valores bloqueados por solicitações de saque"/>
+        <Stat label="Capital contabilizado" value={money(stats.data?.totalCapital)} icon={ArrowDownLeft} sub="Conta de capital separada"/>
+        <Stat label="Rendimentos contábeis" value={money(stats.data?.totalLedgerYields)} icon={Activity} sub="Conta de rendimentos do ledger"/>
+        <Stat label="Aportes legados" value={money(stats.data?.totalInvested)} icon={ArrowDownLeft} sub="Histórico antigo ainda não conciliado"/>
+        <Stat label="Saques legados" value={money(stats.data?.totalWithdrawals)} icon={ArrowUpRight} sub="Histórico antigo ainda não conciliado"/>
         <Stat label="Documentos verificados" value={String(stats.data?.verifiedUsers ?? "—")} icon={ShieldCheck} sub="Usuários com documentação verificada"/>
         <Stat label="Documentos pendentes" value={String(stats.data?.pendingDocuments ?? "—")} icon={Activity} sub="Aguardando análise"/>
-        <Stat label="Rendimentos registrados" value={money(stats.data?.totalYields)} icon={Activity} sub="Registros históricos classificados como rendimento"/>
+        <Stat label="Rendimentos legados" value={money(stats.data?.totalYields)} icon={Activity} sub="Histórico antigo ainda não conciliado"/>
         <Stat label="Movimentações recentes" value={String(stats.data?.recentMovements ?? "—")} icon={RefreshCw} sub="Últimos 30 dias conforme API"/>
       </div>
       <section className="mb-8">
