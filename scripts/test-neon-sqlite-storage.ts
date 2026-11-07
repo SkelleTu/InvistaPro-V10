@@ -18,7 +18,9 @@ const productionObservability = read("server/services/production-observability.t
 const deploymentDocs = read("docs/neon-sqlite-storage.md");
 
 assert.match(storage, /private async writeEssential/);
-assert.match(storage, /async createMovimento[\s\S]*?this\.writeEssential/);
+assert.match(storage, /async createMovimento[\s\S]*?LEGACY_FINANCIAL_MOVEMENT_WRITE_DISABLED/);
+assert.match(storageSqlite, /async createMovimento[\s\S]*?LEGACY_FINANCIAL_MOVEMENT_WRITE_DISABLED/);
+assert.match(storageSqlite, /LEGACY_BALANCE_MUTATION_DISABLED/);
 assert.match(storage, /async createDocumento[\s\S]*?this\.writeEssential/);
 assert.match(storage, /async updateDocumento[\s\S]*?this\.writeEssential/);
 assert.match(storage, /async createTradeOperation[\s\S]*?this\.writeEssential/);
