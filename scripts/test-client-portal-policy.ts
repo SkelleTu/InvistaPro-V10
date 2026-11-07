@@ -71,7 +71,7 @@ assert.match(adminRoutes, /const totalCurrentBalance = Number\(ledger\.totalsCen
 assert.match(adminRoutes, /dualStorage\.updateUser\(document\.userId/, "KYC verification must update durable Neon-backed user storage");
 assert.match(adminRoutes, /catch \(userUpdateError\)[\s\S]*?updateDocumento\(String\(documentId\), previousDecision\)[\s\S]*?throw userUpdateError/, "KYC document decision must roll back if durable account update fails");
 assert.match(adminRoutes, /dualStorage\.getUser\(String\(userId\)\)/, "admin authorization must read the durable user record");
-assert.match(adminRoutes, /const allUsers = await dualStorage\.getAllUsers\(\)/, "admin totals and customer list must use durable user records");
+assert.match(adminRoutes, /const allUsers = \(await dualStorage\.getAllUsers\(\)\)\.filter/, "admin totals and customer list must use durable non-admin user records");
 assert.match(adminRoutes, /Cache-Control", "no-store, max-age=0"/, "admin customer data must not be cached");
 assert.match(ai, /requestedAction && !canControlTrading/, "client AI must reject central motor control requests");
 assert.match(ai, /somente consulta/, "client AI context must be read-only");
