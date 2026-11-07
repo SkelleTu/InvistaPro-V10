@@ -168,11 +168,10 @@ export default function PortalCliente() {
       .filter(item => item.account.accountKind === "client_available" && item.entry.createdAt)
       .sort((a, b) => new Date(a.entry.createdAt!).getTime() - new Date(b.entry.createdAt!).getTime());
     const byDay = new Map<string, number>();
-    let runningCents = 0;
     for (const item of sorted) {
-      runningCents += item.entry.direction === "credit" ? Number(item.entry.amountCents) : -Number(item.entry.amountCents);
       const day = new Date(item.entry.createdAt!).toLocaleDateString("pt-BR");
-      byDay.set(day, runningCents / 100);
+      const netCents = item.entry.direction === "credit" ? Number(item.entry.amountCents) : -Number(item.entry.amountCents);
+      byDay.set(day, (byDay.get(day) || 0) + netCents / 100);
     }
     return Array.from(byDay, ([data, valor]) => ({ data, valor: Number(valor.toFixed(2)) })).slice(-30);
   }, [ledgerEntries]);
@@ -378,7 +377,7 @@ export default function PortalCliente() {
     </>;
 
     if (active === "evolucao") return <>
-      <PageTitle title="Minha evolução" subtitle="Evolução do saldo disponível calculada pelos lançamentos contábeis do ledger." />
+      <PageTitle title="Minha evolução" subtitle="Variação líquida diária (créditos menos débitos) nos últimos lançamentos contábeis carregados." />
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         <Metric label="Aportes legados" value={money(totalDeposits)} icon={ArrowDownLeft} detail="Histórico antigo, ainda não conciliado" />
         <Metric label="Saques legados" value={money(totalWithdrawals)} icon={ArrowUpRight} detail="Histórico antigo, ainda não conciliado" />
@@ -387,8 +386,8 @@ export default function PortalCliente() {
       </div>
       <section className="rounded-2xl border border-white/10 bg-slate-900/70 p-5">
         <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
-          <div><h2 className="font-semibold text-white">Saldo disponível acumulado</h2><p className="text-xs text-slate-500 mt-1">Créditos e débitos da conta disponível no ledger.</p></div>
-          <span className="text-xs text-slate-500">Até 30 datas dos últimos 500 lançamentos</span>
+          <div><h2 className="font-semibold text-white">Variação líquida diária do ledger</h2><p className="text-xs text-slate-500 mt-1">Créditos menos débitos da conta disponível em cada dia; não representa saldo de abertura.</p></div>
+          <span className="text-xs text-slate-500">Até 30 dias dos últimos 500 lançamentos</span>
         </div>
         {ledgerQuery.isLoading ? <p className="text-sm text-slate-400 p-8 text-center">Carregando extrato contábil…</p> :
           ledgerQuery.isError ? <p className="text-sm text-rose-300 p-8 text-center">Não foi possível carregar a evolução contábil.</p> :
