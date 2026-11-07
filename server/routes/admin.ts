@@ -5,6 +5,7 @@ import { isAuthorizedEmail, ACCESS_DENIED_MESSAGE } from "../config/access";
 import { getAffiliateAdminSummary, getAffiliateAdminNetwork } from "../services/affiliate-program";
 import { readPrivateDocument } from "../services/private-document-storage";
 import { generateAdminFinancialReport, getAdminReport, listAdminReports, recordAdminReportDownload } from "../services/admin-financial-reports";
+import { getClientFinancialSummary, getPlatformFinancialSummary, listClientLedger, listClientWithdrawals } from "../services/financial-ledger";
 
 // Extend session type
 declare module 'express-session' {
@@ -145,19 +146,29 @@ router.get('/trading/summary', isAuthenticated, isAdmin, async (_req, res) => {
 // Get all users
 router.get('/users', isAuthenticated, isAdmin, async (req, res) => {
   try {
-    const allUsers = await dualStorage.getAllUsers();
+    const allUsers = (await dualStorage.getAllUsers()).filter((user: any) => !user.isAdmin);
+    const ledger = await getPlatformFinancialSummary(allUsers.map(user => user.id));
+    const ledgerByUser = new Map(ledger.clients.map((item: any) => [item.userId, item.balancesCents]));
     const safeUsers = allUsers
-      .map(user => ({
+      .map(user => {
+        const balances: any = ledgerByUser.get(user.id) || { client_available: 0, client_reserved: 0, client_capital: 0, client_yield: 0 };
+        return ({
         id: user.id,
         nomeCompleto: user.nomeCompleto,
         email: user.email,
         cpf: user.cpf,
         telefone: user.telefone,
-        saldo: user.saldo,
+        saldoLegado: user.saldo,
+        saldoDisponivel: Number(balances.client_available || 0) / 100,
+        saldoReservado: Number(balances.client_reserved || 0) / 100,
+        saldoCapital: Number(balances.client_capital || 0) / 100,
+        saldoRendimentos: Number(balances.client_yield || 0) / 100,
+        ledgerOfficial: true,
         documentosVerificados: user.documentosVerificados,
         contaAprovada: user.contaAprovada,
         createdAt: user.createdAt,
-      }))
+      });
+      })
       .sort((a, b) => new Date(String(b.createdAt || 0)).getTime() - new Date(String(a.createdAt || 0)).getTime());
 
     res.setHeader("Cache-Control", "no-store, max-age=0");
@@ -254,10 +265,13 @@ router.get('/user/:userId', isAuthenticated, isAdmin, async (req, res) => {
     }
 
     // Read the customer's complete history from the same durable source as their identity.
-    const [storedMovements, storedTrades, storedDocuments] = await Promise.all([
+    const [storedMovements, storedTrades, storedDocuments, financialSummary, ledgerEntries, withdrawals] = await Promise.all([
       dualStorage.getUserMovimentos(userId, 100000),
       dualStorage.getUserTradeOperations(userId, 100000),
       dualStorage.getUserDocumentos(userId),
+      getClientFinancialSummary(userId),
+      listClientLedger(userId, 1000, 0),
+      listClientWithdrawals(userId, 500),
     ]);
     const userMovements = storedMovements.map(mov => ({
       id: mov.id, tipo: mov.tipo, valor: Number(mov.valor || 0),
@@ -296,12 +310,19 @@ router.get('/user/:userId', isAuthenticated, isAdmin, async (req, res) => {
         cidade: user.cidade,
         estado: user.estado,
         cep: user.cep,
-        saldo: user.saldo,
+        saldoLegado: user.saldo,
+        saldoDisponivel: Number(financialSummary.availableBalanceCents || 0) / 100,
+        saldoReservado: Number(financialSummary.reservedBalanceCents || 0) / 100,
+        saldoCapital: Number(financialSummary.capitalBalanceCents || 0) / 100,
+        saldoRendimentos: Number(financialSummary.yieldBalanceCents || 0) / 100,
         contaAprovada: user.contaAprovada,
         documentosVerificados: user.documentosVerificados,
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
       },
+      financialSummary,
+      ledgerEntries,
+      withdrawals,
       movements: userMovements,
       tradeOperations: userTradeOperations,
       documents: userDocuments,
@@ -396,11 +417,13 @@ router.post('/documents/review', isAuthenticated, isAdmin, async (req, res) => {
 // Get admin dashboard statistics
 router.get('/stats', isAuthenticated, isAdmin, async (_req, res) => {
   try {
-    const [allUsers, allDocuments, allMovements] = await Promise.all([
+    const [storedUsers, allDocuments, allMovements] = await Promise.all([
       dualStorage.getAllUsers(),
       dualStorage.getAllDocumentos(),
       dualStorage.getAllMovimentos(),
     ]);
+    const allUsers = storedUsers.filter((user: any) => !user.isAdmin);
+    const ledger = await getPlatformFinancialSummary(allUsers.map(user => user.id));
     const sumType = (type: string) => allMovements
       .filter(movement => movement.tipo === type)
       .reduce((sum, movement) => sum + Number(movement.valor || 0), 0);
@@ -433,7 +456,11 @@ router.get('/stats', isAuthenticated, isAdmin, async (_req, res) => {
       totalUsers: allUsers.length,
       verifiedUsers: allUsers.filter(user => Boolean(user.documentosVerificados)).length,
       pendingDocuments: allDocuments.filter(document => document.status === "pendente").length,
-      totalBalance: allUsers.reduce((sum, user) => sum + Number(user.saldo || 0), 0),
+      totalBalance: Number(ledger.totalsCents.client_available || 0) / 100,
+      totalReserved: Number(ledger.totalsCents.client_reserved || 0) / 100,
+      totalCapital: Number(ledger.totalsCents.client_capital || 0) / 100,
+      totalLedgerYields: Number(ledger.totalsCents.client_yield || 0) / 100,
+      ledgerOfficial: true,
       totalInvested: sumType("deposito"),
       totalYields: sumType("rendimento"),
       totalWithdrawals: sumType("saque"),
