@@ -65,8 +65,9 @@ assert.match(adminRoutes, /readPrivateDocument\(String\(document\.arquivo\)\)/, 
 assert.match(admin, /\/api\/admin\/documents\/\$\{encodeURIComponent\(doc\.id\)\}\/file/, "admin customer profile must link to protected KYC document viewer");
 assert.match(adminRoutes, /hasApprovedAddress/, "proof of residence must be independently approved");
 assert.match(adminRoutes, /const userDocs = await dualStorage\.getUserDocumentos\(document\.userId\)/, "KYC must reload the updated user document set from durable storage before computing completeness");
-assert.match(adminRoutes, /const \[durableUsers, storedMovements\] = await Promise\.all\(\[[\s\S]*?dualStorage\.getAllUsers\(\)/, "admin dashboard must read account balances from durable user storage");
-assert.match(adminRoutes, /const totalCurrentBalance = usersWithFinancials\.reduce/, "admin global balance must be derived from durable user records");
+assert.match(adminRoutes, /const \[storedUsers, storedMovements\] = await Promise\.all\(\[[\s\S]*?dualStorage\.getAllUsers\(\)/, "admin dashboard must read customer identities from durable storage");
+assert.match(adminRoutes, /getPlatformFinancialSummary\(durableUsers\.map\(user => user\.id\)\)/, "admin dashboard must read account balances from the durable financial ledger");
+assert.match(adminRoutes, /const totalCurrentBalance = Number\(ledger\.totalsCents\.client_available/, "admin global balance must be derived from durable ledger entries");
 assert.match(adminRoutes, /dualStorage\.updateUser\(document\.userId/, "KYC verification must update durable Neon-backed user storage");
 assert.match(adminRoutes, /catch \(userUpdateError\)[\s\S]*?updateDocumento\(String\(documentId\), previousDecision\)[\s\S]*?throw userUpdateError/, "KYC document decision must roll back if durable account update fails");
 assert.match(adminRoutes, /dualStorage\.getUser\(String\(userId\)\)/, "admin authorization must read the durable user record");
