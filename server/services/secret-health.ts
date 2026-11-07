@@ -43,7 +43,7 @@ export function getSecretHealth() {
     state("DATABASE_URL", v => /^(postgres|postgresql|file|libsql|https?):/i.test(v)),
     state("SESSION_SECRET", v => v.length >= 32 && !/^your-very-secure/i.test(v)),
     state("ADMIN_EMAIL", v => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)),
-    state("SUPABASE_URL", v => /^https?:\\/\\//i.test(v)),
+    state("SUPABASE_URL", v => /^https?:\/\//i.test(v)),
     state("SUPABASE_SERVICE_ROLE_KEY"),
     { name: "WITHDRAWAL_DESTINATION_ENCRYPTION_KEY", state: process.env.WITHDRAWALS_ENABLED === "true" ? state("WITHDRAWAL_DESTINATION_ENCRYPTION_KEY", v => /^[0-9a-fA-F]{64}$/.test(v)).state : "not_applicable" },
     state("SENDGRID_API_KEY"),
