@@ -397,13 +397,6 @@ export class DatabaseStorage implements IStorage {
   // Movement operations
   async createMovimento(_movimento: InsertMovimento): Promise<Movimento> {
     throw new Error("LEGACY_FINANCIAL_MOVEMENT_WRITE_DISABLED: post financial movements through the durable ledger.");
-    /* Historical implementation intentionally removed from the active path.
-    const [newMovimento] = await db
-      .insert(movimentos)
-      .values(movimento)
-      .returning();
-    
-    return newMovimento;
   }
 
   async getUserMovimentos(userId: string, limit = 10): Promise<Movimento[]> {
