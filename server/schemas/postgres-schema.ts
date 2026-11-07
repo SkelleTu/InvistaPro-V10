@@ -565,3 +565,34 @@ export const adminReportExports = pgTable("admin_report_exports", {
 }, (table) => [
   index("idx_admin_report_exports_subject_created").on(table.subjectUserId, table.createdAt),
 ]);
+
+
+// Affiliate attribution and pending commissions are persisted in the same durable PostgreSQL database.
+export const affiliateProfiles = pgTable("affiliate_profiles", {
+  userId: varchar("user_id", { length: 32 }).primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  referralCode: varchar("referral_code", { length: 20 }).notNull().unique(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const affiliateReferrals = pgTable("affiliate_referrals", {
+  id: varchar("id", { length: 32 }).primaryKey(),
+  referrerUserId: varchar("referrer_user_id", { length: 32 }).notNull().references(() => users.id, { onDelete: "cascade" }),
+  referredUserId: varchar("referred_user_id", { length: 32 }).notNull().unique().references(() => users.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("idx_affiliate_referrals_referrer").on(table.referrerUserId),
+]);
+
+export const affiliateCommissions = pgTable("affiliate_commissions", {
+  id: varchar("id", { length: 32 }).primaryKey(),
+  referrerUserId: varchar("referrer_user_id", { length: 32 }).notNull().references(() => users.id),
+  referredUserId: varchar("referred_user_id", { length: 32 }).notNull().references(() => users.id),
+  paymentReference: varchar("payment_reference", { length: 160 }).notNull().unique(),
+  eligibleBaseCents: bigint("eligible_base_cents", { mode: "number" }).notNull(),
+  rateBps: integer("rate_bps").notNull().default(150),
+  commissionAmountCents: bigint("commission_amount_cents", { mode: "number" }).notNull(),
+  status: varchar("status", { length: 20 }).notNull().default("pending"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("idx_affiliate_commissions_referrer").on(table.referrerUserId),
+]);
