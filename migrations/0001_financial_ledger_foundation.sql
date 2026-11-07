@@ -281,3 +281,31 @@ DROP TRIGGER IF EXISTS trg_withdrawal_transition ON withdrawal_requests;
 CREATE TRIGGER trg_withdrawal_transition
 BEFORE UPDATE ON withdrawal_requests
 FOR EACH ROW EXECUTE FUNCTION enforce_withdrawal_transition();
+
+
+-- Affiliate program tables are durable, but pending commissions are not wallet credits.
+CREATE TABLE IF NOT EXISTS affiliate_profiles (
+  user_id varchar(32) PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  referral_code varchar(20) NOT NULL UNIQUE,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS affiliate_referrals (
+  id varchar(32) PRIMARY KEY,
+  referrer_user_id varchar(32) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  referred_user_id varchar(32) NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT affiliate_no_self_referral CHECK (referrer_user_id <> referred_user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_affiliate_referrals_referrer ON affiliate_referrals(referrer_user_id);
+CREATE TABLE IF NOT EXISTS affiliate_commissions (
+  id varchar(32) PRIMARY KEY,
+  referrer_user_id varchar(32) NOT NULL REFERENCES users(id),
+  referred_user_id varchar(32) NOT NULL REFERENCES users(id),
+  payment_reference varchar(160) NOT NULL UNIQUE,
+  eligible_base_cents bigint NOT NULL,
+  rate_bps integer NOT NULL DEFAULT 150,
+  commission_amount_cents bigint NOT NULL,
+  status varchar(20) NOT NULL DEFAULT 'pending',
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_affiliate_commissions_referrer ON affiliate_commissions(referrer_user_id);
