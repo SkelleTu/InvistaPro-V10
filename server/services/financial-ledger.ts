@@ -75,9 +75,9 @@ export async function postLedgerTransaction(input: PostLedgerInput) {
   });
 }
 
-export async function getClientFinancialSummary(userId: string) {
-  const db = requirePostgres();
-  const accounts = await ensureClientFinancialAccounts(userId);
+export async function getClientFinancialSummary(userId: string, txArg?: any) {
+  const db = txArg || requirePostgres();
+  const accounts = await ensureClientFinancialAccounts(userId, txArg);
   const rows = await db.select({
     accountId: pgSchema.ledgerEntries.accountId,
     direction: pgSchema.ledgerEntries.direction,
@@ -102,8 +102,8 @@ export async function getClientFinancialSummary(userId: string) {
   };
 }
 
-export async function getPlatformFinancialSummary(userIds: string[]) {
-  const db = requirePostgres();
+export async function getPlatformFinancialSummary(userIds: string[], txArg?: any) {
+  const db = txArg || requirePostgres();
   const ids = Array.from(new Set(userIds.filter(Boolean)));
   const zero = { client_available: 0, client_reserved: 0, client_capital: 0, client_yield: 0 };
   if (!ids.length) return { currency: "BRL", unit: "centavos", totalsCents: { ...zero }, clients: [] as Array<{ userId: string; balancesCents: typeof zero }> };
