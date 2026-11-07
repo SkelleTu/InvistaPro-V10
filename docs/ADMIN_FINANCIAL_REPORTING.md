@@ -29,7 +29,7 @@ Disponibilizar ao administrador autorizado relatórios imprimíveis e arquiváve
 2. O PDF deve conter identificador único, data/hora UTC e horário local, intervalo consultado, filtros, número de registros e totais.
 3. O backend calcula SHA-256 do arquivo e registra o hash, solicitante, escopo, cliente/período e referência privada em `admin_report_exports`.
 4. O PDF fica em bucket privado de objetos; o hash e os metadados ficam em PostgreSQL. O endpoint de download exige autorização administrativa e não expõe URL pública permanente.
-5. Cada geração e download bem-sucedidos geram evento de auditoria com usuário administrador, ação, data, motivo e request ID. Falhas de geração são registradas nos logs da aplicação; auditoria financeira dedicada para tentativas malsucedidas ainda é uma melhoria pendente.
+5. Cada geração e download bem-sucedidos geram evento de auditoria com usuário administrador, ação, data, motivo e request ID. Falhas de exportação também geram evento dedicado quando o PostgreSQL está disponível; se o banco estiver indisponível, a falha permanece nos logs da aplicação.
 6. O PDF é uma cópia documental; o PostgreSQL e o ledger são a fonte oficial. Uma correção gera novo lançamento/relatório, nunca edição do PDF histórico.
 
 ## Segurança e integridade
