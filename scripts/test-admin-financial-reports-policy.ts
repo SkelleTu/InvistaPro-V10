@@ -22,6 +22,8 @@ assert.match(reportService, /storePrivateReport\(reportId, pdf\)/);
 assert.match(reportService, /contentSha256: hash/);
 assert.match(reportService, /REPORT_HASH_MISMATCH/);
 assert.match(reportService, /REPORT_STORAGE_HASH_MISMATCH/);
+assert.match(reportService, /recordAdminReportFailure/);
+assert.match(adminRoutes, /recordAdminReportFailure\(/);
 assert.match(reportService, /deletePrivateReport\(storageRef\)/);
 assert.match(reportService, /wrappedLines/);
 assert.match(reportService, /financialAuditEvents/);
