@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, lte, or, sql } from "drizzle-orm";
 import { pgDb, pgSchema, isPostgresAvailable } from "../db-postgres";
 import { storePrivateReport, readPrivateReport, deletePrivateReport } from "./private-document-storage";
 import { getClientFinancialSummary, getPlatformFinancialSummary } from "./financial-ledger";
@@ -120,7 +120,13 @@ export async function generateAdminFinancialReport(input: {
       .from(pgSchema.users).where(eq(pgSchema.users.id, input.requestedBy)).limit(1);
     if (!requestedBy) throw new Error("ADMIN_NOT_FOUND");
 
-    const [users, movements, trades, documents, transactions, entries, paymentIntents, providerPayments, withdrawals, auditEvents, webhookEvents] = await Promise.all([
+    const affiliateReferralConditions: any[] = periodConditions(pgSchema.affiliateReferrals.createdAt, start, end);
+    const affiliateCommissionConditions: any[] = periodConditions(pgSchema.affiliateCommissions.createdAt, start, end);
+    if (input.scope === "client") {
+      affiliateReferralConditions.push(or(eq(pgSchema.affiliateReferrals.referrerUserId, input.userId!), eq(pgSchema.affiliateReferrals.referredUserId, input.userId!)));
+      affiliateCommissionConditions.push(or(eq(pgSchema.affiliateCommissions.referrerUserId, input.userId!), eq(pgSchema.affiliateCommissions.referredUserId, input.userId!)));
+    }
+    const [users, movements, trades, documents, transactions, entries, paymentIntents, providerPayments, withdrawals, auditEvents, webhookEvents, affiliateReferrals, affiliateCommissions] = await Promise.all([
       input.scope === "client"
         ? tx.select().from(pgSchema.users).where(eq(pgSchema.users.id, input.userId!))
         : tx.select({ id: pgSchema.users.id, nomeCompleto: pgSchema.users.nomeCompleto, email: pgSchema.users.email, isAdmin: pgSchema.users.isAdmin, contaAprovada: pgSchema.users.contaAprovada, documentosVerificados: pgSchema.users.documentosVerificados, createdAt: pgSchema.users.createdAt }).from(pgSchema.users),
@@ -136,6 +142,8 @@ export async function generateAdminFinancialReport(input: {
       input.scope === "platform"
         ? tx.select().from(pgSchema.providerWebhookEvents).where(periodConditions(pgSchema.providerWebhookEvents.receivedAt, start, end).length ? and(...periodConditions(pgSchema.providerWebhookEvents.receivedAt, start, end)) : undefined).orderBy(desc(pgSchema.providerWebhookEvents.receivedAt))
         : Promise.resolve([]),
+      tx.select().from(pgSchema.affiliateReferrals).where(affiliateReferralConditions.length ? and(...affiliateReferralConditions) : undefined).orderBy(desc(pgSchema.affiliateReferrals.createdAt)),
+      tx.select().from(pgSchema.affiliateCommissions).where(affiliateCommissionConditions.length ? and(...affiliateCommissionConditions) : undefined).orderBy(desc(pgSchema.affiliateCommissions.createdAt)),
     ]);
 
     const user = input.scope === "client" ? users[0] as any : null;
@@ -162,7 +170,7 @@ export async function generateAdminFinancialReport(input: {
     for (const item of relevantAccounts as any[]) accountById.set(item.id, item);
     return {
       requestedBy, users, movements, trades, documents, transactions, entries, paymentIntents,
-      providerPayments, withdrawals, auditEvents, webhookEvents, user, clientUsers,
+      providerPayments, withdrawals, auditEvents, webhookEvents, affiliateReferrals, affiliateCommissions, user, clientUsers,
       relevantAccounts, relevantProviderPayments, relevantWebhookEvents, relevantEntries,
       relevantTransactions, audit, clientBalanceSnapshot, platformBalanceSnapshot, userById, accountById,
     };
@@ -170,7 +178,7 @@ export async function generateAdminFinancialReport(input: {
 
   const {
     requestedBy, users, movements, trades, documents, transactions, entries, paymentIntents,
-    providerPayments, withdrawals, auditEvents, webhookEvents, user, clientUsers,
+    providerPayments, withdrawals, auditEvents, webhookEvents, affiliateReferrals, affiliateCommissions, user, clientUsers,
     relevantAccounts, relevantProviderPayments, relevantWebhookEvents, relevantEntries,
     relevantTransactions, audit, clientBalanceSnapshot, platformBalanceSnapshot, userById, accountById,
   } = snapshot;
@@ -186,7 +194,7 @@ export async function generateAdminFinancialReport(input: {
     `Solicitante: ${requestedBy.name} <${requestedBy.email}>`,
     `Periodo UTC: ${start?.toISOString() || "inicio do historico"} ate ${end?.toISOString() || "agora"}`,
     `Escopo: ${input.scope === "client" ? "cliente individual" : "plataforma consolidada"}`,
-    `Registros listados: ${clientUsers.length + movements.length + trades.length + documents.length + relevantTransactions.length + relevantEntries.length + paymentIntents.length + relevantProviderPayments.length + withdrawals.length + audit.length + relevantWebhookEvents.length}`,
+    `Registros listados: ${clientUsers.length + movements.length + trades.length + documents.length + relevantTransactions.length + relevantEntries.length + paymentIntents.length + relevantProviderPayments.length + withdrawals.length + audit.length + relevantWebhookEvents.length + affiliateReferrals.length + affiliateCommissions.length}`,
     " ",
   ];
   if (user) {
