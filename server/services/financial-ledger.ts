@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { createCipheriv, createHash, randomBytes } from "node:crypto";
 import { reconcileVerifiedPayment } from "./payment-domain";
 import { assertPositiveCents, calculateLiabilityBalance, splitWithdrawal, validateBalancedLedgerLines } from "./financial-ledger-policy";
@@ -98,6 +98,49 @@ export async function getClientFinancialSummary(userId: string) {
     reservedBalanceCents: balances.client_reserved || 0,
     capitalBalanceCents: balances.client_capital || 0,
     yieldBalanceCents: balances.client_yield || 0,
+    legacyBalanceNotReconciled: true,
+  };
+}
+
+export async function getPlatformFinancialSummary(userIds: string[]) {
+  const db = requirePostgres();
+  const ids = Array.from(new Set(userIds.filter(Boolean)));
+  const zero = { client_available: 0, client_reserved: 0, client_capital: 0, client_yield: 0 };
+  if (!ids.length) return { currency: "BRL", unit: "centavos", totalsCents: { ...zero }, clients: [] as Array<{ userId: string; balancesCents: typeof zero }> };
+
+  const accounts = await db.select({
+    id: pgSchema.financialAccounts.id,
+    ownerUserId: pgSchema.financialAccounts.ownerUserId,
+    accountKind: pgSchema.financialAccounts.accountKind,
+  }).from(pgSchema.financialAccounts)
+    .where(inArray(pgSchema.financialAccounts.ownerUserId, ids));
+  const accountIds = accounts.map((account: any) => account.id);
+  const rows = accountIds.length ? await db.select({
+    accountId: pgSchema.ledgerEntries.accountId,
+    direction: pgSchema.ledgerEntries.direction,
+    total: sql<string>`COALESCE(SUM(${pgSchema.ledgerEntries.amountCents}),0)::text`,
+  }).from(pgSchema.ledgerEntries)
+    .where(inArray(pgSchema.ledgerEntries.accountId, accountIds))
+    .groupBy(pgSchema.ledgerEntries.accountId, pgSchema.ledgerEntries.direction) : [];
+
+  const balancesByUser = new Map<string, Record<string, number>>();
+  for (const userId of ids) balancesByUser.set(userId, { ...zero });
+  for (const account of accounts as any[]) {
+    const userId = String(account.ownerUserId);
+    const userBalances = balancesByUser.get(userId);
+    if (!userBalances || !(account.accountKind in userBalances)) continue;
+    const debit = Number(rows.find((row: any) => row.accountId === account.id && row.direction === "debit")?.total || 0);
+    const credit = Number(rows.find((row: any) => row.accountId === account.id && row.direction === "credit")?.total || 0);
+    userBalances[account.accountKind] = Math.round(credit - debit);
+  }
+  const totalsCents = { ...zero };
+  for (const balances of balancesByUser.values()) {
+    for (const kind of Object.keys(totalsCents) as Array<keyof typeof totalsCents>) totalsCents[kind] += balances[kind];
+  }
+  return {
+    currency: "BRL", unit: "centavos", totalsCents,
+    totalsBRL: Object.fromEntries(Object.entries(totalsCents).map(([kind, cents]) => [kind, cents / 100])),
+    clients: Array.from(balancesByUser, ([userId, balancesCents]) => ({ userId, balancesCents })),
     legacyBalanceNotReconciled: true,
   };
 }
