@@ -123,14 +123,18 @@ export async function getPlatformFinancialSummary(userIds: string[], txArg?: any
     .where(inArray(pgSchema.ledgerEntries.accountId, accountIds))
     .groupBy(pgSchema.ledgerEntries.accountId, pgSchema.ledgerEntries.direction) : [];
 
+  const totalsByAccountAndDirection = new Map<string, number>();
+  for (const row of rows as any[]) {
+    totalsByAccountAndDirection.set(`${row.accountId}:${row.direction}`, Number(row.total || 0));
+  }
   const balancesByUser = new Map<string, Record<string, number>>();
   for (const userId of ids) balancesByUser.set(userId, { ...zero });
   for (const account of accounts as any[]) {
     const userId = String(account.ownerUserId);
     const userBalances = balancesByUser.get(userId);
     if (!userBalances || !(account.accountKind in userBalances)) continue;
-    const debit = Number(rows.find((row: any) => row.accountId === account.id && row.direction === "debit")?.total || 0);
-    const credit = Number(rows.find((row: any) => row.accountId === account.id && row.direction === "credit")?.total || 0);
+    const debit = totalsByAccountAndDirection.get(`${account.id}:debit`) || 0;
+    const credit = totalsByAccountAndDirection.get(`${account.id}:credit`) || 0;
     userBalances[account.accountKind] = Math.round(credit - debit);
   }
   const totalsCents = { ...zero };
