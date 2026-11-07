@@ -1494,7 +1494,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         winRate: Math.max(0, parseFloat(String(stats?.winRate || 0))),
         totalPnL: parseFloat(String(stats?.totalProfit || 0)),
         investidoMesAtual: 0,
-        investidoMesAtualLegado: legacyDeposits,
+        depositosLegadosRecentes: legacyDeposits,
         movimentos: legacyMovements.map(m => ({
           tipo: m.tipo,
           valor: m.valor,
