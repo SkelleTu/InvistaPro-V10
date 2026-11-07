@@ -122,9 +122,8 @@ export async function generateAdminFinancialReport(input: {
   const paymentIntentIds = new Set(paymentIntents.map((intent: any) => intent.id));
   const relevantProviderPayments = providerPayments.filter((payment: any) => paymentIntentIds.has(payment.paymentIntentId));
   const relevantWebhookEvents = input.scope === "platform" ? webhookEvents : [];
-  const balanceSnapshot = input.scope === "client"
-    ? await getClientFinancialSummary(input.userId!)
-    : await getPlatformFinancialSummary(clientUsers.map((item: any) => item.id));
+  const clientBalanceSnapshot = input.scope === "client" ? await getClientFinancialSummary(input.userId!) : null;
+  const platformBalanceSnapshot = input.scope === "platform" ? await getPlatformFinancialSummary(clientUsers.map((item: any) => item.id)) : null;
   const relevantEntries = entries.filter((entry: any) => {
     const timestamp = new Date(entry.createdAt as any).getTime();
     return relevantAccountIds.has(entry.accountId) && (!start || timestamp >= start.getTime()) && (!end || timestamp <= end.getTime());
@@ -167,18 +166,18 @@ export async function generateAdminFinancialReport(input: {
   lines.push(" ", "SALDOS CONTABEIS ATUAIS (fonte: ledger PostgreSQL)");
   if (input.scope === "client") {
     lines.push(
-      `Disponivel: ${brlFromCents(balanceSnapshot.availableBalanceCents)}`,
-      `Reservado: ${brlFromCents(balanceSnapshot.reservedBalanceCents)}`,
-      `Capital: ${brlFromCents(balanceSnapshot.capitalBalanceCents)}`,
-      `Rendimentos: ${brlFromCents(balanceSnapshot.yieldBalanceCents)}`,
+      `Disponivel: ${brlFromCents(clientBalanceSnapshot!.availableBalanceCents)}`,
+      `Reservado: ${brlFromCents(clientBalanceSnapshot!.reservedBalanceCents)}`,
+      `Capital: ${brlFromCents(clientBalanceSnapshot!.capitalBalanceCents)}`,
+      `Rendimentos: ${brlFromCents(clientBalanceSnapshot!.yieldBalanceCents)}`,
     );
   } else {
-    for (const item of balanceSnapshot.clients) {
+    for (const item of platformBalanceSnapshot!.clients) {
       const owner: any = userById.get(item.userId);
       const b: any = item.balancesCents;
       lines.push(`Cliente ${owner?.nomeCompleto || item.userId} (${item.userId}) | disponivel ${brlFromCents(b.client_available)} | reservado ${brlFromCents(b.client_reserved)} | capital ${brlFromCents(b.client_capital)} | rendimentos ${brlFromCents(b.client_yield)}`);
     }
-    const totals: any = balanceSnapshot.totalsCents;
+    const totals: any = platformBalanceSnapshot!.totalsCents;
     lines.push(`TOTAL PLATAFORMA | disponivel ${brlFromCents(totals.client_available)} | reservado ${brlFromCents(totals.client_reserved)} | capital ${brlFromCents(totals.client_capital)} | rendimentos ${brlFromCents(totals.client_yield)}`);
   }
   lines.push("MOVIMENTACOES LEGADAS (nao equivalem a lancamentos conciliados)");
