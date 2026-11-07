@@ -4,7 +4,7 @@ import { isAuthenticated } from "../auth";
 import { isAuthorizedEmail, ACCESS_DENIED_MESSAGE } from "../config/access";
 import { getAffiliateAdminSummary, getAffiliateAdminNetwork } from "../services/affiliate-program";
 import { readPrivateDocument } from "../services/private-document-storage";
-import { generateAdminFinancialReport, getAdminReport, listAdminReports, recordAdminReportDownload } from "../services/admin-financial-reports";
+import { generateAdminFinancialReport, getAdminReport, listAdminReports, recordAdminReportDownload, recordAdminReportFailure } from "../services/admin-financial-reports";
 import { getClientFinancialSummary, getPlatformFinancialSummary, listClientLedger, listClientWithdrawals } from "../services/financial-ledger";
 
 // Extend session type
@@ -614,6 +614,15 @@ router.post('/reports', isAuthenticated, isAdmin, async (req, res) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error("Admin financial report generation failed:", message);
+    await recordAdminReportFailure({
+      requestedBy: String((req as any).session?.passport?.user || ""),
+      scope: req.body?.scope === "client" || req.body?.scope === "platform" ? req.body.scope : undefined,
+      userId: req.body?.scope === "client" ? String(req.body?.userId || "").slice(0, 32) : undefined,
+      reason: message,
+      requestId: String(req.headers["x-request-id"] || ""),
+      ip: req.ip,
+      userAgent: String(req.headers["user-agent"] || ""),
+    }).catch(auditError => console.error("Failed to audit report export failure:", auditError));
     if (message === "REPORT_CLIENT_NOT_FOUND") return res.status(404).json({ message: "Cliente não encontrado." });
     if (message === "INVALID_REPORT_PERIOD") return res.status(400).json({ message: "Período inválido." });
     if (message === "DURABLE_POSTGRES_REQUIRED" || message.includes("PRIVATE_REPORT_STORAGE_NOT_CONFIGURED")) {
