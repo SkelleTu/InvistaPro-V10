@@ -477,16 +477,26 @@ router.get('/stats', isAuthenticated, isAdmin, async (_req, res) => {
 // Get comprehensive dashboard data
 router.get('/dashboard-data', isAuthenticated, isAdmin, async (_req, res) => {
   try {
-    const [durableUsers, storedMovements] = await Promise.all([
+    const [storedUsers, storedMovements] = await Promise.all([
       dualStorage.getAllUsers(),
       dualStorage.getAllMovimentos(),
     ]);
+    const durableUsers = storedUsers.filter((user: any) => !user.isAdmin);
+    const ledger = await getPlatformFinancialSummary(durableUsers.map(user => user.id));
+    const ledgerByUser = new Map(ledger.clients.map((item: any) => [item.userId, item.balancesCents]));
     const usersWithFinancials = durableUsers
-      .map(user => ({
+      .map(user => {
+        const balances: any = ledgerByUser.get(user.id) || { client_available: 0, client_reserved: 0, client_capital: 0, client_yield: 0 };
+        return ({
         id: user.id, nomeCompleto: user.nomeCompleto, email: user.email, cpf: user.cpf,
-        saldo: Number(user.saldo || 0), documentosVerificados: Boolean(user.documentosVerificados),
+        saldoLegado: Number(user.saldo || 0),
+        saldoDisponivel: Number(balances.client_available || 0) / 100,
+        saldoReservado: Number(balances.client_reserved || 0) / 100,
+        saldoCapital: Number(balances.client_capital || 0) / 100,
+        saldoRendimentos: Number(balances.client_yield || 0) / 100,
         contaAprovada: Boolean(user.contaAprovada), createdAt: user.createdAt, updatedAt: user.updatedAt,
-      }))
+      });
+      })
       .sort((a, b) => new Date(String(b.createdAt || 0)).getTime() - new Date(String(a.createdAt || 0)).getTime());
     const usersById = new Map(usersWithFinancials.map(user => [user.id, user]));
     const allMovements = storedMovements
@@ -507,7 +517,7 @@ router.get('/dashboard-data', isAuthenticated, isAdmin, async (_req, res) => {
     const totalInvested = sumType("deposito");
     const totalYields = sumType("rendimento");
     const totalWithdrawals = sumType("saque");
-    const totalCurrentBalance = usersWithFinancials.reduce((sum, user) => sum + user.saldo, 0);
+    const totalCurrentBalance = Number(ledger.totalsCents.client_available || 0) / 100;
 
     const movementTypes = new Map<string, { tipo: string; count: number; total: number }>();
     for (const movement of allMovements) {
@@ -552,6 +562,10 @@ router.get('/dashboard-data', isAuthenticated, isAdmin, async (_req, res) => {
     return res.json({
       platformTotals: {
         totalInvested, totalYields, totalWithdrawals, totalCurrentBalance,
+        totalReserved: Number(ledger.totalsCents.client_reserved || 0) / 100,
+        totalCapital: Number(ledger.totalsCents.client_capital || 0) / 100,
+        totalLedgerYields: Number(ledger.totalsCents.client_yield || 0) / 100,
+        ledgerOfficial: true,
         totalUsers: usersWithFinancials.length,
         verifiedUsers: usersWithFinancials.filter(user => user.documentosVerificados).length,
       },
