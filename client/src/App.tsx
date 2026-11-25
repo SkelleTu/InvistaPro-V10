@@ -158,13 +158,20 @@ function AppContent() {
   const { isAuthenticated, isApproved, isPhoneVerified, isLoading } = useAuth();
   const showAiAssistant = !isLoading && isAuthenticated && isApproved && isPhoneVerified;
 
+  useEffect(() => {
+    if (isLoading || window.parent === window) return;
+    let targetOrigin = "*";
+    try { if (document.referrer) targetOrigin = new URL(document.referrer).origin; } catch { targetOrigin = "*"; }
+    window.parent.postMessage({ type: "INVISTA_PRO_V10_READY" }, targetOrigin);
+  }, [isLoading]);
+
   return (
-    <>
+    <div className="aura-integration-shell" data-platform="invista-pro-v10">
       <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>}>
         <Router />
       </Suspense>
       {showAiAssistant && <AiAssistant />}
-    </>
+    </div>
   );
 }
 
