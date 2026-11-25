@@ -225,7 +225,9 @@ app.use((req, res, next) => {
   // handler can accept writes before Neon migration and local restoration finish.
   app.use('/api', (req, res, next) => {
     const livenessPath = ['/health', '/status', '/ping', '/api/health', '/api/status', '/api/ping'].includes(req.path);
-    if (!persistenceReady && !livenessPath && !req.path.startsWith('/observability/')) {
+    // Private stateless AI bridge uses a high-entropy service token and does not access application persistence.
+    const privateAiBridgePath = req.path.startsWith('/internal/marketing-ai/') || req.path.startsWith('/internal/marketing-groq/');
+    if (!persistenceReady && !livenessPath && !privateAiBridgePath && !req.path.startsWith('/observability/')) {
       return res.status(503).json({
         success: false,
         error: 'Persistência indisponível: Neon não foi migrada/restaurada com sucesso.',
