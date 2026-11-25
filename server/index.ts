@@ -289,7 +289,8 @@ app.use((req, res, next) => {
   // API nunca pode cair no HTML do SPA. Primeiro protegemos o namespace /api
   // e devolvemos JSON determinístico para boot degradado ou rota inexistente.
   app.use('/api', (req, res, next) => {
-    if (!routesReady) {
+    const privateAiBridgePath = req.path.startsWith('/internal/marketing-ai/') || req.path.startsWith('/internal/marketing-groq/');
+    if (!privateAiBridgePath && !routesReady) {
       return res.status(503).json({
         success: false,
         error: 'API indisponível: falha no registro das rotas durante o boot.',
@@ -297,7 +298,7 @@ app.use((req, res, next) => {
         detail: routeRegistrationError || 'Falha de inicialização não especificada',
       });
     }
-    if (!persistenceReady) {
+    if (!privateAiBridgePath && !persistenceReady) {
       return res.status(503).json({
         success: false,
         error: 'Persistência indisponível: Neon não foi migrada/restaurada com sucesso.',
@@ -394,7 +395,10 @@ app.use((req, res, next) => {
           console.error(nonRetryable
             ? '❌ Erro de identidade/configuração/integridade: não será repetido.'
             : '❌ Persistência não recuperada após tentativas limitadas; encerrando para permitir reinício controlado pelo Render.');
-          if (process.env.NODE_ENV === 'production') process.exit(1);
+          if (process.env.NODE_ENV === 'production' && !String(process.env.AURA_MARKETING_AI_BRIDGE_TOKEN || '').trim()) process.exit(1);
+          if (process.env.NODE_ENV === 'production' && String(process.env.AURA_MARKETING_AI_BRIDGE_TOKEN || '').trim()) {
+            console.warn('⚠️ [BOOT] Persistência indisponível; mantendo somente o bridge privado de IA. Todas as demais rotas da API permanecem bloqueadas.');
+          }
           break;
         }
         const delayMs = 1000 * (2 ** (attempt - 1));
@@ -411,7 +415,10 @@ app.use((req, res, next) => {
     console.log('   📋 Configure DATABASE_URL com a Neon exclusiva desta plataforma.');
     console.log('   📋 Configure INVISTA_PLATFORM=v10 ou INVISTA_PLATFORM=aura.');
     console.log('   📋 Configure uma base Neon diferente para cada plataforma e reinicie.');
-    if (process.env.NODE_ENV === 'production') process.exit(1);
+    if (process.env.NODE_ENV === 'production' && !String(process.env.AURA_MARKETING_AI_BRIDGE_TOKEN || '').trim()) process.exit(1);
+          if (process.env.NODE_ENV === 'production' && String(process.env.AURA_MARKETING_AI_BRIDGE_TOKEN || '').trim()) {
+            console.warn('⚠️ [BOOT] Persistência indisponível; mantendo somente o bridge privado de IA. Todas as demais rotas da API permanecem bloqueadas.');
+          }
   }
   
   // 🛡️ SISTEMA DE BACKUP AUTOMÁTICO DO BANCO DE DADOS
