@@ -4868,7 +4868,125 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       res.status(500).json({ error: 'Transcription error', details: err.message });
     }
   });
-  // ========== END AI ASSISTANT ROUTES ==========
+  // ========== PRIVATE AURA MARKETING AI BRIDGE ==========
+  // This bridge reuses Invista's existing provider credentials without exposing them to Aura.
+  const authorizeAuraMarketingBridge = (req: any): boolean => {
+    const expected = String(process.env.AURA_MARKETING_AI_BRIDGE_TOKEN || '').trim();
+    const provided = String(req.headers.authorization || '').replace(/^Bearer\\s+/i, '').trim();
+    if (!expected || !provided) return false;
+    const expectedBuffer = Buffer.from(expected);
+    const providedBuffer = Buffer.from(provided);
+    return expectedBuffer.length === providedBuffer.length && crypto.timingSafeEqual(expectedBuffer, providedBuffer);
+  };
+  const marketingBridgeModels = {
+    huggingface: ['openai/gpt-oss-120b:fastest', 'Qwen/Qwen3-4B-Thinking-2507:fastest', 'Qwen/Qwen2.5-7B-Instruct-1M:fastest'],
+    groq: ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b'],
+  };
+  const validateMarketingMessages = (messages: any): boolean =>
+    Array.isArray(messages) && messages.length > 0 && messages.length <= 20 &&
+    messages.every((item: any) => item && ['system', 'user', 'assistant'].includes(item.role) &&
+      typeof item.content === 'string' && item.content.length <= 12000);
+
+  app.get('/api/internal/marketing-ai/status', (req: any, res: any) => {
+    if (!authorizeAuraMarketingBridge(req)) return res.sendStatus(401);
+    res.json({
+      huggingfaceConfigured: Boolean(String(process.env.HUGGINGFACE_API_KEY || process.env.HF_TOKEN || '').trim()),
+      groqConfigured: Boolean(String(process.env.GROQ_API_KEY || '').trim()),
+      models: marketingBridgeModels,
+    });
+  });
+
+  app.get('/api/internal/marketing-ai/models', async (req: any, res: any) => {
+    if (!authorizeAuraMarketingBridge(req)) return res.sendStatus(401);
+    const apiKey = String(process.env.HUGGINGFACE_API_KEY || process.env.HF_TOKEN || '').trim();
+    if (!apiKey) return res.status(503).json({ error: 'Hugging Face não configurado neste serviço.' });
+    try {
+      const response = await fetch('https://router.huggingface.co/v1/models', {
+        headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
+        signal: AbortSignal.timeout(15000),
+      });
+      const raw = await response.text();
+      if (!response.ok) return res.status(response.status).type('application/json').send(raw);
+      let data: any = {}; try { data = JSON.parse(raw); } catch { return res.status(502).json({ error: 'Catálogo Hugging Face retornou JSON inválido.' }); }
+      const models = (Array.isArray(data?.data) ? data.data : Array.isArray(data?.models) ? data.models : [])
+        .map((item: any) => ({ id: String(item?.id || item?.model || ''), name: String(item?.name || item?.id || item?.model || '') }))
+        .filter((item: any) => item.id);
+      res.json({ data: models.length ? models : marketingBridgeModels.huggingface.map((id) => ({ id, name: id })) });
+    } catch (error: any) {
+      res.status(502).json({ error: error?.message || 'Falha ao consultar catálogo Hugging Face.' });
+    }
+  });
+
+  app.post('/api/internal/marketing-ai/chat/completions', async (req: any, res: any) => {
+    if (!authorizeAuraMarketingBridge(req)) return res.sendStatus(401);
+    const apiKey = String(process.env.HUGGINGFACE_API_KEY || process.env.HF_TOKEN || '').trim();
+    if (!apiKey) return res.status(503).json({ error: 'Hugging Face não configurado neste serviço.' });
+    if (!validateMarketingMessages(req.body?.messages)) return res.status(400).json({ error: 'Mensagens inválidas.' });
+    const requestedModel = String(req.body?.model || marketingBridgeModels.huggingface[0]);
+    if (!marketingBridgeModels.huggingface.includes(requestedModel)) return res.status(400).json({ error: 'Modelo Hugging Face não permitido neste bridge.' });
+    try {
+      const response = await fetch('https://router.huggingface.co/v1/chat/completions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          model: requestedModel,
+          messages: req.body.messages,
+          temperature: Math.max(0, Math.min(1, Number(req.body?.temperature ?? 0.5))),
+          max_tokens: Math.max(256, Math.min(1600, Number(req.body?.max_tokens ?? 1400))),
+          stream: false,
+        }),
+        signal: AbortSignal.timeout(60000),
+      });
+      const raw = await response.text();
+      res.status(response.status).type('application/json').send(raw);
+    } catch (error: any) {
+      res.status(502).json({ error: error?.message || 'Falha na inferência Hugging Face.' });
+    }
+  });
+
+  app.get('/api/internal/marketing-groq/models', async (req: any, res: any) => {
+    if (!authorizeAuraMarketingBridge(req)) return res.sendStatus(401);
+    const apiKey = String(process.env.GROQ_API_KEY || '').trim();
+    if (!apiKey) return res.status(503).json({ error: 'Groq não configurado neste serviço.' });
+    try {
+      const response = await fetch('https://api.groq.com/openai/v1/models', {
+        headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
+        signal: AbortSignal.timeout(15000),
+      });
+      const raw = await response.text();
+      res.status(response.status).type('application/json').send(raw);
+    } catch (error: any) {
+      res.status(502).json({ error: error?.message || 'Falha ao consultar catálogo Groq.' });
+    }
+  });
+
+  app.post('/api/internal/marketing-groq/chat/completions', async (req: any, res: any) => {
+    if (!authorizeAuraMarketingBridge(req)) return res.sendStatus(401);
+    const apiKey = String(process.env.GROQ_API_KEY || '').trim();
+    if (!apiKey) return res.status(503).json({ error: 'Groq não configurado neste serviço.' });
+    if (!validateMarketingMessages(req.body?.messages)) return res.status(400).json({ error: 'Mensagens inválidas.' });
+    const requestedModel = String(req.body?.model || marketingBridgeModels.groq[0]);
+    if (!marketingBridgeModels.groq.includes(requestedModel)) return res.status(400).json({ error: 'Modelo Groq não permitido neste bridge.' });
+    try {
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          model: requestedModel,
+          messages: req.body.messages,
+          temperature: Math.max(0, Math.min(1, Number(req.body?.temperature ?? 0.5))),
+          max_tokens: Math.max(256, Math.min(1600, Number(req.body?.max_tokens ?? 1400))),
+          stream: false,
+        }),
+        signal: AbortSignal.timeout(60000),
+      });
+      const raw = await response.text();
+      res.status(response.status).type('application/json').send(raw);
+    } catch (error: any) {
+      res.status(502).json({ error: error?.message || 'Falha na inferência Groq.' });
+    }
+  });
+  // ========== END PRIVATE AURA MARKETING AI BRIDGE ==========
 
   const httpServer = existingServer ?? createServer(app);
   return httpServer;
