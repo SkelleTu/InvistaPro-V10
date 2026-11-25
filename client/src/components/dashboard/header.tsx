@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { LogOut, User, Settings, Shield, TrendingUp, Palette, Moon, Layout, BarChart3, Monitor } from "lucide-react";
-import iconImage from "@/assets/investpro-icon.png";
 import { useAuth } from "@/hooks/useAuth";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useQuery } from "@tanstack/react-query";
@@ -56,18 +55,15 @@ export default function Header() {
 
   return (
     <>
-      <header className="bg-card border-b border-border px-4 sm:px-6 lg:px-8">
+      <header className="aura-platform-header sticky top-0 z-40 border-b border-cyan-400/15 bg-black/55 px-4 shadow-[0_8px_32px_rgba(0,0,0,.35)] backdrop-blur-xl sm:px-6 lg:px-8">
         <div className="max-w-7xl mx-auto">
           <div className="flex justify-between items-center py-4">
             <div className="flex items-center space-x-3">
-              <img 
-                src={iconImage} 
-                alt="InvistaPRO Logo" 
-                className="w-14 h-14 rounded-xl shadow-md relative z-0"
-              />
-              <div className="flex flex-col relative z-10">
-                <h1 className="text-2xl font-bold text-foreground">InvistaPRO</h1>
-                <span className="text-xs font-medium text-muted-foreground tracking-wide opacity-75">Invista com Risco Zero</span>
+              <img src="https://integrated-system-1c86.onrender.com/aura-system-logo.webp?v=1" alt="Aura System"
+                className="relative z-0 h-10 w-10 rounded-xl object-contain drop-shadow-[0_0_10px_rgba(0,229,255,.35)] sm:h-11 sm:w-11" />
+              <div className="relative z-10 flex flex-col">
+                <h1 className="text-xl font-black tracking-tight text-white sm:text-2xl">Aura System</h1>
+                <span className="text-[10px] font-black uppercase tracking-[.24em] text-cyan-300">Renda Variável</span>
               </div>
             </div>
             
