@@ -22,7 +22,7 @@ export default {
           foreground: "var(--popover-foreground)",
         },
         primary: {
-          DEFAULT: "hsl(221.2 83.2% 53.3%)",
+          DEFAULT: "var(--primary)",
           50: "hsl(214 100% 97%)",
           100: "hsl(214 95% 93%)",
           200: "hsl(213 97% 87%)",
