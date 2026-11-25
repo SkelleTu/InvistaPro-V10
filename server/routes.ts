@@ -4872,7 +4872,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   // This bridge reuses Invista's existing provider credentials without exposing them to Aura.
   const authorizeAuraMarketingBridge = (req: any): boolean => {
     const expected = String(process.env.AURA_MARKETING_AI_BRIDGE_TOKEN || '').trim();
-    const provided = String(req.headers.authorization || '').replace(/^Bearer\\s+/i, '').trim();
+    const provided = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
     if (!expected || !provided) return false;
     const expectedBuffer = Buffer.from(expected);
     const providedBuffer = Buffer.from(provided);
