@@ -81,8 +81,8 @@ export default function InvestmentPieChart({ data }: InvestmentPieChartProps) {
           label: function(context: any) {
             const value = Number(context.raw);
             const category = categories[context.dataIndex];
-            const percentage = ((value / data.currentBalance) * 100).toFixed(1);
-            return `${category.description}: R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} (${percentage}%)`;
+            const percentage = data.currentBalance > 0 ? `${((value / data.currentBalance) * 100).toFixed(1)}%` : '—';
+            return `${category.description}: R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} (${percentage})`;
           }
         }
       }
@@ -134,7 +134,7 @@ export default function InvestmentPieChart({ data }: InvestmentPieChartProps) {
                     R$ {category.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    {((category.value / data.currentBalance) * 100).toFixed(1)}%
+                    {data.currentBalance > 0 ? `${((category.value / data.currentBalance) * 100).toFixed(1)}%` : '—'}
                   </p>
                 </div>
               </div>
