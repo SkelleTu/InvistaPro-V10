@@ -1616,14 +1616,20 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   app.post('/api/simulation', isAuthenticated, isApproved, async (req: any, res) => {
     try {
       const { depositoInicial, meses, depositoExtra = 0 } = req.body;
-      
-      const taxaMensal = 0.00835; // 0.835% mensal = 10.63% anual composto exato
-      let saldo = parseFloat(depositoInicial);
+      const inicial = Number(depositoInicial);
+      const periodo = Number(meses);
+      const extra = Number(depositoExtra);
+      if (!Number.isFinite(inicial) || inicial <= 0 || !Number.isInteger(periodo) || periodo < 1 || periodo > 600 || !Number.isFinite(extra) || extra < 0) {
+        return res.status(400).json({ code: "INVALID_SIMULATION_INPUT", message: "Informe depósito inicial positivo, período inteiro entre 1 e 600 meses e depósito mensal não negativo." });
+      }
+
+      const taxaMensal = 0.00835; // taxa fixa ilustrativa de 0,835% ao mês; não representa benchmark ou promessa
+      let saldo = inicial;
       const historico: Array<{ mes: number; rendimento: number; saldoAcumulado: number }> = [];
       
       for (let m = 1; m <= meses; m++) {
         const rendimento = saldo * taxaMensal;
-        saldo += rendimento + parseFloat(depositoExtra);
+        saldo += rendimento + extra;
         
         historico.push({
           mes: m,
@@ -1632,10 +1638,11 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         });
       }
 
-      const totalInvestido = parseFloat(depositoInicial) + (parseFloat(depositoExtra) * meses);
+      const totalInvestido = inicial + (extra * periodo);
       const totalRendimentos = saldo - totalInvestido;
       
       res.json({
+        taxaMensalPercentual: taxaMensal * 100,
         historico,
         resumo: {
           totalInvestido: Math.round(totalInvestido * 100) / 100,
