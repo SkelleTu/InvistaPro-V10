@@ -1,7 +1,6 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ChartLine, Shield, TrendingUp, Banknote, Zap, BarChart3, Globe, Brain, Users, Cpu, Lock, Menu, X } from "lucide-react";
-import iconImage from "@/assets/investpro-icon.png";
 import investmentBgImage from "@assets/generated_images/Dark_investment_chart_background_ac2d4762.png";
 import { useState } from "react";
 import SimpleMarketChart from "@/components/simple-chart";
@@ -17,19 +16,19 @@ export default function Landing() {
   return (
     <>
       {/* Header Navigation */}
-      <header className="absolute top-0 left-0 right-0 z-50 bg-slate-900/80 backdrop-blur-md border-b border-white/10">
+      <header className="absolute top-0 left-0 right-0 z-50 bg-black/65 backdrop-blur-xl border-b border-cyan-400/15">
         <div className="max-w-7xl mx-auto px-4 lg:px-8">
           <div className="flex justify-between items-center py-4">
             {/* Logo */}
             <div className="flex items-center space-x-3">
               <img 
-                src={iconImage} 
-                alt="InvistaPRO Logo" 
+                src="https://integrated-system-1c86.onrender.com/aura-system-logo.webp?v=1" 
+                alt="Aura System" 
                 className="w-12 h-12 rounded-lg relative z-0"
               />
               <div className="relative z-10">
-                <h3 className="text-lg font-bold text-white">InvistaPRO</h3>
-                <p className="text-xs text-blue-100 opacity-90">Invista com Risco Zero</p>
+                <h3 className="text-lg font-bold text-white">Aura System</h3>
+                <p className="text-xs text-cyan-300 opacity-90">Renda Variável</p>
               </div>
             </div>
 
@@ -112,13 +111,13 @@ export default function Landing() {
             <div className="text-center lg:text-left mb-8 lg:mb-0">
               <div className="flex items-center justify-center lg:justify-start mb-6">
                 <img 
-                  src={iconImage} 
-                  alt="InvistaPRO Logo" 
+                  src="https://integrated-system-1c86.onrender.com/aura-system-logo.webp?v=1" 
+                  alt="Aura System" 
                   className="w-20 h-20 lg:w-24 lg:h-24 rounded-2xl shadow-lg mr-4"
                 />
                 <div className="text-left">
-                  <h1 className="text-3xl lg:text-5xl font-bold text-white mb-1">InvistaPRO</h1>
-                  <p className="text-sm lg:text-base font-medium text-blue-100 tracking-wide opacity-90">Invista com Risco Zero</p>
+                  <h1 className="text-3xl lg:text-5xl font-bold text-white mb-1">Aura System</h1>
+                  <p className="text-sm lg:text-base font-medium text-cyan-300 tracking-wide opacity-90">Renda Variável</p>
                 </div>
               </div>
               
@@ -257,12 +256,12 @@ export default function Landing() {
       </div>
 
       {/* Footer - Rodapé Horizontal */}
-      <footer className="bg-slate-900/95 backdrop-blur-sm border-t border-white/10">
+      <footer className="bg-black/80 backdrop-blur-xl border-t border-cyan-400/15">
         <div className="max-w-7xl mx-auto px-4 lg:px-8 py-8">
           <div className="flex flex-col md:flex-row justify-between items-center space-y-4 md:space-y-0">
             <div className="flex items-center space-x-4">
               <p className="text-sm text-slate-300">
-                © {currentYear} InvistaPRO. Todos os direitos reservados.
+                © {currentYear} Aura System. Todos os direitos reservados.
               </p>
               <div className="hidden md:flex items-center space-x-2 text-xs text-slate-400">
                 <span>•</span>
