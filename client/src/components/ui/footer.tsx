@@ -1,21 +1,20 @@
 import { Phone, Mail, MapPin, Shield, TrendingUp, Users, ExternalLink } from "lucide-react";
-import iconImage from "@/assets/investpro-icon.png";
 
 export function Footer() {
   const currentYear = new Date().getFullYear();
 
   const handleWhatsAppClick = () => {
-    const message = "Olá! Preciso de suporte com a plataforma InvistaPRO.";
+    const message = "Olá! Preciso de suporte com o módulo Renda Variável da Aura System.";
     const whatsappUrl = `https://wa.me/5519997238298?text=${encodeURIComponent(message)}`;
     window.open(whatsappUrl, '_blank');
   };
 
   const handleEmailClick = () => {
-    window.location.href = "mailto:vfdiogoseg@gmail.com?subject=Suporte InvistaPRO";
+    window.location.href = "mailto:vfdiogoseg@gmail.com?subject=Suporte Aura System";
   };
 
   return (
-    <footer className="bg-background/95 backdrop-blur-sm border-t border-border/50 mt-8">
+    <footer className="bg-black/80 backdrop-blur-xl border-t border-cyan-400/15 mt-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
           
@@ -23,13 +22,13 @@ export function Footer() {
           <div className="md:col-span-1">
             <div className="flex items-center space-x-3 mb-4">
               <img 
-                src={iconImage} 
-                alt="InvistaPRO Logo" 
+                src="https://integrated-system-1c86.onrender.com/aura-system-logo.webp?v=1" 
+                alt="Aura System" 
                 className="w-14 h-14 rounded-xl relative z-0"
               />
               <div className="relative z-10">
-                <h3 className="text-lg font-bold text-foreground">InvistaPRO</h3>
-                <p className="text-xs text-muted-foreground">Invista com Risco Zero</p>
+                <h3 className="text-lg font-bold text-foreground">Aura System</h3>
+                <p className="text-xs text-cyan-300">Renda Variável</p>
               </div>
             </div>
             <p className="text-sm text-muted-foreground leading-relaxed mb-4">
@@ -167,7 +166,7 @@ export function Footer() {
           <div className="flex flex-col md:flex-row justify-between items-center space-y-4 md:space-y-0">
             <div className="flex items-center space-x-4">
               <p className="text-sm text-muted-foreground">
-                © {currentYear} InvistaPRO. Todos os direitos reservados.
+                © {currentYear} Aura System. Todos os direitos reservados.
               </p>
               <div className="hidden md:flex items-center space-x-2 text-xs text-muted-foreground">
                 <span>•</span>
