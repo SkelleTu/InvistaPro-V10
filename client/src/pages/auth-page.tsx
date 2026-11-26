@@ -13,7 +13,6 @@ import { useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { ChartLine, Shield, Eye, EyeOff, TrendingUp, Cpu, AlertTriangle } from "lucide-react";
-import iconImage from "@/assets/investpro-icon.png";
 import { registerUserSchema, loginSchema, type RegisterUser, type LoginUser } from "@shared/schema";
 import investmentBgImage from "@assets/generated_images/Dark_investment_chart_background_ac2d4762.png";
 
@@ -171,14 +170,14 @@ export default function AuthPage() {
           <div className="text-foreground space-y-8">
             <div className="text-center lg:text-left">
               <img 
-                src={iconImage} 
-                alt="InvistaPRO Logo" 
+                src="https://integrated-system-1c86.onrender.com/aura-system-logo.webp?v=1" 
+                alt="Aura System" 
                 className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl mx-auto lg:mx-0 mb-4 sm:mb-6 shadow-lg relative z-0"
               />
               <div className="text-center lg:text-left mb-2 sm:mb-4">
-                <h1 className="text-2xl sm:text-3xl lg:text-5xl font-bold mb-1">InvistaPRO</h1>
+                <h1 className="text-2xl sm:text-3xl lg:text-5xl font-bold mb-1">Aura System</h1>
                 <p className="text-sm sm:text-base font-medium text-muted-foreground tracking-wide opacity-80">
-                  Invista com <span className="font-bold text-foreground">Risco Zero</span>
+                  Módulo integrado de <span className="font-bold text-cyan-300">Renda Variável</span>
                 </p>
               </div>
               <p className="text-sm sm:text-xl text-muted-foreground mb-4 sm:mb-8">
@@ -236,7 +235,7 @@ export default function AuthPage() {
                 <TabsContent value="login" className="space-y-4 sm:space-y-6">
                   <div className="text-center mb-4 sm:mb-6">
                     <h2 className="text-lg sm:text-2xl font-bold text-card-foreground">Bem-vindo de volta</h2>
-                    <p className="text-sm sm:text-base text-muted-foreground">Entre na sua conta InvistaPRO</p>
+                    <p className="text-sm sm:text-base text-muted-foreground">Entre na sua conta Aura System</p>
                   </div>
 
                   {/* Security Alert for Login */}
