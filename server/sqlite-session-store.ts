@@ -1,124 +1,133 @@
 import session from "express-session";
-import Database from "better-sqlite3";
-import fs from "fs";
-import path from "path";
+import { sqlite } from "./db";
 
-const DB_PATH = path.join(process.cwd(), "database", "sessions.db");
+function expiryFor(data: session.SessionData): string {
+  const cookie = data.cookie;
+  const explicit = cookie?.expires ? new Date(cookie.expires).getTime() : Number.NaN;
+  const maxAge = Number(cookie?.maxAge);
+  const expiresAt = Number.isFinite(explicit)
+    ? explicit
+    : Date.now() + (Number.isFinite(maxAge) && maxAge > 0 ? maxAge : 365 * 24 * 60 * 60 * 1000);
+  return new Date(Math.max(expiresAt, Date.now() + 1000)).toISOString();
+}
 
 /**
- * Persistent SQLite-backed session store.
- * Sessions survive server restarts and are only cleared when:
- * - The user manually logs out
- * - The browser cache/cookies are cleared
- * - The session cookie expires (1 year)
+ * Persistent sessions in the shared SQLite database.
+ * The sessions table is replicated to Supabase, avoiding Neon quota dependency.
  */
 export class SqliteSessionStore extends session.Store {
-  private db: ReturnType<typeof Database>;
-  private cleanupInterval: NodeJS.Timeout | null = null;
+  private cleanupInterval: NodeJS.Timeout;
 
   constructor() {
     super();
-    fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
-    this.db = new Database(DB_PATH);
-    this.db.pragma("journal_mode = WAL");
-    this.db.pragma("synchronous = NORMAL");
-    this.init();
-    this.startCleanup();
-  }
-
-  private init() {
-    this.db.exec(`
+    sqlite.exec(`
       CREATE TABLE IF NOT EXISTS sessions (
-        sid  TEXT PRIMARY KEY NOT NULL,
+        sid TEXT PRIMARY KEY NOT NULL,
         sess TEXT NOT NULL,
-        expire INTEGER NOT NULL
+        expire DATETIME NOT NULL
       );
-      CREATE INDEX IF NOT EXISTS sessions_expire_idx ON sessions(expire);
+      CREATE INDEX IF NOT EXISTS IDX_session_expire ON sessions(expire);
     `);
-    console.log("✅ [SessionStore] SQLite persistente iniciado —", DB_PATH);
-  }
-
-  /** Remove sessões expiradas a cada hora */
-  private startCleanup() {
     this.cleanupInterval = setInterval(() => {
-      const now = Math.floor(Date.now() / 1000);
-      const result = this.db.prepare("DELETE FROM sessions WHERE expire < ?").run(now);
-      if ((result.changes as number) > 0) {
-        console.log(`🧹 [SessionStore] ${result.changes} sessão(ões) expirada(s) removida(s)`);
+      try {
+        const result = sqlite.prepare(
+          "DELETE FROM sessions WHERE julianday(expire) <= julianday('now')"
+        ).run();
+        if (result.changes > 0) {
+          console.log(`🧹 [SessionStore] ${result.changes} sessão(ões) expirada(s) removida(s).`);
+        }
+      } catch (error: any) {
+        console.warn("[SessionStore] Limpeza de sessões falhou:", error?.message || error);
       }
-    }, 60 * 60 * 1000); // a cada 1 hora
-    if (this.cleanupInterval.unref) this.cleanupInterval.unref();
+    }, 60 * 60 * 1000);
+    this.cleanupInterval.unref();
+    console.log("✅ [SessionStore] SQLite persistente compartilhado iniciado; sincronização Supabase habilitada.");
   }
 
-  get(sid: string, callback: (err: any, session?: session.SessionData | null) => void) {
+  get(sid: string, callback: (err: any, sessionData?: session.SessionData | null) => void): void {
     try {
-      const now = Math.floor(Date.now() / 1000);
-      const row = this.db.prepare("SELECT sess FROM sessions WHERE sid = ? AND expire > ?").get(sid, now) as any;
+      const row = sqlite.prepare("SELECT sess, expire FROM sessions WHERE sid = ?").get(sid) as any;
       if (!row) return callback(null, null);
-      const sess = JSON.parse(row.sess);
-      callback(null, sess);
-    } catch (err) {
-      callback(err);
+      const expiresAt = typeof row.expire === "number"
+        ? row.expire * 1000
+        : Date.parse(String(row.expire));
+      if (Number.isFinite(expiresAt) && expiresAt <= Date.now()) {
+        sqlite.prepare("DELETE FROM sessions WHERE sid = ?").run(sid);
+        return callback(null, null);
+      }
+      callback(null, JSON.parse(row.sess));
+    } catch (error) {
+      callback(error);
     }
   }
 
-  set(sid: string, sessionData: session.SessionData, callback?: (err?: any) => void) {
+  set(sid: string, data: session.SessionData, callback?: (err?: any) => void): void {
     try {
-      const expire = sessionData.cookie?.expires
-        ? Math.floor(new Date(sessionData.cookie.expires).getTime() / 1000)
-        : Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60;
-
-      this.db
-        .prepare(
-          `INSERT INTO sessions (sid, sess, expire) VALUES (?, ?, ?)
-           ON CONFLICT(sid) DO UPDATE SET sess = excluded.sess, expire = excluded.expire`
-        )
-        .run(sid, JSON.stringify(sessionData), expire);
-
+      sqlite.prepare(`
+        INSERT INTO sessions (sid, sess, expire) VALUES (?, ?, ?)
+        ON CONFLICT(sid) DO UPDATE SET
+          sess = excluded.sess,
+          expire = excluded.expire
+      `).run(sid, JSON.stringify(data), expiryFor(data));
       callback?.();
-    } catch (err) {
-      callback?.(err);
+    } catch (error) {
+      callback?.(error);
     }
   }
 
-  destroy(sid: string, callback?: (err?: any) => void) {
+  touch(sid: string, data: session.SessionData, callback?: (err?: any) => void): void {
     try {
-      this.db.prepare("DELETE FROM sessions WHERE sid = ?").run(sid);
+      sqlite.prepare("UPDATE sessions SET sess = ?, expire = ? WHERE sid = ?")
+        .run(JSON.stringify(data), expiryFor(data), sid);
       callback?.();
-    } catch (err) {
-      callback?.(err);
+    } catch (error) {
+      callback?.(error);
     }
   }
 
-  touch(sid: string, sessionData: session.SessionData, callback?: (err?: any) => void) {
+  destroy(sid: string, callback?: (err?: any) => void): void {
     try {
-      const expire = sessionData.cookie?.expires
-        ? Math.floor(new Date(sessionData.cookie.expires).getTime() / 1000)
-        : Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60;
-
-      this.db.prepare("UPDATE sessions SET expire = ? WHERE sid = ?").run(expire, sid);
+      sqlite.prepare("DELETE FROM sessions WHERE sid = ?").run(sid);
       callback?.();
-    } catch (err) {
-      callback?.(err);
+    } catch (error) {
+      callback?.(error);
     }
   }
 
-  length(callback: (err: any, length?: number) => void) {
+  clear(callback?: (err?: any) => void): void {
     try {
-      const now = Math.floor(Date.now() / 1000);
-      const row = this.db.prepare("SELECT COUNT(*) as count FROM sessions WHERE expire > ?").get(now) as any;
-      callback(null, row.count);
-    } catch (err) {
-      callback(err);
-    }
-  }
-
-  clear(callback?: (err?: any) => void) {
-    try {
-      this.db.prepare("DELETE FROM sessions").run();
+      sqlite.prepare("DELETE FROM sessions").run();
       callback?.();
-    } catch (err) {
-      callback?.(err);
+    } catch (error) {
+      callback?.(error);
     }
+  }
+
+  length(callback: (err: any, length?: number) => void): void {
+    try {
+      const row = sqlite.prepare(
+        "SELECT COUNT(*) AS count FROM sessions WHERE julianday(expire) > julianday('now')"
+      ).get() as any;
+      callback(null, Number(row?.count ?? 0));
+    } catch (error) {
+      callback(error);
+    }
+  }
+
+  all(callback: (err: any, sessions?: Record<string, session.SessionData>) => void): void {
+    try {
+      const rows = sqlite.prepare(
+        "SELECT sid, sess FROM sessions WHERE julianday(expire) > julianday('now')"
+      ).all() as any[];
+      const result: Record<string, session.SessionData> = {};
+      for (const row of rows) result[row.sid] = JSON.parse(row.sess);
+      callback(null, result);
+    } catch (error) {
+      callback(error);
+    }
+  }
+
+  close(): void {
+    clearInterval(this.cleanupInterval);
   }
 }
