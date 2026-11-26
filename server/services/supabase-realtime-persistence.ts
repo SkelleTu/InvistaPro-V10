@@ -15,10 +15,43 @@ const CORE_TABLES = [
   "market_data",
   "daily_pnl",
   "ai_recovery_strategies",
+  "affiliate_profiles",
+  "affiliate_referrals",
+  "affiliate_commissions",
 ] as const;
 
 const BATCH_SIZE = 200;
 const SYNC_INTERVAL_MS = 2000;
+
+function ensureAffiliateReplicaSchema(): void {
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS affiliate_profiles (
+      user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      referral_code TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS affiliate_referrals (
+      id TEXT PRIMARY KEY,
+      referrer_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      referred_user_id TEXT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CHECK (referrer_user_id <> referred_user_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_affiliate_referrals_referrer ON affiliate_referrals(referrer_user_id);
+    CREATE TABLE IF NOT EXISTS affiliate_commissions (
+      id TEXT PRIMARY KEY,
+      referrer_user_id TEXT NOT NULL REFERENCES users(id),
+      referred_user_id TEXT NOT NULL REFERENCES users(id),
+      payment_reference TEXT NOT NULL UNIQUE,
+      eligible_base_cents INTEGER NOT NULL,
+      rate_bps INTEGER NOT NULL DEFAULT 150,
+      commission_amount_cents INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_affiliate_commissions_referrer ON affiliate_commissions(referrer_user_id);
+  `);
+}
 
 let client: SupabaseClient | null = null;
 let timer: NodeJS.Timeout | null = null;
@@ -72,7 +105,7 @@ async function upsertTable(supabase: SupabaseClient, table: string, rows: any[])
     const batch = rows.slice(i, i + BATCH_SIZE);
     const replica = batch.map((row: any) => ({
       table_name: table,
-      row_id: String(row.id ?? row.sid ?? (table + ":" + i)),
+      row_id: String(row.id ?? row.sid ?? row.user_id ?? (table + ":" + i)),
       payload: row,
       updated_at: new Date().toISOString(),
     }));
@@ -80,6 +113,8 @@ async function upsertTable(supabase: SupabaseClient, table: string, rows: any[])
       .from("sqlite_replica_rows")
       .upsert(replica, { onConflict: "table_name,row_id", ignoreDuplicates: false });
     if (replicaError) throw new Error("SUPABASE_REPLICA_" + table + ": " + replicaError.message);
+
+    if (table.startsWith("affiliate_")) { written += batch.length; continue; }
 
     const allowed = typedColumns[table] ?? Object.keys(batch[0]);
     const typedBatch = batch.map((row: any) => {
@@ -109,6 +144,7 @@ export async function syncSqliteToSupabaseOnce(): Promise<{ tables: number; rows
   if (!supabase) return { tables: 0, rows: 0 };
   let tables = 0;
   let rows = 0;
+  ensureAffiliateReplicaSchema();
   for (const table of CORE_TABLES) {
     const source = rowsFor(table);
     if (!source.length) continue;
@@ -128,8 +164,19 @@ export async function restoreSupabaseToSqliteOnce(): Promise<{ tables: number; r
   let tables = 0;
   let rows = 0;
 
+  ensureAffiliateReplicaSchema();
   for (const table of CORE_TABLES) {
-    const { data, error } = await supabase.from(table).select("*");
+    let data: any[] | null = null;
+    let error: any = null;
+    if (table.startsWith("affiliate_")) {
+      const replica = await supabase.from("sqlite_replica_rows").select("payload").eq("table_name", table);
+      error = replica.error;
+      data = (replica.data || []).map((item: any) => typeof item.payload === "string" ? JSON.parse(item.payload) : item.payload).filter(Boolean);
+    } else {
+      const result = await supabase.from(table).select("*");
+      data = result.data;
+      error = result.error;
+    }
     if (error) {
       console.warn(`[SUPABASE→SQLITE] ${table}: ${error.message}`);
       continue;
@@ -142,7 +189,7 @@ export async function restoreSupabaseToSqliteOnce(): Promise<{ tables: number; r
       (sqlite.prepare(`PRAGMA table_info("${table}")`).all() as any[]).map(column => String(column.name))
     );
     const columns = Object.keys(data[0]).filter(column => localColumns.has(column));
-    const pk = table === "sessions" ? "sid" : "id";
+    const pk = table === "sessions" ? "sid" : table === "affiliate_profiles" ? "user_id" : "id";
     if (!columns.includes(pk)) continue;
 
     const quotedColumns = columns.map(c => `"${c}"`).join(",");
