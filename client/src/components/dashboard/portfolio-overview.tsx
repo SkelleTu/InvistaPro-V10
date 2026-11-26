@@ -28,7 +28,8 @@ export default function PortfolioOverview() {
   );
 
   const formatCurrency = (value: string | number) => {
-    const numValue = typeof value === 'string' ? parseFloat(value) : value;
+    const parsedValue = typeof value === 'string' ? Number.parseFloat(value) : Number(value);
+    const numValue = Number.isFinite(parsedValue) ? parsedValue : 0;
     return new Intl.NumberFormat('pt-BR', {
       style: 'currency',
       currency: 'BRL'
@@ -104,7 +105,7 @@ export default function PortfolioOverview() {
             </div>
             <div className="flex items-center">
               <ArrowUp className="h-4 w-4 text-green-400 mr-1" />
-              <span className="text-green-400 text-sm">Lucros de até 130% dos maiores bancos brasileiros</span>
+              <span className="text-green-400 text-sm">Saldo disponível para acompanhar seus investimentos</span>
             </div>
           </CardContent>
         </Card>
@@ -114,7 +115,7 @@ export default function PortfolioOverview() {
           <CardContent className="p-6">
             <div className="flex items-center justify-between mb-4">
               <div>
-                <p className="text-muted-foreground text-sm">Até 130% dos Melhores Bancos</p>
+                <p className="text-muted-foreground text-sm">Rendimento acumulado</p>
                 <p className="text-2xl font-bold text-card-foreground">
                   {formatCurrency((currentYield as any)?.rendimento || 0)}
                 </p>
@@ -124,7 +125,7 @@ export default function PortfolioOverview() {
               </div>
             </div>
             <div className="text-sm text-muted-foreground">
-              Rendimento de até 130% baseado nos lucros dos principais bancos
+              Valor de rendimentos registrado na sua conta
             </div>
           </CardContent>
         </Card>
