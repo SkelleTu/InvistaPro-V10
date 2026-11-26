@@ -119,7 +119,7 @@ async function uploadBackupToDrive(filePath: string, fileName: string): Promise<
     : { name: fileName, parents: [config.folderId] };
   const binary = await fs.promises.readFile(filePath);
   const form = new FormData();
-  form.append("metadata", new Blob([new Uint8Array(binary)], { type: "application/json" }), "metadata.json");
+  form.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }));
   form.append("file", new Blob([new Uint8Array(binary)], { type: "application/vnd.sqlite3" }), fileName);
 
   const endpoint = target
