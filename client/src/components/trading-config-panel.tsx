@@ -456,7 +456,7 @@ export default function TradingConfigPanel() {
                 <li>✅ Operação: <span className="font-mono font-bold">{operatingDuration[0]} minutos</span></li>
                 <li>⏸️ Pausa Aleatória: <span className="font-mono font-bold">{pauseMinDuration[0]}s - {pauseMaxDuration[0]}s</span></li>
                 <li>🤖 Consenso de IAs: <span className="font-mono font-bold">{(minAIConsensus[0] * 100).toFixed(0)}%</span></li>
-                <li>🟢 Status: <span className="font-bold">{pauseConfig.isPausedNow ? '⏸️ EM PAUSA' : '▶️ OPERANDO'}</span></li>
+                <li>⏱️ Estado da pausa: <span className="font-bold">{pauseConfig.isPausedNow ? '⏸️ Em pausa neste momento' : '▶️ Fora do período de pausa'}</span></li>
               </ul>
             </div>
           </CardContent>
