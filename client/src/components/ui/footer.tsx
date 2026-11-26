@@ -183,7 +183,7 @@ export function Footer() {
               </div>
               <div className="flex items-center space-x-2 text-xs">
                 <TrendingUp className="w-3 h-3 text-blue-400" />
-                <span className="text-muted-foreground">Rendimentos até 130%</span>
+                <span className="text-muted-foreground">Consulte os rendimentos registrados</span>
               </div>
             </div>
           </div>
