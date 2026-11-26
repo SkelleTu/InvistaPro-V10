@@ -187,10 +187,10 @@ export default function PortalCliente() {
     <>
       <div className="flex items-center gap-3 px-5 py-6 border-b border-white/10">
         <div className="h-10 w-10 rounded-xl bg-violet-500/20 border border-violet-300/20 flex items-center justify-center">
-          <Activity className="h-5 w-5 text-violet-300" />
+          <Activity className="h-5 w-5 text-cyan-300" />
         </div>
         <div>
-          <p className="font-bold tracking-wide text-white">INVISTA<span className="text-violet-300">PRO</span></p>
+          <p className="font-bold tracking-wide text-white">INVISTA<span className="text-cyan-300">PRO</span></p>
           <p className="text-[10px] uppercase tracking-[.22em] text-slate-500">Portal do cliente</p>
         </div>
       </div>
@@ -198,7 +198,7 @@ export default function PortalCliente() {
       <nav className="px-3 space-y-1">
         {navItems.map(({ id, label, icon: Icon }) => (
           <button key={id} onClick={() => selectTab(id)}
-            className={`w-full flex items-center gap-3 rounded-xl px-3 py-3 text-sm transition ${active === id ? "bg-violet-500/15 text-violet-200 border border-violet-400/20" : "text-slate-400 hover:bg-white/5 hover:text-white"}`}>
+            className={`w-full flex items-center gap-3 rounded-xl px-3 py-3 text-sm transition ${active === id ? "bg-violet-500/15 text-cyan-200 border border-violet-400/20" : "text-slate-400 hover:bg-white/5 hover:text-white"}`}>
             <Icon className="h-4 w-4" /> <span>{label}</span>
             {active === id && <ChevronRight className="h-4 w-4 ml-auto" />}
           </button>
@@ -224,7 +224,7 @@ export default function PortalCliente() {
 
   const PageTitle = ({ title, subtitle }: { title: string; subtitle: string }) => (
     <div className="mb-7">
-      <p className="text-xs uppercase tracking-[.2em] text-violet-300 mb-2">Área do cliente</p>
+      <p className="text-xs uppercase tracking-[.2em] text-cyan-300 mb-2">Área do cliente</p>
       <h1 className="text-2xl sm:text-3xl font-bold text-white">{title}</h1>
       <p className="text-sm text-slate-400 mt-2">{subtitle}</p>
     </div>
@@ -234,7 +234,7 @@ export default function PortalCliente() {
     <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-5 shadow-xl shadow-black/10">
       <div className="flex items-center justify-between">
         <span className="text-sm text-slate-400">{label}</span>
-        <span className="h-9 w-9 rounded-xl bg-violet-500/10 flex items-center justify-center"><Icon className="h-4 w-4 text-violet-300" /></span>
+        <span className="h-9 w-9 rounded-xl bg-violet-500/10 flex items-center justify-center"><Icon className="h-4 w-4 text-cyan-300" /></span>
       </div>
       <p className="text-2xl font-bold text-white mt-4">{value}</p>
       <p className="text-xs text-slate-500 mt-1">{detail}</p>
@@ -250,7 +250,7 @@ export default function PortalCliente() {
       const isDeposit = item.tipo === "deposito";
       const isYield = item.tipo === "rendimento";
       return <div key={item.id ?? `${item.tipo}-${item.createdAt}-${index}`} className="flex items-center gap-3 px-5 py-4">
-        <div className={`h-9 w-9 rounded-xl flex items-center justify-center ${isDeposit ? "bg-emerald-500/10 text-emerald-300" : isYield ? "bg-violet-500/10 text-violet-300" : "bg-amber-500/10 text-amber-300"}`}>
+        <div className={`h-9 w-9 rounded-xl flex items-center justify-center ${isDeposit ? "bg-emerald-500/10 text-emerald-300" : isYield ? "bg-violet-500/10 text-cyan-300" : "bg-amber-500/10 text-amber-300"}`}>
           {isDeposit ? <ArrowDownLeft className="h-4 w-4" /> : <ArrowUpRight className="h-4 w-4" />}
         </div>
         <div className="min-w-0 flex-1">
@@ -276,14 +276,14 @@ export default function PortalCliente() {
       </div>
       <div className="grid grid-cols-1 xl:grid-cols-[1.4fr_1fr] gap-4">
         <section className="rounded-2xl border border-white/10 bg-slate-900/70 overflow-hidden">
-          <div className="flex items-center justify-between p-5 border-b border-white/5"><div><h2 className="font-semibold text-white">Movimentações recentes</h2><p className="text-xs text-slate-500 mt-1">Dados vinculados à sua conta</p></div><button onClick={() => selectTab("historico")} className="text-xs text-violet-300 hover:text-white">Ver histórico</button></div>
+          <div className="flex items-center justify-between p-5 border-b border-white/5"><div><h2 className="font-semibold text-white">Movimentações recentes</h2><p className="text-xs text-slate-500 mt-1">Dados vinculados à sua conta</p></div><button onClick={() => selectTab("historico")} className="text-xs text-cyan-300 hover:text-white">Ver histórico</button></div>
           <MovementList limit={5} />
         </section>
         <section className="rounded-2xl border border-violet-400/20 bg-gradient-to-br from-violet-950/60 to-slate-900 p-5">
-          <div className="h-10 w-10 rounded-xl bg-violet-400/15 flex items-center justify-center mb-4"><Sparkles className="h-5 w-5 text-violet-200" /></div>
+          <div className="h-10 w-10 rounded-xl bg-violet-400/15 flex items-center justify-center mb-4"><Sparkles className="h-5 w-5 text-cyan-200" /></div>
           <h2 className="text-lg font-semibold text-white">Central do cliente</h2>
           <p className="text-sm text-slate-400 mt-2 leading-6">Consulte sua carteira, acompanhe os registros financeiros e acesse as funcionalidades disponíveis para sua conta.</p>
-          <Button onClick={() => selectTab("carteira")} className="mt-5 bg-violet-600 hover:bg-violet-500 text-white">Abrir minha carteira</Button>
+          <Button onClick={() => selectTab("carteira")} className="mt-5 bg-cyan-600 hover:bg-cyan-500 text-white">Abrir minha carteira</Button>
         </section>
       </div>
     </>;
@@ -312,7 +312,7 @@ export default function PortalCliente() {
           <label className="flex-1 text-xs text-slate-400">Valor bruto solicitado (R$)
             <input inputMode="decimal" type="number" min="0.01" step="0.01" value={withdrawalAmount} onChange={e=>{setWithdrawalAmount(e.target.value);withdrawalQuoteMutation.reset();}} className="mt-2 w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-base text-white outline-none focus:border-violet-400" />
           </label>
-          <div className="flex items-end"><Button onClick={()=>withdrawalQuoteMutation.mutate()} disabled={withdrawalQuoteMutation.isPending} className="bg-violet-600 hover:bg-violet-500 text-white">{withdrawalQuoteMutation.isPending ? "Calculando…" : "Calcular taxa"}</Button></div>
+          <div className="flex items-end"><Button onClick={()=>withdrawalQuoteMutation.mutate()} disabled={withdrawalQuoteMutation.isPending} className="bg-cyan-600 hover:bg-cyan-500 text-white">{withdrawalQuoteMutation.isPending ? "Calculando…" : "Calcular taxa"}</Button></div>
         </div>
         {withdrawalQuoteMutation.isError && <p className="text-sm text-rose-300 mt-3">{withdrawalQuoteMutation.error instanceof Error ? withdrawalQuoteMutation.error.message : "Não foi possível calcular a taxa."}</p>}
         {withdrawalQuoteMutation.data && <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
@@ -363,11 +363,11 @@ export default function PortalCliente() {
       {affiliatesQuery.isLoading ? <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-8 text-sm text-slate-400">Carregando sua rede…</div> :
        affiliatesQuery.isError || !affiliatesQuery.data ? <div className="rounded-2xl border border-rose-400/20 bg-rose-950/20 p-6 text-sm text-rose-200">Não foi possível carregar os dados de afiliados. Tente atualizar a página.</div> : <>
         <section className="rounded-2xl border border-violet-400/20 bg-gradient-to-br from-violet-950/60 to-slate-900 p-6 mb-5">
-          <div className="flex items-center gap-3 mb-3"><Network className="h-6 w-6 text-violet-200" /><h2 className="font-semibold text-white">Seu link de indicação</h2></div>
+          <div className="flex items-center gap-3 mb-3"><Network className="h-6 w-6 text-cyan-200" /><h2 className="font-semibold text-white">Seu link de indicação</h2></div>
           <p className="text-xs text-slate-400 mb-2">Código exclusivo</p>
           <div className="flex flex-col sm:flex-row gap-3">
-            <div className="flex-1 rounded-xl bg-black/30 border border-white/10 px-4 py-3 font-mono tracking-widest text-violet-200">{affiliatesQuery.data.referralCode}</div>
-            <Button onClick={() => navigator.clipboard.writeText(window.location.origin + affiliatesQuery.data!.referralLink).then(()=>setReferralCopied(true)).catch(()=>setReferralCopied(false))} className="bg-violet-600 hover:bg-violet-500 text-white">{referralCopied ? "Link copiado" : "Copiar link"}</Button>
+            <div className="flex-1 rounded-xl bg-black/30 border border-white/10 px-4 py-3 font-mono tracking-widest text-cyan-200">{affiliatesQuery.data.referralCode}</div>
+            <Button onClick={() => navigator.clipboard.writeText(window.location.origin + affiliatesQuery.data!.referralLink).then(()=>setReferralCopied(true)).catch(()=>setReferralCopied(false))} className="bg-cyan-600 hover:bg-cyan-500 text-white">{referralCopied ? "Link copiado" : "Copiar link"}</Button>
           </div>
           <p className="text-xs text-slate-500 mt-3 break-all">{window.location.origin + affiliatesQuery.data.referralLink}</p>
         </section>
@@ -381,7 +381,7 @@ export default function PortalCliente() {
         <section className="rounded-2xl border border-white/10 bg-slate-900/70 overflow-hidden mb-5">
           <div className="p-5 border-b border-white/10"><h2 className="font-semibold text-white">Rede de indicações</h2><p className="text-xs text-slate-500 mt-1">Privacidade: nomes abreviados e sem dados de contato de terceiros.</p></div>
           {!affiliatesQuery.data.network.length ? <p className="p-7 text-center text-sm text-slate-500">Você ainda não possui indicações cadastradas.</p> :
-            <div className="divide-y divide-white/5">{affiliatesQuery.data.network.map((referral) => <div key={referral.id} className="flex items-center justify-between gap-3 px-5 py-4"><div className="flex items-center gap-3"><div className="h-9 w-9 rounded-full bg-violet-500/10 flex items-center justify-center text-violet-200"><Users className="h-4 w-4" /></div><div><span className="text-sm text-slate-200">{referral.displayName}</span><p className="text-[10px] text-slate-500">Nível {referral.level}</p></div></div><span className="text-xs text-slate-500">{dateLabel(referral.createdAt)}</span></div>)}</div>}
+            <div className="divide-y divide-white/5">{affiliatesQuery.data.network.map((referral) => <div key={referral.id} className="flex items-center justify-between gap-3 px-5 py-4"><div className="flex items-center gap-3"><div className="h-9 w-9 rounded-full bg-violet-500/10 flex items-center justify-center text-cyan-200"><Users className="h-4 w-4" /></div><div><span className="text-sm text-slate-200">{referral.displayName}</span><p className="text-[10px] text-slate-500">Nível {referral.level}</p></div></div><span className="text-xs text-slate-500">{dateLabel(referral.createdAt)}</span></div>)}</div>}
         </section>
         <div className="rounded-xl border border-amber-400/20 bg-amber-950/20 p-4 text-xs leading-5 text-amber-200/90">{affiliatesQuery.data.commissionNotice} A base de cálculo e a liberação de comissões dependem da regra final do programa e da integração de pagamentos. O saldo de comissão não é sacável nesta etapa.</div>
       </>}
@@ -404,10 +404,10 @@ export default function PortalCliente() {
 
     if (active === "energizar") return <>
       <PageTitle title="Energizar IA" subtitle="Assistente integrado à sua conta para consultar dados e histórico registrados." />
-      <section className="rounded-2xl border border-violet-400/20 bg-gradient-to-br from-violet-950/50 to-slate-900 p-6">
-        <div className="flex items-center gap-3 mb-3"><Sparkles className="h-7 w-7 text-violet-200"/><h2 className="font-semibold text-white text-lg">Assistente Invista Pro</h2></div>
+      <section className="rounded-2xl border border-cyan-400/20 bg-gradient-to-br from-cyan-950/40 to-slate-950 p-6">
+        <div className="flex items-center gap-3 mb-3"><Sparkles className="h-7 w-7 text-cyan-200"/><h2 className="font-semibold text-white text-lg">Assistente Aura System</h2></div>
         <p className="text-sm leading-6 text-slate-300 mb-4">A IA está conectada ao contexto permitido da sua conta. Clientes podem consultar movimentações e resultados individuais; controles do motor central e dados de outras contas permanecem restritos.</p>
-        <Button onClick={()=>window.dispatchEvent(new Event("invista:open-ai-assistant"))} className="bg-violet-600 hover:bg-violet-500 text-white"><Sparkles className="h-4 w-4 mr-2"/>Abrir assistente IA</Button>
+        <Button onClick={()=>window.dispatchEvent(new Event("invista:open-ai-assistant"))} className="bg-cyan-600 hover:bg-cyan-500 text-white"><Sparkles className="h-4 w-4 mr-2"/>Abrir assistente IA</Button>
       </section>
     </>;
     if (active === "perfil") return <>
@@ -430,7 +430,7 @@ export default function PortalCliente() {
             <option value="rg">RG</option><option value="cnh">CNH</option><option value="cpf">CPF</option><option value="comprovante">Comprovante de residência</option>
           </select>
           <input type="file" accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf" onChange={(e)=>setDocumentFile(e.target.files?.[0] || null)} className="min-w-0 text-xs text-slate-300 file:mr-3 file:rounded-lg file:border-0 file:bg-violet-600 file:px-3 file:py-2 file:text-white" />
-          <Button disabled={!documentFile || uploadDocumentMutation.isPending} onClick={()=>uploadDocumentMutation.mutate()} className="bg-violet-600 hover:bg-violet-500 text-white">{uploadDocumentMutation.isPending ? "Enviando…" : "Enviar arquivo"}</Button>
+          <Button disabled={!documentFile || uploadDocumentMutation.isPending} onClick={()=>uploadDocumentMutation.mutate()} className="bg-cyan-600 hover:bg-cyan-500 text-white">{uploadDocumentMutation.isPending ? "Enviando…" : "Enviar arquivo"}</Button>
         </div>
         {documentFile && <p className="text-xs text-slate-400 mt-2">Selecionado: {documentFile.name}</p>}
         {uploadDocumentMutation.isError && <p className="text-xs text-rose-300 mt-2">{uploadDocumentMutation.error.message}</p>}
@@ -439,13 +439,13 @@ export default function PortalCliente() {
     </>;
 
     return <>
-      <PageTitle title="Energizar IA" subtitle="Central de acompanhamento e acesso ao assistente inteligente Invista Pro." />
+      <PageTitle title="Energizar IA" subtitle="Central de acompanhamento e acesso ao assistente inteligente Aura System." />
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
         <section className="rounded-2xl border border-violet-400/20 bg-gradient-to-br from-violet-950/60 to-slate-900 p-6">
-          <div className="h-12 w-12 rounded-xl bg-violet-400/15 flex items-center justify-center mb-4"><Sparkles className="h-6 w-6 text-violet-200" /></div>
-          <h2 className="text-lg font-semibold text-white">IA Invista Pro</h2>
+          <div className="h-12 w-12 rounded-xl bg-violet-400/15 flex items-center justify-center mb-4"><Sparkles className="h-6 w-6 text-cyan-200" /></div>
+          <h2 className="text-lg font-semibold text-white">IA Aura System</h2>
           <p className="text-sm text-slate-300 mt-2 leading-6">O assistente inteligente já está disponível no botão flutuante no canto inferior da tela. Use-o para tirar dúvidas e navegar pelas funcionalidades habilitadas para sua conta.</p>
-          <div className="mt-5 rounded-xl border border-white/10 bg-black/20 p-4"><p className="text-xs uppercase tracking-wider text-violet-200">Status</p><p className="text-sm text-white mt-1">Assistente conectado à sessão autenticada</p></div>
+          <div className="mt-5 rounded-xl border border-white/10 bg-black/20 p-4"><p className="text-xs uppercase tracking-wider text-cyan-200">Status</p><p className="text-sm text-white mt-1">Assistente conectado à sessão autenticada</p></div>
         </section>
         <section className="rounded-2xl border border-amber-400/20 bg-slate-900/70 p-6">
           <div className="flex items-center gap-3"><CircleDollarSign className="h-7 w-7 text-amber-300" /><h2 className="font-semibold text-white">Aportes e pagamentos</h2></div>
@@ -461,18 +461,18 @@ export default function PortalCliente() {
     {mobileOpen && <div className="fixed inset-0 z-50 lg:hidden"><button className="absolute inset-0 bg-black/70" onClick={() => setMobileOpen(false)} aria-label="Fechar menu" /><aside className="relative z-10 w-72 h-full bg-[#0b0e1a] flex flex-col"><div className="flex justify-end p-2"><button onClick={() => setMobileOpen(false)} className="p-2 text-slate-400"><X /></button></div><SidebarContent /></aside></div>}
     <main className="min-w-0 flex-1">
       <header className="h-16 border-b border-white/10 bg-[#0b0e1a]/80 backdrop-blur flex items-center justify-between px-4 sm:px-7 sticky top-0 z-30">
-        <div className="flex items-center gap-3"><button onClick={() => setMobileOpen(true)} className="lg:hidden text-slate-300"><Menu /></button><span className="text-xs text-slate-500 hidden sm:inline">INVISTA PRO /</span><span className="text-sm text-slate-200"> {navItems.find((item) => item.id === active)?.label ?? "Energizar IA"}</span></div>
+        <div className="flex items-center gap-3"><button onClick={() => setMobileOpen(true)} className="lg:hidden text-slate-300"><Menu /></button><span className="text-xs text-slate-500 hidden sm:inline">AURA SYSTEM /</span><span className="text-sm text-slate-200"> {navItems.find((item) => item.id === active)?.label ?? "Energizar IA"}</span></div>
         <div className="flex items-center gap-3">
           <div className="relative">
             <button onClick={()=>setNotificationsOpen((open)=>!open)} className="h-9 w-9 rounded-full border border-white/10 flex items-center justify-center text-slate-400 hover:text-white" title="Atividade recente" aria-expanded={notificationsOpen}><Bell className="h-4 w-4" />{movements.length>0&&<span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-violet-400" />}</button>
             {notificationsOpen&&<div className="absolute right-0 top-12 z-50 w-80 max-w-[calc(100vw-2rem)] rounded-xl border border-white/10 bg-[#101426] shadow-2xl overflow-hidden">
               <div className="p-4 border-b border-white/10"><p className="text-sm font-semibold text-white">Atividade recente</p><p className="text-[11px] text-slate-500 mt-1">Movimentações registradas na sua conta</p></div>
-              {!movements.length?<p className="p-4 text-xs text-slate-500">Nenhuma atividade registrada.</p>:<div className="divide-y divide-white/5">{movements.slice(0,5).map((item,index)=><button key={item.id??index} onClick={()=>{setNotificationsOpen(false);selectTab("historico");}} className="w-full text-left p-3 hover:bg-white/5"><div className="flex justify-between gap-2"><span className="text-xs text-slate-200 capitalize">{item.descricao||item.tipo}</span><span className="text-xs text-violet-200">{money(item.valor)}</span></div><p className="text-[10px] text-slate-500 mt-1">{dateLabel(item.createdAt)}</p></button>)}</div>}
-              <button onClick={()=>{setNotificationsOpen(false);selectTab("historico");}} className="w-full border-t border-white/10 p-3 text-xs text-violet-300 hover:bg-white/5">Abrir histórico completo</button>
+              {!movements.length?<p className="p-4 text-xs text-slate-500">Nenhuma atividade registrada.</p>:<div className="divide-y divide-white/5">{movements.slice(0,5).map((item,index)=><button key={item.id??index} onClick={()=>{setNotificationsOpen(false);selectTab("historico");}} className="w-full text-left p-3 hover:bg-white/5"><div className="flex justify-between gap-2"><span className="text-xs text-slate-200 capitalize">{item.descricao||item.tipo}</span><span className="text-xs text-cyan-200">{money(item.valor)}</span></div><p className="text-[10px] text-slate-500 mt-1">{dateLabel(item.createdAt)}</p></button>)}</div>}
+              <button onClick={()=>{setNotificationsOpen(false);selectTab("historico");}} className="w-full border-t border-white/10 p-3 text-xs text-cyan-300 hover:bg-white/5">Abrir histórico completo</button>
             </div>}
           </div>
           <div className="hidden sm:block text-right"><p className="text-xs font-medium text-white">{user?.nomeCompleto}</p><p className="text-[10px] text-slate-500">Conta do cliente</p></div>
-          <div className="h-9 w-9 rounded-full bg-violet-500/20 border border-violet-300/20 flex items-center justify-center text-sm font-bold text-violet-200">{user?.nomeCompleto?.slice(0,1) || "C"}</div>
+          <div className="h-9 w-9 rounded-full bg-violet-500/20 border border-violet-300/20 flex items-center justify-center text-sm font-bold text-cyan-200">{user?.nomeCompleto?.slice(0,1) || "C"}</div>
         </div>
       </header>
       <div className="max-w-7xl mx-auto p-4 sm:p-7 lg:p-9">
@@ -480,7 +480,7 @@ export default function PortalCliente() {
         {dashboardQuery.isError && <div className="mb-5 rounded-xl border border-rose-400/20 bg-rose-950/30 p-4 text-sm text-rose-200">Não foi possível atualizar o saldo pelo backend. Os dados exibidos podem estar desatualizados.</div>}
         {financialSummaryQuery.isError && <div className="mb-5 rounded-xl border border-amber-400/20 bg-amber-950/20 p-4 text-sm text-amber-200">O resumo financeiro completo não está disponível. Os totais podem refletir apenas as movimentações recentes carregadas.</div>}
         {renderContent()}
-        <footer className="mt-10 border-t border-white/10 pt-5 text-[11px] text-slate-600 flex flex-wrap justify-between gap-2"><span>Invista Pro · Portal do Cliente</span><span>Informações financeiras sujeitas à conciliação do sistema.</span></footer>
+        <footer className="mt-10 border-t border-white/10 pt-5 text-[11px] text-slate-600 flex flex-wrap justify-between gap-2"><span>Aura System · Renda Variável</span><span>Informações financeiras sujeitas à conciliação do sistema.</span></footer>
       </div>
     </main>
   </div>;
