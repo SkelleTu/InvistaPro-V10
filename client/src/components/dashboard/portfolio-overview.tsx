@@ -2,9 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
 import { useTheme } from "@/contexts/ThemeContext";
 import { Card, CardContent } from "@/components/ui/card";
-import { Wallet, TrendingUp, Calendar, ArrowUp } from "lucide-react";
+import { Wallet, TrendingUp, Calendar, ArrowUp, AlertCircle } from "lucide-react";
 import InvestmentPieChart from "@/components/charts/InvestmentPieChart";
-import TrendChart from "@/components/charts/TrendChart";
 
 export default function PortfolioOverview() {
   const { user } = useAuth();
@@ -23,7 +22,7 @@ export default function PortfolioOverview() {
       <h2 className="text-2xl font-bold text-foreground mb-2">
         Olá, {user?.nomeCompleto?.split(' ')[0] || 'Investidor'}!
       </h2>
-      <p className="text-muted-foreground">Acompanhe seus investimentos e rendimentos</p>
+      <p className="text-muted-foreground">Acompanhe o saldo registrado e as ferramentas da plataforma</p>
     </div>
   );
 
@@ -36,52 +35,16 @@ export default function PortfolioOverview() {
     }).format(numValue);
   };
 
-  const calculateNextWithdrawalDay = () => {
-    const today = new Date();
-    const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
-    return lastDay;
+  // A composição usa apenas saldo registrado e estimativa matemática; não representa aportes ou lucros conciliados.
+  const currentBalance = Number(user?.saldo ?? 0);
+  const currentYieldValue = Number.parseFloat(String(currentYield?.rendimento ?? "0"));
+  const safeBalance = Number.isFinite(currentBalance) ? currentBalance : 0;
+  const safeYield = Number.isFinite(currentYieldValue) ? Math.max(0, currentYieldValue) : 0;
+  const investmentData = {
+    totalInvested: Math.max(safeBalance - safeYield, 0),
+    totalYield: safeYield,
+    currentBalance: safeBalance,
   };
-
-  // Gerar dados para os gráficos do tema fluent
-  const generateChartData = () => {
-    const currentBalance = user?.saldo ?? 0;
-    const currentYieldValue = parseFloat((currentYield as any)?.rendimento || "0");
-    const totalInvested = currentBalance - currentYieldValue;
-    
-    // Dados para gráfico de pizza
-    const investmentData = {
-      totalInvested: Math.max(totalInvested, 0),
-      totalYield: currentYieldValue,
-      currentBalance: currentBalance
-    };
-
-    // Simular dados históricos para gráfico de tendência
-    const months: string[] = [];
-    const values: number[] = [];
-    const currentMonth = new Date().getMonth();
-    
-    for (let i = 5; i >= 0; i--) {
-      const monthDate = new Date();
-      monthDate.setMonth(currentMonth - i);
-      months.push(monthDate.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' }));
-      
-      // Simular crescimento gradual
-      const baseValue = totalInvested;
-      const growth = (5 - i) * (currentYieldValue / 6);
-      values.push(baseValue + growth);
-    }
-
-    const trendData = {
-      months,
-      values,
-      trend: currentYieldValue > 0 ? 'up' as const : 'stable' as const,
-      monthlyGrowth: 0.835 // 0.835% mensal
-    };
-
-    return { investmentData, trendData };
-  };
-
-  const { investmentData, trendData } = generateChartData();
 
   return (
     <div>
@@ -105,7 +68,7 @@ export default function PortfolioOverview() {
             </div>
             <div className="flex items-center">
               <ArrowUp className="h-4 w-4 text-green-400 mr-1" />
-              <span className="text-green-400 text-sm">Saldo disponível para acompanhar seus investimentos</span>
+              <span className="text-green-400 text-sm">Saldo registrado na conta; não confirma disponibilidade para saque</span>
             </div>
           </CardContent>
         </Card>
@@ -115,7 +78,7 @@ export default function PortfolioOverview() {
           <CardContent className="p-6">
             <div className="flex items-center justify-between mb-4">
               <div>
-                <p className="text-muted-foreground text-sm">Rendimento acumulado</p>
+                <p className="text-muted-foreground text-sm">Rendimento estimado</p>
                 <p className="text-2xl font-bold text-card-foreground">
                   {formatCurrency((currentYield as any)?.rendimento || 0)}
                 </p>
@@ -125,7 +88,7 @@ export default function PortfolioOverview() {
               </div>
             </div>
             <div className="text-sm text-muted-foreground">
-              Valor de rendimentos registrado na sua conta
+              Estimativa ilustrativa baseada em taxa fixa de 0,835% ao mês; não é rendimento realizado ou contratado
             </div>
           </CardContent>
         </Card>
@@ -135,9 +98,9 @@ export default function PortfolioOverview() {
           <CardContent className="p-6">
             <div className="flex items-center justify-between mb-4">
               <div>
-                <p className="text-muted-foreground text-sm">Próximo Saque</p>
+                <p className="text-muted-foreground text-sm">Status dos saques</p>
                 <p className="text-2xl font-bold text-card-foreground">
-                  Dia {dashboardData?.proximoSaque || calculateNextWithdrawalDay()}
+                  Indisponível
                 </p>
               </div>
               <div className={`w-12 h-12 ${theme === 'fluent' ? 'bg-amber-500/10 border border-amber-200' : 'bg-amber-500/20 rounded-xl'} flex items-center justify-center`}>
@@ -145,7 +108,7 @@ export default function PortfolioOverview() {
               </div>
             </div>
             <div className="text-sm text-muted-foreground">
-              Rendimento disponível
+              Integração de transferência não configurada
             </div>
           </CardContent>
         </Card>
@@ -187,15 +150,16 @@ export default function PortfolioOverview() {
       {theme === 'fluent' && (
         <div className="space-y-8 mt-8">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            {/* Gráfico de Pizza - Composição dos Investimentos */}
             <InvestmentPieChart data={investmentData} />
-            
-            {/* Gráfico de Tendência - Evolução do Saldo */}
-            <TrendChart 
-              data={trendData}
-              title="Evolução do Seu Dinheiro"
-              subtitle="Acompanhe como seus investimentos crescem mês a mês"
-            />
+            <Card className="fluent-card bg-card shadow-lg border-0">
+              <CardContent className="h-full min-h-[280px] flex flex-col items-center justify-center text-center p-8">
+                <AlertCircle className="h-8 w-8 text-muted-foreground mb-3" />
+                <h3 className="font-semibold text-foreground">Histórico de evolução indisponível</h3>
+                <p className="text-sm text-muted-foreground mt-2 max-w-sm">
+                  Ainda não há uma série histórica de saldos e movimentações conciliadas. A plataforma não cria crescimento fictício para preencher o gráfico.
+                </p>
+              </CardContent>
+            </Card>
           </div>
         </div>
       )}
