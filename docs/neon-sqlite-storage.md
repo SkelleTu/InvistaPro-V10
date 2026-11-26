@@ -35,3 +35,20 @@ The SQLite file is stored at `database/investpro.db`. On Render instances withou
 6. Confirm a database-identity mismatch blocks API readiness and never silently switches to the other platform's data.
 7. Configure the private Supabase KYC bucket and server-only service-role secret; verify upload, authenticated admin download and deletion/retention policy.
 8. Keep Render auto-deploy disabled until CI and a controlled verification pass; deploy V10 and Aura from the same validated core commit.
+
+
+## Daily SQLite backup rotation
+
+The V10 process creates one SQLite snapshot per calendar day using the `America/Sao_Paulo` timezone. The current day's file is refreshed every 15 minutes; when the date changes, a new daily file is created. Local and Google Drive retention keep the newest 30 dated snapshots. Snapshot creation uses better-sqlite3's online backup API, writes to a temporary file, runs `PRAGMA quick_check`, and atomically replaces the current day's copy only after validation. It does not run VACUUM against the live database.
+
+For durable off-instance copies, configure these server-only Render environment variables:
+
+- `GOOGLE_DRIVE_CLIENT_ID`
+- `GOOGLE_DRIVE_CLIENT_SECRET`
+- `GOOGLE_DRIVE_REFRESH_TOKEN`
+- `GOOGLE_DRIVE_BACKUP_FOLDER_ID` (ID of an existing private Drive folder)
+- `SQLITE_BACKUP_DIR` (for example, `/var/data/database-backups` when a persistent disk is mounted)
+
+The Drive integration updates the same named file for the current day and prunes dated snapshots older than the newest 30. OAuth credentials must belong to an account authorized to write to that folder. The application never logs credential values. If Drive is not configured or synchronization fails, a validated local snapshot is still retained and the failure is logged; this is not equivalent to a verified off-site backup.
+
+Important: the Render V10 service currently uses the Free plan, whose filesystem is ephemeral. A local `database-backups` directory on that plan is not durable across instance replacement. Until Google Drive OAuth is configured and a successful upload is verified, the 30-day off-site retention is NOT active. Do not treat local files on the Free instance as the disaster-recovery copy.
