@@ -1729,7 +1729,7 @@ export default function TradingSystemPage() {
             <h1 className="text-3xl font-bold text-foreground">Sistema de Renda Variável</h1>
           </div>
           <p className="text-muted-foreground">
-            Trading automatizado em digit differs com inteligência artificial cooperativa
+            Ferramentas de análise e automação para contratos de dígitos.
           </p>
           <div className="flex items-center space-x-2 mt-2">
             <Badge variant="outline" className="text-green-600 border-green-200 animate-pulse">
@@ -1738,7 +1738,7 @@ export default function TradingSystemPage() {
             </Badge>
             <Badge variant="outline" className="text-blue-600 border-blue-200">
               <Brain className="h-3 w-3 mr-1" />
-              IA Cooperativa Ativa
+              Recursos de IA
             </Badge>
             {accountInfo?.accountType && (
               <Badge variant={accountInfo.accountType === 'demo' ? "secondary" : "default"}>
@@ -1893,12 +1893,11 @@ export default function TradingSystemPage() {
                     <Wifi className="h-4 w-4 text-green-600 dark:text-green-400 flex-shrink-0" />
                     <div className="min-w-0">
                       <p className="text-xs font-semibold text-green-700 dark:text-green-300 leading-none">
-                        Servidor Acordado 24/7
-                        {keepAliveStatus?.pullIntervalMinutes && (
-                          <span className="ml-1.5 font-normal text-green-500 dark:text-green-600">
-                            · pull a cada {keepAliveStatus.pullIntervalMinutes}min + push externo a cada 5min
-                          </span>
-                        )}
+                        Keep-alive
+                        <span className="ml-1.5 font-normal text-green-500 dark:text-green-600">
+                          · {keepAliveStatus?.isActive ? 'Ativo' : 'Inativo'}
+                          {keepAliveStatus?.pullIntervalMinutes ? ` · pull a cada ${keepAliveStatus.pullIntervalMinutes}min + push externo a cada 5min` : ''}
+                        </span>
                       </p>
                       <p className="text-xs text-green-600 dark:text-green-500 mt-0.5 truncate">
                         {pingLabel
