@@ -148,21 +148,7 @@
     gap: 12px;
   }
   
-  /* Override border-radius para tema fluent */
-  .fluent * {
-    border-radius: 0 !important;
-  }
-  
-  .fluent .rounded,
-  .fluent .rounded-sm,
-  .fluent .rounded-md,
-  .fluent .rounded-lg,
-  .fluent .rounded-xl,
-  .fluent .rounded-2xl,
-  .fluent .rounded-3xl,
-  .fluent .rounded-full {
-    border-radius: 0 !important;
-  }
+  /* Aura System usa superfícies arredondadas e camadas glass em todos os módulos. */
 }
 
 /* Suprimir overlay de erro do Vite para evitar conflitos com teclado móvel */
