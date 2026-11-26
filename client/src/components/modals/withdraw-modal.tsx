@@ -21,7 +21,7 @@ export default function WithdrawModal({ isOpen, onClose }: WithdrawModalProps) {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Banknote className="h-5 w-5" />
-            Saque Total
+            Saques
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-5">
@@ -35,7 +35,7 @@ export default function WithdrawModal({ isOpen, onClose }: WithdrawModalProps) {
               <div className="space-y-2">
                 <h3 className="font-semibold">Saques temporariamente indisponíveis</h3>
                 <p className="text-sm text-muted-foreground">
-                  A integração de transferência ainda não está configurada. Nenhum saque pode ser concluído ou confirmado pela plataforma neste momento.
+                  A integração de transferência ainda não está configurada. Nenhum saque de rendimento ou saque total pode ser concluído ou confirmado pela plataforma neste momento.
                 </p>
                 <p className="text-sm text-muted-foreground">
                   O saldo exibido é um registro interno e não significa que exista transferência bancária disponível.
