@@ -3446,13 +3446,11 @@ export default function TradingSystemPage() {
                   </Button>
                 </div>
                 <div className="text-sm text-muted-foreground p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded border border-yellow-200 dark:border-yellow-800">
-                  <p className="font-medium mb-1">🔧 Correções Automáticas:</p>
+                  <p className="font-medium mb-1">🛡️ Garantias de segurança:</p>
                   <ul className="list-disc list-inside space-y-1 text-xs">
-                    <li>Desativa parada de emergência</li>
-                    <li>Remove aprovação administrativa</li>
-                    <li>Cria/reativa configuração de trading</li>
-                    <li>Reseta sessões bloqueadas</li>
-                    <li>Aumenta limites para modo demo</li>
+                    <li>Preserva a parada de emergência e a aprovação administrativa</li>
+                    <li>Não ativa o trading nem altera limites de risco</li>
+                    <li>Exibe os bloqueios que exigem ação explícita do administrador</li>
                   </ul>
                 </div>
               </CardContent>
