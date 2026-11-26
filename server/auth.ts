@@ -9,6 +9,7 @@ import { dualStorage as storage } from "./storage-dual";
 import { User } from "@shared/schema";
 import { createRequire } from "module";
 import { isAuthorizedEmail, ACCESS_DENIED_MESSAGE } from "./config/access";
+import { SqliteSessionStore } from "./sqlite-session-store";
 
 declare global {
   namespace Express {
@@ -28,7 +29,6 @@ declare global {
 
 const require = createRequire(import.meta.url);
 const createMemoryStoreFactory: any = require("memorystore");
-const connectPgSimpleFactory: any = require("connect-pg-simple");
 
 const scryptAsync = promisify(scrypt);
 
@@ -59,25 +59,21 @@ export function setupAuth(app: Express) {
   if (isProduction && !configuredSessionSecret) {
     throw new Error("SESSION_SECRET is required in production for persistent and secure authentication.");
   }
-  if (isProduction && !process.env.DATABASE_URL) {
-    throw new Error("DATABASE_URL is required in production for persistent authenticated sessions.");
+  if (isProduction && (!process.env.SUPABASE_URL?.trim() || !process.env.SUPABASE_ANON_KEY?.trim())) {
+    throw new Error("SUPABASE_URL and SUPABASE_ANON_KEY are required in production for replicated authenticated sessions.");
   }
   const sessionSecret = configuredSessionSecret || crypto.randomBytes(32).toString("hex");
 
-  // PostgreSQL store is mandatory in production; MemoryStore is development-only.
+  // Production sessions use the shared SQLite database, replicated to Supabase.
+  // Authentication no longer requires Neon session-table writes.
   let sessionStore: session.Store;
-  if (process.env.DATABASE_URL) {
-    const PgStore = connectPgSimpleFactory(session);
-    sessionStore = new PgStore({
-      conString: process.env.DATABASE_URL,
-      createTableIfMissing: true,
-      tableName: "user_sessions",
-    });
-    console.log("✅ [SessionStore] PostgreSQL selecionado para sessões persistentes.");
+  if (isProduction) {
+    sessionStore = new SqliteSessionStore();
+    console.log("✅ [SessionStore] SQLite persistente selecionado; sincronização Supabase ativa.");
   } else {
     const MemoryStore = createMemoryStoreFactory(session);
     sessionStore = new MemoryStore({ checkPeriod: 24 * 60 * 60 * 1000 });
-    console.warn("⚠️ [SessionStore] DATABASE_URL ausente; usando MemoryStore em modo fallback.");
+    console.log("ℹ️ [SessionStore] MemoryStore selecionado em desenvolvimento.");
   }
 
   // 1 ano em ms — usuário só é deslogado se limpar cookies/cache ou clicar em "Sair"
