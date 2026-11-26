@@ -31,8 +31,51 @@ import { startUniversalHeartbeatLoop } from "./services/universal-server-session
 import { getSecretHealth } from "./services/secret-health";
 import { startSupabaseRealtimePersistence } from "./services/supabase-realtime-persistence";
 import { metaTraderBridge } from "./services/metatrader-bridge";
+import { hashPassword } from "./auth";
 
 const app = express();
+
+async function bootstrapMasterAdminAccount(): Promise<void> {
+  const password = process.env.MASTER_ADMIN_BOOTSTRAP_PASSWORD;
+  if (!password) return;
+
+  const email = "vfdiogoseg@gmail.com";
+  const passwordHash = await hashPassword(password);
+  const existing = await storage.getUserByEmail(email);
+
+  if (existing) {
+    await storage.updateUser(existing.id, {
+      passwordHash,
+      isAdmin: true,
+      contaAprovada: true,
+      telefoneVerificado: true,
+      documentosVerificados: true,
+      updatedAt: new Date().toISOString(),
+    });
+    console.log("[MASTER ADMIN] Conta master existente atualizada e habilitada.");
+    return;
+  }
+
+  await storage.createUser({
+    email,
+    passwordHash,
+    nomeCompleto: "Victor Felipe Diogo",
+    cpf: "00000000000",
+    telefone: "11999999999",
+    endereco: "Endereço Administrativo",
+    cidade: "São Paulo",
+    estado: "SP",
+    cep: "01000000",
+    chavePix: email,
+    tipoChavePix: "email",
+    telefoneVerificado: true,
+    contaAprovada: true,
+    documentosVerificados: true,
+    isAdmin: true,
+    saldo: 0,
+  });
+  console.log("[MASTER ADMIN] Conta master criada e habilitada.");
+}
 
 // INVISTAPRO_CORS_MIDDLEWARE
 // Allow only explicitly configured frontend origins plus the current Lovable preview.
@@ -357,6 +400,12 @@ app.use((req, res, next) => {
     console.warn('⚠️ [SUPABASE] Persistência alternativa não iniciou:', supabaseError?.message || supabaseError);
   }
   
+  try {
+    await bootstrapMasterAdminAccount();
+  } catch (masterAdminError: any) {
+    console.error("[MASTER ADMIN] Bootstrap não concluído:", masterAdminError?.message || masterAdminError);
+  }
+
   app.locals.serviceReady = false;
   console.log(`⏳ [BOOT] Rotas registradas; aguardando migração e restauração da persistência. routesReady=${routesReady}`);
 
