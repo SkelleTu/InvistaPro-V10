@@ -303,7 +303,7 @@ app.use((req, res, next) => {
     if (!privateAiBridgePath && !persistenceReady) {
       return res.status(503).json({
         success: false,
-        error: 'Persistência indisponível: Neon não foi migrada/restaurada com sucesso.',
+        error: 'Persistência indisponível: nenhuma fonte durável está pronta.',
         persistenceReady: false,
       });
     }
