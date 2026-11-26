@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
+import { createCipheriv, randomBytes } from "node:crypto";
 import { sqlite } from "./db";
 
 const TIME_ZONE = "America/Sao_Paulo";
@@ -37,8 +38,13 @@ function getDriveConfig() {
   const clientSecret = process.env.GOOGLE_DRIVE_CLIENT_SECRET?.trim();
   const refreshToken = process.env.GOOGLE_DRIVE_REFRESH_TOKEN?.trim();
   const folderId = process.env.GOOGLE_DRIVE_BACKUP_FOLDER_ID?.trim();
-  if (!clientId || !clientSecret || !refreshToken || !folderId) return null;
-  return { clientId, clientSecret, refreshToken, folderId };
+  const encryptionKey = process.env.SQLITE_BACKUP_ENCRYPTION_KEY?.trim();
+  if (!clientId || !clientSecret || !refreshToken || !folderId || !encryptionKey) return null;
+  const keyBytes = Buffer.from(encryptionKey, "base64");
+  if (keyBytes.length !== 32) {
+    throw new Error("SQLITE_BACKUP_ENCRYPTION_KEY deve ser uma chave Base64 de 32 bytes.");
+  }
+  return { clientId, clientSecret, refreshToken, folderId, encryptionKey: keyBytes };
 }
 
 async function getDriveAccessToken(): Promise<string> {
@@ -104,23 +110,28 @@ async function uploadBackupToDrive(filePath: string, fileName: string): Promise<
   const config = getDriveConfig();
   if (!config) {
     if (!driveConfigurationWarningShown) {
-      console.warn("[BACKUP] Google Drive ainda não configurado. Backup local será mantido; sincronização remota aguardará OAuth.");
+      console.warn("[BACKUP] Google Drive ou chave de criptografia não configurados. Backup local será mantido; sincronização remota aguardará configuração segura.");
       driveConfigurationWarningShown = true;
     }
     return;
   }
 
-  const existing = (await listDriveBackups()).filter((file) => file.name === fileName);
+  const driveFileName = `${fileName}.enc`;
+  const existing = (await listDriveBackups()).filter((file) => file.name === driveFileName);
   const target = existing.sort((a, b) =>
     String(b.modifiedTime ?? "").localeCompare(String(a.modifiedTime ?? "")),
   )[0];
   const metadata = target
-    ? { name: fileName }
-    : { name: fileName, parents: [config.folderId] };
+    ? { name: driveFileName }
+    : { name: driveFileName, parents: [config.folderId] };
   const binary = await fs.promises.readFile(filePath);
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", config.encryptionKey, iv);
+  const ciphertext = Buffer.concat([cipher.update(binary), cipher.final()]);
+  const encrypted = Buffer.concat([Buffer.from("IPRODB1"), iv, cipher.getAuthTag(), ciphertext]);
   const form = new FormData();
   form.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }));
-  form.append("file", new Blob([new Uint8Array(binary)], { type: "application/vnd.sqlite3" }), fileName);
+  form.append("file", new Blob([new Uint8Array(encrypted)], { type: "application/octet-stream" }), driveFileName);
 
   const endpoint = target
     ? `https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(target.id)}?uploadType=multipart&fields=id,name,size,modifiedTime`
