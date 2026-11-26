@@ -429,6 +429,11 @@ app.use((req, res, next) => {
     void createDatabaseBackup();
   }, { timezone: 'America/Sao_Paulo' });
 
+  // Última atualização do dia antes da virada do calendário local.
+  cron.schedule('59 23 * * *', () => {
+    void createDatabaseBackup();
+  }, { timezone: 'America/Sao_Paulo' });
+
   console.log('✅ Backup rotativo ativado: 30 dias, atualização a cada 15 minutos e fechamento natural à meia-noite.');
   console.log(`   📁 Diretório local: ${process.env.SQLITE_BACKUP_DIR?.trim() || path.join(process.cwd(), 'database-backups')}`);
   console.log('   ☁️ Google Drive: sincronização automática quando OAuth e pasta estiverem configurados.');
