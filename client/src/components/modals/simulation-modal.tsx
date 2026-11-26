@@ -19,6 +19,7 @@ interface SimulationResult {
     rendimento: number;
     saldoAcumulado: number;
   }>;
+  taxaMensalPercentual: number;
   resumo: {
     totalInvestido: number;
     totalRendimentos: number;
@@ -108,11 +109,12 @@ export default function SimulationModal({ isOpen, onClose }: SimulationModalProp
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden">
         <DialogHeader>
           <DialogTitle className="text-xl font-semibold text-gray-900">
-            Simulação - Rendimentos de até 130% dos maiores bancos
+            Simulação de rendimento estimado
           </DialogTitle>
         </DialogHeader>
         
         <div className="overflow-y-auto max-h-[calc(90vh-120px)] space-y-6">
+          <p className="text-sm text-muted-foreground">Projeção matemática com taxa fixa de {simulationResult?.taxaMensalPercentual ?? 0.835}% ao mês. Não é comparação com bancos, taxa de mercado, promessa de retorno ou resultado real. Operações financeiras podem gerar perdas.</p>
           {/* Simulation Form */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="space-y-2">
@@ -168,7 +170,7 @@ export default function SimulationModal({ isOpen, onClose }: SimulationModalProp
             size="lg"
           >
             <Calculator className="h-4 w-4 mr-2" />
-            {simulationMutation.isPending ? "Simulando..." : "Simular - Performance dos maiores bancos brasileiros"}
+            {simulationMutation.isPending ? "Simulando..." : "Calcular projeção"}
           </Button>
           
           {/* Results */}
@@ -184,7 +186,7 @@ export default function SimulationModal({ isOpen, onClose }: SimulationModalProp
                     </p>
                   </div>
                   <div className="text-center">
-                    <p className="text-blue-100 text-sm">Até 130% dos Bancos - Rendimentos</p>
+                    <p className="text-blue-100 text-sm">Rendimentos estimados</p>
                     <p className="text-2xl font-bold">
                       {formatCurrency(simulationResult.resumo.totalRendimentos)}
                     </p>
@@ -208,7 +210,7 @@ export default function SimulationModal({ isOpen, onClose }: SimulationModalProp
                           Mês
                         </th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Rendimento (130% Bancos)
+                          Rendimento estimado
                         </th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Saldo Acumulado
