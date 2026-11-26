@@ -69,6 +69,12 @@ function mt5SignalAccess(req: any, res: any, next: any) {
   const suppliedToken = String(req.query?.token ?? '').trim();
 
   if (process.env.NODE_ENV === 'production' && !configuredToken) {
+    // The authenticated web dashboard polls this endpoint without an EA token
+    // to display status. Allow that read-only request and keep EA polling blocked.
+    // An EA request always includes a symbol and must never bypass token setup.
+    if (!suppliedToken && !req.query?.symbol) {
+      return mt5DashboardAccess(req, res, next);
+    }
     return res.status(503).json({
       action: 'HOLD',
       executionEnabled: false,
