@@ -90,7 +90,7 @@ const MODE_CONFIG: Record<StakeMode, { label: string; description: string; color
   },
   aggressive: {
     label: "Agressivo",
-    description: "Boost exponencial nos quentes · mínimo nos frios · lucro maximizado",
+    description: "Maior exposição aos dígitos quentes · risco elevado",
     color: "border-orange-500/50 bg-orange-500/10 text-orange-300",
     icon: Flame,
   },
@@ -403,9 +403,9 @@ export default function Frenetico9TokensPanel({ syncedDigitCount, syncedStakeMod
               <Zap className="w-5 h-5 text-violet-400" />
             </div>
             <div>
-              <CardTitle className="text-lg">9 Dígitos Simultâneos</CardTitle>
+              <CardTitle className="text-lg">Cobertura de 10 Dígitos</CardTitle>
               <CardDescription>
-                100% cobertura simultânea · stake inteligente por calor de dígito
+                {totalConfigured === 10 ? "Cobertura completa configurada" : `${totalConfigured}/10 contas configuradas`} · distribuição de stake por frequência
               </CardDescription>
             </div>
           </div>
@@ -483,11 +483,11 @@ export default function Frenetico9TokensPanel({ syncedDigitCount, syncedStakeMod
                     <div className="font-bold text-foreground">${burstStats.totalStaked.toFixed(2)}</div>
                   </div>
                   <div className="text-center">
-                    <div className="text-muted-foreground text-[10px]">Ganho esperado</div>
+                    <div className="text-muted-foreground text-[10px]">Ganho estimado</div>
                     <div className="font-bold text-blue-400">${burstStats.expectedWin.toFixed(2)}</div>
                   </div>
                   <div className="text-center">
-                    <div className="text-muted-foreground text-[10px]">EV líquido</div>
+                    <div className="text-muted-foreground text-[10px]">EV modelado</div>
                     <div className={`font-bold ${burstStats.expectedProfit >= 0 ? "text-green-400" : "text-red-400"}`}>
                       {burstStats.expectedProfit >= 0 ? "+" : ""}${burstStats.expectedProfit.toFixed(2)}
                     </div>
@@ -1005,7 +1005,7 @@ export default function Frenetico9TokensPanel({ syncedDigitCount, syncedStakeMod
             <p className="text-xs mt-2 max-w-sm mx-auto">
               Cada dígito (0-9) usa uma conta Deriv separada. Com os 10 dígitos configurados,
               o motor Kelly distribui stakes automaticamente — dígitos quentes recebem mais,
-              dígitos frios recebem o mínimo — maximizando o valor esperado por rajada.
+              dígitos frios recebem o mínimo — distribuindo a stake conforme a frequência estimada. Isso não garante EV positivo nem lucro.
             </p>
           </div>
         )}
