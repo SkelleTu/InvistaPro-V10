@@ -330,8 +330,8 @@ export default function AdminPanel({ isOpen, onClose }: AdminPanelProps) {
           <DialogTitle className="flex items-center space-x-2">
             <Users className="h-5 w-5" />
             <div className="flex flex-col">
-              <span>Painel Administrativo - InvistaPRO</span>
-              <span className="text-xs font-medium text-muted-foreground tracking-wide opacity-75">Invista com Risco Zero</span>
+              <span>Painel Administrativo - Aura System</span>
+              <span className="text-xs font-medium text-muted-foreground tracking-wide opacity-75">Renda Variável</span>
             </div>
           </DialogTitle>
         </DialogHeader>
