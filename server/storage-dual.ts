@@ -139,24 +139,44 @@ export class DualStorage implements IStorage {
    * continua sendo a fonte recuperável e o próximo boot tentará restaurá-la.
    */
   private async writeEssential<T>(neonFn: () => Promise<T>, sqliteFn: () => Promise<unknown>, op: string): Promise<T> {
-    if (!this.neonOk || !this.neon) {
-      throw new Error(`NEON_REQUIRED: gravação essencial "${op}" recusada porque a Neon não está disponível.`);
+    const supabaseAvailable = Boolean(process.env.SUPABASE_URL?.trim() && process.env.SUPABASE_ANON_KEY?.trim());
+
+    // Caminho preferencial legado: Neon + cópia SQLite.
+    if (this.neonOk && this.neon) {
+      try {
+        const durable = await neonFn();
+        this.neonOk_reset();
+        try {
+          await sqliteFn();
+        } catch (error: any) {
+          console.warn(`⚠️ [SQLITE CACHE] ${op} confirmado na Neon, mas a cópia local falhou; será recuperada pela sincronização.`, error?.message || String(error));
+        }
+        return durable;
+      } catch (error: any) {
+        this.onNeonError(error, op);
+        if (!supabaseAvailable) {
+          console.error(`❌ [NEON] Gravação essencial ${op} falhou e não existe banco alternativo configurado:`, error?.message || String(error));
+          throw error;
+        }
+        console.warn(`⚠️ [NEON] ${op} indisponível. Com Supabase configurado, ativando fallback durável via SQLite→Supabase.`);
+      }
     }
-    let durable: T;
-    try {
-      durable = await neonFn();
-      this.neonOk_reset();
-    } catch (error: any) {
-      this.onNeonError(error, op);
-      console.error(`❌ [NEON] Gravação essencial ${op} falhou; operação não será confirmada:`, error?.message || String(error));
-      throw error;
+
+    // Fallback de produção: SQLite confirma a operação localmente e o
+    // SupabaseRealtimePersistence replica continuamente o conteúdo completo.
+    // Assim uma indisponibilidade/cota da Neon não bloqueia a aplicação.
+    if (supabaseAvailable) {
+      try {
+        const localResult = await sqliteFn();
+        console.log(`✅ [SQLITE→SUPABASE] ${op} aceito pelo armazenamento de contingência; sincronização contínua ativa.`);
+        return localResult as T;
+      } catch (error: any) {
+        console.error(`❌ [SQLITE FALLBACK] Gravação ${op} falhou:`, error?.message || String(error));
+        throw error;
+      }
     }
-    try {
-      await sqliteFn();
-    } catch (error: any) {
-      console.warn(`⚠️ [SQLITE CACHE] ${op} foi confirmado na Neon, mas a cópia local falhou; será restaurada no próximo sync.`, error?.message || String(error));
-    }
-    return durable;
+
+    throw new Error(`NEON_REQUIRED: gravação essencial "${op}" recusada porque a Neon não está disponível e nenhum armazenamento alternativo está configurado.`);
   }
 
   /**
