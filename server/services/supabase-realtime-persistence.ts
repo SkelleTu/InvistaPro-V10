@@ -51,10 +51,47 @@ function rowsFor(table: string): any[] {
 async function upsertTable(supabase: SupabaseClient, table: string, rows: any[]): Promise<number> {
   if (!rows.length) return 0;
   let written = 0;
+  const typedColumns: Record<string, string[]> = {
+    users: ["id","email","password_hash","nome_completo","cpf","telefone","endereco","cidade","estado","cep","chave_pix","tipo_chave_pix","telefone_verificado","codigo_verificacao","codigo_expires_at","password_reset_token","password_reset_token_expires_at","conta_aprovada","aprovada_por","aprovada_em","documentos_verificados","documentos_aprovados_em","is_admin","senha_fallback","usar_senha_fallback","biometria_configurada","saldo","deposito_data","rendimento_saque_automatico","created_at","updated_at"],
+    sessions: ["sid","sess","expire"],
+    movimentos: ["id","user_id","tipo","valor","descricao","pix_string","biometria_verificada","created_at"],
+    documentos: ["id","user_id","tipo","arquivo","status","motivo_rejeicao","aprovado_por","aprovado_em","created_at","updated_at"],
+    kyc_status: ["id","user_id","status","rg_cnh_frente_status","rg_cnh_verso_status","comprovante_residencia_status","completed_at","approved_at","rejected_at","rejection_reason","reviewed_by","created_at","updated_at"],
+    deriv_tokens: ["id","user_id","token","account_type","is_active","created_at","updated_at"],
+    trade_configurations: ["id","user_id","mode","is_active","operations_count","interval_type","interval_value","created_at","updated_at"],
+    ai_logs: ["id","user_id","model_name","analysis","decision","confidence","market_data","created_at"],
+    trade_operations: ["id","user_id","deriv_contract_id","symbol","trade_type","direction","amount","duration","status","entry_price","exit_price","profit","ai_consensus","isRecoveryMode","recovery_multiplier","is_conservative_forced","created_at","completed_at"],
+    market_data: ["id","symbol","current_price","price_history","last_update","is_simulated"],
+    daily_pnl: ["id","user_id","date","opening_balance","current_balance","daily_pnl","total_trades","won_trades","lost_trades","conservative_operations","is_recovery_active","recovery_threshold","max_drawdown","recovery_operations","created_at","updated_at"],
+    ai_recovery_strategies: ["id","user_id","strategy_name","is_active","parameters","success_rate","total_recoveries","avg_recovery_time","created_at","updated_at"],
+  };
   for (let i = 0; i < rows.length; i += BATCH_SIZE) {
     const batch = rows.slice(i, i + BATCH_SIZE);
-    const { error } = await supabase.from(table).upsert(batch, { onConflict: "id", ignoreDuplicates: false });
-    if (error) throw new Error(`SUPABASE_SYNC_${table}: ${error.message}`);
+    const replica = batch.map((row: any) => ({
+      table_name: table,
+      row_id: String(row.id ?? row.sid ?? (table + ":" + i)),
+      payload: row,
+      updated_at: new Date().toISOString(),
+    }));
+    const { error: replicaError } = await supabase
+      .from("sqlite_replica_rows")
+      .upsert(replica, { onConflict: "table_name,row_id", ignoreDuplicates: false });
+    if (replicaError) throw new Error("SUPABASE_REPLICA_" + table + ": " + replicaError.message);
+
+    const allowed = typedColumns[table] ?? Object.keys(batch[0]);
+    const typedBatch = batch.map((row: any) => {
+      const typed: any = {};
+      for (const column of allowed) {
+        if (Object.prototype.hasOwnProperty.call(row, column)) typed[column] = row[column];
+      }
+      return typed;
+    });
+    const conflict = table === "sessions" ? "sid" : "id";
+    const { error } = await supabase.from(table).upsert(typedBatch, {
+      onConflict: conflict,
+      ignoreDuplicates: false,
+    });
+    if (error) throw new Error("SUPABASE_SYNC_" + table + ": " + error.message);
     written += batch.length;
   }
   return written;
