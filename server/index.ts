@@ -78,6 +78,7 @@ app.use((req, res, next) => {
 });
 let routesReady = false;
 let persistenceReady = false;
+let supabasePersistenceReady = false;
 let routeRegistrationError: string | null = null;
 let bootFailureEventId: string | null = null;
 app.use(express.json());
@@ -182,7 +183,7 @@ app.use((req, res, next) => {
       readiness: healthy ? 'ready' : 'degraded',
       routesReady,
       persistenceReady,
-      error: persistenceReady ? undefined : 'Persistência Neon ainda não está pronta',
+      error: persistenceReady ? undefined : 'Persistência durável indisponível',
       observability: {
         status: obsHealth.status,
         errors: obsHealth.errors,
@@ -231,7 +232,7 @@ app.use((req, res, next) => {
     if (!persistenceReady && !livenessPath && !privateAiBridgePath && !req.path.startsWith('/observability/')) {
       return res.status(503).json({
         success: false,
-        error: 'Persistência indisponível: Neon não foi migrada/restaurada com sucesso.',
+        error: 'Persistência indisponível: nenhuma fonte durável está pronta.',
         persistenceReady: false,
       });
     }
@@ -344,8 +345,14 @@ app.use((req, res, next) => {
     console.error("❌ [BOOT] Banco local não pôde ser inicializado; servidor HTTP continuará ativo:", dbError?.message || dbError);
   }
   try {
-    await startSupabaseRealtimePersistence();
-    console.log('✅ [SUPABASE] Persistência alternativa SQLite↔Supabase inicializada.');
+    supabasePersistenceReady = await startSupabaseRealtimePersistence();
+    if (supabasePersistenceReady) {
+      persistenceReady = true;
+      app.locals.persistenceReady = true;
+      console.log('✅ [SUPABASE] Persistência alternativa SQLite↔Supabase inicializada e disponível.');
+    } else {
+      console.log('ℹ️ [SUPABASE] Persistência alternativa não configurada.');
+    }
   } catch (supabaseError: any) {
     console.warn('⚠️ [SUPABASE] Persistência alternativa não iniciou:', supabaseError?.message || supabaseError);
   }
@@ -393,17 +400,17 @@ app.use((req, res, next) => {
       } catch (persistenceError: any) {
         const message = persistenceError?.message || String(persistenceError);
         const nonRetryable = /platform mismatch|INVISTA_PLATFORM must be set|NEON_PLATFORM_IDENTITY_MISSING|LOCAL_USER_ID_CONFLICT|LOCAL_USER_IMPORT_CONFLICT|ENCRYPTION_KEY|TOKEN_CIPHERTEXT_FORMAT_INVALID/i.test(message);
-        persistenceReady = false;
-        app.locals.persistenceReady = false;
-        app.locals.serviceReady = false;
+        persistenceReady = supabasePersistenceReady;
+        app.locals.persistenceReady = persistenceReady;
+        app.locals.serviceReady = routesReady;
         console.error(`❌ [PERSISTÊNCIA] Tentativa ${attempt}/${maxPersistenceAttempts} falhou:`, message);
 
         if (nonRetryable || attempt === maxPersistenceAttempts) {
           console.error(nonRetryable
             ? '❌ Erro de identidade/configuração/integridade: não será repetido.'
             : '❌ Persistência não recuperada após tentativas limitadas; encerrando para permitir reinício controlado pelo Render.');
-          if (process.env.NODE_ENV === 'production' && !String(process.env.AURA_MARKETING_AI_BRIDGE_TOKEN || '').trim()) process.exit(1);
-          if (process.env.NODE_ENV === 'production' && String(process.env.AURA_MARKETING_AI_BRIDGE_TOKEN || '').trim()) {
+          if (!supabasePersistenceReady && process.env.NODE_ENV === 'production' && !String(process.env.AURA_MARKETING_AI_BRIDGE_TOKEN || '').trim()) process.exit(1);
+          if (!supabasePersistenceReady && process.env.NODE_ENV === 'production' && String(process.env.AURA_MARKETING_AI_BRIDGE_TOKEN || '').trim()) {
             console.warn('⚠️ [BOOT] Persistência indisponível; mantendo somente o bridge privado de IA. Todas as demais rotas da API permanecem bloqueadas.');
           }
           break;
@@ -414,16 +421,16 @@ app.use((req, res, next) => {
       }
     }
   } else {
-    persistenceReady = false;
-    app.locals.persistenceReady = false;
-    app.locals.serviceReady = false;
-    console.error('❌ DATABASE_URL PostgreSQL não configurada. API bloqueada para proteger dados essenciais.');
+    persistenceReady = supabasePersistenceReady;
+    app.locals.persistenceReady = persistenceReady;
+    app.locals.serviceReady = routesReady;
+    if (!supabasePersistenceReady) console.error('❌ DATABASE_URL PostgreSQL não configurada e nenhuma persistência durável alternativa está pronta.');
     console.log('ℹ️ DATABASE_URL PostgreSQL não está configurado');
-    console.log('   📋 Configure DATABASE_URL com a Neon exclusiva desta plataforma.');
-    console.log('   📋 Configure INVISTA_PLATFORM=v10 ou INVISTA_PLATFORM=aura.');
-    console.log('   📋 Configure uma base Neon diferente para cada plataforma e reinicie.');
-    if (process.env.NODE_ENV === 'production' && !String(process.env.AURA_MARKETING_AI_BRIDGE_TOKEN || '').trim()) process.exit(1);
-          if (process.env.NODE_ENV === 'production' && String(process.env.AURA_MARKETING_AI_BRIDGE_TOKEN || '').trim()) {
+    if (!supabasePersistenceReady) console.log('   📋 Configure DATABASE_URL com a Neon exclusiva desta plataforma.');
+    if (!supabasePersistenceReady) console.log('   📋 Configure INVISTA_PLATFORM=v10 ou INVISTA_PLATFORM=aura.');
+    if (!supabasePersistenceReady) console.log('   📋 Configure uma base Neon diferente para cada plataforma e reinicie.');
+    if (!supabasePersistenceReady && process.env.NODE_ENV === 'production' && !String(process.env.AURA_MARKETING_AI_BRIDGE_TOKEN || '').trim()) process.exit(1);
+          if (!supabasePersistenceReady && process.env.NODE_ENV === 'production' && String(process.env.AURA_MARKETING_AI_BRIDGE_TOKEN || '').trim()) {
             console.warn('⚠️ [BOOT] Persistência indisponível; mantendo somente o bridge privado de IA. Todas as demais rotas da API permanecem bloqueadas.');
           }
   }
