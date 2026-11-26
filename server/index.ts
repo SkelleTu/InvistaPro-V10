@@ -29,6 +29,7 @@ import { initUrlRegistry } from "./services/url-registry";
 import { startDerivObservabilityBridge } from "./services/deriv-observability-bridge";
 import { startUniversalHeartbeatLoop } from "./services/universal-server-session";
 import { getSecretHealth } from "./services/secret-health";
+import { startSupabaseRealtimePersistence } from "./services/supabase-realtime-persistence";
 import { metaTraderBridge } from "./services/metatrader-bridge";
 
 const app = express();
@@ -341,6 +342,12 @@ app.use((req, res, next) => {
     initializeDatabase();
   } catch (dbError: any) {
     console.error("❌ [BOOT] Banco local não pôde ser inicializado; servidor HTTP continuará ativo:", dbError?.message || dbError);
+  }
+  try {
+    await startSupabaseRealtimePersistence();
+    console.log('✅ [SUPABASE] Persistência alternativa SQLite↔Supabase inicializada.');
+  } catch (supabaseError: any) {
+    console.warn('⚠️ [SUPABASE] Persistência alternativa não iniciou:', supabaseError?.message || supabaseError);
   }
   
   app.locals.serviceReady = false;
