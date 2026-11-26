@@ -19,27 +19,7 @@ export default function ActionButtons() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
 
-  const withdrawYieldMutation = useMutation({
-    mutationFn: async () => {
-      const response = await apiRequest("/api/yield/withdraw", { method: "POST" });
-      return response.json();
-    },
-    onSuccess: (data) => {
-      toast({
-        title: "Saque realizado!",
-        description: data.message,
-      });
-      queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/movements"] });
-    },
-    onError: (error) => {
-      toast({
-        title: "Erro no saque",
-        description: error.message,
-        variant: "destructive",
-      });
-    },
-  });
+
 
   return (
     <>
@@ -54,8 +34,7 @@ export default function ActionButtons() {
         </Button>
         
         <Button
-          onClick={() => withdrawYieldMutation.mutate()}
-          disabled={withdrawYieldMutation.isPending}
+          onClick={() => setShowWithdrawModal(true)}
           className={`${theme === 'fluent' ? 'fluent-button fluent-elevated bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl'} p-4 font-medium transition-all duration-300 flex items-center justify-center space-x-2 h-auto`}
           size="lg"
         >
