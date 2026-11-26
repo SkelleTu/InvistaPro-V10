@@ -32,16 +32,16 @@ export function Footer() {
               </div>
             </div>
             <p className="text-sm text-muted-foreground leading-relaxed mb-4">
-              Plataforma financeira de investimentos automatizados com tecnologia avançada e rendimentos de até 130% das melhores rendas fixas do mercado.
+              Plataforma de acompanhamento de investimentos e ferramentas de renda variável. Consulte os dados e riscos de cada modalidade antes de operar.
             </p>
             <div className="flex space-x-2">
               <div className="flex items-center text-xs text-green-400">
                 <Shield className="w-3 h-3 mr-1" />
-                <span>100% Seguro</span>
+                <span>Segurança da conta</span>
               </div>
               <div className="flex items-center text-xs text-blue-400">
                 <TrendingUp className="w-3 h-3 mr-1" />
-                <span>Alta Rentabilidade</span>
+                <span>Renda variável</span>
               </div>
             </div>
           </div>
@@ -155,7 +155,7 @@ export function Footer() {
                 <span className="text-xs font-semibold text-foreground">Compromisso</span>
               </div>
               <p className="text-xs text-muted-foreground leading-relaxed">
-                Operamos com total transparência, conformidade regulatória e compromisso com a segurança dos seus investimentos.
+                Disponibilizamos informações sobre funcionalidades, movimentações e riscos para apoiar o acompanhamento da sua conta.
               </p>
             </div>
           </div>
@@ -172,7 +172,7 @@ export function Footer() {
                 <span>•</span>
                 <span>Araras, São Paulo, Brasil</span>
                 <span>•</span>
-                <span>CNPJ: 00.000.000/0001-00</span>
+                
               </div>
             </div>
             
