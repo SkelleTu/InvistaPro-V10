@@ -1,140 +1,271 @@
-import fs from 'fs';
-import path from 'path';
-import { sqlite } from './db';
+import fs from "node:fs";
+import path from "node:path";
+import Database from "better-sqlite3";
+import { sqlite } from "./db";
 
-const BACKUP_DIR = path.join(process.cwd(), 'database-backups');
-const MAX_BACKUPS = 30; // Manter últimos 30 backups
+const TIME_ZONE = "America/Sao_Paulo";
+const MAX_BACKUPS = 30;
+const BACKUP_PREFIX = "investpro_backup_";
+const BACKUP_DIR = path.resolve(
+  process.env.SQLITE_BACKUP_DIR?.trim() || path.join(process.cwd(), "database-backups"),
+);
+const SOURCE_PATH = path.join(process.cwd(), "database", "investpro.db");
 
-// Garantir que o diretório de backup existe
-if (!fs.existsSync(BACKUP_DIR)) {
-  fs.mkdirSync(BACKUP_DIR, { recursive: true });
-  console.log('📁 Diretório de backups criado:', BACKUP_DIR);
+let backupInProgress: Promise<string> | null = null;
+let cachedDriveToken: { value: string; expiresAt: number } | null = null;
+let driveConfigurationWarningShown = false;
+
+type DriveFile = { id: string; name: string; modifiedTime?: string };
+
+function getSaoPauloDate(date = new Date()): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function getBackupName(date: string): string {
+  return `${BACKUP_PREFIX}${date}.db`;
+}
+
+function getDriveConfig() {
+  const clientId = process.env.GOOGLE_DRIVE_CLIENT_ID?.trim();
+  const clientSecret = process.env.GOOGLE_DRIVE_CLIENT_SECRET?.trim();
+  const refreshToken = process.env.GOOGLE_DRIVE_REFRESH_TOKEN?.trim();
+  const folderId = process.env.GOOGLE_DRIVE_BACKUP_FOLDER_ID?.trim();
+  if (!clientId || !clientSecret || !refreshToken || !folderId) return null;
+  return { clientId, clientSecret, refreshToken, folderId };
+}
+
+async function getDriveAccessToken(): Promise<string> {
+  const config = getDriveConfig();
+  if (!config) throw new Error("Google Drive não configurado: faltam credenciais OAuth ou ID da pasta.");
+  if (cachedDriveToken && cachedDriveToken.expiresAt > Date.now() + 60_000) {
+    return cachedDriveToken.value;
+  }
+
+  const response = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: config.clientId,
+      client_secret: config.clientSecret,
+      refresh_token: config.refreshToken,
+      grant_type: "refresh_token",
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`Falha OAuth Google Drive (HTTP ${response.status}). Verifique a configuração OAuth.`);
+  }
+  const token = await response.json() as { access_token?: string; expires_in?: number };
+  if (!token.access_token) throw new Error("Google OAuth não retornou access_token.");
+  cachedDriveToken = {
+    value: token.access_token,
+    expiresAt: Date.now() + Math.max(60, token.expires_in ?? 3600) * 1000,
+  };
+  return token.access_token;
+}
+
+async function driveRequest(url: string, init: RequestInit = {}): Promise<Response> {
+  const token = await getDriveAccessToken();
+  const headers = new Headers(init.headers);
+  headers.set("Authorization", `Bearer ${token}`);
+  const response = await fetch(url, { ...init, headers });
+  if (response.status === 401) {
+    cachedDriveToken = null;
+    const retryToken = await getDriveAccessToken();
+    headers.set("Authorization", `Bearer ${retryToken}`);
+    return fetch(url, { ...init, headers });
+  }
+  return response;
+}
+
+async function listDriveBackups(): Promise<DriveFile[]> {
+  const config = getDriveConfig();
+  if (!config) return [];
+  const query = `'${config.folderId.replace(/'/g, "\\'")}' in parents and trashed = false and name contains '${BACKUP_PREFIX}'`;
+  const params = new URLSearchParams({
+    q: query,
+    pageSize: "1000",
+    orderBy: "name",
+    fields: "files(id,name,modifiedTime),nextPageToken",
+  });
+  const response = await driveRequest(`https://www.googleapis.com/drive/v3/files?${params}`);
+  if (!response.ok) throw new Error(`Falha ao listar backups no Drive (HTTP ${response.status}).`);
+  const data = await response.json() as { files?: DriveFile[] };
+  return data.files ?? [];
+}
+
+async function uploadBackupToDrive(filePath: string, fileName: string): Promise<void> {
+  const config = getDriveConfig();
+  if (!config) {
+    if (!driveConfigurationWarningShown) {
+      console.warn("[BACKUP] Google Drive ainda não configurado. Backup local será mantido; sincronização remota aguardará OAuth.");
+      driveConfigurationWarningShown = true;
+    }
+    return;
+  }
+
+  const existing = (await listDriveBackups()).filter((file) => file.name === fileName);
+  const target = existing.sort((a, b) =>
+    String(b.modifiedTime ?? "").localeCompare(String(a.modifiedTime ?? "")),
+  )[0];
+  const metadata = target
+    ? { name: fileName }
+    : { name: fileName, parents: [config.folderId] };
+  const binary = await fs.promises.readFile(filePath);
+  const form = new FormData();
+  form.append("metadata", new Blob([new Uint8Array(binary)], { type: "application/json" }), "metadata.json");
+  form.append("file", new Blob([new Uint8Array(binary)], { type: "application/vnd.sqlite3" }), fileName);
+
+  const endpoint = target
+    ? `https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(target.id)}?uploadType=multipart&fields=id,name,size,modifiedTime`
+    : "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,size,modifiedTime";
+  const response = await driveRequest(endpoint, {
+    method: target ? "PATCH" : "POST",
+    body: form,
+  });
+  if (!response.ok) {
+    throw new Error(`Falha ao enviar backup diário ao Google Drive (HTTP ${response.status}).`);
+  }
+
+  await pruneDriveBackups();
+  console.info(`[BACKUP] Cópia diária sincronizada com Google Drive: ${fileName}`);
+}
+
+async function pruneDriveBackups(): Promise<void> {
+  const files = await listDriveBackups();
+  const dated = files
+    .map((file) => ({ ...file, date: file.name.match(/^investpro_backup_(\\d{4}-\\d{2}-\\d{2})\\.db$/)?.[1] }))
+    .filter((file): file is DriveFile & { date: string } => Boolean(file.date))
+    .sort((a, b) => b.date.localeCompare(a.date));
+
+  for (const file of dated.slice(MAX_BACKUPS)) {
+    const response = await driveRequest(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(file.id)}`, {
+      method: "DELETE",
+    });
+    if (!response.ok && response.status !== 404) {
+      throw new Error(`Falha ao aplicar retenção de 30 dias no Drive (HTTP ${response.status}).`);
+    }
+  }
+}
+
+function pruneLocalBackups(): void {
+  const files = fs.readdirSync(BACKUP_DIR)
+    .map((name) => ({ name, date: name.match(/^investpro_backup_(\\d{4}-\\d{2}-\\d{2})\\.db$/)?.[1] }))
+    .filter((file): file is { name: string; date: string } => Boolean(file.date))
+    .sort((a, b) => b.date.localeCompare(a.date));
+
+  for (const file of files.slice(MAX_BACKUPS)) {
+    fs.unlinkSync(path.join(BACKUP_DIR, file.name));
+    console.info(`[BACKUP] Backup local antigo removido: ${file.name}`);
+  }
 }
 
 /**
- * Cria um backup do banco de dados
- * Formato: investpro_backup_YYYY-MM-DD_HH-mm-ss.db
+ * Atualiza uma única cópia por dia no fuso de São Paulo.
+ * Usa a API de backup online do SQLite e troca o arquivo atomicamente,
+ * sem copiar diretamente o banco ativo nem executar VACUUM nele.
  */
-export function createDatabaseBackup(): string {
-  try {
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    const backupFileName = `investpro_backup_${timestamp}.db`;
-    const backupPath = path.join(BACKUP_DIR, backupFileName);
-    const sourcePath = path.join(process.cwd(), 'database', 'investpro.db');
-    
-    // Verificar se o arquivo fonte existe
-    if (!fs.existsSync(sourcePath)) {
-      console.warn('⚠️ Arquivo de banco de dados não encontrado para backup');
-      return '';
-    }
-    
-    // Executar VACUUM para otimizar antes do backup
+export function createDatabaseBackup(): Promise<string> {
+  if (backupInProgress) return backupInProgress;
+
+  backupInProgress = (async () => {
+    let temporaryPath = "";
     try {
-      sqlite.prepare('VACUUM').run();
-    } catch (e) {
-      console.log('ℹ️ VACUUM ignorado (banco pode estar em uso)');
+      fs.mkdirSync(BACKUP_DIR, { recursive: true });
+      if (!fs.existsSync(SOURCE_PATH)) {
+        console.warn("[BACKUP] Banco SQLite ainda não existe; backup adiado.");
+        return "";
+      }
+
+      const date = getSaoPauloDate();
+      const fileName = getBackupName(date);
+      const backupPath = path.join(BACKUP_DIR, fileName);
+      temporaryPath = path.join(BACKUP_DIR, `.${fileName}.${process.pid}.${Date.now()}.tmp`);
+
+      await sqlite.backup(temporaryPath);
+
+      const verificationDb = new Database(temporaryPath, { readonly: true, fileMustExist: true });
+      try {
+        const integrity = verificationDb.pragma("quick_check", { simple: true });
+        if (integrity !== "ok") throw new Error(`SQLite quick_check falhou: ${String(integrity)}`);
+      } finally {
+        verificationDb.close();
+      }
+
+      await fs.promises.rename(temporaryPath, backupPath);
+      temporaryPath = "";
+      await fs.promises.chmod(backupPath, 0o600);
+
+      const size = fs.statSync(backupPath).size;
+      console.info(`[BACKUP] ${fileName} atualizado com integridade validada (${(size / 1024 / 1024).toFixed(2)} MB).`);
+
+      pruneLocalBackups();
+      try {
+        await uploadBackupToDrive(backupPath, fileName);
+      } catch (driveError: any) {
+        console.error("[BACKUP] Cópia local validada, mas sincronização com Google Drive falhou:", driveError?.message || String(driveError));
+      }
+      return backupPath;
+    } catch (error) {
+      console.error("[BACKUP] Erro ao criar backup SQLite:", error);
+      return "";
+    } finally {
+      if (temporaryPath && fs.existsSync(temporaryPath)) {
+        try { await fs.promises.unlink(temporaryPath); } catch { /* limpeza best-effort */ }
+      }
     }
-    
-    // Copiar arquivo
-    fs.copyFileSync(sourcePath, backupPath);
-    
-    const stats = fs.statSync(backupPath);
-    const sizeMB = (stats.size / 1024 / 1024).toFixed(2);
-    
-    console.log(`✅ Backup criado: ${backupFileName} (${sizeMB} MB)`);
-    
-    // Limpar backups antigos
-    cleanOldBackups();
-    
-    return backupPath;
-  } catch (error) {
-    console.error('❌ Erro ao criar backup:', error);
-    return '';
-  }
+  })().finally(() => {
+    backupInProgress = null;
+  });
+
+  return backupInProgress;
 }
 
-/**
- * Remove backups antigos, mantendo apenas os mais recentes
- */
-function cleanOldBackups(): void {
-  try {
-    const files = fs.readdirSync(BACKUP_DIR)
-      .filter(f => f.startsWith('investpro_backup_') && f.endsWith('.db'))
-      .map(f => ({
-        name: f,
-        path: path.join(BACKUP_DIR, f),
-        time: fs.statSync(path.join(BACKUP_DIR, f)).mtime.getTime()
-      }))
-      .sort((a, b) => b.time - a.time); // Mais recentes primeiro
-    
-    // Remover backups excedentes
-    if (files.length > MAX_BACKUPS) {
-      const toDelete = files.slice(MAX_BACKUPS);
-      toDelete.forEach(file => {
-        fs.unlinkSync(file.path);
-        console.log(`🗑️ Backup antigo removido: ${file.name}`);
-      });
-    }
-  } catch (error) {
-    console.error('❌ Erro ao limpar backups antigos:', error);
-  }
-}
-
-/**
- * Lista todos os backups disponíveis
- */
 export function listBackups(): Array<{ name: string; date: Date; size: string }> {
   try {
-    const files = fs.readdirSync(BACKUP_DIR)
-      .filter(f => f.startsWith('investpro_backup_') && f.endsWith('.db'))
-      .map(f => {
-        const filePath = path.join(BACKUP_DIR, f);
+    if (!fs.existsSync(BACKUP_DIR)) return [];
+    return fs.readdirSync(BACKUP_DIR)
+      .filter((name) => /^investpro_backup_\\d{4}-\\d{2}-\\d{2}\\.db$/.test(name))
+      .map((name) => {
+        const filePath = path.join(BACKUP_DIR, name);
         const stats = fs.statSync(filePath);
-        return {
-          name: f,
-          date: stats.mtime,
-          size: (stats.size / 1024 / 1024).toFixed(2) + ' MB'
-        };
+        return { name, date: stats.mtime, size: `${(stats.size / 1024 / 1024).toFixed(2)} MB` };
       })
       .sort((a, b) => b.date.getTime() - a.date.getTime());
-    
-    return files;
   } catch (error) {
-    console.error('❌ Erro ao listar backups:', error);
+    console.error("[BACKUP] Erro ao listar backups:", error);
     return [];
   }
 }
 
 /**
- * Restaura um backup específico
+ * Restaura somente arquivos diários reconhecidos. A cópia atual é preservada
+ * antes da troca; o servidor deve ser reiniciado para reabrir o banco.
  */
-export function restoreBackup(backupFileName: string): boolean {
-  try {
-    const backupPath = path.join(BACKUP_DIR, backupFileName);
-    const targetPath = path.join(process.cwd(), 'database', 'investpro.db');
-    
-    if (!fs.existsSync(backupPath)) {
-      console.error('❌ Arquivo de backup não encontrado:', backupFileName);
-      return false;
-    }
-    
-    // Criar backup do estado atual antes de restaurar
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    const preRestoreBackup = path.join(BACKUP_DIR, `pre_restore_${timestamp}.db`);
-    if (fs.existsSync(targetPath)) {
-      fs.copyFileSync(targetPath, preRestoreBackup);
-      console.log(`📦 Backup pré-restauração criado: pre_restore_${timestamp}.db`);
-    }
-    
-    // Restaurar backup
-    fs.copyFileSync(backupPath, targetPath);
-    console.log(`✅ Backup restaurado: ${backupFileName}`);
-    console.log('⚠️ IMPORTANTE: Reinicie o servidor para aplicar as mudanças!');
-    
-    return true;
-  } catch (error) {
-    console.error('❌ Erro ao restaurar backup:', error);
-    return false;
-  }
-}
+export async function restoreBackup(backupFileName: string): Promise<boolean> {
+  if (!/^investpro_backup_\\d{4}-\\d{2}-\\d{2}\\.db$/.test(backupFileName)) return false;
+  const backupPath = path.join(BACKUP_DIR, path.basename(backupFileName));
+  if (!fs.existsSync(backupPath)) return false;
 
+  const candidate = new Database(backupPath, { readonly: true, fileMustExist: true });
+  try {
+    const integrity = candidate.pragma("quick_check", { simple: true });
+    if (integrity !== "ok") throw new Error("Backup inválido: quick_check não retornou ok.");
+  } finally {
+    candidate.close();
+  }
+
+  const currentPath = SOURCE_PATH;
+  const preRestorePath = path.join(BACKUP_DIR, `pre_restore_${Date.now()}.db`);
+  if (fs.existsSync(currentPath)) await sqlite.backup(preRestorePath);
+  await fs.promises.copyFile(backupPath, `${currentPath}.restore.tmp`);
+  await fs.promises.rename(`${currentPath}.restore.tmp`, currentPath);
+  console.warn(`[BACKUP] Banco restaurado de ${backupFileName}. Reinicie o processo para reabrir a conexão SQLite.`);
+  return true;
+}
