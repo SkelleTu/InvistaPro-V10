@@ -47,8 +47,9 @@ For durable off-instance copies, configure these server-only Render environment 
 - `GOOGLE_DRIVE_CLIENT_SECRET`
 - `GOOGLE_DRIVE_REFRESH_TOKEN`
 - `GOOGLE_DRIVE_BACKUP_FOLDER_ID` (ID of an existing private Drive folder)
+- `SQLITE_BACKUP_ENCRYPTION_KEY` (Base64-encoded 32-byte AES-256-GCM key; keep only in Render secrets, never GitHub or Kilo)
 - `SQLITE_BACKUP_DIR` (for example, `/var/data/database-backups` when a persistent disk is mounted)
 
-The Drive integration updates the same named file for the current day and prunes dated snapshots older than the newest 30. OAuth credentials must belong to an account authorized to write to that folder. The application never logs credential values. If Drive is not configured or synchronization fails, a validated local snapshot is still retained and the failure is logged; this is not equivalent to a verified off-site backup.
+The Drive integration encrypts each SQLite snapshot with AES-256-GCM using a fresh 96-bit nonce and authentication tag, then uploads it as `investpro_backup_YYYY-MM-DD.db.enc`. The same dated file is updated during the day and dated encrypted snapshots older than the newest 30 are pruned. OAuth credentials must belong to an account authorized to write to that folder. Keep the encryption key only in Render secrets; without that key, remote copies cannot be decrypted. The application never logs credential values. If Drive is not configured or synchronization fails, a validated local snapshot is still retained and the failure is logged; this is not equivalent to a verified off-site backup.
 
 Important: the Render V10 service currently uses the Free plan, whose filesystem is ephemeral. A local `database-backups` directory on that plan is not durable across instance replacement. Until Google Drive OAuth is configured and a successful upload is verified, the 30-day off-site retention is NOT active. Do not treat local files on the Free instance as the disaster-recovery copy.
