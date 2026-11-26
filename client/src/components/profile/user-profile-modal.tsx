@@ -34,6 +34,11 @@ export default function UserProfileModal({ isOpen, onClose }: UserProfileModalPr
   
   // Estatísticas dos documentos
   const requiredDocs = ['rg', 'comprovante'];
+  const allRequiredApproved = requiredDocs.every(tipo => userDocs.some((doc: any) => doc.tipo === tipo && doc.status === 'aprovado'));
+  const displayField = (value: unknown, placeholders: string[] = []) => {
+    const normalized = String(value ?? '').trim();
+    return !normalized || placeholders.includes(normalized) ? 'Não informado' : normalized;
+  };
   const pendingDocs = userDocs.filter((doc: any) => doc.status === 'pendente');
   const approvedDocs = userDocs.filter((doc: any) => doc.status === 'aprovado');
   const rejectedDocs = userDocs.filter((doc: any) => doc.status === 'rejeitado');
@@ -116,7 +121,7 @@ export default function UserProfileModal({ isOpen, onClose }: UserProfileModalPr
                 <h4 className="font-medium text-blue-800">Seus Dados Estão Protegidos</h4>
               </div>
               <p className="text-blue-700 text-sm">
-                Todas as informações pessoais são criptografadas e armazenadas com segurança bancária. Nunca compartilhamos seus dados com terceiros.
+                A aplicação utiliza controles de sessão e acesso. Dados podem ser processados por fornecedores técnicos necessários ao funcionamento dos serviços, conforme o Aviso de Privacidade. Nenhum sistema elimina todos os riscos.
               </p>
             </div>
 
@@ -134,11 +139,11 @@ export default function UserProfileModal({ isOpen, onClose }: UserProfileModalPr
                 </div>
                 <div>
                   <label className="font-medium text-muted-foreground">CPF</label>
-                  <p>{user.cpf}</p>
+                  <p>{displayField(user.cpf, ['00000000000'])}</p>
                 </div>
                 <div>
                   <label className="font-medium text-muted-foreground">Telefone</label>
-                  <p>{user.telefone}</p>
+                  <p>{displayField(user.telefone, ['11999999999'])}</p>
                 </div>
               </div>
             </div>
@@ -151,19 +156,19 @@ export default function UserProfileModal({ isOpen, onClose }: UserProfileModalPr
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div className="col-span-2">
                   <label className="font-medium text-muted-foreground">Endereço</label>
-                  <p>{user.endereco}</p>
+                  <p>{displayField(user.endereco, ['Endereço Administrativo'])}</p>
                 </div>
                 <div>
                   <label className="font-medium text-muted-foreground">Cidade</label>
-                  <p>{user.cidade}</p>
+                  <p>{displayField(user.cidade, ['São Paulo'])}</p>
                 </div>
                 <div>
                   <label className="font-medium text-muted-foreground">Estado</label>
-                  <p>{user.estado}</p>
+                  <p>{displayField(user.estado)}</p>
                 </div>
                 <div>
                   <label className="font-medium text-muted-foreground">CEP</label>
-                  <p>{user.cep}</p>
+                  <p>{displayField(user.cep, ['01000000'])}</p>
                 </div>
               </div>
             </div>
@@ -176,11 +181,11 @@ export default function UserProfileModal({ isOpen, onClose }: UserProfileModalPr
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div>
                   <label className="font-medium text-muted-foreground">Chave PIX</label>
-                  <p>{user.chavePix}</p>
+                  <p>{displayField(user.chavePix)}</p>
                 </div>
                 <div>
                   <label className="font-medium text-muted-foreground">Tipo de Chave</label>
-                  <p className="capitalize">{user.tipoChavePix}</p>
+                  <p className="capitalize">{displayField(user.tipoChavePix)}</p>
                 </div>
               </div>
             </div>
@@ -194,10 +199,10 @@ export default function UserProfileModal({ isOpen, onClose }: UserProfileModalPr
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-lg font-medium">Status de Verificação</h3>
                 <Badge
-                  variant={user.documentosVerificados ? "default" : "secondary"}
-                  className={user.documentosVerificados ? "bg-green-100 text-green-800" : ""}
+                  variant={allRequiredApproved ? "default" : "secondary"}
+                  className={allRequiredApproved ? "bg-green-100 text-green-800" : ""}
                 >
-                  {user.documentosVerificados ? "Verificado" : "Pendente"}
+                  {allRequiredApproved ? "Verificado" : "Pendente"}
                 </Badge>
               </div>
               
