@@ -3392,7 +3392,7 @@ export default function TradingSystemPage() {
                   <span>Diagnóstico do Sistema</span>
                 </CardTitle>
                 <CardDescription>
-                  Verificar e corrigir problemas automaticamente
+                  Identificar bloqueios e próximos passos sem alterar travas de segurança ou ativar operações.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -3418,26 +3418,31 @@ export default function TradingSystemPage() {
                   </Button>
                   
                   <Button
-                    onClick={() => {
-                      fetch('/api/auto-trading/fix-auto', { method: 'POST' })
-                        .then(r => r.json())
-                        .then(data => {
-                          console.log('Correções aplicadas:', data);
-                          toast({
-                            title: "Correções Aplicadas!",
-                            description: `${data.corrigoesAplicadas} correção(ões) aplicada(s). ${data.proximoPasso}`,
-                            duration: 10000
-                          });
-                          // Recarregar dados
-                          queryClient.invalidateQueries({ queryKey: ["/api/trading/config"] });
+                    onClick={async () => {
+                      try {
+                        const response = await fetch('/api/auto-trading/fix-auto', { method: 'POST' });
+                        const data = await response.json();
+                        const blockers = Array.isArray(data.blockers) ? data.blockers.join(' · ') : '';
+                        toast({
+                          title: response.ok && data.success ? "Diagnóstico concluído" : "Sistema protegido — nenhuma alteração aplicada",
+                          description: [data.message, blockers, data.nextStep].filter(Boolean).join(' '),
+                          duration: 12000,
+                          variant: response.ok && data.success ? "default" : "destructive",
                         });
+                      } catch (error: any) {
+                        toast({
+                          title: "Não foi possível concluir o diagnóstico",
+                          description: error?.message || "Falha de comunicação com o servidor.",
+                          duration: 10000,
+                          variant: "destructive",
+                        });
+                      }
                     }}
-                    variant="default"
-                    className="bg-green-600 hover:bg-green-700"
+                    variant="outline"
                     data-testid="button-fix-auto"
                   >
-                    <CheckCircle2 className="h-4 w-4 mr-2" />
-                    Corrigir Automaticamente
+                    <Activity className="h-4 w-4 mr-2" />
+                    Verificar bloqueios
                   </Button>
                 </div>
                 <div className="text-sm text-muted-foreground p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded border border-yellow-200 dark:border-yellow-800">
