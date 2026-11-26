@@ -421,29 +421,18 @@ app.use((req, res, next) => {
           }
   }
   
-  // 🛡️ SISTEMA DE BACKUP AUTOMÁTICO DO BANCO DE DADOS
-  console.log('💾 Configurando sistema de backup automático...');
-  
-  // Backup inicial ao iniciar
-  createDatabaseBackup();
-  
-  // Backup automático a cada 6 horas
-  cron.schedule('0 */6 * * *', () => {
-    console.log('⏰ Executando backup automático programado...');
-    createDatabaseBackup();
-  });
-  
-  // Backup diário às 03:00 AM
-  cron.schedule('0 3 * * *', () => {
-    console.log('🌙 Executando backup diário noturno...');
-    createDatabaseBackup();
-  });
-  
-  console.log('✅ Sistema de backup automático ativado!');
-  console.log('   📦 Backups a cada 6 horas + diário às 03:00');
-  console.log('   📁 Backups salvos em: database-backups/');
-  console.log('   🗑️ Mantendo últimos 30 backups');
-  
+  // 🛡️ BACKUP DIÁRIO ROTATIVO DO SQLITE (fuso America/Sao_Paulo)
+  console.log('💾 Ativando backups diários: uma cópia por dia, atualizada a cada 15 minutos.');
+  void createDatabaseBackup();
+
+  cron.schedule('*/15 * * * *', () => {
+    void createDatabaseBackup();
+  }, { timezone: 'America/Sao_Paulo' });
+
+  console.log('✅ Backup rotativo ativado: 30 dias, atualização a cada 15 minutos e fechamento natural à meia-noite.');
+  console.log(`   📁 Diretório local: ${process.env.SQLITE_BACKUP_DIR?.trim() || path.join(process.cwd(), 'database-backups')}`);
+  console.log('   ☁️ Google Drive: sincronização automática quando OAuth e pasta estiverem configurados.');
+
   // Inicializar ResilienceSupervisor sem bloquear o servidor HTTP.
   console.log('🛡️ Inicializando ResilienceSupervisor em segundo plano...');
   resilienceSupervisor.start().catch((error: any) => {
