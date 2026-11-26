@@ -160,11 +160,11 @@ export async function restoreSupabaseToSqliteOnce(): Promise<{ tables: number; r
   return { tables, rows };
 }
 
-export async function startSupabaseRealtimePersistence(): Promise<void> {
+export async function startSupabaseRealtimePersistence(): Promise<boolean> {
   if (timer) return;
   if (!getClient()) {
     console.warn("[SUPABASE] SUPABASE_URL/SUPABASE_ANON_KEY não configurados; sincronização não iniciada.");
-    return;
+    return false;
   }
 
   try {
@@ -191,6 +191,7 @@ export async function startSupabaseRealtimePersistence(): Promise<void> {
   timer = setInterval(() => void cycle(), SYNC_INTERVAL_MS);
   timer.unref();
   console.log("🔄 [SUPABASE] persistência contínua SQLite ↔ Supabase ativada (2s).");
+  return true;
 
   // Supabase Realtime: invalida o cache local quando outro cliente alterar dados.
   const channel = getClient()!.channel("invistapro-persistence");
