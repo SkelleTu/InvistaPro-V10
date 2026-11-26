@@ -1,0 +1,170 @@
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { sqlite } from "../db";
+import { pgDb, pgSchema, isPostgresAvailable } from "../db-postgres";
+
+const CORE_TABLES = [
+  "users",
+  "sessions",
+  "movimentos",
+  "documentos",
+  "kyc_status",
+  "deriv_tokens",
+  "trade_configurations",
+  "ai_logs",
+  "trade_operations",
+  "market_data",
+  "daily_pnl",
+  "ai_recovery_strategies",
+] as const;
+
+const BATCH_SIZE = 200;
+const SYNC_INTERVAL_MS = 2000;
+
+let client: SupabaseClient | null = null;
+let timer: NodeJS.Timeout | null = null;
+let running = false;
+
+function getClient(): SupabaseClient | null {
+  const url = process.env.SUPABASE_URL?.trim();
+  const key = process.env.SUPABASE_ANON_KEY?.trim();
+  if (!url || !key) return null;
+  if (!client) client = createClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  return client;
+}
+
+function normalize(value: any): any {
+  if (Buffer.isBuffer(value)) return value.toString("base64");
+  if (value instanceof Date) return value.toISOString();
+  return value;
+}
+
+function rowsFor(table: string): any[] {
+  return sqlite.prepare(`SELECT * FROM "${table}"`).all().map((row: any) => {
+    const out: any = {};
+    for (const [k, v] of Object.entries(row)) out[k] = normalize(v);
+    return out;
+  });
+}
+
+async function upsertTable(supabase: SupabaseClient, table: string, rows: any[]): Promise<number> {
+  if (!rows.length) return 0;
+  let written = 0;
+  for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+    const batch = rows.slice(i, i + BATCH_SIZE);
+    const { error } = await supabase.from(table).upsert(batch, { onConflict: "id", ignoreDuplicates: false });
+    if (error) throw new Error(`SUPABASE_SYNC_${table}: ${error.message}`);
+    written += batch.length;
+  }
+  return written;
+}
+
+/**
+ * SQLite continua sendo o cache de execução local. Supabase recebe uma cópia
+ * durável continuamente. Isto não substitui a necessidade de backup.
+ */
+export async function syncSqliteToSupabaseOnce(): Promise<{ tables: number; rows: number }> {
+  const supabase = getClient();
+  if (!supabase) return { tables: 0, rows: 0 };
+  let tables = 0;
+  let rows = 0;
+  for (const table of CORE_TABLES) {
+    const source = rowsFor(table);
+    if (!source.length) continue;
+    rows += await upsertTable(supabase, table, source);
+    tables++;
+  }
+  return { tables, rows };
+}
+
+/**
+ * Recupera dados que já existam no Supabase para o SQLite, sem apagar dados locais.
+ * O merge é feito por PK e só cobre tabelas presentes nos dois lados.
+ */
+export async function restoreSupabaseToSqliteOnce(): Promise<{ tables: number; rows: number }> {
+  const supabase = getClient();
+  if (!supabase) return { tables: 0, rows: 0 };
+  let tables = 0;
+  let rows = 0;
+
+  for (const table of CORE_TABLES) {
+    const { data, error } = await supabase.from(table).select("*");
+    if (error) {
+      console.warn(`[SUPABASE→SQLITE] ${table}: ${error.message}`);
+      continue;
+    }
+    if (!data?.length) continue;
+
+    const columns = Object.keys(data[0]);
+    if (!columns.includes("id") && table !== "sessions") continue;
+    const pk = table === "sessions" ? "sid" : "id";
+    if (!columns.includes(pk)) continue;
+
+    const quotedColumns = columns.map(c => `"${c}"`).join(",");
+    const placeholders = columns.map(c => `@${c}`).join(",");
+    const updates = columns.filter(c => c !== pk).map(c => `"${c}"=excluded."${c}"`).join(",");
+    const stmt = sqlite.prepare(`
+      INSERT INTO "${table}" (${quotedColumns}) VALUES (${placeholders})
+      ON CONFLICT("${pk}") DO UPDATE SET ${updates || `"${pk}"=excluded."${pk}"`}
+    `);
+
+    const tx = sqlite.transaction((items: any[]) => {
+      for (const row of items) {
+        const normalized: any = {};
+        for (const [k, v] of Object.entries(row)) normalized[k] = normalize(v);
+        stmt.run(normalized);
+      }
+    });
+    tx(data);
+    rows += data.length;
+    tables++;
+  }
+  return { tables, rows };
+}
+
+export async function startSupabaseRealtimePersistence(): Promise<void> {
+  if (timer) return;
+  if (!getClient()) {
+    console.warn("[SUPABASE] SUPABASE_URL/SUPABASE_ANON_KEY não configurados; sincronização não iniciada.");
+    return;
+  }
+
+  try {
+    const restored = await restoreSupabaseToSqliteOnce();
+    console.log(`[SUPABASE→SQLITE] restauração concluída: ${restored.tables} tabelas / ${restored.rows} linhas.`);
+  } catch (error: any) {
+    console.warn("[SUPABASE→SQLITE] restauração inicial falhou; SQLite local será preservado:", error?.message || error);
+  }
+
+  const cycle = async () => {
+    if (running) return;
+    running = true;
+    try {
+      const result = await syncSqliteToSupabaseOnce();
+      if (result.rows) console.log(`[SQLITE→SUPABASE] sincronização: ${result.tables} tabelas / ${result.rows} linhas.`);
+    } catch (error: any) {
+      console.warn("[SQLITE→SUPABASE] ciclo falhou; próxima tentativa automática:", error?.message || error);
+    } finally {
+      running = false;
+    }
+  };
+
+  await cycle();
+  timer = setInterval(() => void cycle(), SYNC_INTERVAL_MS);
+  timer.unref();
+  console.log("🔄 [SUPABASE] persistência contínua SQLite ↔ Supabase ativada (2s).");
+
+  // Supabase Realtime: invalida o cache local quando outro cliente alterar dados.
+  const channel = getClient()!.channel("invistapro-persistence");
+  channel
+    .on("postgres_changes", { event: "*", schema: "public", table: "users" }, () => void restoreSupabaseToSqliteOnce())
+    .on("postgres_changes", { event: "*", schema: "public", table: "movimentos" }, () => void restoreSupabaseToSqliteOnce())
+    .on("postgres_changes", { event: "*", schema: "public", table: "trade_operations" }, () => void restoreSupabaseToSqliteOnce())
+    .subscribe((status) => console.log(`[SUPABASE REALTIME] ${status}`));
+}
+
+export function stopSupabaseRealtimePersistence(): void {
+  if (timer) clearInterval(timer);
+  timer = null;
+}
