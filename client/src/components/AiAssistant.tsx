@@ -170,7 +170,7 @@ export default function AiAssistant() {
       id: "welcome",
       role: "assistant",
       content:
-        "Olá! Sou a IA da **InvistaPRO**.\n\nPressione o microfone e fale comigo, ou escreva sua pergunta. Posso ajudar a consultar informações da sua conta, histórico e resultados registrados.",
+        "Olá! Sou a IA da **Aura System**.\n\nPressione o microfone e fale comigo, ou escreva sua pergunta. Posso ajudar a consultar informações da sua conta, histórico e resultados registrados.",
       timestamp: new Date(),
     },
   ]);
@@ -427,7 +427,7 @@ export default function AiAssistant() {
                   )}
                 </div>
                 <div>
-                  <p className="text-white font-semibold text-sm leading-none">IA InvistaPRO</p>
+                  <p className="text-white font-semibold text-sm leading-none">IA Aura System</p>
                   <p className="text-white/70 text-xs mt-0.5">
                     {voiceState === "recording"
                       ? "🔴 Gravando..."
