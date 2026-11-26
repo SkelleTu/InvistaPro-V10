@@ -53,35 +53,9 @@ interface RajadaCondition {
   details: Record<string, any>;
 }
 
-interface RajadaResult {
-  success: boolean;
-  totalModules: number;
-  succeeded: number;
-  failed: number;
-  results: Array<{ slotIndex: number; status: string; stakeUsed: number; contractId: string | null }>;
-}
-
 const MODALITIES = [
-  { id: "digit_matches", name: "Digit Matches", category: "Dígitos", color: "blue" },
   { id: "digit_differs", name: "Digit Differs", category: "Dígitos", color: "blue" },
-  { id: "digit_over", name: "Digit Over", category: "Dígitos", color: "blue" },
-  { id: "digit_under", name: "Digit Under", category: "Dígitos", color: "blue" },
-  { id: "digit_even", name: "Digit Even", category: "Dígitos", color: "blue" },
-  { id: "digit_odd", name: "Digit Odd", category: "Dígitos", color: "blue" },
-  { id: "rise", name: "Rise (Alta)", category: "Altas & Baixas", color: "emerald" },
-  { id: "fall", name: "Fall (Baixa)", category: "Altas & Baixas", color: "emerald" },
-  { id: "higher", name: "Higher", category: "Altas & Baixas", color: "emerald" },
-  { id: "lower", name: "Lower", category: "Altas & Baixas", color: "emerald" },
-  { id: "touch", name: "Touch", category: "Touch/No Touch", color: "purple" },
-  { id: "no_touch", name: "No Touch", category: "Touch/No Touch", color: "purple" },
-  { id: "end_between", name: "End Between", category: "In/Out", color: "orange" },
-  { id: "end_outside", name: "End Outside", category: "In/Out", color: "orange" },
-  { id: "stays_between", name: "Stays Between", category: "In/Out", color: "orange" },
-  { id: "goes_outside", name: "Goes Outside", category: "In/Out", color: "orange" },
   { id: "accumulator", name: "Acumulador", category: "Acumuladores", color: "yellow" },
-  { id: "multiplier", name: "Multiplicador", category: "Multiplicadores", color: "red" },
-  { id: "vanilla_call", name: "Vanilla Call", category: "Vanilla", color: "violet" },
-  { id: "vanilla_put", name: "Vanilla Put", category: "Vanilla", color: "violet" },
 ];
 
 const SLOT_COLORS = [
@@ -183,7 +157,6 @@ function ModalityModuleCard({ modality, slots, config, onSave, isSaving }: Modal
     }));
   });
   const [expanded, setExpanded] = useState(false);
-  const [rajadaResult, setRajadaResult] = useState<RajadaResult | null>(null);
 
   const enabledCount = localConfig.filter(c => c.enabled).length;
 
@@ -192,20 +165,6 @@ function ModalityModuleCard({ modality, slots, config, onSave, isSaving }: Modal
     queryFn: () => apiRequest(`/api/trading/module-configs/${modality.id}/rajada-conditions`).then(r => r.json()),
     refetchInterval: 15000,
     enabled: expanded && enabledCount > 0,
-  });
-
-  const rajadaMutation = useMutation({
-    mutationFn: () => apiRequest(`/api/trading/module-configs/${modality.id}/rajada`, { method: 'POST' }),
-    onSuccess: (data: any) => {
-      setRajadaResult(data);
-      toast({
-        title: `⚡ Rajada disparada — ${modality.name}`,
-        description: `${data.succeeded}/${data.totalModules} módulos executados com sucesso`,
-      });
-    },
-    onError: (e: any) => {
-      toast({ title: 'Erro na Rajada', description: e?.message || 'Falha ao disparar', variant: 'destructive' });
-    },
   });
 
   const toggleSlot = (slotIndex: number) => {
@@ -400,41 +359,13 @@ function ModalityModuleCard({ modality, slots, config, onSave, isSaving }: Modal
             </Button>
 
             {enabledCount > 0 && (
-              <Button
-                onClick={() => rajadaMutation.mutate()}
-                disabled={rajadaMutation.isPending}
-                size="sm"
-                variant="outline"
-                className={`flex-1 border-orange-500/50 text-orange-300 hover:bg-orange-500/10 ${conditions?.ready ? 'border-green-500/50 text-green-300 hover:bg-green-500/10' : ''}`}
-                data-testid={`rajada-btn-${modality.id}`}
-              >
-                {rajadaMutation.isPending
-                  ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />
-                  : <Zap className="w-3.5 h-3.5 mr-1" />}
-                Rajada Manual
-              </Button>
+              <p className="flex-1 text-xs text-muted-foreground">
+                Execução manual indisponível neste painel. O servidor exige símbolo e contrato explicitamente validados antes de qualquer ordem.
+              </p>
             )}
           </div>
 
-          {/* Rajada Result */}
-          {rajadaResult && (
-            <div className={`rounded-lg border p-3 text-xs space-y-1.5 ${rajadaResult.succeeded > 0 ? 'border-green-500/30 bg-green-500/5' : 'border-red-500/30 bg-red-500/5'}`}>
-              <div className="flex items-center gap-2 font-semibold">
-                {rajadaResult.succeeded > 0 ? <CheckCircle2 className="w-3.5 h-3.5 text-green-400" /> : <XCircle className="w-3.5 h-3.5 text-red-400" />}
-                Rajada: {rajadaResult.succeeded}/{rajadaResult.totalModules} módulos executados
-              </div>
-              <div className="grid grid-cols-2 gap-1">
-                {rajadaResult.results?.map(r => (
-                  <div key={r.slotIndex} className={`flex items-center gap-1 ${r.status === 'success' ? 'text-green-300' : 'text-red-300'}`}>
-                    <div className={`w-4 h-4 rounded-full flex items-center justify-center text-[9px] border ${SLOT_COLORS[r.slotIndex]}`}>
-                      {r.slotIndex}
-                    </div>
-                    <span>{r.status === 'success' ? `✓ $${r.stakeUsed}` : '✗'}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+
         </div>
       )}
     </Card>
