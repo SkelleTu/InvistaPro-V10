@@ -19,16 +19,16 @@ export default function InvestmentPieChart({ data }: InvestmentPieChartProps) {
   // Calcular categorias leigas para o usuário entender
   const categories = [
     {
-      label: 'Dinheiro Investido',
+      label: 'Saldo base estimado',
       value: data.totalInvested,
       color: theme === 'fluent' ? '#0078d4' : '#10b981',
-      description: 'Valor que você depositou'
+      description: 'Saldo registrado menos a estimativa mensal'
     },
     {
-      label: 'Lucros Gerados',
+      label: 'Rendimento ilustrativo',
       value: data.totalYield,
       color: theme === 'fluent' ? '#107c10' : '#3b82f6',
-      description: 'Rendimentos conquistados'
+      description: 'Cálculo de 0,835% ao mês; não é lucro realizado'
     }
   ];
 
@@ -102,11 +102,11 @@ export default function InvestmentPieChart({ data }: InvestmentPieChartProps) {
       <CardHeader>
         <CardTitle className={`flex items-center space-x-2 ${theme === 'fluent' ? 'text-lg font-semibold' : ''}`}>
           <PieChart className="h-5 w-5" />
-          <span>Composição dos Seus Investimentos</span>
+          <span>Composição matemática do saldo</span>
         </CardTitle>
         {theme === 'fluent' && (
           <p className="text-sm text-muted-foreground mt-2">
-            Veja como seu dinheiro está distribuído de forma simples
+            Decomposição ilustrativa; não representa histórico de depósitos ou lucros conciliados
           </p>
         )}
       </CardHeader>
