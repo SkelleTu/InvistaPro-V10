@@ -140,7 +140,7 @@ async function uploadBackupToDrive(filePath: string, fileName: string): Promise<
 async function pruneDriveBackups(): Promise<void> {
   const files = await listDriveBackups();
   const dated = files
-    .map((file) => ({ ...file, date: file.name.match(/^investpro_backup_(\\d{4}-\\d{2}-\\d{2})\\.db$/)?.[1] }))
+    .map((file) => ({ ...file, date: file.name.match(/^investpro_backup_(\d{4}-\d{2}-\d{2})\.db$/)?.[1] }))
     .filter((file): file is DriveFile & { date: string } => Boolean(file.date))
     .sort((a, b) => b.date.localeCompare(a.date));
 
@@ -156,7 +156,7 @@ async function pruneDriveBackups(): Promise<void> {
 
 function pruneLocalBackups(): void {
   const files = fs.readdirSync(BACKUP_DIR)
-    .map((name) => ({ name, date: name.match(/^investpro_backup_(\\d{4}-\\d{2}-\\d{2})\\.db$/)?.[1] }))
+    .map((name) => ({ name, date: name.match(/^investpro_backup_(\d{4}-\d{2}-\d{2})\.db$/)?.[1] }))
     .filter((file): file is { name: string; date: string } => Boolean(file.date))
     .sort((a, b) => b.date.localeCompare(a.date));
 
@@ -231,7 +231,7 @@ export function listBackups(): Array<{ name: string; date: Date; size: string }>
   try {
     if (!fs.existsSync(BACKUP_DIR)) return [];
     return fs.readdirSync(BACKUP_DIR)
-      .filter((name) => /^investpro_backup_\\d{4}-\\d{2}-\\d{2}\\.db$/.test(name))
+      .filter((name) => /^investpro_backup_\d{4}-\d{2}-\d{2}\.db$/.test(name))
       .map((name) => {
         const filePath = path.join(BACKUP_DIR, name);
         const stats = fs.statSync(filePath);
@@ -249,7 +249,7 @@ export function listBackups(): Array<{ name: string; date: Date; size: string }>
  * antes da troca; o servidor deve ser reiniciado para reabrir o banco.
  */
 export async function restoreBackup(backupFileName: string): Promise<boolean> {
-  if (!/^investpro_backup_\\d{4}-\\d{2}-\\d{2}\\.db$/.test(backupFileName)) return false;
+  if (!/^investpro_backup_\d{4}-\d{2}-\d{2}\.db$/.test(backupFileName)) return false;
   const backupPath = path.join(BACKUP_DIR, path.basename(backupFileName));
   if (!fs.existsSync(backupPath)) return false;
 
