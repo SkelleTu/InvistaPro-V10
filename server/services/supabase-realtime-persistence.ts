@@ -37,6 +37,9 @@ function getClient(): SupabaseClient | null {
 function normalize(value: any): any {
   if (Buffer.isBuffer(value)) return value.toString("base64");
   if (value instanceof Date) return value.toISOString();
+  // better-sqlite3 does not accept JavaScript booleans or plain objects as bind values.
+  if (typeof value === "boolean") return value ? 1 : 0;
+  if (value !== null && typeof value === "object") return JSON.stringify(value);
   return value;
 }
 
@@ -133,8 +136,12 @@ export async function restoreSupabaseToSqliteOnce(): Promise<{ tables: number; r
     }
     if (!data?.length) continue;
 
-    const columns = Object.keys(data[0]);
-    if (!columns.includes("id") && table !== "sessions") continue;
+    // Only restore columns that exist in the current local SQLite schema.
+    // Newer Supabase schemas may contain columns not yet present in this release.
+    const localColumns = new Set(
+      (sqlite.prepare(`PRAGMA table_info("${table}")`).all() as any[]).map(column => String(column.name))
+    );
+    const columns = Object.keys(data[0]).filter(column => localColumns.has(column));
     const pk = table === "sessions" ? "sid" : "id";
     if (!columns.includes(pk)) continue;
 
@@ -149,7 +156,7 @@ export async function restoreSupabaseToSqliteOnce(): Promise<{ tables: number; r
     const tx = sqlite.transaction((items: any[]) => {
       for (const row of items) {
         const normalized: any = {};
-        for (const [k, v] of Object.entries(row)) normalized[k] = normalize(v);
+        for (const column of columns) normalized[column] = normalize(row[column]);
         stmt.run(normalized);
       }
     });
