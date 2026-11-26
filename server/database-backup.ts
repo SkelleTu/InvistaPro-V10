@@ -151,7 +151,7 @@ async function uploadBackupToDrive(filePath: string, fileName: string): Promise<
 async function pruneDriveBackups(): Promise<void> {
   const files = await listDriveBackups();
   const dated = files
-    .map((file) => ({ ...file, date: file.name.match(/^investpro_backup_(\d{4}-\d{2}-\d{2})\.db$/)?.[1] }))
+    .map((file) => ({ ...file, date: file.name.match(/^investpro_backup_(\d{4}-\d{2}-\d{2})\.db\.enc$/)?.[1] }))
     .filter((file): file is DriveFile & { date: string } => Boolean(file.date))
     .sort((a, b) => b.date.localeCompare(a.date));
 
