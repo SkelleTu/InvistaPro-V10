@@ -317,3 +317,28 @@ body::before {
 .aura-integration-shell .aura-platform-header { background:linear-gradient(135deg,rgba(0,0,0,.78),rgba(0,20,30,.76))!important; border-color:rgba(0,229,255,.16)!important; backdrop-filter:blur(20px); }
 .aura-integration-shell .aura-platform-header button { border:1px solid rgba(0,229,255,.12); border-radius:.75rem; }
 @media(max-width:767px) { body::before { background-size:150px 150px,50px 50px,50px 50px,100% 100%,100% 100%; } }
+
+
+/* Aura System visual identity — shared with the host application. */
+:root, .dark {
+  --background: 220 25% 3%;
+  --foreground: 210 20% 98%;
+  --card: 220 25% 5%;
+  --card-foreground: 210 20% 98%;
+  --popover: 220 25% 5%;
+  --popover-foreground: 210 20% 98%;
+  --primary: 190 100% 50%;
+  --primary-foreground: 210 20% 98%;
+  --secondary: 190 100% 50%;
+  --secondary-foreground: 210 20% 98%;
+  --muted: 220 15% 10%;
+  --muted-foreground: 210 10% 70%;
+  --accent: 190 100% 50%;
+  --accent-foreground: 210 20% 98%;
+  --border: 190 100% 50% / 0.2;
+  --input: 220 20% 10%;
+  --ring: 190 100% 50%;
+  --radius: 0.75rem;
+  --font-sans: Calibri, "Segoe UI", Arial, sans-serif;
+}
+html, body { font-family: Calibri, "Segoe UI", Arial, sans-serif; }
