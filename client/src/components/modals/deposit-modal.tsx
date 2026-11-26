@@ -8,7 +8,6 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { useTheme } from "@/contexts/ThemeContext";
 import { Copy, QrCode, X, TrendingUp } from "lucide-react";
-import iconImage from "@/assets/investpro-icon.png";
 
 
 interface DepositModalProps {
@@ -144,13 +143,13 @@ export default function DepositModal({ isOpen, onClose }: DepositModalProps) {
         <DialogHeader>
           <DialogTitle className="flex items-center space-x-3 text-xl font-semibold text-card-foreground">
             <img 
-              src={iconImage} 
-              alt="InvistaPRO Logo" 
+              src="https://integrated-system-1c86.onrender.com/aura-system-logo.webp?v=1" 
+              alt="Aura System" 
               className="w-12 h-12 rounded-lg shadow-sm relative z-0"
             />
             <div className="flex flex-col relative z-10">
-              <span className="text-xl font-semibold">Fazer Depósito - InvistaPRO</span>
-              <span className="text-xs font-medium text-muted-foreground tracking-wide opacity-75">Invista com Risco Zero</span>
+              <span className="text-xl font-semibold">Fazer Depósito - Aura System</span>
+              <span className="text-xs font-medium text-muted-foreground tracking-wide opacity-75">Renda Variável</span>
             </div>
           </DialogTitle>
         </DialogHeader>
@@ -279,7 +278,7 @@ export default function DepositModal({ isOpen, onClose }: DepositModalProps) {
                 <p><strong>Favorecido:</strong> {pixData.empresa || "Victor Felipe Diogo"}</p>
                 <p><strong>Chave PIX:</strong> {pixData.chavePix || "05f6ace9-d21c-43f2-8fb9-40e7da3009a8"}</p>
                 <p><strong>Valor:</strong> R$ {pixData.valor}</p>
-                <p><strong>Descrição:</strong> {pixData.observacao || "Depósito InvistaPRO"}</p>
+                <p><strong>Descrição:</strong> {pixData.observacao || "Depósito Aura System"}</p>
               </div>
             </div>
 
