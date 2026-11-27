@@ -2956,9 +2956,13 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     const userId = req.user.id;
     const { modality } = req.params;
     const { slotConfigs } = req.body;
+    if (!["digit_differs", "accumulator"].includes(String(modality))) {
+      return res.status(403).json({ code: "MODULE_MODALITY_NOT_ALLOWED", message: "A cópia multi-conta está disponível somente para Digit Differs e Acumulador neste ambiente." });
+    }
     if (!Array.isArray(slotConfigs) || slotConfigs.length > 10) {
       return res.status(400).json({ message: 'slotConfigs deve ser um array com no máximo 10 módulos' });
     }
+    const activeSlotTokens = (await dbStorage.getAllDerivTokens(userId)).filter(token => token.isActive && Boolean(token.token));
     const seenSlots = new Set<number>();
     const normalizedConfigs: Array<{ slotIndex: number; enabled: boolean; stakeMode: 'ai' | 'fixed' | 'manual'; fixedStake: number; accountType: 'demo' | 'real' }> = [];
     for (const raw of slotConfigs) {
@@ -2973,13 +2977,23 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
           message: 'Configuração inválida: cada módulo exige slot único (1-10), enabled booleano, stakeMode válido, stake mínimo de 0,35 e conta demo/real válida.',
         });
       }
+      const desiredAccountType = raw.accountType === 'real' ? 'real' : 'demo';
+      if (raw.enabled) {
+        const matchingToken = activeSlotTokens.find(token => Number((token as any).slotIndex) === raw.slotIndex);
+        if (!matchingToken?.token) {
+          return res.status(409).json({ code: "DERIV_SLOT_TOKEN_REQUIRED", message: `Configure um token ativo no slot ${raw.slotIndex + 1} antes de habilitá-lo.` });
+        }
+        if (String(matchingToken.accountType).toLowerCase() !== desiredAccountType) {
+          return res.status(409).json({ code: "DERIV_SLOT_ENVIRONMENT_MISMATCH", message: `O slot ${raw.slotIndex + 1} possui token ${String(matchingToken.accountType).toUpperCase()}; selecione esse ambiente ou configure o token correto.` });
+        }
+      }
       seenSlots.add(raw.slotIndex);
       normalizedConfigs.push({
         slotIndex: raw.slotIndex,
         enabled: raw.enabled,
         stakeMode: raw.stakeMode,
         fixedStake: raw.fixedStake,
-        accountType: raw.accountType === 'real' ? 'real' : 'demo',
+        accountType: desiredAccountType,
       });
     }
     const saved = await dbStorage.upsertModalityModuleConfig(userId, modality, normalizedConfigs);
