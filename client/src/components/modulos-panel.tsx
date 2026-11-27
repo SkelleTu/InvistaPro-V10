@@ -252,7 +252,7 @@ function ModalityModuleCard({ modality, slots, config, onSave, isSaving }: Modal
                       <Clock className="w-3.5 h-3.5 text-yellow-400" />
                     )}
                     <span className={`text-xs font-medium ${conditions.ready ? 'text-green-400' : 'text-yellow-400'}`}>
-                      {conditions.ready ? 'Momento favorável para Rajada' : 'Aguardando condições ideais'}
+                      {conditions.ready ? 'Condições favoráveis detectadas' : 'Aguardando condições ideais'}
                     </span>
                   </div>
                 </div>
