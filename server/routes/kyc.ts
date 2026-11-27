@@ -3,7 +3,7 @@ import multer from "multer";
 import { isAuthenticated } from "../auth";
 import { dualStorage } from "../storage-dual";
 import { whatsappService } from "../whatsappService";
-import { readPrivateDocument } from "../services/private-document-storage";
+import { isPrivateDocumentStorageConfigured, readPrivateDocument } from "../services/private-document-storage";
 import { saveKycDocument } from "../services/kyc-document-service";
 
 const router = express.Router();
@@ -45,6 +45,7 @@ router.get("/status", isAuthenticated, async (req: any, res) => {
     return res.json({
       verified: Boolean(user?.documentosVerificados),
       verifiedAt: user?.documentosAprovadosEm ?? null,
+      uploadAvailable: isPrivateDocumentStorageConfigured(),
       documents: userDocuments.map(document => ({
         id: document.id,
         tipo: document.tipo,
