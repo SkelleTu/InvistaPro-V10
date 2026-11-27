@@ -178,7 +178,7 @@ export default function DocumentUpload() {
             type="file"
             accept=".jpg,.jpeg,.png,.pdf"
             onChange={(e) => handleFileChange('rg', e.target.files?.[0] || null)}
-            disabled={uploading}
+            disabled={uploading || kycStatus?.uploadAvailable === false}
             data-testid="input-rg-upload"
           />
           {rgFile && (
@@ -200,9 +200,9 @@ export default function DocumentUpload() {
           <Input
             id="comprovante-upload"
             type="file"
-            accept="image/*,.pdf"
+            accept=".jpg,.jpeg,.png,.pdf"
             onChange={(e) => handleFileChange('comprovante', e.target.files?.[0] || null)}
-            disabled={uploading}
+            disabled={uploading || kycStatus?.uploadAvailable === false}
             data-testid="input-comprovante-upload"
           />
           {comprovanteFile && (
