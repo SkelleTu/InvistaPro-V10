@@ -477,7 +477,7 @@ export default function ModulosPanel() {
             Sistema de Módulos
           </h2>
           <p className="text-sm text-muted-foreground mt-1">
-            Amplifique cada decisão da IA disparando o mesmo contrato em múltiplos módulos simultaneamente
+            Preferências de cópia por modalidade. Esta tela não envia ordens nem inicia execuções multi-conta.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -510,7 +510,7 @@ export default function ModulosPanel() {
             Painel Central de Módulos
           </CardTitle>
           <CardDescription className="text-xs">
-            Visão geral de todos os 10 módulos (tokens) — seus saldos, modalidades ativas e status em tempo real
+            Visão dos 10 slots, tokens configurados e estados atualizados periodicamente
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -526,7 +526,7 @@ export default function ModulosPanel() {
             </div>
             <div className="rounded-lg border border-border/50 bg-muted/20 p-3 text-center">
               <div className="text-2xl font-bold text-orange-400">{totalActiveModules}</div>
-              <div className="text-[11px] text-muted-foreground">Cópias simultâneas</div>
+              <div className="text-[11px] text-muted-foreground">Slots habilitados</div>
             </div>
           </div>
 
@@ -538,9 +538,7 @@ export default function ModulosPanel() {
                 <div className="text-xs space-y-1">
                   <p className="font-semibold text-amber-300">Nenhum módulo configurado</p>
                   <p className="text-muted-foreground">
-                    Para usar o sistema de módulos, primeiro configure os tokens nos slots 0-9 na aba
-                    <strong className="text-foreground"> Configurações → Frenético 9-Tokens</strong>.
-                    Cada slot usa seu próprio token/conta Deriv para executar trades em paralelo.
+                    O gerenciamento de tokens por slot e a execução multi-conta estão desativados nesta versão. A tela antiga Frenético 9-Tokens não aceita novas configurações. Não insira tokens nem espere ordens a partir deste painel.
                   </p>
                 </div>
               </div>
@@ -563,20 +561,20 @@ export default function ModulosPanel() {
           <div className="rounded-lg border border-border/50 bg-muted/10 p-3">
             <h4 className="text-xs font-semibold flex items-center gap-1.5 mb-2">
               <Cpu className="w-3.5 h-3.5 text-blue-400" />
-              Como funciona o Amplificador de Cópia Simultânea
+              Estado atual do recurso de cópia
             </h4>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px] text-muted-foreground">
               <div className="flex items-start gap-1.5">
                 <span className="text-blue-400 font-bold">1.</span>
-                <span>A IA analisa o mercado e aprova um trade em uma modalidade</span>
+                <span>As preferências por modalidade podem ser consultadas e salvas nesta tela</span>
               </div>
               <div className="flex items-start gap-1.5">
                 <span className="text-blue-400 font-bold">2.</span>
-                <span>O sistema dispara o mesmo contrato simultaneamente em todos os módulos ativos naquela modalidade</span>
+                <span>Esta tela não envia ordens nem inicia cópias simultâneas</span>
               </div>
               <div className="flex items-start gap-1.5">
                 <span className="text-blue-400 font-bold">3.</span>
-                <span>Cada módulo executa na sua própria conta/token com stake configurado individualmente</span>
+                <span>A execução multi-conta permanece bloqueada até existir gerenciamento de slots, validação de contrato e confirmação explícita do ambiente DEMO/REAL</span>
               </div>
             </div>
           </div>
@@ -590,8 +588,7 @@ export default function ModulosPanel() {
           Configuração por Modalidade
         </h3>
         <p className="text-xs text-muted-foreground mb-4">
-          Para cada modalidade, selecione quais módulos copiam as operações e defina o stake de cada um.
-          Clique em qualquer modalidade para expandir e configurar.
+          As preferências podem ser visualizadas e salvas, mas não iniciam operações. A execução multi-conta está temporariamente indisponível.
         </p>
 
         {configsLoading ? (
