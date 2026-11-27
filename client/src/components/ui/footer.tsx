@@ -179,11 +179,11 @@ export function Footer() {
             <div className="flex items-center space-x-6">
               <div className="flex items-center space-x-2 text-xs">
                 <Shield className="w-3 h-3 text-green-400" />
-                <span className="text-muted-foreground">SSL Seguro</span>
+                <span className="text-muted-foreground">Conexão HTTPS</span>
               </div>
               <div className="flex items-center space-x-2 text-xs">
                 <TrendingUp className="w-3 h-3 text-blue-400" />
-                <span className="text-muted-foreground">Consulte os rendimentos registrados</span>
+                <span className="text-muted-foreground">Indicadores da conta</span>
               </div>
             </div>
           </div>
@@ -192,7 +192,7 @@ export function Footer() {
             <p className="text-xs text-muted-foreground leading-relaxed">
               <span className="font-medium text-foreground">Aviso Legal:</span> Os investimentos em renda variável e sintéticos podem apresentar riscos. 
               Rentabilidade passada não garante resultados futuros. Leia todos os termos antes de investir. 
-              InvistaPRO não é uma instituição financeira, atuamos como facilitadores de investimentos automatizados.
+              A Invista PRO é uma plataforma de software. A negociação de ativos e contratos envolve risco; simulações não representam resultados reais.
             </p>
           </div>
         </div>
