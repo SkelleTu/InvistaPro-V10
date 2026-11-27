@@ -144,7 +144,7 @@ export default function Landing() {
                   size="lg"
                 >
                   <TrendingUp className="h-5 w-5 lg:h-6 lg:w-6" />
-                  <span>Começar a Lucrar Agora</span>
+                  <span>Acessar a plataforma</span>
                 </Button>
               </div>
             </div>
@@ -158,10 +158,10 @@ export default function Landing() {
                     <div className="w-8 h-8 lg:w-10 lg:h-10 bg-gradient-to-br from-indigo-400 to-purple-600 rounded-lg flex items-center justify-center">
                       <Cpu className="h-4 w-4 lg:h-5 lg:w-5 text-white" />
                     </div>
-                    <h3 className="text-indigo-100 font-bold text-sm lg:text-base">Tecnologia Avançada</h3>
+                    <h3 className="text-indigo-100 font-bold text-sm lg:text-base">Ferramentas de análise e automação</h3>
                   </div>
                   <p className="text-indigo-100/90 text-xs lg:text-sm leading-relaxed">
-                    Nossos algoritmos são potencializados com Inteligência Artificial de última geração, fazendo todo o processo de análise e otimização de forma completamente automatizada para você.
+                    A plataforma reúne ferramentas de análise, configuração e integração com serviços externos. A disponibilidade depende de credenciais válidas, dados do provedor e validações operacionais.
                   </p>
                 </CardContent>
               </Card>
@@ -173,8 +173,8 @@ export default function Landing() {
                     <Brain className="h-5 w-5 text-white" />
                   </div>
                   <div>
-                    <h3 className="text-white font-semibold">100% Automático</h3>
-                    <p className="text-blue-100 text-sm">Não precisa entender NADA de investimentos para lucrar</p>
+                    <h3 className="text-white font-semibold">Controles configuráveis</h3>
+                    <p className="text-blue-100 text-sm">O usuário deve compreender os riscos e acompanhar as configurações antes de operar</p>
                   </div>
                 </CardContent>
               </Card>
@@ -185,8 +185,8 @@ export default function Landing() {
                     <Users className="h-5 w-5 text-white" />
                   </div>
                   <div>
-                    <h3 className="text-white font-semibold">Para Todos os Perfis</h3>
-                    <p className="text-blue-100 text-sm">Iniciantes ou especialistas, nosso sistema funciona igual</p>
+                    <h3 className="text-white font-semibold">Uso responsável</h3>
+                    <p className="text-blue-100 text-sm">Os recursos disponíveis variam conforme a conta, as permissões e os serviços conectados</p>
                   </div>
                 </CardContent>
               </Card>
@@ -197,8 +197,8 @@ export default function Landing() {
                     <Zap className="h-5 w-5 text-white" />
                   </div>
                   <div>
-                    <h3 className="text-white font-semibold">Gestão Inteligente</h3>
-                    <p className="text-blue-100 text-sm">Algoritmos profissionais trabalham 24/7 por você</p>
+                    <h3 className="text-white font-semibold">Monitoramento e limites</h3>
+                    <p className="text-blue-100 text-sm">Controles de risco ajudam a limitar a exposição, mas não eliminam perdas nem garantem disponibilidade contínua</p>
                   </div>
                 </CardContent>
               </Card>
