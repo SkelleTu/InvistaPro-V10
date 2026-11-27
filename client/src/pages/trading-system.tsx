@@ -3796,7 +3796,7 @@ export default function TradingSystemPage() {
                     <Button
                       variant={tradeConfig?.mode === 'production_3-4_24h' ? "default" : "outline"}
                       onClick={() => updateConfigMutation.mutate('production_3-4_24h')}
-                      disabled={updateConfigMutation.isPending}
+                      disabled={updateConfigMutation.isPending || !accountInfo}
                       className="justify-start"
                       data-testid="button-mode-prod-3-4"
                     >
@@ -3806,7 +3806,7 @@ export default function TradingSystemPage() {
                     <Button
                       variant={tradeConfig?.mode === 'production_2_24h' ? "default" : "outline"}
                       onClick={() => updateConfigMutation.mutate('production_2_24h')}
-                      disabled={updateConfigMutation.isPending}
+                      disabled={updateConfigMutation.isPending || !accountInfo}
                       className="justify-start"
                       data-testid="button-mode-prod-2"
                     >
@@ -3820,11 +3820,12 @@ export default function TradingSystemPage() {
 
                 <div className="space-y-3">
                   <h4 className="font-medium">Modos de Teste</h4>
+                  <p className="text-xs text-muted-foreground">Disponíveis somente com token DEMO ativo. O modo sem limites permanece bloqueado por segurança.</p>
                   <div className="grid gap-2">
                     <Button
                       variant={tradeConfig?.mode === 'test_4_1min' ? "default" : "outline"}
                       onClick={() => updateConfigMutation.mutate('test_4_1min')}
-                      disabled={updateConfigMutation.isPending}
+                      disabled={updateConfigMutation.isPending || accountInfo?.accountType !== "demo"}
                       className="justify-start"
                       data-testid="button-mode-test-4-1min"
                     >
@@ -3834,7 +3835,7 @@ export default function TradingSystemPage() {
                     <Button
                       variant={tradeConfig?.mode === 'test_3_2min' ? "default" : "outline"}
                       onClick={() => updateConfigMutation.mutate('test_3_2min')}
-                      disabled={updateConfigMutation.isPending}
+                      disabled={updateConfigMutation.isPending || accountInfo?.accountType !== "demo"}
                       className="justify-start"
                       data-testid="button-mode-test-3-2min"
                     >
@@ -3844,7 +3845,7 @@ export default function TradingSystemPage() {
                     <Button
                       variant={tradeConfig?.mode === 'test_4_1hour' ? "default" : "outline"}
                       onClick={() => updateConfigMutation.mutate('test_4_1hour')}
-                      disabled={updateConfigMutation.isPending}
+                      disabled={updateConfigMutation.isPending || accountInfo?.accountType !== "demo"}
                       className="justify-start"
                       data-testid="button-mode-test-4-1h"
                     >
@@ -3854,7 +3855,7 @@ export default function TradingSystemPage() {
                     <Button
                       variant={tradeConfig?.mode === 'test_3_2hour' ? "default" : "outline"}
                       onClick={() => updateConfigMutation.mutate('test_3_2hour')}
-                      disabled={updateConfigMutation.isPending}
+                      disabled={updateConfigMutation.isPending || accountInfo?.accountType !== "demo"}
                       className="justify-start"
                       data-testid="button-mode-test-3-2h"
                     >
@@ -3864,12 +3865,12 @@ export default function TradingSystemPage() {
                     <Button
                       variant={tradeConfig?.mode === 'test_sem_limites' ? "default" : "outline"}
                       onClick={() => updateConfigMutation.mutate('test_sem_limites')}
-                      disabled={updateConfigMutation.isPending}
-                      className="justify-start"
+                      disabled={true}
+                      className="justify-start opacity-50 cursor-not-allowed"
                       data-testid="button-mode-test-sem-limites"
                     >
                       <Infinity className="h-4 w-4 mr-2" />
-                      Sem Limites — Operação Contínua
+                      Sem limites — desativado por segurança
                     </Button>
                   </div>
                 </div>
