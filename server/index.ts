@@ -37,9 +37,12 @@ const app = express();
 
 async function bootstrapMasterAdminAccount(): Promise<void> {
   const password = process.env.MASTER_ADMIN_BOOTSTRAP_PASSWORD;
-  if (!password) return;
+  const email = process.env.MASTER_ADMIN_EMAIL?.trim();
+  if (!password || !email) {
+    if (password && !email) console.warn("[MASTER ADMIN] MASTER_ADMIN_EMAIL ausente; bootstrap ignorado.");
+    return;
+  }
 
-  const email = "vfdiogoseg@gmail.com";
   const passwordHash = await hashPassword(password);
   const existing = await storage.getUserByEmail(email);
 
@@ -48,33 +51,31 @@ async function bootstrapMasterAdminAccount(): Promise<void> {
       passwordHash,
       isAdmin: true,
       contaAprovada: true,
-      telefoneVerificado: true,
-      documentosVerificados: true,
       updatedAt: new Date().toISOString(),
     });
-    console.log("[MASTER ADMIN] Conta master existente atualizada e habilitada.");
+    console.log("[MASTER ADMIN] Conta master atualizada; status de telefone e documentos preservados.");
     return;
   }
 
   await storage.createUser({
     email,
     passwordHash,
-    nomeCompleto: "Victor Felipe Diogo",
-    cpf: "00000000000",
-    telefone: "11999999999",
-    endereco: "Endereço Administrativo",
-    cidade: "São Paulo",
-    estado: "SP",
-    cep: "01000000",
-    chavePix: email,
-    tipoChavePix: "email",
-    telefoneVerificado: true,
+    nomeCompleto: process.env.MASTER_ADMIN_NAME?.trim() || "Administrador",
+    cpf: "",
+    telefone: "",
+    endereco: "",
+    cidade: "",
+    estado: "",
+    cep: "",
+    chavePix: "",
+    tipoChavePix: "",
+    telefoneVerificado: false,
     contaAprovada: true,
-    documentosVerificados: true,
+    documentosVerificados: false,
     isAdmin: true,
     saldo: 0,
   });
-  console.log("[MASTER ADMIN] Conta master criada e habilitada.");
+  console.log("[MASTER ADMIN] Conta master criada sem dados pessoais fictícios e sem marcar KYC como verificado.");
 }
 
 // INVISTAPRO_CORS_MIDDLEWARE
