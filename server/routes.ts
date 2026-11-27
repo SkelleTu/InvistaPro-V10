@@ -1384,8 +1384,8 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       if (!req.user) {
         return res.status(401).json({ message: "Não autenticado" });
       }
-      const currentUser = await dualStorage.getUser(String(req.user.id)) || req.user;
-      const userDocuments = await dualStorage.getUserDocumentos(String(req.user.id));
+      const currentUser = await dbStorage.getUser(String(req.user.id)) || req.user;
+      const userDocuments = await dbStorage.getUserDocumentos(String(req.user.id));
       const hasIdentityDocument = userDocuments.some(document => ["rg", "cnh"].includes(String(document.tipo || "").toLowerCase()) && document.status === "aprovado");
       const hasAddressDocument = userDocuments.some(document => String(document.tipo || "").toLowerCase() === "comprovante" && document.status === "aprovado");
       const hasVerifiedDocuments = hasIdentityDocument && hasAddressDocument;
