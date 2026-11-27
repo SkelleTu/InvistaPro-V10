@@ -957,11 +957,17 @@ export default function TradingSystemPage() {
   });
   
   const hasAccess = Boolean((accessCheck as any)?.hasAccess);
+  const { data: derivTokenStatus } = useQuery<{ tokenConfigured?: boolean; isActive?: boolean }>({
+    queryKey: ["/api/trading/deriv-token"],
+    enabled: hasAccess,
+    staleTime: 30_000,
+  });
+  const hasDerivToken = Boolean(derivTokenStatus?.tokenConfigured);
 
   // Queries
   const { data: accountInfo } = useQuery<AccountInfo>({
     queryKey: ["/api/trading/account-info"],
-    enabled: hasAccess,
+    enabled: hasAccess && hasDerivToken,
     refetchInterval: 5000, // Dados de conta mudam raramente
   });
 
@@ -1046,7 +1052,7 @@ export default function TradingSystemPage() {
 
   const { data: liveBalance } = useQuery({
     queryKey: ["/api/trading/live-balance"],
-    enabled: hasAccess,
+    enabled: hasAccess && hasDerivToken,
     refetchInterval: 4000, // Saldo — 4s suficiente
   });
 
@@ -1106,7 +1112,7 @@ export default function TradingSystemPage() {
   });
 
   const { data: initialBlockedAssets } = useQuery<string[]>({
-    queryKey: ["/api/trading/blocked-assets", "digit_diff"],
+    queryKey: ["/api/trading/blocked-assets?mode=digit_diff"],
     enabled: hasAccess,
   });
 
@@ -1134,7 +1140,7 @@ export default function TradingSystemPage() {
         title: "Bloqueios salvos",
         description: "A lista de ativos bloqueados foi atualizada."
       });
-      queryClient.invalidateQueries({ queryKey: ["/api/trading/blocked-assets"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/trading/blocked-assets?mode=digit_diff"] });
     }
   });
 
