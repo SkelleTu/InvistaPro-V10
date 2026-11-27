@@ -19,16 +19,15 @@ export default function KYCNotification() {
   });
 
   // Calcular estatísticas dos documentos
-  const requiredDocs = ['rg', 'comprovante'];
   const userDocs = (kycStatus as any)?.documents || [];
   
   const pendingDocs = userDocs.filter((doc: any) => doc.status === 'pendente').length;
   const approvedDocs = userDocs.filter((doc: any) => doc.status === 'aprovado').length;
   const rejectedDocs = userDocs.filter((doc: any) => doc.status === 'rejeitado').length;
-  const approvedRequiredDocs = requiredDocs.filter(tipo => userDocs.some((doc: any) => doc.tipo === tipo && doc.status === 'aprovado'));
-  const presentRequiredTypes = new Set(userDocs.filter((doc: any) => requiredDocs.includes(doc.tipo)).map((doc: any) => doc.tipo));
-  const missingDocs = requiredDocs.filter(tipo => !presentRequiredTypes.has(tipo)).length;
-  const allRequiredApproved = approvedRequiredDocs.length === requiredDocs.length;
+  const hasIdentityDocument = userDocs.some((doc: any) => ['rg', 'cnh'].includes(String(doc.tipo).toLowerCase()));
+  const hasAddressDocument = userDocs.some((doc: any) => doc.tipo === 'comprovante');
+  const allRequiredApproved = userDocs.some((doc: any) => ['rg', 'cnh'].includes(String(doc.tipo).toLowerCase()) && doc.status === 'aprovado') && userDocs.some((doc: any) => doc.tipo === 'comprovante' && doc.status === 'aprovado');
+  const missingDocs = (hasIdentityDocument ? 0 : 1) + (hasAddressDocument ? 0 : 1);
 
   if (allRequiredApproved) return null;
 
