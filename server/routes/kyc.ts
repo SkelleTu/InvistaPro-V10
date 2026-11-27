@@ -41,10 +41,13 @@ router.get("/status", isAuthenticated, async (req: any, res) => {
       dualStorage.getUser(userId),
       dualStorage.getUserDocumentos(userId),
     ]);
+    const hasIdentityDocument = userDocuments.some(document => ["rg", "cnh"].includes(String(document.tipo || "").toLowerCase()) && document.status === "aprovado");
+    const hasAddressDocument = userDocuments.some(document => String(document.tipo || "").toLowerCase() === "comprovante" && document.status === "aprovado");
+    const verified = hasIdentityDocument && hasAddressDocument;
     res.setHeader("Cache-Control", "private, no-store, max-age=0");
     return res.json({
-      verified: Boolean(user?.documentosVerificados),
-      verifiedAt: user?.documentosAprovadosEm ?? null,
+      verified,
+      verifiedAt: verified ? (user?.documentosAprovadosEm ?? null) : null,
       uploadAvailable: isPrivateDocumentStorageConfigured(),
       documents: userDocuments.map(document => ({
         id: document.id,
