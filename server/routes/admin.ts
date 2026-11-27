@@ -18,6 +18,10 @@ const REQUIRED_KYC_DOC_TYPES = ["rg", "comprovante"];
 function hasVerifiedKycDocuments(documents: Array<{ tipo?: string; status?: string }>): boolean {
   return REQUIRED_KYC_DOC_TYPES.every(tipo => documents.some(doc => doc.tipo === tipo && doc.status === "aprovado"));
 }
+function hideBootstrapPlaceholder(value: unknown, placeholder: string): string {
+  const normalized = String(value ?? "").trim();
+  return normalized === placeholder ? "" : normalized;
+}
 
 // Endpoint para verificar se usuário tem acesso admin
 router.get('/check-access', isAuthenticated, async (req, res) => {
@@ -164,8 +168,8 @@ router.get('/users', isAuthenticated, isAdmin, async (req, res) => {
         id: user.id,
         nomeCompleto: user.nomeCompleto,
         email: user.email,
-        cpf: user.cpf,
-        telefone: user.telefone,
+        cpf: hideBootstrapPlaceholder(user.cpf, "00000000000"),
+        telefone: hideBootstrapPlaceholder(user.telefone, "11999999999"),
         saldo: user.saldo,
         documentosVerificados: hasVerifiedKycDocuments(documentsByUser.get(user.id) ?? []),
         contaAprovada: user.contaAprovada,
@@ -303,12 +307,12 @@ router.get('/user/:userId', isAuthenticated, isAdmin, async (req, res) => {
         id: user.id,
         nomeCompleto: user.nomeCompleto,
         email: user.email,
-        cpf: user.cpf,
-        telefone: user.telefone,
-        endereco: user.endereco,
-        cidade: user.cidade,
+        cpf: hideBootstrapPlaceholder(user.cpf, "00000000000"),
+        telefone: hideBootstrapPlaceholder(user.telefone, "11999999999"),
+        endereco: hideBootstrapPlaceholder(user.endereco, "Endereço Administrativo"),
+        cidade: hideBootstrapPlaceholder(user.cidade, "São Paulo"),
         estado: user.estado,
-        cep: user.cep,
+        cep: hideBootstrapPlaceholder(user.cep, "01000000"),
         saldo: user.saldo,
         contaAprovada: user.contaAprovada,
         documentosVerificados: hasVerifiedKycDocuments(storedDocuments),
