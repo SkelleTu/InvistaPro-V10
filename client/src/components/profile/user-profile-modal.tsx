@@ -172,22 +172,7 @@ export default function UserProfileModal({ isOpen, onClose }: UserProfileModalPr
               </div>
             </div>
 
-            <Separator />
 
-            {/* PIX */}
-            <div>
-              <h3 className="text-lg font-medium mb-3">Chave PIX</h3>
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <label className="font-medium text-muted-foreground">Chave PIX</label>
-                  <p>{displayField(user.chavePix)}</p>
-                </div>
-                <div>
-                  <label className="font-medium text-muted-foreground">Tipo de Chave</label>
-                  <p className="capitalize">{displayField(user.tipoChavePix)}</p>
-                </div>
-              </div>
-            </div>
           </div>
         )}
 
