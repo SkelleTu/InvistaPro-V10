@@ -61,9 +61,13 @@ function getClient(): SupabaseClient | null {
   const url = process.env.SUPABASE_URL?.trim();
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
   const anonKey = process.env.SUPABASE_ANON_KEY?.trim();
-  // Production replication is server-to-server and must not use the public anon key.
-  // Without a service-role key, SQLite remains authoritative and replica sync stays off.
-  const key = process.env.NODE_ENV === "production" ? serviceRoleKey : (serviceRoleKey || anonKey);
+  // Prefer the server-only service role. Until it is configured, retain the existing anon-key
+  // replication path so the production service can restore its durable Supabase mirror.
+  // RLS must remain disabled until the service-role migration is completed.
+  const key = serviceRoleKey || anonKey;
+  if (process.env.NODE_ENV === "production" && !serviceRoleKey && anonKey) {
+    console.warn("[SUPABASE][SECURITY] Usando anon key temporariamente; configure SUPABASE_SERVICE_ROLE_KEY e habilite RLS antes de remover este fallback.");
+  }
   if (!url || !key) return null;
   if (!client) client = createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },
@@ -221,10 +225,8 @@ export async function restoreSupabaseToSqliteOnce(): Promise<{ tables: number; r
 export async function startSupabaseRealtimePersistence(): Promise<boolean> {
   if (timer) return;
   if (!getClient()) {
-    // Keep the application available on its durable SQLite database.
-    // Supabase replication and private document storage remain disabled until a server-only service-role key is configured.
-    console.warn("[SUPABASE] SUPABASE_SERVICE_ROLE_KEY ausente; réplica Supabase desativada. SQLite permanece como fonte de dados da aplicação.");
-    return true;
+    console.warn("[SUPABASE] SUPABASE_URL e chave de API não configurados; nenhuma réplica durável alternativa está disponível.");
+    return false;
   }
 
   try {
