@@ -18,11 +18,6 @@ export default function KYCNotification() {
     enabled: !!user,
   });
 
-  // Não mostrar notificação se o usuário já está verificado
-  if (user?.documentosVerificados) {
-    return null;
-  }
-
   // Calcular estatísticas dos documentos
   const requiredDocs = ['rg', 'comprovante'];
   const userDocs = (kycStatus as any)?.documents || [];
@@ -30,9 +25,13 @@ export default function KYCNotification() {
   const pendingDocs = userDocs.filter((doc: any) => doc.status === 'pendente').length;
   const approvedDocs = userDocs.filter((doc: any) => doc.status === 'aprovado').length;
   const rejectedDocs = userDocs.filter((doc: any) => doc.status === 'rejeitado').length;
+  const approvedRequiredDocs = requiredDocs.filter(tipo => userDocs.some((doc: any) => doc.tipo === tipo && doc.status === 'aprovado'));
   const missingDocs = requiredDocs.length - userDocs.filter((doc: any) => 
-    requiredDocs.includes(doc.tipo)
+    requiredDocs.includes(doc.tipo) && doc.status !== 'rejeitado'
   ).length;
+  const allRequiredApproved = approvedRequiredDocs.length === requiredDocs.length;
+
+  if (allRequiredApproved) return null;
 
   const totalMissing = missingDocs + rejectedDocs;
   const hasDocuments = userDocs.length > 0;
@@ -146,8 +145,7 @@ export default function KYCNotification() {
                       <div className="text-sm">
                         <p className="font-medium text-red-900">Importante:</p>
                         <p className="text-red-700">
-                          Para sua segurança e conformidade regulatória, o envio de documentos
-                          é obrigatório para acessar todas as funcionalidades da plataforma.
+                          O fluxo de validação da conta exige o envio dos documentos listados. A aprovação depende da análise e da confirmação do status no sistema.
                         </p>
                       </div>
                     </div>
