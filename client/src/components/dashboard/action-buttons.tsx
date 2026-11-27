@@ -1,10 +1,6 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Plus, Download, Banknote, Calculator } from "lucide-react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
-import { useToast } from "@/hooks/use-toast";
-import { useAuth } from "@/hooks/useAuth";
 import { useTheme } from "@/contexts/ThemeContext";
 import DepositModal from "@/components/modals/deposit-modal";
 import SimulationModal from "@/components/modals/simulation-modal";
@@ -14,10 +10,7 @@ export default function ActionButtons() {
   const [showDepositModal, setShowDepositModal] = useState(false);
   const [showSimulationModal, setShowSimulationModal] = useState(false);
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
-  const { toast } = useToast();
   const { theme } = useTheme();
-  const queryClient = useQueryClient();
-  const { user } = useAuth();
 
 
 
