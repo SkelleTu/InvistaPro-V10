@@ -122,14 +122,14 @@ export default function Landing() {
               </div>
               
               <div className="mb-6">
-                <p className="text-blue-100 text-lg lg:text-2xl font-medium mb-2">Investimentos 100% Automatizados</p>
-                <p className="text-blue-200 text-sm lg:text-base opacity-90">Sem conhecimento necessário • Para iniciantes e experientes</p>
+                <p className="text-blue-100 text-lg lg:text-2xl font-medium mb-2">Ferramentas de análise e negociação</p>
+                <p className="text-blue-200 text-sm lg:text-base opacity-90">Recursos de acompanhamento e configuração para usuários que compreendem os riscos</p>
               </div>
               
               {/* Destaque de Rendimento */}
               <div className="mb-8 bg-gradient-to-r from-amber-400/20 to-yellow-600/20 border border-amber-400/40 rounded-lg p-4 lg:p-6 backdrop-blur-sm">
                 <p className="text-amber-100 text-sm lg:text-base font-semibold">
-                  ⚡ Potencial de até <span className="text-amber-200 font-bold text-lg lg:text-xl">130%</span> das melhores rendas fixas do mercado, operadas diariamente pelos algoritmos
+                  Mercados de renda variável e sintéticos envolvem risco. A plataforma não promete taxa de retorno nem rentabilidade.
                 </p>
               </div>
 
@@ -209,8 +209,8 @@ export default function Landing() {
                     <TrendingUp className="h-5 w-5 text-white" />
                   </div>
                   <div>
-                    <h3 className="text-white font-semibold">Até 130% de Rentabilidade</h3>
-                    <p className="text-blue-100 text-sm">Superior às principais soluções do mercado financeiro</p>
+                    <h3 className="text-white font-semibold">Ferramentas de análise de mercado</h3>
+                    <p className="text-blue-100 text-sm">Acompanhe dados e configurações das integrações disponíveis</p>
                   </div>
                 </CardContent>
               </Card>
@@ -222,7 +222,7 @@ export default function Landing() {
                   </div>
                   <div>
                     <h3 className="text-white font-semibold">Micro Operações Sintéticas</h3>
-                    <p className="text-blue-100 text-sm">Diversificação em mercados globais com alta liquidez</p>
+                    <p className="text-blue-100 text-sm">Integração com mercados sintéticos, conforme disponibilidade do provedor</p>
                   </div>
                 </CardContent>
               </Card>
@@ -233,8 +233,8 @@ export default function Landing() {
                     <BarChart3 className="h-5 w-5 text-white" />
                   </div>
                   <div>
-                    <h3 className="text-white font-semibold">Rendimento Composto</h3>
-                    <p className="text-blue-100 text-sm">Seus lucros geram mais lucros automaticamente</p>
+                    <h3 className="text-white font-semibold">Simulação de cenários</h3>
+                    <p className="text-blue-100 text-sm">Projete cenários matemáticos; simulações não representam resultados reais</p>
                   </div>
                 </CardContent>
               </Card>
@@ -245,8 +245,8 @@ export default function Landing() {
                     <Shield className="h-5 w-5 text-white" />
                   </div>
                   <div>
-                    <h3 className="text-white font-semibold">Capital 100% Protegido</h3>
-                    <p className="text-blue-100 text-sm">Zero risco sobre seu investimento inicial</p>
+                    <h3 className="text-white font-semibold">Controles de risco</h3>
+                    <p className="text-blue-100 text-sm">Limites e bloqueios ajudam a configurar operações, mas não eliminam perdas</p>
                   </div>
                 </CardContent>
               </Card>
@@ -278,7 +278,7 @@ export default function Landing() {
               </div>
               <div className="flex items-center space-x-2 text-xs">
                 <TrendingUp className="w-3 h-3 text-blue-400" />
-                <span className="text-slate-300">Rendimentos até 130%</span>
+                <span className="text-slate-300">Sem promessa de rentabilidade</span>
               </div>
             </div>
           </div>
@@ -287,7 +287,7 @@ export default function Landing() {
             <p className="text-xs text-slate-400 leading-relaxed">
               <span className="font-medium text-slate-300">Aviso Legal:</span> Os investimentos em renda variável e sintéticos podem apresentar riscos. 
               Rentabilidade passada não garante resultados futuros. Leia todos os termos antes de investir. 
-              InvistaPRO não é uma instituição financeira, atuamos como facilitadores de investimentos automatizados.
+              A Invista PRO é uma plataforma de software. Integrações, pagamentos e operações dependem da configuração e das condições dos provedores externos.
             </p>
           </div>
         </div>
