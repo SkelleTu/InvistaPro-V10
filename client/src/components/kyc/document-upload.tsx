@@ -62,7 +62,7 @@ export default function DocumentUpload() {
     if (file.size > maxSize) {
       toast({
         title: "Arquivo muito grande",
-        description: "O arquivo deve ter no máximo 10MB.",
+        description: "O arquivo deve ter no máximo 5MB.",
         variant: "destructive",
       });
       return;
@@ -133,7 +133,7 @@ export default function DocumentUpload() {
         <Alert className="bg-green-50 border-green-200 mb-4">
           <Shield className="h-4 w-4 text-green-600" />
           <AlertDescription className="text-green-800 text-sm">
-            <strong>Segurança:</strong> Seus documentos são transmitidos com criptografia SSL e armazenados em servidores seguros. Apenas nossa equipe de compliance terá acesso para verificação.
+            <strong>Privacidade:</strong> Envie somente os documentos solicitados para validação da conta. O tratamento dos arquivos está descrito no Aviso de Privacidade; não envie documentos por mensagens ou canais externos.
           </AlertDescription>
         </Alert>
         
