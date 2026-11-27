@@ -238,7 +238,7 @@ export default function SimpleMarketChart() {
               {currentAsset.name}
             </h3>
             <p className="text-slate-400 text-xs">
-              {currentAsset.symbol} - Tempo Real
+              {currentAsset.symbol} - Dados oficiais
             </p>
           </div>
           <div className="flex items-center space-x-3">
@@ -256,7 +256,7 @@ export default function SimpleMarketChart() {
               <div className="flex items-center space-x-1">
                 <div className={`w-1.5 h-1.5 rounded-full ${marketData.success && !marketData.fallback ? 'animate-pulse' : ''}`}
                      style={{ backgroundColor: currentAsset.color }}></div>
-                <span>{marketData.success && !marketData.fallback ? 'BCB AO VIVO' : marketData.fallback ? 'TAXA ATUAL' : 'INDISPONÍVEL'}</span>
+                <span>{marketData.success && !marketData.fallback ? 'BCB OFICIAL' : marketData.fallback ? 'TAXA ATUAL' : 'INDISPONÍVEL'}</span>
               </div>
             </div>
           </div>
