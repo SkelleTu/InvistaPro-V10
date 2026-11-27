@@ -118,7 +118,7 @@ export default function UserProfileModal({ isOpen, onClose }: UserProfileModalPr
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
               <div className="flex items-center space-x-2 mb-2">
                 <Shield className="h-4 w-4 text-blue-600" />
-                <h4 className="font-medium text-blue-800">Seus Dados Estão Protegidos</h4>
+                <h4 className="font-medium text-blue-800">Tratamento de dados pessoais</h4>
               </div>
               <p className="text-blue-700 text-sm">
                 A aplicação utiliza controles de sessão e acesso. Dados podem ser processados por fornecedores técnicos necessários ao funcionamento dos serviços, conforme o Aviso de Privacidade. Nenhum sistema elimina todos os riscos.
