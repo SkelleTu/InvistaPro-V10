@@ -136,9 +136,6 @@ export function Footer() {
               <p className="text-sm text-muted-foreground">
                 © {currentYear} Aura System. Todos os direitos reservados.
               </p>
-              <div className="hidden md:flex items-center space-x-2 text-xs text-muted-foreground">
-                <span>•</span>
-              </div>
             </div>
             
             <div className="flex items-center space-x-6">
