@@ -456,12 +456,12 @@ export default function PortalCliente() {
     </>;
   };
 
-  return <div className="min-h-screen bg-[#070912] text-white flex">
+  return <div className="min-h-screen bg-transparent text-white flex">
     <aside className="hidden lg:flex w-64 shrink-0 flex-col border-r border-white/10 bg-[#0b0e1a]"><SidebarContent /></aside>
     {mobileOpen && <div className="fixed inset-0 z-50 lg:hidden"><button className="absolute inset-0 bg-black/70" onClick={() => setMobileOpen(false)} aria-label="Fechar menu" /><aside className="relative z-10 w-72 h-full bg-[#0b0e1a] flex flex-col"><div className="flex justify-end p-2"><button onClick={() => setMobileOpen(false)} className="p-2 text-slate-400"><X /></button></div><SidebarContent /></aside></div>}
     <main className="min-w-0 flex-1">
-      <header className="h-16 border-b border-white/10 bg-[#0b0e1a]/80 backdrop-blur flex items-center justify-between px-4 sm:px-7 sticky top-0 z-30">
-        <div className="flex items-center gap-3"><button onClick={() => setMobileOpen(true)} className="lg:hidden text-slate-300"><Menu /></button><span className="text-xs text-slate-500 hidden sm:inline">AURA SYSTEM /</span><span className="text-sm text-slate-200"> {navItems.find((item) => item.id === active)?.label ?? "Energizar IA"}</span></div>
+      <header className="h-16 border-b border-white/10 bg-[#0b0e1a]/80 backdrop-blur flex items-center justify-between px-4 sm:px-7 sticky top-20 z-30">
+        <div className="flex items-center gap-3"><button onClick={() => setMobileOpen(true)} className="lg:hidden text-slate-300"><Menu /></button><span className="text-xs text-slate-500 hidden sm:inline">PORTAL DO CLIENTE /</span><span className="text-sm text-slate-200"> {navItems.find((item) => item.id === active)?.label ?? "Energizar IA"}</span></div>
         <div className="flex items-center gap-3">
           <div className="relative">
             <button onClick={()=>setNotificationsOpen((open)=>!open)} className="h-9 w-9 rounded-full border border-white/10 flex items-center justify-center text-slate-400 hover:text-white" title="Atividade recente" aria-expanded={notificationsOpen}><Bell className="h-4 w-4" />{movements.length>0&&<span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-violet-400" />}</button>

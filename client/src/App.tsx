@@ -210,9 +210,11 @@ function AppContent() {
   return (
     <div className="aura-integration-shell" data-platform="invista-pro-v10">
       {showAuthenticatedShell && <Header />}
-      <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>}>
-        <Router />
-      </Suspense>
+      <div className="aura-module-theme">
+        <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>}>
+          <Router />
+        </Suspense>
+      </div>
       {showAuthenticatedShell && location !== "/metatrader5" && <AuraStatusBar />}
       {showAiAssistant && <AiAssistant />}
     </div>
