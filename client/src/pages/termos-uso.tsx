@@ -46,7 +46,7 @@ export default function TermosUso() {
             <p>Este documento não define tarifas, prazos de saque, carência de capital, depósito mínimo ou obrigações regulatórias que não tenham sido formalmente confirmadas.</p>
           </CardContent></Card>
           <Card><CardHeader><CardTitle>7. Privacidade e contato</CardTitle></CardHeader><CardContent className="text-sm text-muted-foreground space-y-2">
-            <p>O tratamento de dados é descrito no Aviso de Privacidade. Para dúvidas ou solicitações, utilize os canais de suporte publicados na plataforma.</p>
+            <p>O tratamento de dados é descrito no Aviso de Privacidade. O canal oficial de suporte ainda precisa ser publicado após a confirmação da entidade responsável e de seus dados de contato.</p>
             <p>Antes da publicação como contrato definitivo, este documento deve ser completado com a identificação legal da entidade responsável, endereço, canais oficiais e revisão jurídica.</p>
           </CardContent></Card>
         </div>
