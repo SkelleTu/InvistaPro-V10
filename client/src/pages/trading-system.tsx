@@ -3335,49 +3335,20 @@ export default function TradingSystemPage() {
 
                 <Separator />
 
-                {/* Motor de IAs */}
+                {/* Estado real dos modelos de IA */}
                 <div className="space-y-3">
                   <h4 className="font-semibold flex items-center gap-2">
                     <Cpu className="h-4 w-4 text-purple-500" />
-                    <span>Motor de IAs e Estratégias</span>
-                    <Badge variant="outline" className="text-purple-600 dark:text-purple-400 border-purple-300 dark:border-purple-700 text-xs">Máxima Potência</Badge>
+                    <span>Recursos de IA</span>
+                    <Badge variant="outline" className="text-amber-600 dark:text-amber-400 border-amber-300 dark:border-amber-700 text-xs">Aguardando registro</Badge>
                   </h4>
-                  <div className="grid gap-3 md:grid-cols-3">
-                    <div className="p-3 border rounded-lg bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800 space-y-1">
-                      <div className="flex items-center gap-2">
-                        <Bot className="h-4 w-4 text-purple-500" />
-                        <span className="text-sm font-medium">IA Primária</span>
-                      </div>
-                      <p className="text-xs text-muted-foreground">LSTM + Transformer (Série Temporal)</p>
-                      <p className="text-xs text-purple-600 dark:text-purple-400">Análise preditiva de movimentos</p>
-                    </div>
-                    <div className="p-3 border rounded-lg bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800 space-y-1">
-                      <div className="flex items-center gap-2">
-                        <FlaskConical className="h-4 w-4 text-indigo-500" />
-                        <span className="text-sm font-medium">IA Secundária</span>
-                      </div>
-                      <p className="text-xs text-muted-foreground">XGBoost + Redes Bayesianas</p>
-                      <p className="text-xs text-indigo-600 dark:text-indigo-400">Validação e gestão de risco</p>
-                    </div>
-                    <div className="p-3 border rounded-lg bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800 space-y-1">
-                      <div className="flex items-center gap-2">
-                        <Brain className="h-4 w-4 text-emerald-500" />
-                        <span className="text-sm font-medium">IA Arbitragem</span>
-                      </div>
-                      <p className="text-xs text-muted-foreground">Reinforcement Learning (PPO/SAC)</p>
-                      <p className="text-xs text-emerald-600 dark:text-emerald-400">Otimização de portfólio em tempo real</p>
-                    </div>
-                  </div>
-                  <div className="p-3 bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-900/20 dark:to-blue-900/20 border border-purple-200 dark:border-purple-800 rounded-lg">
-                    <p className="text-sm font-medium text-purple-800 dark:text-purple-200 mb-1">Como as IAs cooperam entre modalidades:</p>
-                    <ul className="text-xs text-muted-foreground space-y-1 list-disc list-inside">
-                      <li>A IA Primária analisa padrões e emite sinais específicos para cada tipo de contrato ativo</li>
-                      <li>A IA Secundária valida cada sinal e bloqueia operações com risco acima do threshold</li>
-                      <li>A IA de Arbitragem distribui capital entre categorias conforme desempenho recente</li>
-                      <li>O sistema rotaciona automaticamente entre modalidades para evitar sequências de perdas</li>
-                      <li>Threshold de confiança mínimo: 70% — abaixo disso a operação é cancelada independente da modalidade</li>
-                      <li>Lookbacks, Turbos e Acumuladores exigem confiança mínima de 85% para ativação</li>
-                    </ul>
+                  <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 space-y-2 text-sm text-muted-foreground">
+                    <p>
+                      A interface prevê recursos de análise, validação e otimização, mas o ambiente atual não confirma modelos de IA registrados e ativos. Por isso, não apresentamos LSTM/Transformer, XGBoost/Redes Bayesianas ou PPO/SAC como motores em execução.
+                    </p>
+                    <p>
+                      A análise automatizada só poderá ser considerada operacional após o registro dos modelos, validação de suas respostas e confirmação dos bloqueios de risco. Nenhuma arbitragem de portfólio em tempo real está confirmada neste momento.
+                    </p>
                   </div>
                 </div>
               </CardContent>
