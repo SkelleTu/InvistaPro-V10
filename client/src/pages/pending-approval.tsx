@@ -2,7 +2,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Footer } from "@/components/ui/footer";
 import { Clock, User, Shield, Phone, Mail } from "lucide-react";
-import investmentBgImage from "@assets/generated_images/Dark_investment_chart_background_ac2d4762.png";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -39,17 +38,7 @@ function PendingApprovalPage() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <div 
-        className="flex-1 bg-gradient-to-br from-primary to-primary/90 flex items-center justify-center p-4 relative"
-        style={{
-          backgroundImage: `url(${investmentBgImage})`,
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-          backgroundRepeat: 'no-repeat'
-        }}
-      >
-        {/* Background overlay with blur effect */}
-        <div className="absolute inset-0 backdrop-blur-md bg-primary/40 mobile-backdrop-blur mobile-backdrop-enhanced"></div>
+      <div className="flex-1 bg-transparent flex items-center justify-center p-4 relative">
         <div className="w-full max-w-2xl relative z-10">
         <Card className="bg-white shadow-2xl">
           <CardHeader className="text-center">

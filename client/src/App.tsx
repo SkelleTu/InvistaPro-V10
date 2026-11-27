@@ -32,6 +32,8 @@ const CentralAdministrativa = lazy(() => import("@/pages/central-administrativa"
 import { useAuth } from "@/hooks/useAuth";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import AiAssistant from "@/components/AiAssistant";
+import Header from "@/components/dashboard/header";
+import AuraStatusBar from "@/components/aura-status-bar";
 
 const PUBLIC_PATHS = [
   "/", "/auth", "/reset-password",
@@ -194,7 +196,9 @@ function Router() {
 
 function AppContent() {
   const { isAuthenticated, isApproved, isPhoneVerified, isLoading } = useAuth();
-  const showAiAssistant = !isLoading && isAuthenticated && isApproved && isPhoneVerified;
+  const [location] = useLocation();
+  const showAuthenticatedShell = !isLoading && isAuthenticated && isApproved;
+  const showAiAssistant = showAuthenticatedShell && isPhoneVerified;
 
   useEffect(() => {
     if (isLoading || window.parent === window) return;
@@ -205,9 +209,11 @@ function AppContent() {
 
   return (
     <div className="aura-integration-shell" data-platform="invista-pro-v10">
+      {showAuthenticatedShell && <Header />}
       <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>}>
         <Router />
       </Suspense>
+      {showAuthenticatedShell && location !== "/metatrader5" && <AuraStatusBar />}
       {showAiAssistant && <AiAssistant />}
     </div>
   );

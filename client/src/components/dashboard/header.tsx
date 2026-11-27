@@ -8,7 +8,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import UserProfileModal from "@/components/profile/user-profile-modal";
 import AdminPanel from "@/components/admin/admin-panel";
 import { useLocation } from "wouter";
-const AURA_LOGO = "https://integrated-system-1c86.onrender.com/aura-system-logo.webp?v=1";
+const AURA_LOGO = "/aura-system-icon-192.png";
 export default function Header() {
   const { user } = useAuth();
   const { theme, toggleTheme } = useTheme();
@@ -34,7 +34,7 @@ export default function Header() {
   ];
   return <>
     <div className="relative z-40 h-20">
-      <header className="fixed top-2 left-1/2 -translate-x-1/2 z-40 w-[calc(100vw-16px)] max-w-[1700px] flex items-center gap-3">
+      <header className="aura-platform-header fixed top-2 left-1/2 -translate-x-1/2 z-40 w-[calc(100vw-16px)] max-w-[1700px] flex items-center gap-3">
         <div className="hidden sm:flex items-center gap-2 h-12 px-3 rounded-2xl border border-cyan-400/15 bg-black/65 backdrop-blur-xl shadow-[0_8px_32px_rgba(0,0,0,.45)] shrink-0">
           <img src={AURA_LOGO} alt="Aura System" className="w-8 h-8 object-contain drop-shadow-[0_0_10px_rgba(0,229,255,.45)]" />
           <div className="flex flex-col leading-tight"><span className="text-[10px] font-black uppercase tracking-[0.2em] text-white/85">Aura System</span><span className="text-[9px] font-bold uppercase tracking-[0.16em] text-cyan-300">Renda Variável</span></div>

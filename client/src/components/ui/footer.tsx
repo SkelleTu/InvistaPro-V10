@@ -12,7 +12,7 @@ export function Footer() {
           <div className="md:col-span-1">
             <div className="flex items-center space-x-3 mb-4">
               <img 
-                src="https://integrated-system-1c86.onrender.com/aura-system-logo.webp?v=1" 
+                src="/aura-system-icon-192.png" 
                 alt="Aura System" 
                 className="w-14 h-14 rounded-xl relative z-0"
               />

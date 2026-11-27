@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Users, Wallet, ArrowDownLeft, ArrowUpRight, ShieldCheck, RefreshCw, LogOut, Search, Activity } from "lucide-react";
+import { Users, Wallet, ArrowDownLeft, ArrowUpRight, ShieldCheck, RefreshCw, Search, Activity } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useState } from "react";
@@ -68,11 +68,10 @@ export default function CentralAdministrativa() {
     enabled: !!selectedUserId,
     retry: false,
   });
-  const logout = async () => { try { await apiRequest("/api/logout",{method:"POST"}); } finally { queryClient.clear(); window.location.href="/auth"; } };
   const filtered = (users.data ?? []).filter(u => `${u.nomeCompleto} ${u.email}`.toLowerCase().includes(search.toLowerCase()));
   const Stat = ({label,value,icon:Icon,sub}:{label:string;value:string;icon:any;sub:string}) => <div className="rounded-2xl border border-white/10 bg-slate-900/70 p-5"><div className="flex justify-between text-slate-400 text-sm"><span>{label}</span><Icon className="h-4 w-4 text-violet-300"/></div><div className="text-2xl font-bold text-white mt-4">{value}</div><div className="text-xs text-slate-500 mt-1">{sub}</div></div>;
-  return <div className="min-h-screen bg-[#070912] text-white">
-    <header className="border-b border-white/10 bg-[#0b0e1a] px-5 py-4"><div className="max-w-7xl mx-auto flex items-center justify-between gap-4"><div><p className="font-bold tracking-wide">AURA <span className="text-cyan-300">SYSTEM</span></p><p className="text-[10px] uppercase tracking-[.22em] text-slate-500">Central Administrativa Geral</p></div><div className="flex gap-2"><Button variant="outline" onClick={()=>{stats.refetch();users.refetch();affiliates.refetch();affiliateNetwork.refetch();trading.refetch();pendingDocuments.refetch();recentMovements.refetch();if(selectedUserId)userDetail.refetch();}} className="border-white/15 text-slate-200"><RefreshCw className="h-4 w-4 mr-2"/>Atualizar</Button><Button variant="ghost" onClick={logout} className="text-slate-300"><LogOut className="h-4 w-4 mr-2"/>Sair</Button></div></div></header>
+  return <div className="min-h-screen bg-transparent text-white">
+    <div className="max-w-7xl mx-auto px-5 sm:px-8 pt-6 flex justify-end"><Button variant="outline" onClick={()=>{stats.refetch();users.refetch();affiliates.refetch();affiliateNetwork.refetch();trading.refetch();pendingDocuments.refetch();recentMovements.refetch();if(selectedUserId)userDetail.refetch();}} className="border-cyan-400/20 bg-black/40 text-slate-200 hover:bg-cyan-400/10"><RefreshCw className="h-4 w-4 mr-2"/>Atualizar</Button></div>
     <main className="max-w-7xl mx-auto p-5 sm:p-8">
       <div className="mb-7"><div className="flex items-center gap-2 text-xs uppercase tracking-[.2em] text-violet-300 mb-2"><ShieldCheck className="h-4 w-4"/>Acesso administrativo</div><h1 className="text-3xl font-bold">Visão consolidada</h1><p className="text-sm text-slate-400 mt-2">Dados retornados pelas rotas administrativas do módulo Renda Variável.</p></div>
       {stats.isError && <div className="rounded-xl border border-rose-400/20 bg-rose-950/30 p-4 text-sm text-rose-200 mb-5">Não foi possível consultar as estatísticas administrativas. A API pode não reconhecer este perfil como administrador.</div>}

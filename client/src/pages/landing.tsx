@@ -1,7 +1,6 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ChartLine, Shield, TrendingUp, Banknote, Zap, BarChart3, Globe, Brain, Users, Cpu, Lock, Menu, X } from "lucide-react";
-import investmentBgImage from "@assets/generated_images/Dark_investment_chart_background_ac2d4762.png";
 import { useState } from "react";
 import SimpleMarketChart from "@/components/simple-chart";
 
@@ -22,7 +21,7 @@ export default function Landing() {
             {/* Logo */}
             <div className="flex items-center space-x-3">
               <img 
-                src="https://integrated-system-1c86.onrender.com/aura-system-logo.webp?v=1" 
+                src="/aura-system-icon-192.png" 
                 alt="Aura System" 
                 className="w-12 h-12 rounded-lg relative z-0"
               />
@@ -54,7 +53,7 @@ export default function Landing() {
               <Button 
                 onClick={handleLogin}
                 size="sm"
-                className="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700"
+                className="bg-cyan-400 text-slate-950 hover:bg-cyan-300"
               >
                 Cadastrar
               </Button>
@@ -82,7 +81,7 @@ export default function Landing() {
                   <Button onClick={handleLogin} variant="outline" size="sm" className="border-white/20 text-white hover:bg-white/10 flex-1">
                     Login
                   </Button>
-                  <Button onClick={handleLogin} size="sm" className="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 flex-1">
+                  <Button onClick={handleLogin} size="sm" className="bg-cyan-400 text-slate-950 hover:bg-cyan-300 flex-1">
                     Cadastrar
                   </Button>
                 </div>
@@ -93,17 +92,7 @@ export default function Landing() {
       </header>
 
       {/* Main Content */}
-      <div 
-        className="bg-gradient-to-br from-slate-900 via-slate-800 to-gray-900 flex items-center justify-center p-4 relative pt-24 pb-8"
-        style={{
-          backgroundImage: `url(${investmentBgImage})`,
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-          backgroundRepeat: 'no-repeat'
-        }}
-      >
-        {/* Background overlay with blur effect */}
-        <div className="absolute inset-0 backdrop-blur-md bg-slate-900/60 mobile-backdrop-blur mobile-backdrop-enhanced"></div>
+      <div className="bg-transparent flex items-center justify-center p-4 relative pt-24 pb-8">
         <div className="w-full max-w-7xl mx-auto relative z-10 px-4 lg:px-8">
           {/* Desktop Layout */}
           <div className="lg:grid lg:grid-cols-2 lg:gap-16 lg:items-center lg:min-h-[60vh]">
@@ -111,7 +100,7 @@ export default function Landing() {
             <div className="text-center lg:text-left mb-8 lg:mb-0">
               <div className="flex items-center justify-center lg:justify-start mb-6">
                 <img 
-                  src="https://integrated-system-1c86.onrender.com/aura-system-logo.webp?v=1" 
+                  src="/aura-system-icon-192.png" 
                   alt="Aura System" 
                   className="w-20 h-20 lg:w-24 lg:h-24 rounded-2xl shadow-lg mr-4"
                 />
@@ -140,7 +129,7 @@ export default function Landing() {
               <div className="text-center lg:text-left mt-8">
                 <Button 
                   onClick={handleLogin}
-                  className="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white px-8 lg:px-12 py-3 lg:py-4 font-semibold text-base lg:text-lg shadow-lg hover:shadow-xl transition-all duration-300 flex items-center justify-center space-x-2"
+                  className="bg-cyan-400 text-slate-950 hover:bg-cyan-300 text-white px-8 lg:px-12 py-3 lg:py-4 font-semibold text-base lg:text-lg shadow-lg hover:shadow-xl transition-all duration-300 flex items-center justify-center space-x-2"
                   size="lg"
                 >
                   <TrendingUp className="h-5 w-5 lg:h-6 lg:w-6" />

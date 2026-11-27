@@ -11,7 +11,6 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
-import Header from "@/components/dashboard/header";
 import DerivTokenSettings from "@/components/deriv-token-settings";
 import Frenetico9TokensPanel from "@/components/frenetico-9tokens-panel";
 import LearningDashboard from "@/components/learning-dashboard";
@@ -1671,7 +1670,6 @@ export default function TradingSystemPage() {
   if (!hasAccess) {
     return (
       <div className="min-h-screen bg-background">
-        <Header />
         <div className="container mx-auto px-4 py-8">
           <Card className="max-w-md mx-auto">
             <CardContent className="p-6 text-center">
@@ -1719,7 +1717,6 @@ export default function TradingSystemPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <Header />
       
       <div className="container mx-auto px-4 py-8">
         {/* Cabeçalho da página */}

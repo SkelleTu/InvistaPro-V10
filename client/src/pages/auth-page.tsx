@@ -14,7 +14,6 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { ChartLine, Shield, Eye, EyeOff, TrendingUp, Cpu, AlertTriangle } from "lucide-react";
 import { registerUserSchema, loginSchema, type RegisterUser, type LoginUser } from "@shared/schema";
-import investmentBgImage from "@assets/generated_images/Dark_investment_chart_background_ac2d4762.png";
 
 
 export default function AuthPage() {
@@ -152,17 +151,7 @@ export default function AuthPage() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <div 
-        className="flex-1 bg-background flex items-center justify-center p-2 sm:p-4 relative"
-        style={{
-          backgroundImage: `url(${investmentBgImage})`,
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-          backgroundRepeat: 'no-repeat'
-        }}
-      >
-        {/* Background overlay with blur effect */}
-        <div className="absolute inset-0 backdrop-blur-md bg-background/30 mobile-backdrop-blur mobile-backdrop-enhanced"></div>
+      <div className="flex-1 bg-transparent flex items-center justify-center p-2 sm:p-4 relative">
         
         <div className="w-full max-w-sm sm:max-w-md lg:max-w-4xl relative z-10">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-8 items-center">
@@ -170,7 +159,7 @@ export default function AuthPage() {
           <div className="text-foreground space-y-8">
             <div className="text-center lg:text-left">
               <img 
-                src="https://integrated-system-1c86.onrender.com/aura-system-logo.webp?v=1" 
+                src="/aura-system-icon-192.png" 
                 alt="Aura System" 
                 className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl mx-auto lg:mx-0 mb-4 sm:mb-6 shadow-lg relative z-0"
               />
@@ -216,8 +205,8 @@ export default function AuthPage() {
                   <ChartLine className="h-5 w-5 text-foreground" />
                 </div>
                 <div>
-                  <h3 className="font-medium">Rendimento Garantido</h3>
-                  <p className="text-muted-foreground text-sm">Rendendo 130% com os lucros dos melhores bancos do Brasil</p>
+                  <h3 className="font-medium">Análise de Mercado</h3>
+                  <p className="text-muted-foreground text-sm">Ferramentas de análise e automação com controles de risco e execução configurável.</p>
                 </div>
               </div>
             </div>

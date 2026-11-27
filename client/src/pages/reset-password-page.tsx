@@ -9,7 +9,6 @@ import { useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Eye, EyeOff, Shield, CheckCircle } from "lucide-react";
-import investmentBgImage from "@assets/generated_images/Dark_investment_chart_background_ac2d4762.png";
 
 export default function ResetPasswordPage() {
   const { toast } = useToast();
@@ -101,16 +100,7 @@ export default function ResetPasswordPage() {
   if (!isValidToken) {
     return (
       <div className="min-h-screen flex flex-col">
-        <div 
-          className="flex-1 bg-background flex items-center justify-center p-4 relative"
-          style={{
-            backgroundImage: `url(${investmentBgImage})`,
-            backgroundSize: 'cover',
-            backgroundPosition: 'center',
-            backgroundRepeat: 'no-repeat'
-          }}
-        >
-          <div className="absolute inset-0 backdrop-blur-md bg-background/30"></div>
+        <div className="flex-1 bg-transparent flex items-center justify-center p-4 relative">
           
           <div className="relative z-10 w-full max-w-md">
             <Card className="border-border/50 bg-card/80 backdrop-blur-sm">
@@ -141,16 +131,7 @@ export default function ResetPasswordPage() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <div 
-        className="flex-1 bg-background flex items-center justify-center p-4 relative"
-        style={{
-          backgroundImage: `url(${investmentBgImage})`,
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-          backgroundRepeat: 'no-repeat'
-        }}
-      >
-        <div className="absolute inset-0 backdrop-blur-md bg-background/30"></div>
+      <div className="flex-1 bg-transparent flex items-center justify-center p-4 relative">
         
         <div className="relative z-10 w-full max-w-md">
           <Card className="border-border/50 bg-card/80 backdrop-blur-sm">
