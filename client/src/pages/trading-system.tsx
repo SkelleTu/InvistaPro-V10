@@ -2800,9 +2800,15 @@ export default function TradingSystemPage() {
                                       </div>
                                       <p className="text-xs text-muted-foreground leading-relaxed">{modality.aiStrategy}</p>
                                     </div>
-                                    {/* Seleção de Módulos (slots de cópia simultânea) */}
+                                    {/* Cópia multi-conta: modalidades efetivamente suportadas pelo painel */}
                                     <div onClick={(e) => e.stopPropagation()}>
-                                      <ModalityModuleSelector modalityId={modality.id} />
+                                      {["digit_differs", "accumulator"].includes(modality.id) ? (
+                                        <ModalityModuleSelector modalityId={modality.id} />
+                                      ) : (
+                                        <p className="mt-2 border-t border-border pt-2 text-xs text-muted-foreground">
+                                          Cópia multi-conta indisponível para esta modalidade. O painel de módulos atualmente aceita apenas Digit Differs e Acumulador.
+                                        </p>
+                                      )}
                                     </div>
                                   </div>
                                 )}
