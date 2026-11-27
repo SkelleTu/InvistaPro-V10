@@ -3169,6 +3169,17 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         return res.status(401).json({ message: 'Usuário não autenticado' });
       }
       const userId = req.user.id;
+      const normalizedMode = String(mode).trim().toLowerCase();
+      const derivToken = await dbStorage.getUserDerivToken(userId);
+      if (!derivToken?.token || !derivToken.isActive) {
+        return res.status(409).json({ code: "DERIV_TOKEN_REQUIRED", message: "Configure e valide um token Deriv ativo antes de selecionar a frequência de operações." });
+      }
+      if (normalizedMode === "test_sem_limites") {
+        return res.status(403).json({ code: "UNLIMITED_TEST_MODE_DISABLED", message: "O modo de operações sem limites está desativado por segurança." });
+      }
+      if (normalizedMode.startsWith("test_") && String(derivToken.accountType).toLowerCase() !== "demo") {
+        return res.status(409).json({ code: "TEST_MODE_REQUIRES_DEMO", message: "Modos de teste só podem ser selecionados com uma conta Deriv DEMO ativa." });
+      }
 
       const config = await dbStorage.updateTradeConfig(userId, mode);
 
