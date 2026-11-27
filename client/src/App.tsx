@@ -59,11 +59,11 @@ function SaveAndRedirectToAuth({ currentPath }: { currentPath: string }) {
 }
 
 function Router() {
-  const { isAuthenticated, isLoading, isApproved, isPhoneVerified } = useAuth();
+  const { isAuthenticated, isLoading, isApproved, isPhoneVerified, authError, retryAuth } = useAuth();
   const [location] = useLocation();
   const destinationQuery = useQuery<{ role: "master" | "admin" | "client"; destination: string }>({
     queryKey: ["/api/auth/destination"],
-    enabled: isAuthenticated && isApproved && isPhoneVerified,
+    enabled: isAuthenticated && isApproved,
     retry: false,
   });
 
@@ -93,7 +93,29 @@ function Router() {
           );
         }
 
-        if (!isAuthenticated || !isPhoneVerified) {
+        if (authError) {
+          return (
+            <Route>
+              <div className="min-h-screen flex items-center justify-center bg-background p-6">
+                <div className="max-w-md text-center space-y-3">
+                  <h1 className="text-xl font-bold">Não foi possível validar sua sessão</h1>
+                  <p className="text-sm text-muted-foreground">
+                    O serviço de autenticação ou o banco de dados não respondeu corretamente. Sua conta não foi desconectada automaticamente.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={retryAuth}
+                    className="rounded-md border border-border px-4 py-2 text-sm font-medium hover:bg-accent"
+                  >
+                    Tentar novamente
+                  </button>
+                </div>
+              </div>
+            </Route>
+          );
+        }
+
+        if (!isAuthenticated) {
           return (
             <>
               <Route path="/auth" component={AuthPage} />
@@ -117,6 +139,22 @@ function Router() {
 
         if (destinationQuery.isError || !destinationQuery.data?.role) {
           return <Route><div className="min-h-screen flex items-center justify-center bg-background p-6"><div className="max-w-md text-center"><h1 className="text-xl font-bold">Não foi possível validar o perfil</h1><p className="text-sm text-muted-foreground mt-2">Por segurança, o sistema não abriu nenhum módulo. Atualize a página ou entre novamente.</p></div></div></Route>;
+        }
+
+        // A conta Mestre é identificada pelo servidor por allowlist própria.
+        // Ela não deve ser bloqueada pelo telefone-placeholder do bootstrap.
+        // Administradores comuns e clientes continuam exigindo telefone verificado.
+        if (destinationQuery.data.role !== "master" && !isPhoneVerified) {
+          return (
+            <>
+              <Route path="/auth" component={AuthPage} />
+              <Route path="/reset-password" component={ResetPasswordPage} />
+              <Route path="/" component={Landing} />
+              <Route>
+                <SaveAndRedirectToAuth currentPath={location} />
+              </Route>
+            </>
+          );
         }
 
         if (destinationQuery.data.role === "client") {
