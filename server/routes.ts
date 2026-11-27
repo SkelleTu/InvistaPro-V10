@@ -2679,7 +2679,16 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     const userId = String(req.user?.id ?? '');
     if (!userId) return res.status(401).json({ message: 'Usuário não autenticado.' });
     const saved = await dbStorage.getUserDerivToken(userId);
-    if (!saved?.token) return res.status(409).json({ message: 'Configure primeiro um token Deriv para o ambiente desejado.' });
+    if (!saved?.token || !saved.isActive) return res.status(409).json({ message: 'Configure primeiro um token Deriv ativo para o ambiente desejado.' });
+    if (accountType === "real") {
+      const currentTradeConfig = await dbStorage.getUserTradeConfig(userId);
+      if (String(currentTradeConfig?.mode ?? "").toLowerCase().startsWith("test_")) {
+        return res.status(409).json({
+          code: "REAL_MODE_REQUIRES_PRODUCTION_FREQUENCY",
+          message: "Antes de alternar para REAL, selecione um modo de frequência de produção. Modos de teste são exclusivos da conta DEMO."
+        });
+      }
+    }
 
     const validationApi = new DerivAPIService(accountType);
     try {
