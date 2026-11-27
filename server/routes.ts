@@ -3067,7 +3067,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     // Verificar condições antes de disparar
     const { checkRajadaConditions, executeModulesTrade, recordModuleExecution } = await import('./services/module-executor');
     const conditions = await checkRajadaConditions(userId, modality);
-    if (!conditions.ready && !req.body.forceOverride) {
+    if (!conditions.ready) {
       return res.json({
         success: false,
         blocked: true,
