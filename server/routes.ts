@@ -1416,28 +1416,13 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   app.get('/api/user', getCurrentUser);
   app.get('/api/auth/user', getCurrentUser);
 
-  // Get available deposit amounts
-  app.get('/api/deposit/amounts', isAuthenticated, isApproved, async (req: any, res) => {
-    try {
-      // Valores predefinidos: 130, 350, 825, 1000, depois incrementos de 10.000
-      const baseAmounts = [130, 350, 825, 1000];
-      const incrementalAmounts: number[] = [];
-      
-      // Gerar valores incrementais a partir de 10.000
-      for (let i = 10000; i <= 100000; i += 10000) {
-        incrementalAmounts.push(i);
-      }
-      
-      const allAmounts = [...baseAmounts, ...incrementalAmounts];
-      
-      res.json({
-        amounts: allAmounts,
-        message: "Valores de depósito disponíveis"
-      });
-    } catch (error) {
-      console.error("Error getting deposit amounts:", error);
-      res.status(500).json({ message: "Failed to get deposit amounts" });
-    }
+  // Valores de depósito desativados enquanto o provedor de pagamentos não estiver configurado.
+  app.get('/api/deposit/amounts', isAuthenticated, isApproved, (_req: any, res: any) => {
+    res.setHeader("Cache-Control", "no-store, max-age=0");
+    return res.status(503).json({
+      code: "PAYMENTS_NOT_CONFIGURED",
+      message: "Valores de depósito indisponíveis até a configuração e validação do provedor de pagamento."
+    });
   });
 
   // Pagamentos PIX desativados temporariamente.
