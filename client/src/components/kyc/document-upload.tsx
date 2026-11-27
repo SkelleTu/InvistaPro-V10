@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,6 +13,11 @@ export default function DocumentUpload() {
   const { user } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { data: kycStatus } = useQuery<{ uploadAvailable?: boolean }>({
+    queryKey: ["/api/kyc/status"],
+    enabled: !!user,
+    staleTime: 30000,
+  });
   
   const [rgFile, setRgFile] = useState<File | null>(null);
   const [comprovanteFile, setComprovanteFile] = useState<File | null>(null);
@@ -143,6 +148,15 @@ export default function DocumentUpload() {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-6">
+        {kycStatus?.uploadAvailable === false && (
+          <Alert variant="destructive">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertDescription>
+              O armazenamento privado de documentos não está configurado. O envio está bloqueado e nenhum arquivo será aceito até a configuração do serviço.
+            </AlertDescription>
+          </Alert>
+        )}
+
         {/* Instruções */}
         <Alert>
           <AlertTriangle className="h-4 w-4" />
@@ -204,7 +218,7 @@ export default function DocumentUpload() {
         {/* Botão de Upload */}
         <Button
           onClick={handleSubmit}
-          disabled={uploading || (!rgFile && !comprovanteFile)}
+          disabled={uploading || kycStatus?.uploadAvailable === false || (!rgFile && !comprovanteFile)}
           className="w-full"
           data-testid="button-upload-documents"
         >
