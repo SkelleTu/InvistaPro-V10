@@ -33,7 +33,7 @@ export default function LGPD() {
             </ul>
           </CardContent></Card>
           <Card><CardHeader><CardTitle>3. Como encaminhar uma solicitação</CardTitle></CardHeader><CardContent className="text-sm text-muted-foreground space-y-2">
-            <p>Utilize os canais de suporte publicados na plataforma e descreva o direito que deseja exercer. Poderá ser solicitada confirmação de identidade para evitar divulgação indevida de dados pessoais.</p>
+            <p>O controlador ainda precisa publicar um canal oficial para solicitações de titulares. Quando disponível, descreva o direito que deseja exercer; poderá ser solicitada confirmação de identidade para evitar divulgação indevida de dados pessoais.</p>
             <p>O atendimento e os prazos observarão a LGPD e a regulamentação aplicável. Esta página não promete prazo contratual adicional nem confirma a existência de encarregado formalmente designado.</p>
           </CardContent></Card>
           <Card><CardHeader><CardTitle>4. Autoridade Nacional de Proteção de Dados</CardTitle></CardHeader><CardContent className="text-sm text-muted-foreground space-y-2">
