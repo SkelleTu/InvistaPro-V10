@@ -600,3 +600,32 @@ body { background: transparent !important; }
 }
 .aura-module-theme button svg,
 .aura-module-theme [role="button"] svg { color: #00e5ff !important; }
+
+
+/* Mobile reflow: prevent intrinsic grid/flex widths from widening Aura module cards. */
+@media (max-width: 640px) {
+  .aura-module-theme .grid,
+  .aura-module-theme .flex {
+    min-width: 0;
+    max-width: 100%;
+  }
+  .aura-module-theme .grid > *,
+  .aura-module-theme .flex > * {
+    min-width: 0 !important;
+    max-width: 100%;
+  }
+  .aura-module-theme [class*="rounded-"] {
+    max-width: 100%;
+  }
+  .aura-module-theme .flex.justify-between {
+    flex-wrap: wrap;
+  }
+  .aura-module-theme [class*="grid-cols-"] {
+    min-width: 0;
+  }
+  .aura-module-theme p,
+  .aura-module-theme span,
+  .aura-module-theme label {
+    overflow-wrap: anywhere;
+  }
+}
