@@ -94,12 +94,13 @@ export default function ModalityModuleSelector({ modalityId }: Props) {
   });
 
   const configuredSlots = slotData?.slots ?? [];
-  const hasSlot = (idx: number) => configuredSlots.some(s => s.slotIndex === idx && s.isActive);
-  const hasMatchingToken = (accountType: "demo" | "real") => configuredSlots.some(s => s.isActive && s.accountType === accountType);
+  const hasMatchingToken = (idx: number, accountType: "demo" | "real") => configuredSlots.some(s => s.slotIndex === idx && s.isActive && s.accountType === accountType);
   const enabledCount = localConfigs.filter(c => c.enabled).length;
   const tokenTotal = configuredSlots.filter(s => s.isActive).length;
 
   const toggleSlot = (idx: number) => {
+    const target = localConfigs.find(c => c.slotIndex === idx);
+    if (!target || !hasMatchingToken(idx, target.accountType)) return;
     setLocalConfigs(prev => prev.map(c => c.slotIndex === idx ? { ...c, enabled: !c.enabled } : c));
     setDirty(true);
   };
@@ -161,7 +162,7 @@ export default function ModalityModuleSelector({ modalityId }: Props) {
       {/* 10 botões de slot — sempre clicáveis, destaque visual se tem token */}
       <div className="flex flex-wrap gap-1.5">
         {localConfigs.map((cfg) => {
-          const hasToken = hasSlot(cfg.slotIndex);
+          const hasToken = hasMatchingToken(cfg.slotIndex, cfg.accountType);
           const slot = configuredSlots.find(s => s.slotIndex === cfg.slotIndex);
           const isEnabled = cfg.enabled;
           const ring = SLOT_RING[cfg.slotIndex] ?? "ring-gray-500";
@@ -174,7 +175,7 @@ export default function ModalityModuleSelector({ modalityId }: Props) {
                     ? `Slot ${cfg.slotIndex + 1} ativo — clique para desativar`
                     : hasToken
                       ? `Slot ${cfg.slotIndex + 1} (${slot?.accountType?.toUpperCase() ?? "DEMO"}) — clique para ativar`
-                      : `Slot ${cfg.slotIndex + 1} — sem token configurado (pode ativar mesmo assim)`
+                      : `Slot ${cfg.slotIndex + 1} — sem token ${cfg.accountType.toUpperCase()} compatível; configure a conta antes de ativar`
                 }
                 className={`
                   w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold border transition-all cursor-pointer
@@ -186,6 +187,7 @@ export default function ModalityModuleSelector({ modalityId }: Props) {
                   }
                 `}
                 onClick={() => toggleSlot(cfg.slotIndex)}
+                disabled={!hasToken}
                 data-testid={`slot-btn-${modalityId}-${cfg.slotIndex}`}
               >
                 {cfg.slotIndex + 1}
@@ -215,7 +217,7 @@ export default function ModalityModuleSelector({ modalityId }: Props) {
                 <option value="demo">DEMO</option>
                 <option value="real">REAL</option>
               </select>
-              <span title={hasMatchingToken(cfg.accountType) ? "Token compatível disponível" : "Nenhum token ativo deste tipo"} className={"w-2 h-2 rounded-full shrink-0 " + (hasMatchingToken(cfg.accountType) ? "bg-green-400" : "bg-red-400")} />
+              <span title={hasMatchingToken(cfg.slotIndex, cfg.accountType) ? "Token compatível disponível" : "Nenhum token ativo deste tipo"} className={"w-2 h-2 rounded-full shrink-0 " + (hasMatchingToken(cfg.accountType) ? "bg-green-400" : "bg-red-400")} />
             </div>
           ))}
         </div>
@@ -246,7 +248,7 @@ export default function ModalityModuleSelector({ modalityId }: Props) {
                 <Badge variant="outline" className={`text-[10px] py-0 px-1 shrink-0 ${cfg.accountType === "real" ? "border-orange-500/40 text-orange-300" : "border-blue-500/40 text-blue-300"}`}>
                   {cfg.accountType.toUpperCase()}
                 </Badge>
-                {!hasMatchingToken(cfg.accountType) && <span className="text-[10px] text-red-300">sem token compatível</span>}
+                {!hasMatchingToken(cfg.slotIndex, cfg.accountType) && <span className="text-[10px] text-red-300">sem token compatível</span>}
                 <div className="flex gap-1">
                   {STAKE_MODES.map(mode => (
                     <button
