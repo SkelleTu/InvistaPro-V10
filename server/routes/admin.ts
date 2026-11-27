@@ -14,9 +14,10 @@ declare module 'express-session' {
 
 const router = express.Router();
 
-const REQUIRED_KYC_DOC_TYPES = ["rg", "comprovante"];
 function hasVerifiedKycDocuments(documents: Array<{ tipo?: string; status?: string }>): boolean {
-  return REQUIRED_KYC_DOC_TYPES.every(tipo => documents.some(doc => doc.tipo === tipo && doc.status === "aprovado"));
+  const hasIdentity = documents.some(doc => ["rg", "cnh"].includes(String(doc.tipo || "").toLowerCase()) && doc.status === "aprovado");
+  const hasAddress = documents.some(doc => String(doc.tipo || "").toLowerCase() === "comprovante" && doc.status === "aprovado");
+  return hasIdentity && hasAddress;
 }
 function hideBootstrapPlaceholder(value: unknown, placeholder: string): string {
   const normalized = String(value ?? "").trim();
