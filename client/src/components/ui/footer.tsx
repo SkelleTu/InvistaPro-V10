@@ -153,7 +153,7 @@ export function Footer() {
           <div className="mt-4 text-center">
             <p className="text-xs text-muted-foreground leading-relaxed">
               <span className="font-medium text-foreground">Aviso Legal:</span> Os investimentos em renda variável e sintéticos podem apresentar riscos. 
-              Rentabilidade passada não garante resultados futuros. Leia todos os termos antes de investir. 
+              Rentabilidade passada não garante resultados futuros. Consulte os termos dos provedores antes de operar. 
               A Invista PRO é uma plataforma de software. A negociação de ativos e contratos envolve risco; simulações não representam resultados reais.
             </p>
           </div>
