@@ -120,26 +120,26 @@ export default function PortfolioOverview() {
           <Card className={`${theme === 'fluent' ? 'fluent-card bg-card shadow-lg border-0' : 'bg-card border-border'}`}>
             <CardContent className="p-6">
               <p className="text-muted-foreground text-sm">Total de Operações</p>
-              <p className="text-2xl font-bold text-card-foreground">{dashboardData.totalTrades}</p>
+              <p className="text-2xl font-bold text-card-foreground">{Number.isFinite(Number(dashboardData.totalTrades)) ? Number(dashboardData.totalTrades) : 0}</p>
             </CardContent>
           </Card>
           <Card className={`${theme === 'fluent' ? 'fluent-card bg-card shadow-lg border-0' : 'bg-card border-border'}`}>
             <CardContent className="p-6">
               <p className="text-muted-foreground text-sm">Taxa de Sucesso</p>
-              <p className="text-2xl font-bold text-green-600">{dashboardData.winRate.toFixed(2)}%</p>
+              <p className="text-2xl font-bold text-green-600">{(Number.isFinite(Number(dashboardData.winRate)) ? Number(dashboardData.winRate) : 0).toFixed(2)}%</p>
             </CardContent>
           </Card>
           <Card className={`${theme === 'fluent' ? 'fluent-card bg-card shadow-lg border-0' : 'bg-card border-border'}`}>
             <CardContent className="p-6">
               <p className="text-muted-foreground text-sm">Operações Vencidas</p>
-              <p className="text-2xl font-bold text-card-foreground">{dashboardData.wonTrades}/{dashboardData.totalTrades}</p>
+              <p className="text-2xl font-bold text-card-foreground">{Number(dashboardData.wonTrades) || 0}/{Number(dashboardData.totalTrades) || 0}</p>
             </CardContent>
           </Card>
           <Card className={`${theme === 'fluent' ? 'fluent-card bg-card shadow-lg border-0' : 'bg-card border-border'}`}>
             <CardContent className="p-6">
               <p className="text-muted-foreground text-sm">Lucro/Prejuízo</p>
-              <p className={`text-2xl font-bold ${dashboardData.totalPnL >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                {formatCurrency(dashboardData.totalPnL)}
+              <p className={`text-2xl font-bold ${(Number(dashboardData.totalPnL) || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                {formatCurrency(Number(dashboardData.totalPnL) || 0)}
               </p>
             </CardContent>
           </Card>
