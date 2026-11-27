@@ -15,6 +15,11 @@ function getStorageConfig() {
   return { url, serviceKey, bucket };
 }
 
+export function isPrivateDocumentStorageConfigured(): boolean {
+  const { url, serviceKey } = getStorageConfig();
+  return Boolean(url && serviceKey);
+}
+
 function getSupabase(): SupabaseClient | null {
   const { url, serviceKey } = getStorageConfig();
   if (!url || !serviceKey) return null;
