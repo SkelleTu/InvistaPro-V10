@@ -86,7 +86,7 @@ export default function ModalityModuleSelector({ modalityId }: Props) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/trading/module-configs", modalityId] });
       queryClient.invalidateQueries({ queryKey: ["/api/trading/module-overview"] });
-      const count = localConfigs.filter(c => c.enabled).length;
+      const count = localConfigs.filter(c => c.enabled && (slotData?.slots ?? []).some(slot => slot.slotIndex === c.slotIndex && slot.isActive && slot.accountType === c.accountType)).length;
       toast({ title: `Módulos salvos!`, description: `${count} slot(s) ativo(s) para ${modalityId}.` });
       setDirty(false);
     },
@@ -95,7 +95,7 @@ export default function ModalityModuleSelector({ modalityId }: Props) {
 
   const configuredSlots = slotData?.slots ?? [];
   const hasMatchingToken = (idx: number, accountType: "demo" | "real") => configuredSlots.some(s => s.slotIndex === idx && s.isActive && s.accountType === accountType);
-  const enabledCount = localConfigs.filter(c => c.enabled).length;
+  const enabledCount = localConfigs.filter(c => c.enabled && hasMatchingToken(c.slotIndex, c.accountType)).length;
   const tokenTotal = configuredSlots.filter(s => s.isActive).length;
 
   const toggleSlot = (idx: number) => {
@@ -159,12 +159,12 @@ export default function ModalityModuleSelector({ modalityId }: Props) {
         )}
       </div>
 
-      {/* 10 botões de slot — sempre clicáveis, destaque visual se tem token */}
+      {/* 10 slots — só podem ser habilitados com token compatível por ambiente */}
       <div className="flex flex-wrap gap-1.5">
         {localConfigs.map((cfg) => {
           const hasToken = hasMatchingToken(cfg.slotIndex, cfg.accountType);
           const slot = configuredSlots.find(s => s.slotIndex === cfg.slotIndex);
-          const isEnabled = cfg.enabled;
+          const isEnabled = cfg.enabled && hasToken;
           const ring = SLOT_RING[cfg.slotIndex] ?? "ring-gray-500";
 
           return (
@@ -178,7 +178,7 @@ export default function ModalityModuleSelector({ modalityId }: Props) {
                       : `Slot ${cfg.slotIndex + 1} — sem token ${cfg.accountType.toUpperCase()} compatível; configure a conta antes de ativar`
                 }
                 className={`
-                  w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold border transition-all cursor-pointer
+                  w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold border transition-all ${hasToken ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}
                   ${isEnabled
                     ? `ring-2 ${ring} ring-offset-1 ring-offset-background border-transparent bg-violet-500/20 text-violet-200 shadow-sm`
                     : hasToken
