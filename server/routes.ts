@@ -3052,13 +3052,15 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     const { modality } = req.params;
     const { symbol, aiStake = 0.35, contractType, duration, barrier, growthRate } = req.body;
 
-    // Validate policy before evaluating signals or opening any slot connections.
-    if (!isAllowedProductionSymbol(symbol) || !isAllowedProductionContractType(contractType)) {
+    // Multi-account manual execution is restricted to the two modalities exposed by this panel.
+    const expectedContract = modality === "digit_differs" ? "DIGITDIFF" : modality === "accumulator" ? "ACCU" : null;
+    if (!expectedContract || String(contractType ?? "").trim().toUpperCase() !== expectedContract ||
+        !isAllowedProductionSymbol(symbol) || !isAllowedProductionContractType(contractType)) {
       return res.status(409).json({
         success: false,
         blocked: true,
         code: 'PRODUCTION_POLICY_BLOCKED',
-        message: 'Execução bloqueada: informe símbolo permitido (BOOM500, BOOM1000, CRASH500 ou CRASH1000) e contrato ACCU ou DIGITDIFF.',
+        message: 'Execução multi-conta bloqueada: somente Digit Differs (DIGITDIFF) ou Acumulador (ACCU), com símbolo sintético válido e não-1s, são aceitos.',
       });
     }
 
