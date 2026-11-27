@@ -200,7 +200,7 @@ router.get('/documents/pending', isAuthenticated, isAdmin, async (_req, res) => 
         return {
           id: document.id, userId: document.userId, tipo: document.tipo,
           status: document.status, createdAt: document.createdAt,
-          user: user ? { nomeCompleto: user.nomeCompleto, email: user.email, cpf: user.cpf } : null,
+          user: user ? { nomeCompleto: user.nomeCompleto, email: user.email, cpf: hideBootstrapPlaceholder(user.cpf, "00000000000") } : null,
         };
       })
       .sort((a, b) => new Date(String(b.createdAt || 0)).getTime() - new Date(String(a.createdAt || 0)).getTime());
