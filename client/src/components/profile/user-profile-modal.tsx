@@ -33,8 +33,7 @@ export default function UserProfileModal({ isOpen, onClose }: UserProfileModalPr
   const userDocs = (kycStatus as any)?.documents || [];
   
   // Estatísticas dos documentos
-  const requiredDocs = ['rg', 'comprovante'];
-  const allRequiredApproved = requiredDocs.every(tipo => userDocs.some((doc: any) => doc.tipo === tipo && doc.status === 'aprovado'));
+  const allRequiredApproved = userDocs.some((doc: any) => ['rg', 'cnh'].includes(String(doc.tipo).toLowerCase()) && doc.status === 'aprovado') && userDocs.some((doc: any) => doc.tipo === 'comprovante' && doc.status === 'aprovado');
   const displayField = (value: unknown, placeholders: string[] = []) => {
     const normalized = String(value ?? '').trim();
     return !normalized || placeholders.includes(normalized) ? 'Não informado' : normalized;
