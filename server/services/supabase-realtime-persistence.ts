@@ -59,7 +59,11 @@ let running = false;
 
 function getClient(): SupabaseClient | null {
   const url = process.env.SUPABASE_URL?.trim();
-  const key = process.env.SUPABASE_ANON_KEY?.trim();
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  const anonKey = process.env.SUPABASE_ANON_KEY?.trim();
+  // Production replication is server-to-server and must not use the public anon key.
+  // Without a service-role key, SQLite remains authoritative and replica sync stays off.
+  const key = process.env.NODE_ENV === "production" ? serviceRoleKey : (serviceRoleKey || anonKey);
   if (!url || !key) return null;
   if (!client) client = createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },
@@ -217,7 +221,7 @@ export async function restoreSupabaseToSqliteOnce(): Promise<{ tables: number; r
 export async function startSupabaseRealtimePersistence(): Promise<boolean> {
   if (timer) return;
   if (!getClient()) {
-    console.warn("[SUPABASE] SUPABASE_URL/SUPABASE_ANON_KEY não configurados; sincronização não iniciada.");
+    console.warn("[SUPABASE] SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY não configurados; sincronização segura desativada e SQLite permanece como fonte principal.");
     return false;
   }
 
