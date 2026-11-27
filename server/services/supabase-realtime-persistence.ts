@@ -221,8 +221,10 @@ export async function restoreSupabaseToSqliteOnce(): Promise<{ tables: number; r
 export async function startSupabaseRealtimePersistence(): Promise<boolean> {
   if (timer) return;
   if (!getClient()) {
-    console.warn("[SUPABASE] SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY não configurados; sincronização segura desativada e SQLite permanece como fonte principal.");
-    return false;
+    // Keep the application available on its durable SQLite database.
+    // Supabase replication and private document storage remain disabled until a server-only service-role key is configured.
+    console.warn("[SUPABASE] SUPABASE_SERVICE_ROLE_KEY ausente; réplica Supabase desativada. SQLite permanece como fonte de dados da aplicação.");
+    return true;
   }
 
   try {
