@@ -46,7 +46,7 @@ export default function PoliticaPrivacidade() {
           </CardContent></Card>
           <Card><CardHeader><CardTitle className="flex items-center gap-2"><Lock className="h-5 w-5 text-primary" />6. Direitos do titular</CardTitle></CardHeader><CardContent className="text-sm text-muted-foreground space-y-2">
             <p>Nos termos da LGPD, o titular pode solicitar confirmação de tratamento, acesso, correção, informações sobre compartilhamento e, quando cabível, anonimização, bloqueio, eliminação, portabilidade ou revogação do consentimento.</p>
-            <p>Para encaminhar uma solicitação, utilize os canais de suporte publicados na plataforma. A identidade do solicitante poderá ser confirmada para proteger os dados. O atendimento observará os requisitos e prazos legais aplicáveis.</p>
+            <p>O canal oficial para solicitações de titulares ainda precisa ser formalmente publicado pelo controlador. A identidade do solicitante deverá ser confirmada para proteger os dados, e o atendimento observará os requisitos e prazos legais aplicáveis.</p>
           </CardContent></Card>
           <Card><CardHeader><CardTitle>7. Atualizações deste aviso</CardTitle></CardHeader><CardContent className="text-sm text-muted-foreground">
             <p>Este aviso deve ser atualizado quando houver mudanças nos dados tratados, finalidades, fornecedores, prazos de retenção ou canais do controlador. Última atualização: {new Date().toLocaleDateString("pt-BR")}.</p>
