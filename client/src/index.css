@@ -328,3 +328,36 @@ body::before {
   --font-sans: Calibri, "Segoe UI", Arial, sans-serif;
 }
 html, body { font-family: Calibri, "Segoe UI", Arial, sans-serif; }
+
+
+/* Aura System parity refinement: shared interactive surfaces and controls. */
+.aura-integration-shell {
+  color: #f4f4f5 !important;
+  font-family: Calibri, "Segoe UI", Arial, sans-serif !important;
+}
+.aura-integration-shell [class*="rounded-xl"],
+.aura-integration-shell [class*="rounded-2xl"],
+.aura-integration-shell [class*="rounded-3xl"] { border-radius: 16px !important; }
+.aura-integration-shell button:not(:disabled),
+.aura-integration-shell [role="button"]:not([aria-disabled="true"]) {
+  transition: background-color .2s ease, border-color .2s ease, box-shadow .2s ease, transform .2s ease;
+}
+.aura-integration-shell button:hover:not(:disabled),
+.aura-integration-shell [role="button"]:hover:not([aria-disabled="true"]) {
+  border-color: rgba(0,229,255,.32);
+  box-shadow: 0 0 12px rgba(0,229,255,.14);
+}
+.aura-integration-shell button:focus-visible,
+.aura-integration-shell input:focus-visible,
+.aura-integration-shell select:focus-visible,
+.aura-integration-shell textarea:focus-visible {
+  outline: 2px solid rgba(0,229,255,.72) !important;
+  outline-offset: 2px;
+}
+.aura-integration-shell .bg-card,
+.aura-integration-shell [class*="bg-white/"],
+.aura-integration-shell [class*="bg-slate-"],
+.aura-integration-shell [class*="bg-zinc-"] {
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
