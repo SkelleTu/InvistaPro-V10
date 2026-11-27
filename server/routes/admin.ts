@@ -14,6 +14,11 @@ declare module 'express-session' {
 
 const router = express.Router();
 
+const REQUIRED_KYC_DOC_TYPES = ["rg", "comprovante"];
+function hasVerifiedKycDocuments(documents: Array<{ tipo?: string; status?: string }>): boolean {
+  return REQUIRED_KYC_DOC_TYPES.every(tipo => documents.some(doc => doc.tipo === tipo && doc.status === "aprovado"));
+}
+
 // Endpoint para verificar se usuário tem acesso admin
 router.get('/check-access', isAuthenticated, async (req, res) => {
   try {
@@ -144,7 +149,16 @@ router.get('/trading/summary', isAuthenticated, isAdmin, async (_req, res) => {
 // Get all users
 router.get('/users', isAuthenticated, isAdmin, async (req, res) => {
   try {
-    const allUsers = await dualStorage.getAllUsers();
+    const [allUsers, allDocuments] = await Promise.all([
+      dualStorage.getAllUsers(),
+      dualStorage.getAllDocumentos(),
+    ]);
+    const documentsByUser = new Map<string, typeof allDocuments>();
+    for (const document of allDocuments) {
+      const current = documentsByUser.get(document.userId) ?? [];
+      current.push(document);
+      documentsByUser.set(document.userId, current);
+    }
     const safeUsers = allUsers
       .map(user => ({
         id: user.id,
@@ -153,7 +167,7 @@ router.get('/users', isAuthenticated, isAdmin, async (req, res) => {
         cpf: user.cpf,
         telefone: user.telefone,
         saldo: user.saldo,
-        documentosVerificados: user.documentosVerificados,
+        documentosVerificados: hasVerifiedKycDocuments(documentsByUser.get(user.id) ?? []),
         contaAprovada: user.contaAprovada,
         createdAt: user.createdAt,
       }))
@@ -297,7 +311,7 @@ router.get('/user/:userId', isAuthenticated, isAdmin, async (req, res) => {
         cep: user.cep,
         saldo: user.saldo,
         contaAprovada: user.contaAprovada,
-        documentosVerificados: user.documentosVerificados,
+        documentosVerificados: hasVerifiedKycDocuments(storedDocuments),
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
       },
@@ -430,7 +444,7 @@ router.get('/stats', isAuthenticated, isAdmin, async (_req, res) => {
     res.setHeader("Cache-Control", "private, no-store, max-age=0");
     return res.json({
       totalUsers: allUsers.length,
-      verifiedUsers: allUsers.filter(user => Boolean(user.documentosVerificados)).length,
+      verifiedUsers: allUsers.filter(user => hasVerifiedKycDocuments(allDocuments.filter(document => document.userId === user.id))).length,
       pendingDocuments: allDocuments.filter(document => document.status === "pendente").length,
       totalBalance: allUsers.reduce((sum, user) => sum + Number(user.saldo || 0), 0),
       totalInvested: sumType("deposito"),
@@ -449,14 +463,21 @@ router.get('/stats', isAuthenticated, isAdmin, async (_req, res) => {
 // Get comprehensive dashboard data
 router.get('/dashboard-data', isAuthenticated, isAdmin, async (_req, res) => {
   try {
-    const [durableUsers, storedMovements] = await Promise.all([
+    const [durableUsers, storedMovements, allDocuments] = await Promise.all([
       dualStorage.getAllUsers(),
       dualStorage.getAllMovimentos(),
+      dualStorage.getAllDocumentos(),
     ]);
+    const documentsByUser = new Map<string, typeof allDocuments>();
+    for (const document of allDocuments) {
+      const current = documentsByUser.get(document.userId) ?? [];
+      current.push(document);
+      documentsByUser.set(document.userId, current);
+    }
     const usersWithFinancials = durableUsers
       .map(user => ({
         id: user.id, nomeCompleto: user.nomeCompleto, email: user.email, cpf: user.cpf,
-        saldo: Number(user.saldo || 0), documentosVerificados: Boolean(user.documentosVerificados),
+        saldo: Number(user.saldo || 0), documentosVerificados: hasVerifiedKycDocuments(documentsByUser.get(user.id) ?? []),
         contaAprovada: Boolean(user.contaAprovada), createdAt: user.createdAt, updatedAt: user.updatedAt,
       }))
       .sort((a, b) => new Date(String(b.createdAt || 0)).getTime() - new Date(String(a.createdAt || 0)).getTime());
