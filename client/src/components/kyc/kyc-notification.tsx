@@ -26,9 +26,8 @@ export default function KYCNotification() {
   const approvedDocs = userDocs.filter((doc: any) => doc.status === 'aprovado').length;
   const rejectedDocs = userDocs.filter((doc: any) => doc.status === 'rejeitado').length;
   const approvedRequiredDocs = requiredDocs.filter(tipo => userDocs.some((doc: any) => doc.tipo === tipo && doc.status === 'aprovado'));
-  const missingDocs = requiredDocs.length - userDocs.filter((doc: any) => 
-    requiredDocs.includes(doc.tipo) && doc.status !== 'rejeitado'
-  ).length;
+  const presentRequiredTypes = new Set(userDocs.filter((doc: any) => requiredDocs.includes(doc.tipo)).map((doc: any) => doc.tipo));
+  const missingDocs = requiredDocs.filter(tipo => !presentRequiredTypes.has(tipo)).length;
   const allRequiredApproved = approvedRequiredDocs.length === requiredDocs.length;
 
   if (allRequiredApproved) return null;
