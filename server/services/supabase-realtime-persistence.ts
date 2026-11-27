@@ -54,6 +54,7 @@ function ensureAffiliateReplicaSchema(): void {
 }
 
 let client: SupabaseClient | null = null;
+let warnedAnonFallback = false;
 let timer: NodeJS.Timeout | null = null;
 let running = false;
 
@@ -65,7 +66,8 @@ function getClient(): SupabaseClient | null {
   // replication path so the production service can restore its durable Supabase mirror.
   // RLS must remain disabled until the service-role migration is completed.
   const key = serviceRoleKey || anonKey;
-  if (process.env.NODE_ENV === "production" && !serviceRoleKey && anonKey) {
+  if (process.env.NODE_ENV === "production" && !serviceRoleKey && anonKey && !warnedAnonFallback) {
+    warnedAnonFallback = true;
     console.warn("[SUPABASE][SECURITY] Usando anon key temporariamente; configure SUPABASE_SERVICE_ROLE_KEY e habilite RLS antes de remover este fallback.");
   }
   if (!url || !key) return null;
