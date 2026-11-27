@@ -47,7 +47,7 @@ export default function DocumentUpload() {
     if (!file) return;
 
     // Validar tipo de arquivo
-    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf'];
+    const allowedTypes = ['image/jpeg', 'image/png', 'application/pdf'];
     if (!allowedTypes.includes(file.type)) {
       toast({
         title: "Tipo de arquivo inválido",
@@ -162,7 +162,7 @@ export default function DocumentUpload() {
           <Input
             id="rg-upload"
             type="file"
-            accept="image/*,.pdf"
+            accept=".jpg,.jpeg,.png,.pdf"
             onChange={(e) => handleFileChange('rg', e.target.files?.[0] || null)}
             disabled={uploading}
             data-testid="input-rg-upload"
