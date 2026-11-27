@@ -1,17 +1,7 @@
-import { Phone, Mail, MapPin, Shield, TrendingUp, Users, ExternalLink } from "lucide-react";
+import { Shield, TrendingUp, Users } from "lucide-react";
 
 export function Footer() {
   const currentYear = new Date().getFullYear();
-
-  const handleWhatsAppClick = () => {
-    const message = "Olá! Preciso de suporte com o módulo Renda Variável da Aura System.";
-    const whatsappUrl = `https://wa.me/5519997238298?text=${encodeURIComponent(message)}`;
-    window.open(whatsappUrl, '_blank');
-  };
-
-  const handleEmailClick = () => {
-    window.location.href = "mailto:vfdiogoseg@gmail.com?subject=Suporte Aura System";
-  };
 
   return (
     <footer className="bg-black/80 backdrop-blur-xl border-t border-cyan-400/15 mt-8">
@@ -86,35 +76,13 @@ export function Footer() {
           {/* Suporte */}
           <div className="md:col-span-1">
             <h4 className="text-sm font-semibold text-foreground mb-4">Suporte</h4>
-            <div className="space-y-3">
-              <button
-                onClick={handleWhatsAppClick}
-                className="flex items-center space-x-2 text-sm text-muted-foreground hover:text-green-400 transition-colors group"
-                data-testid="footer-whatsapp"
-              >
-                <Phone className="w-4 h-4 group-hover:text-green-400" />
-                <span>(19) 99723-8298</span>
-                <ExternalLink className="w-3 h-3 opacity-50" />
-              </button>
-              <button
-                onClick={handleEmailClick}
-                className="flex items-center space-x-2 text-sm text-muted-foreground hover:text-blue-400 transition-colors group"
-                data-testid="footer-email"
-              >
-                <Mail className="w-4 h-4 group-hover:text-blue-400" />
-                <span>vfdiogoseg@gmail.com</span>
-              </button>
-              <div className="flex items-center space-x-2 text-sm text-muted-foreground">
-                <MapPin className="w-4 h-4" />
-                <span>Araras, SP - Brasil</span>
-              </div>
-            </div>
-            
-            <div className="mt-4 pt-4 border-t border-border/30">
-              <p className="text-xs text-muted-foreground mb-2">Horário de Atendimento:</p>
-              <p className="text-xs text-foreground font-medium">
-                Segunda à Sexta: 9h às 18h<br />
-                Sábado: 9h às 15h
+            <div className="rounded-lg border border-border/50 bg-card/40 p-4 space-y-2">
+              <p className="text-sm text-foreground font-medium">Canal oficial em configuração</p>
+              <p className="text-xs text-muted-foreground">
+                Os dados de contato serão publicados aqui após a confirmação dos canais oficiais de atendimento.
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Não envie senhas, tokens ou documentos pessoais por mensagens.
               </p>
             </div>
           </div>
@@ -170,9 +138,6 @@ export function Footer() {
               </p>
               <div className="hidden md:flex items-center space-x-2 text-xs text-muted-foreground">
                 <span>•</span>
-                <span>Araras, São Paulo, Brasil</span>
-                <span>•</span>
-                
               </div>
             </div>
             
