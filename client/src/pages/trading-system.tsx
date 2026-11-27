@@ -3474,7 +3474,7 @@ export default function TradingSystemPage() {
                   </div>
                   <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
                     <p className="text-sm text-blue-800 dark:text-blue-200">
-                      <strong>Todos os tipos Digit estão operacionais:</strong> As IAs selecionam automaticamente entre Differs, Matches, Even, Odd, Over e Under conforme o padrão de dígitos identificado em tempo real.
+                      <strong>Modalidades configuráveis:</strong> A execução depende de token Deriv ativo, confirmação de disponibilidade do contrato pelo provedor e validação do mecanismo de análise. Nenhuma modalidade está em execução neste momento.
                     </p>
                   </div>
                 </div>
@@ -3524,7 +3524,7 @@ export default function TradingSystemPage() {
                     {['R_50', 'R_75', 'R_100', 'JD50', 'JD75', 'JD100'].map((symbol) => (
                       <div key={symbol} className="p-2 border rounded-lg text-center">
                         <div className="text-sm font-medium">{symbol}</div>
-                        <div className="text-xs text-green-600">✓ Ativo</div>
+                        <div className="text-xs text-green-600">✓ Selecionado</div>
                       </div>
                     ))}
                   </div>
