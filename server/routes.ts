@@ -1384,6 +1384,11 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       if (!req.user) {
         return res.status(401).json({ message: "Não autenticado" });
       }
+      const currentUser = await dualStorage.getUser(String(req.user.id)) || req.user;
+      const userDocuments = await dualStorage.getUserDocumentos(String(req.user.id));
+      const hasIdentityDocument = userDocuments.some(document => ["rg", "cnh"].includes(String(document.tipo || "").toLowerCase()) && document.status === "aprovado");
+      const hasAddressDocument = userDocuments.some(document => String(document.tipo || "").toLowerCase() === "comprovante" && document.status === "aprovado");
+      const hasVerifiedDocuments = hasIdentityDocument && hasAddressDocument;
       const {
         passwordHash,
         senhaFallback,
@@ -1395,18 +1400,29 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         tipoChavePix,
         isAdmin,
         ...userWithoutSensitiveData
-      } = req.user;
+      } = currentUser;
+      const sanitizedUser = {
+        ...userWithoutSensitiveData,
+        cpf: String(currentUser.cpf || "") === "00000000000" ? "" : currentUser.cpf,
+        telefone: String(currentUser.telefone || "") === "11999999999" ? "" : currentUser.telefone,
+        telefoneVerificado: String(currentUser.telefone || "") === "11999999999" ? false : Boolean(currentUser.telefoneVerificado),
+        endereco: String(currentUser.endereco || "") === "Endereço Administrativo" ? "" : currentUser.endereco,
+        cidade: String(currentUser.cidade || "") === "São Paulo" ? "" : currentUser.cidade,
+        cep: String(currentUser.cep || "") === "01000000" ? "" : currentUser.cep,
+        documentosVerificados: hasVerifiedDocuments,
+        documentosAprovadosEm: hasVerifiedDocuments ? currentUser.documentosAprovadosEm : null,
+      };
       // Existing persistent web sessions may predate the Universal Server token vault.
       // Reconcile the user's saved Deriv token in the background without exposing it
       // to the browser or forcing the user to log out and back in.
-      void registerUniversalSession(String(req.user.id), req.user.email).then(async () => {
-        const savedDerivToken = await dbStorage.getUserDerivToken(String(req.user.id));
+      void registerUniversalSession(String(currentUser.id), currentUser.email).then(async () => {
+        const savedDerivToken = await dbStorage.getUserDerivToken(String(currentUser.id));
         if (savedDerivToken?.token && ['demo', 'real'].includes(savedDerivToken.accountType)) {
-          await ensureUniversalDerivSession(String(req.user.id), savedDerivToken.token, savedDerivToken.accountType as 'demo' | 'real');
+          await ensureUniversalDerivSession(String(currentUser.id), savedDerivToken.token, savedDerivToken.accountType as 'demo' | 'real');
         }
       }).catch((e) => console.warn('⚠️ [UNIVERSAL] Falha ao reconciliar sessão web/Deriv ativa:', e instanceof Error ? e.message : String(e)));
       res.setHeader("Cache-Control", "no-store, max-age=0");
-      res.json(userWithoutSensitiveData);
+      res.json(sanitizedUser);
     } catch (error) {
       console.error("Error fetching user:", error);
       res.status(500).json({ message: "Failed to fetch user" });
