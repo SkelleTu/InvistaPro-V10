@@ -263,18 +263,13 @@ export default function Landing() {
               <p className="text-sm text-slate-300">
                 © {currentYear} Aura System. Todos os direitos reservados.
               </p>
-              <div className="hidden md:flex items-center space-x-2 text-xs text-slate-400">
-                <span>•</span>
-                <span>Araras, São Paulo, Brasil</span>
-                <span>•</span>
-                <span>CNPJ: 00.000.000/0001-00</span>
-              </div>
+              
             </div>
             
             <div className="flex items-center space-x-6">
               <div className="flex items-center space-x-2 text-xs">
                 <Shield className="w-3 h-3 text-green-400" />
-                <span className="text-slate-300">SSL Seguro</span>
+                <span className="text-slate-300">Conexão HTTPS</span>
               </div>
               <div className="flex items-center space-x-2 text-xs">
                 <TrendingUp className="w-3 h-3 text-blue-400" />
